@@ -1,0 +1,120 @@
+[build-system]
+requires = [
+    "setuptools>=64",
+    "setuptools_scm[toml]>=7",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+requires-python = ">=3.8"
+name = "mhm_tools"
+description = "Tools for mHM."
+authors = [{name = "mHM Developers", email = "mhm-admin@ufz.de"}]
+readme = "README.md"
+license = {text = "LGPLv3"}
+dynamic = ["version"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: End Users/Desktop",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: GNU Lesser General Public License v3 (LGPLv3)",
+    "Natural Language :: English",
+    "Operating System :: Unix",
+    "Operating System :: Microsoft",
+    "Operating System :: MacOS",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Software Development",
+    "Topic :: Utilities",
+]
+dependencies = ["numpy>=1.17.3"]
+
+[project.urls]
+Homepage = "https://mhm-ufz.org/"
+Documentation = "https://mhm.pages.ufz.de/mhm-tools"
+Source = "https://git.ufz.de/mhm/mhm-tools"
+Tracker = "https://git.ufz.de/mhm/mhm-tools/-/issues"
+Changelog = "https://git.ufz.de/mhm/mhm/-/blob/main/CHANGELOG.md"
+
+[project.optional-dependencies]
+doc = [
+    "sphinx>=5",
+    "pydata-sphinx-theme==0.11",
+    "numpydoc>=1.1",
+    "sphinx-design>=0.3",
+    "myst-parser>=0.18",
+    "sphinxcontrib-mermaid>=0.7",
+    "ablog>=0.10",
+    "docutils>=0.18", # mdinclude with myst
+]
+test = ["pytest-cov>=3"]
+
+[tool.setuptools]
+license-files = ["LICENSE"]
+
+[tool.setuptools_scm]
+write_to = "src/mhm_tools/_version.py"
+write_to_template = "__version__ = '{version}'"
+local_scheme = "no-local-version"
+fallback_version = "0.0.0.dev0"
+
+[tool.black]
+exclude = "_version.py"
+target-version = [
+    "py38",
+    "py39"
+]
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+
+[tool.coverage]
+    [tool.coverage.run]
+    source = ["mhm_tools"]
+    omit = [
+        "*docs*",
+        "*examples*",
+        "*tests*",
+    ]
+
+    [tool.coverage.report]
+    exclude_lines = [
+        "pragma: no cover",
+        "def __repr__",
+        "def __str__",
+    ]
+
+[tool.pylint]
+    [tool.pylint.master]
+    extension-pkg-whitelist = [
+        "numpy",
+        "scipy",
+    ]
+    ignore = [
+        "_version.py",
+    ]
+
+    [tool.pylint.message_control]
+    max-line-length = 120
+    disable = [
+        "C0103", # ignore invalid-names like "x", "y"
+        "C0415", # ignore defered imports
+        "R0801", # ignore code duplications
+    ]
+
+    [tool.pylint.reports]
+    output-format = "colorized"
+
+    [tool.pylint.design]
+    max-args = 15
+    max-locals = 20
+    max-attributes = 15
+    max-parents = 10
+    min-public-methods = 0

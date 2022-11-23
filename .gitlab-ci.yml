@@ -1,0 +1,50 @@
+image: python
+
+stages:
+  - test
+  - build
+  - deploy
+
+check:
+  stage: test
+  before_script:
+    - pip3 install black 'pylint<3' 'isort[colors]<6'
+  script:
+    - pip3 install --editable .
+    - black --check --diff --color .
+    - isort --check --diff --color .
+    - pylint src/mhm_tools
+
+test:
+  stage: test
+  script:
+    - pip3 install --editable .[test]
+    - python -m pytest --cov mhm_tools --cov-report term-missing --cov-report html:cov --cov-report xml:cov.xml -v tests/
+  coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
+  artifacts:
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: cov.xml
+    paths:
+      - cov
+
+documentation:
+  stage: build
+  script:
+    - pip3 install --editable .[doc]
+    - sphinx-build docs/source docs/build
+    - mv docs/build public/
+  artifacts:
+    paths:
+      - public
+
+pages:
+  stage: deploy
+  script: "true"
+  artifacts:
+    paths:
+      - public
+  only:
+    - main
+
