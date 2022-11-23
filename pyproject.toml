@@ -55,6 +55,9 @@ doc = [
 ]
 test = ["pytest-cov>=3"]
 
+[project.scripts]
+mhm-tools = "mhm_tools._cli:main"
+
 [tool.setuptools]
 license-files = ["LICENSE"]
 
@@ -99,6 +102,7 @@ multi_line_output = 3
     ]
     ignore = [
         "_version.py",
+        "netcdf4.py",
     ]
 
     [tool.pylint.message_control]
