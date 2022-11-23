@@ -6,7 +6,18 @@ from . import _bankfull
 
 
 def main(argv=None):
-    """Main CLI routine."""
+    """
+    Main CLI routine.
+
+    Parameters
+    ----------
+    argv : list of str
+        command line arguments, default is None
+
+    Returns
+    -------
+        result of the called sub-argument routine
+    """
     parent_parser = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
