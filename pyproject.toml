@@ -33,7 +33,11 @@ classifiers = [
     "Topic :: Software Development",
     "Topic :: Utilities",
 ]
-dependencies = ["numpy>=1.17.3"]
+dependencies = [
+    "numpy>=1.17.3",
+    "netCDF4",
+    "xarray",
+]
 
 [project.urls]
 Homepage = "https://mhm-ufz.org/"
