@@ -175,14 +175,14 @@ def bankfull_discharge(ncin_path, ncout_path, return_period=1.5, peri_bkfl=False
 
     Parameters
     ----------
-    ncin_path : _type_
-        _description_
-    ncout_path : _type_
-        _description_
+    ncin_path : pathlike
+        The path of the mRM NetCDF file with the discharge data
+    ncout_path : pathlike
+        The path of the output NetCDF file
     return_period : float, optional
-        _description_, by default 1.5
+        The return period of the flood, by default 1.5
     peri_bkfl : bool, optional
-        _description_, by default False
+        Whether to also estimate the wetted perimeter, by default False
     """
     t, Q = read_discharge(ncin_path)
     Q_mon = calc_monthly_means(t, Q)

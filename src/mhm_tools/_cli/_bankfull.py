@@ -31,7 +31,7 @@ def add_args(parser):
         action="store_true",
         default=False,
         dest="peri_bkfl",
-        help="Also estimate the wetted perimeter.",
+        help="Wether to lso estimate the wetted perimeter.",
     )
 
 
