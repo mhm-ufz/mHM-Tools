@@ -1,16 +1,16 @@
 """
-Purpose:
-    Calculate the river discharge at bankfull conditions and the bankfull width.
+Purpose
+-------
+Calculate the river discharge at bankfull conditions and the bankfull width.
 
-Author:
-    Lennart Schueler
+Authors
+-------
+- Lennart Schüler
+- Sebastian Müller
 """
 
 import numpy as np
 import xarray as xr
-
-from . import netcdf4 as nc
-from .netcdf4 import NcDataset
 
 
 def find_nearest_idx(array, value):
@@ -31,143 +31,12 @@ def find_nearest_idx(array, value):
     return (np.abs(array - value)).argmin()
 
 
-def find_nearest(array, value):
-    """Find nearest value.
+def calc_q_bkfl(q_monthly, return_period):
+    """Calculates the discharge at bankfull conditions for a single time series.
 
     Parameters
     ----------
-    array : numpy.ndarray
-        input array
-    value : float
-        desired value
-
-    Returns
-    -------
-    float
-        nearest value
-    """
-    return array[find_nearest_idx(array, value)]
-
-
-def read_discharge(filename, var_name="Qrouted"):
-    """Reads in the discharge from a previous mHM run.
-
-    Assumes that the time variable is named 'time'.
-    Converts the time into an array of datetime objects.
-
-    Parameters
-    ----------
-    filename : str
-        name of the mHM output file
-    var_name :
-         (Default value = "Qrouted")
-
-    Returns
-    -------
-    t : 1d ndarray
-        array of datetime objects
-    Q : 3d ndarray
-        the mHM data
-
-    """
-    rootgrp = NcDataset(filename, "r")
-    t_nc = rootgrp["time"]
-    t = t_nc[:]
-    t_units = t_nc.units
-    try:
-        t_cal = t_nc.calendar
-    except AttributeError:
-        t_cal = "standard"
-
-    t = nc.num2date(t, units=t_units, calendar=t_cal)
-    Q = rootgrp[var_name][:]
-    return t, Q
-
-
-def write_Q_bkfl(Q_bkfl, discharge_filename, ncout_filename, peri_bkfl=False):
-    """Copies dims and attrs from given file and writes the bankfull discharge
-
-    Parameters
-    ----------
-    Q_bkfl : 2d ndarray
-        the bankfull discharge
-    discharge_filename : str
-        the filename of the discharge data
-    ncout_filename : str
-        the output filename
-    peri_bkfl : bool
-        whether to calculate the wetted perimeter derived
-        from bankful discharge (Default value = False)
-    """
-    ncin = NcDataset(discharge_filename, "r")
-    ncout = NcDataset(ncout_filename, "w")
-
-    dims = nc.getDimensions(ncin)
-    variables = nc.getVariables(ncin)
-
-    nc.copyDimensions(ncout, dims)
-    nc.copyVariables(ncout, variables, skip="Qrouted")
-
-    Q_bkfl_nc = ncout.createVariable(
-        "Q_bkfl", "f8", (dims["northing"].name, dims["easting"].name)
-    )
-    set_nc_attrs(Q_bkfl_nc, "Discharge at bankfull conditions")
-    Q_bkfl_nc[:] = Q_bkfl
-    if peri_bkfl:
-        P_bkfl_nc = ncout.createVariable(
-            "P_bkfl", "f8", (dims["northing"].name, dims["easting"].name)
-        )
-        set_nc_attrs(P_bkfl_nc, "Perimeter at bankfull conditions", units="m")
-        P_bkfl_nc[:] = 4.8 * np.sqrt(Q_bkfl)
-
-
-def set_nc_attrs(nc_var, long_name, units="m3 s-1"):
-    """Set NetCDF attributes.
-
-    Parameters
-    ----------
-    nc_var :
-        the netcdf variable
-    long_name : str
-        desired long name
-    units :
-         (Default value = "m3 s-1")
-    """
-    nc_var.setncattr("FillValue", -9999.0)
-    nc_var.setncattr("long_name", long_name)
-    nc_var.setncattr("units", units)
-    nc_var.setncattr("scale_factor", 1.0)
-    nc_var.setncattr("missing_value", -9999.0)
-    nc_var.setncattr("coordinates", "lat lon")
-
-
-def calc_monthly_means(t, Q):
-    """Calculates the monthly mean of Q
-
-    Parameters
-    ----------
-    t : numpy.ndarray
-        the time
-    Q : numpy.ndarray
-        the discharge on the mRM grid
-
-    Returns
-    -------
-    arraylike
-        monthly mean discharge (3d ndarray)
-    """
-    ds = xr.Dataset({"Q": (["time", "y", "x"], Q)}, coords={"time": t})
-    # ds_mon = ds.resample('M', dim='time')
-    ds_mon = ds.resample(time="1M").mean()
-    return ds_mon["Q"]
-
-
-def calc_Q_bkfl(Q, return_period):
-    """Calculates the discharge at bankfull conditions for a single time series
-
-    Parameters
-    ----------
-    Q : arraylike
+    q_monthly : arraylike
         discharge time-series
     return_period : float
         The return period of the flood
@@ -178,9 +47,9 @@ def calc_Q_bkfl(Q, return_period):
         discharge at bankfull conditions
     """
     # exceedance probability
-    ex_prob = np.linspace(0, 1, len(Q), endpoint=False)
+    ex_prob = np.linspace(0, 1, len(q_monthly), endpoint=False)
     # empirical CDF
-    Q_sort = np.sort(Q)[::-1]
+    Q_sort = np.sort(q_monthly)[::-1]
     # plotting Q_sort against ex_prob gives the exceedance probability
     # pt.plot(Q_sort, ex_prob)
     # X-year flood is defined as a flood which has a
@@ -189,12 +58,12 @@ def calc_Q_bkfl(Q, return_period):
     return Q_sort[idx_bkfl]
 
 
-def process_grid(Q, return_period):
-    """Calculates the discharge at bankfull conditions for a complete grid
+def process_grid(q_monthly, return_period):
+    """Calculates the discharge at bankfull conditions for a complete grid.
 
     Parameters
     ----------
-    Q : arraylike
+    q_monthly : arraylike
         monthly mean discharge (3d ndarray)
     return_period : float
         The return period of the flood
@@ -203,12 +72,12 @@ def process_grid(Q, return_period):
     -------
     numpy.ma.MaskedArray
     """
-    Q_bkfl = np.ma.empty(Q.shape[1:], Q.dtype)
-    for i in range(Q.shape[1]):
-        for j in range(Q.shape[2]):
-            if not np.all(Q[:, i, j]):
-                Q_bkfl[i, j] = calc_Q_bkfl(Q[:, i, j], return_period)
-    return Q_bkfl
+    q_bkfl = np.ma.empty(q_monthly.shape[1:], q_monthly.dtype)
+    for i in range(q_monthly.shape[1]):
+        for j in range(q_monthly.shape[2]):
+            if not np.all(q_monthly[:, i, j]):
+                q_bkfl[i, j] = calc_q_bkfl(q_monthly[:, i, j], return_period)
+    return q_bkfl
 
 
 def gen_bankfull_discharge(ncin_path, ncout_path, return_period=1.5, peri_bkfl=False):
@@ -225,7 +94,33 @@ def gen_bankfull_discharge(ncin_path, ncout_path, return_period=1.5, peri_bkfl=F
     peri_bkfl : bool, optional
         Whether to also estimate the wetted perimeter, by default False
     """
-    t, Q = read_discharge(ncin_path)
-    Q_mon = calc_monthly_means(t, Q)
-    Q_bkfl = process_grid(Q_mon, return_period)
-    write_Q_bkfl(Q_bkfl, ncin_path, ncout_path, peri_bkfl)
+
+    ds = xr.open_dataset(ncin_path, engine="netcdf4", mask_and_scale=False)
+    # bankfull discharge
+    q_monthly = ds["Qrouted"].resample(time="1M").mean()
+    q_bkfl_data = process_grid(q_monthly, return_period=return_period)
+    q_bkfl = q_monthly.isel(time=0, drop=True).copy(data=q_bkfl_data)
+    q_bkfl.attrs["long_name"] = "Discharge at bankfull conditions"
+    # drop time (and all time dependent variables)
+    ds = ds.drop_dims("time")
+    ds.encoding.pop("unlimited_dims", None)
+    # add new variable
+    ds["Q_bkfl"] = q_bkfl
+    # perimeter
+    if peri_bkfl:
+        p_bkfl_data = np.copy(q_bkfl_data)
+        p_bkfl_data[q_bkfl_data > 0] = 4.8 * np.sqrt(q_bkfl_data[q_bkfl_data > 0])
+        p_bkfl = q_bkfl.copy(data=p_bkfl_data)
+        p_bkfl.attrs["long_name"] = "Perimeter at bankfull conditions"
+        p_bkfl.attrs["units"] = "m"
+        ds["P_bkfl"] = p_bkfl
+    # no FillValue for coords and bounds
+    encoding = dict()
+    for v in list(ds.data_vars) + list(ds.coords):
+        if not (v in ds.coords or v.endswith("_bnds")):
+            continue
+        ds[v].attrs.pop("_FillValue", None)
+        ds[v].attrs.pop("missing_value", None)
+        encoding[v] = dict(_FillValue=None)
+    # save
+    ds.to_netcdf(ncout_path, encoding=encoding)
