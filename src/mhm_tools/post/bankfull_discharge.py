@@ -115,12 +115,12 @@ def gen_bankfull_discharge(ncin_path, ncout_path, return_period=1.5, peri_bkfl=F
         p_bkfl.attrs["units"] = "m"
         ds["P_bkfl"] = p_bkfl
     # no FillValue for coords and bounds
-    encoding = dict()
+    encoding = {}
     for v in list(ds.data_vars) + list(ds.coords):
         if not (v in ds.coords or v.endswith("_bnds")):
             continue
         ds[v].attrs.pop("_FillValue", None)
         ds[v].attrs.pop("missing_value", None)
-        encoding[v] = dict(_FillValue=None)
+        encoding[v] = {"_FillValue": None}
     # save
     ds.to_netcdf(ncout_path, encoding=encoding)
