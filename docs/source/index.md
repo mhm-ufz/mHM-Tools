@@ -9,7 +9,7 @@ html_theme.sidebar_secondary.remove: true
 # mHM-Tools
 
 ```{image} _static/logo.png
-:alt: FINAM Logo
+:alt: mHM-Tools Logo
 :class: dark-light p-2
 :width: 200px
 :align: center
@@ -70,7 +70,7 @@ api/index
 
 ## About
 
-Further information about licensing, the developers team and the changelog of FINAM.
+Further information about licensing, the developers team and the changelog of mHM-Tools.
 
 ```{toctree}
 :maxdepth: 2
