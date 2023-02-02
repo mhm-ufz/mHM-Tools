@@ -21,4 +21,4 @@ $ pip install git+https://git.ufz.de/mhm/mhm-tools.git
 
 ## License
 
-LGPLv3, Copyright © 2021-2023, the mHM developers from Helmholtz-Zentrum für Umweltforschung GmbH - UFZ. All rights reserved.
+LGPLv3, Copyright © 2023, the mHM developers from Helmholtz-Zentrum für Umweltforschung GmbH - UFZ. All rights reserved.
