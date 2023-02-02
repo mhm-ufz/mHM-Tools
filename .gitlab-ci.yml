@@ -38,12 +38,25 @@ documentation:
     paths:
       - public
 
+build:
+  stage: build
+  variables:
+    GIT_STRATEGY: clone
+    GIT_DEPTH: 0  # to have all tags
+  script:
+    - pip install build
+    - python -m build
+  artifacts:
+    paths:
+      - dist
+
 pages:
   stage: deploy
+  dependencies:
+    - documentation
   script: "true"
   artifacts:
     paths:
       - public
   only:
     - main
-
