@@ -125,3 +125,4 @@ docs/source/api/generated/
 *.zip
 
 .vscode
+.ruff_cache

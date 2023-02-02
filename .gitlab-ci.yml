@@ -8,12 +8,11 @@ stages:
 check:
   stage: test
   before_script:
-    - pip3 install black 'pylint<3' 'isort[colors]<6'
+    - pip3 install 'black>=23,<24' 'ruff==0.0.239'
   script:
     - pip3 install --editable .
     - black --check --diff --color .
-    - isort --check --diff --color .
-    - pylint src/mhm_tools
+    - ruff src/mhm_tools
 
 test:
   stage: test
