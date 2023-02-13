@@ -3,6 +3,7 @@ import argparse
 
 from .. import __version__
 from . import _bankfull
+from . import _hydrograph
 
 
 def main(argv=None):
@@ -35,9 +36,15 @@ def main(argv=None):
         title="subcommands", dest="command", required=True
     )
 
+    # bankfull discharge
     parser = subparsers.add_parser("bankfull", help=_bankfull.__doc__)
     _bankfull.add_args(parser)
     parser.set_defaults(func=_bankfull.bankfull)
+
+    # hydrograph
+    parser = subparsers.add_parser("hydrograph", help=_hydrograph.__doc__)
+    _hydrograph.add_args(parser)
+    parser.set_defaults(func=_hydrograph.hydrograph)
 
     args = parent_parser.parse_args(argv)
     return args.func(args)
