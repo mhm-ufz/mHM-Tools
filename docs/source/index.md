@@ -20,8 +20,18 @@ mHM-Tools is a toolbox to pre- and post-process data for and from mHM.
 
 ---
 
-::::{grid} 1 2 2 2
+::::{grid} 1 2 2 3
 :gutter: 1 1 1 2
+
+:::{grid-item-card} {octicon}`terminal;1.5em;sd-mr-1` mhm-tools CLI
+:link: cli
+:link-type: doc
+
+mhm-tools brings you an intuitive command line interface to pre- and post-process data for mHM.
+
++++
+[Learn more »](cli)
+:::
 
 :::{grid-item-card} {octicon}`code-square;1.5em;sd-mr-1` Well-documented API
 :link: api/index
@@ -59,12 +69,21 @@ $ pip install git+https://git.ufz.de/mhm/mhm-tools.git
 * mHM-Tools [documentation](https://mhm.pages.ufz.de/mhm-tools)
 * mHM-Tools [source code](https://git.ufz.de/mhm/mhm-tools)
 
+## CLI documentation
+
+Information about the command line interface of mHM-Tools.
+
+```{toctree}
+:maxdepth: 3
+cli
+```
+
 ## API References
 
 Information about the API of mHM-Tools.
 
 ```{toctree}
-:maxdepth: 2
+:maxdepth: 3
 api/index
 ```
 
