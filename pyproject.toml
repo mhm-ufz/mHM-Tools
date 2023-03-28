@@ -57,6 +57,7 @@ doc = [
   "sphinxcontrib-mermaid>=0.7",
   "ablog>=0.10",
   "docutils>=0.18", # mdinclude with myst
+  "sphinxcontrib-autoprogram>=0.1.8", # CLI doc
 ]
 test = ["pytest-cov>=3"]
 
