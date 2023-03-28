@@ -17,10 +17,10 @@ The list of developers is provided in the AUTHORS.md file.
 
 ***Contact:***
 
-- mHM Admins (E-mail: mhm-admin@ufz.de)
+- mHM Admins (E-mail: <mhm-admin@ufz.de>)
 - Sebastian Müller (E-mail: <sebastian.mueller@ufz.de>)
 - Stephan Thober (E-mail: <stephan.thober@ufz.de>)
-- Luis Samaniego (E-mail: luis.samaniego@ufz.de)
+- Luis Samaniego (E-mail: <luis.samaniego@ufz.de>)
 - Sabine Attinger (E-mail: <sabine.attinger@ufz.de>)
 
 > Department Computational Hydrosystems (CHS)<br/>
