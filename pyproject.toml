@@ -60,6 +60,11 @@ doc = [
   "sphinxcontrib-autoprogram>=0.1.8", # CLI doc
 ]
 test = ["pytest-cov>=3"]
+check = [
+  "black>=23,<24",
+  "isort[colors]<6",
+  "ruff==0.0.239",
+]
 
 [project.scripts]
 mhm-tools = "mhm_tools._cli:main"
