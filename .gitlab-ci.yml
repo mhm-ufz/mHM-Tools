@@ -7,11 +7,10 @@ stages:
 
 check:
   stage: test
-  before_script:
-    - pip3 install 'black>=23,<24' 'ruff==0.0.239'
   script:
-    - pip3 install --editable .
+    - pip3 install --editable .[check]
     - black --check --diff --color .
+    - isort --check --diff --color .
     - ruff src/mhm_tools
 
 test:
