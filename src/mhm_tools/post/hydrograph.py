@@ -100,6 +100,11 @@ class Hydrograph:
                 return
         self.logger.warning("No plots will be produced since none were specified.")
 
+    def raise_if_not_directory(self, path):
+        p = Path(path)
+        if not p.is_dir():
+            msg = 'The given path "{path}" is not a directory.'
+            raise NotADirectoryError(msg)
     def gen_hydrograph(self, input_path, filename, show, save, title, plot_code):
         """
         Read in discharge data and plot the simulated against the observed discharge
@@ -121,6 +126,7 @@ class Hydrograph:
         self.check_which_plots_to_create(plot_code)
         if sum(self.plots) == 0:
             return
+        self.raise_if_not_directory(input_path)
         with xr.open_dataset(input_path + "discharge.nc") as ds:
             discharge_timestep = ds.load()
             for v in discharge_timestep.variables:
