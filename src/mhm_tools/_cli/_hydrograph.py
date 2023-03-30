@@ -45,13 +45,13 @@ def add_args(parser):
     parser.add_argument(
         "-g",
         "--graphics",
-        default=31,
+        default=15,
         required=False,
         dest="plots_to_be_created",
-        help="plot only the specified hydrograph 1 daily, 2 monthly, 4 yearly, 8 seasonality, 16 scatter e.g. " \
-               "\n - daily and seasonality -> 9" \
-               "\n - daily, monthly, yearly -> 7" \
-               "\n - all plots -> 31 (default)"
+        help="specifies which graphics are generated. Sum up the numbers of the plots you want: "
+             "1 model timestep, 2 yearly, 4 seasonality, 8 scatter e.g. "
+             "all with out seasonality (advised for performance) = 11 "
+             "default is all"
     )
     parser.add_argument(
         "-l",
@@ -77,5 +77,5 @@ def hydrograph(args):
         show=args.show,
         save=True,
         title=args.title,
-        plots=args.plots_to_be_created
+        plot_code=args.plots_to_be_created
     )
