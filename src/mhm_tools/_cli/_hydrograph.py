@@ -1,5 +1,5 @@
 """Create a hydrograph showing the simulated and observed discharge."""
-from ..post.hydrograph import gen_hydrograph
+from ..post.hydrograph import Hydrograph
 
 
 def add_args(parser):
@@ -18,19 +18,13 @@ def add_args(parser):
         help="The path to input mhm output directory"
     )
     parser.add_argument(
-        "-o",
-        "--output",
-        dest="out_path",
-        required=False,
-        help="The path of the output NetCDF file"
-    )
-    parser.add_argument(
         "-f",
         "--filename",
         dest="filename",
         required=False,
         default="hydrograph.pdf",
-        help="The name of the output file"
+        help="The name of the output file. By default `hydrograph.png` If it contains no path the file is written to "
+             "the input path. "
     )
     parser.add_argument(
         "-t",
@@ -51,13 +45,21 @@ def add_args(parser):
     parser.add_argument(
         "-g",
         "--graphics",
-        default=15,
+        default=31,
         required=False,
         dest="plots_to_be_created",
-        help="plot only the specified hydrograph 1 daily, 2 monthly, 4 yearly, 8 seasonality e.g. " \
+        help="plot only the specified hydrograph 1 daily, 2 monthly, 4 yearly, 8 seasonality, 16 scatter e.g. " \
                "\n - daily and seasonality -> 9" \
                "\n - daily, monthly, yearly -> 7" \
-               "\n - all plots -> 15 (default)"
+               "\n - all plots -> 31 (default)"
+    )
+    parser.add_argument(
+        "-l",
+        "--log_level",
+        default='warning',
+        required=False,
+        dest="log_level",
+        help="log level (debug, info, warning) default is warning"
     )
 
 def hydrograph(args):
@@ -68,9 +70,9 @@ def hydrograph(args):
     args : argparse.Namespace
         parsed command line arguments
     """
-    gen_hydrograph(
+    hydro = Hydrograph(args.log_level)
+    hydro.gen_hydrograph(
         input_path=args.path,
-        output_path=args.out_path,
         filename=args.filename,
         show=args.show,
         save=True,
