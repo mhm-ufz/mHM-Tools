@@ -2,8 +2,7 @@
 import argparse
 
 from .. import __version__
-from . import _bankfull
-from . import _hydrograph
+from . import _bankfull, _hydrograph
 
 
 def _get_parser():

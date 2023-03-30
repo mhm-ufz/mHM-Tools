@@ -2,18 +2,27 @@
 26.01.2023
 """
 import itertools
+import logging
+
 import hydroeval as he
 import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
-import logging
+
 
 class Hydrograph:
-    levels = {'info': logging.INFO, 'warning': logging.WARNING, 'warn': logging.WARNING, 'debug': logging.DEBUG, 'error': logging.ERROR}
+    levels = {
+        "info": logging.INFO,
+        "warning": logging.WARNING,
+        "warn": logging.WARNING,
+        "debug": logging.DEBUG,
+        "error": logging.ERROR,
+    }
     grid = None
-    logging.basicConfig(format='%(asctime)s - %(levelname)-8s - %(message)s')
-    logger = logging.getLogger('hydrograph')
-    plots = (0,0,0,0)
+    logging.basicConfig(format="%(asctime)s - %(levelname)-8s - %(message)s")
+    logger = logging.getLogger("hydrograph")
+    plots = (0, 0, 0, 0)
+
     def __init__(self, log_level):
         self.logger.setLevel(self.levels[log_level])
 
@@ -32,7 +41,7 @@ class Hydrograph:
             for j, v in enumerate(row):
                 if not v:
                     return i, j
-                
+
     def is_last_plot(self, n):
         # finds the first unused gridcell for the next plot
         return np.sum(self.plots[n:]) == 1
@@ -43,14 +52,15 @@ class Hydrograph:
                 doc = f.readlines()
                 for l in doc[::-1]:
                     if l.strip():
-                        return f"{float(l.replace('Total[km2]', '').strip()):.{ndecimal}f}"
+                        return (
+                            f"{float(l.replace('Total[km2]', '').strip()):.{ndecimal}f}"
+                        )
         except:
             self.logger.warning("Area could not be read.")
             return ""
 
-
     def get_long_time_monthly_mean(self, variable):
-        """ Takes a variable and calculated the long time average value for every month of the year
+        """Takes a variable and calculated the long time average value for every month of the year
         :param variable: xarray with a variable and a time
         :return: list of twelve numbers corresponding to the long term average value for each month of the year
         """
@@ -59,9 +69,8 @@ class Hydrograph:
             var_ses[int(variable.time[i].dt.month.data) - 1].append(variable[i])
         return np.array([np.mean(np.array(m)) for m in var_ses])
 
-
     def plot_on_axis(
-        self, function, xvalues , yvalues: list, colors=None, labels=None, **arguments
+        self, function, xvalues, yvalues: list, colors=None, labels=None, **arguments
     ):
         """
         Plots multiple graphs for specified function.
@@ -87,12 +96,13 @@ class Hydrograph:
         for l in lst:
             check = 0
             for i, v in enumerate(l):
-                check += v * 2**i
+                check += v * 2 ** i
             if a == check:
-                self.logger.debug(f'plots to be produced: {l}')
+                self.logger.debug(f"plots to be produced: {l}")
                 self.plots = l
                 return
-        self.logger.warning('No plots will be produced since none were specified.')
+        self.logger.warning("No plots will be produced since none were specified.")
+
     def gen_hydrograph(self, input_path, filename, show, save, title, plot_code):
         """
         Read in discharge data and plot the simulated against the observed discharge for different time resolutions and a seasonality.
@@ -104,9 +114,11 @@ class Hydrograph:
         :param log_level: log level for the function
         """
 
-        if input_path[-1] != '/':
-            input_path += '/'
-        if len(filename.split('/')) == 1: # by default the hydrograph is saved to the data directory
+        if input_path[-1] != "/":
+            input_path += "/"
+        if (
+            len(filename.split("/")) == 1
+        ):  # by default the hydrograph is saved to the data directory
             filename = input_path + filename
         self.check_which_plots_to_create(plot_code)
         if sum(self.plots) == 0:
@@ -115,7 +127,7 @@ class Hydrograph:
             discharge_timestep = ds.load()
             for v in discharge_timestep.variables:
                 if not isinstance(v, str):
-                    raise TypeError(f'variable name is not a string - {v} - {type(v)}')
+                    raise TypeError(f"variable name is not a string - {v} - {type(v)}")
                 for key in ["sim", "obs"]:
                     if key in v:
                         catchment = str(int(v.split("_")[1]))
@@ -123,7 +135,9 @@ class Hydrograph:
             discharge_monthly = discharge_timestep.resample(time="M").mean(skipna=False)
             discharge_yearly = discharge_timestep.resample(time="Y").mean(skipna=False)
 
-            nse_timestep = he.evaluator(he.nse, discharge_timestep["sim"], discharge_timestep["obs"])
+            nse_timestep = he.evaluator(
+                he.nse, discharge_timestep["sim"], discharge_timestep["obs"]
+            )
             kge_timestep, r_timestep, alpha_timestep, beta_timestep = he.evaluator(
                 he.kge, discharge_timestep["sim"], discharge_timestep["obs"]
             )
@@ -140,14 +154,14 @@ class Hydrograph:
                 he.kge, discharge_yearly["sim"], discharge_yearly["obs"]
             )
 
-            fig = plt.figure(figsize=(7,8))
+            fig = plt.figure(figsize=(7, 8))
             # fig.set_size_inches(7, 8)
-            nrows = sum(self.plots)//2+1
+            nrows = sum(self.plots) // 2 + 1
             ncols = 2 if sum(self.plots) > 2 else 1
             self.generate_grid(nrows, ncols)
-            self.logger.debug(f'nrows = {nrows} and ncols = {ncols}')
+            self.logger.debug(f"nrows = {nrows} and ncols = {ncols}")
             # gs = gridspec.GridSpec(nrows=nrows, ncols=ncols, figure=fig)
-            gs = fig.add_gridspec(nrows, ncols, width_ratios=[1,1])
+            gs = fig.add_gridspec(nrows, ncols, width_ratios=[1, 1])
             area = self.get_catchment_area(input_path, ndecimal=0)
             fig.text(
                 s=f"{catchment}",
@@ -173,9 +187,9 @@ class Hydrograph:
             )
 
             if self.plots[0]:
-                self.logger.info('generating discharge plot')
+                self.logger.info("generating discharge plot")
                 r, c = self.get_row_col()
-                ax1 = fig.add_subplot(gs[r,c:])
+                ax1 = fig.add_subplot(gs[r, c:])
                 self.grid[r] = [True for c in self.grid[r]]
                 self.logger.debug(self.grid)
                 self.plot_on_axis(
@@ -188,7 +202,7 @@ class Hydrograph:
                     function=ax1.plot,
                     xvalues=discharge_timestep["time"],
                     yvalues=[discharge_timestep["sim"], discharge_timestep["obs"]],
-                    linewidth=.3,
+                    linewidth=0.3,
                 )
                 ax1.legend()
                 ax1.set_title(
@@ -200,7 +214,9 @@ class Hydrograph:
                     horizontalalignment="center",
                 )  # , alpha_day={alpha_timestep[0]:.2f} , beta_day={beta_timestep[0]:.2f} , r_day={r_timestep[0]:.2f}')
                 ax1.set_ylabel(r"Q $[m^3 s^{-1}]$")
-                ax1.set_xlim(discharge_timestep["time"][0],discharge_timestep["time"][-1])
+                ax1.set_xlim(
+                    discharge_timestep["time"][0], discharge_timestep["time"][-1]
+                )
 
             # if self.plots[1]:
             #     self.logger.info('generating monthly discharge plot')
@@ -248,10 +264,10 @@ class Hydrograph:
             #     # ax2.set_xticks(time_years[::int(tick_freq)])
 
             if self.plots[1]:
-                self.logger.info('generating yearly discharge plot')
+                self.logger.info("generating yearly discharge plot")
                 r, c = self.get_row_col()
                 if r == 0 or self.is_last_plot(1):
-                    ax3 = fig.add_subplot(gs[r,c:])
+                    ax3 = fig.add_subplot(gs[r, c:])
                     self.grid[r] = [True for c in self.grid[r]]
                 else:
                     ax3 = fig.add_subplot(gs[r, c])
@@ -268,7 +284,7 @@ class Hydrograph:
                     function=ax3.plot,
                     xvalues=time_yearly,
                     yvalues=[discharge_yearly["sim"], discharge_yearly["obs"]],
-                    linewidth=.3,
+                    linewidth=0.3,
                 )
                 if r == 0:
                     ax3.legend()
@@ -281,10 +297,10 @@ class Hydrograph:
                 ax3.set_xticks(time_yearly[:: len(time_yearly) // 3])
 
             if self.plots[2]:
-                self.logger.info('generating discharge seasonality plot')
+                self.logger.info("generating discharge seasonality plot")
                 r, c = self.get_row_col()
                 if r == 0 or self.is_last_plot(2):
-                    ax4 = fig.add_subplot(gs[r,c:])
+                    ax4 = fig.add_subplot(gs[r, c:])
                     self.grid[r] = [True for c in self.grid[r]]
                 else:
                     ax4 = fig.add_subplot(gs[r, c])
@@ -306,7 +322,7 @@ class Hydrograph:
                         self.get_long_time_monthly_mean(discharge_timestep["sim"]),
                         self.get_long_time_monthly_mean(discharge_timestep["obs"]),
                     ],
-                    linewidth=.3,
+                    linewidth=0.3,
                 )
                 if r == 0:
                     ax4.legend()
@@ -315,11 +331,11 @@ class Hydrograph:
                 ax4.set_ylabel(r"Q $[m^3 s^{-1}]$")
                 ax4.set_xlabel(r"month")
             if self.plots[3]:
-                self.logger.info('generating discharge scatter plot')
+                self.logger.info("generating discharge scatter plot")
                 r, c = self.get_row_col()
                 if r == 0 or self.is_last_plot(3):
-                    self.logger.debug('scatter is last')
-                    ax5 = fig.add_subplot(gs[r,c:])
+                    self.logger.debug("scatter is last")
+                    ax5 = fig.add_subplot(gs[r, c:])
                     self.grid[r] = [True for col in self.grid[r][c:]]
                 else:
                     ax5 = fig.add_subplot(gs[r, c])
@@ -328,29 +344,42 @@ class Hydrograph:
                 # add linear regression line to scatterplot
                 self.plot_on_axis(
                     function=ax5.scatter,
-                    xvalues=discharge_timestep['obs'],
-                    yvalues=[discharge_timestep['sim']],
+                    xvalues=discharge_timestep["obs"],
+                    yvalues=[discharge_timestep["sim"]],
                     s=50.0,
-                    colors=['black'],
-                    edgecolor='white',
+                    colors=["black"],
+                    edgecolor="white",
                     linewidth=0.3,
-                    alpha=0.1
+                    alpha=0.1,
                 )
-                m, b = np.polyfit(discharge_timestep['obs'], discharge_timestep['sim'], deg=1)
+                m, b = np.polyfit(
+                    discharge_timestep["obs"], discharge_timestep["sim"], deg=1
+                )
                 self.plot_on_axis(
                     function=ax5.plot,
                     xvalues=np.array([0, 1e6]),
                     yvalues=[m * np.array([0, 1e6]) + b, np.array([0, 1e6])],
-                    colors=['red', 'black'],
-                    linewidth=.5
+                    colors=["red", "black"],
+                    linewidth=0.5,
                 )
                 if r == 0:
                     ax5.legend()
-                ax5.set_title(f"relation simulated to observed discharge", horizontalalignment="center")
+                ax5.set_title(
+                    f"relation simulated to observed discharge",
+                    horizontalalignment="center",
+                )
                 ax5.set_xlabel("Qobs $[m^3 s^{-1}]$")  # X Achsenbeschriftung
                 ax5.set_ylabel("Qsim $[m^3 s^{-1}]$")  # Y Achsenbeschriftung
-                lim = np.max([np.max(discharge_timestep['obs']), np.max(discharge_timestep['sim'])])*1.1
-                lim = lim - lim % 5 if lim - lim % 5 >= lim / 1.1 else lim + 5 - lim%5
+                lim = (
+                    np.max(
+                        [
+                            np.max(discharge_timestep["obs"]),
+                            np.max(discharge_timestep["sim"]),
+                        ]
+                    )
+                    * 1.1
+                )
+                lim = lim - lim % 5 if lim - lim % 5 >= lim / 1.1 else lim + 5 - lim % 5
                 ax5.set_xlim(0, lim)
                 ax5.set_ylim(0, lim)
             plt.tight_layout()

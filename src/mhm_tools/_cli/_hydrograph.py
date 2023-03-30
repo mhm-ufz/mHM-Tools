@@ -15,7 +15,7 @@ def add_args(parser):
         "--path",
         dest="path",
         required=True,
-        help="The path to input mhm output directory"
+        help="The path to input mhm output directory",
     )
     parser.add_argument(
         "-f",
@@ -24,7 +24,7 @@ def add_args(parser):
         required=False,
         default="hydrograph.pdf",
         help="The name of the output file. By default `hydrograph.png` If it contains no path the file is written to "
-             "the input path. "
+        "the input path. ",
     )
     parser.add_argument(
         "-t",
@@ -32,15 +32,15 @@ def add_args(parser):
         dest="title",
         required=False,
         default="",
-        help="The titel for the hydrograph"
+        help="The titel for the hydrograph",
     )
     parser.add_argument(
         "-s",
         "--show",
         dest="show",
         required=False,
-        action='store_true',
-        help="Show the plots that are created the default is only saving them"
+        action="store_true",
+        help="Show the plots that are created the default is only saving them",
     )
     parser.add_argument(
         "-g",
@@ -49,18 +49,19 @@ def add_args(parser):
         required=False,
         dest="plots_to_be_created",
         help="specifies which graphics are generated. Sum up the numbers of the plots you want: "
-             "1 model timestep, 2 yearly, 4 seasonality, 8 scatter e.g. "
-             "all with out seasonality (advised for performance) = 11 "
-             "default is all"
+        "1 model timestep, 2 yearly, 4 seasonality, 8 scatter e.g. "
+        "all with out seasonality (advised for performance) = 11 "
+        "default is all",
     )
     parser.add_argument(
         "-l",
         "--log_level",
-        default='warning',
+        default="warning",
         required=False,
         dest="log_level",
-        help="log level (debug, info, warning) default is warning"
+        help="log level (debug, info, warning) default is warning",
     )
+
 
 def hydrograph(args):
     """Calculate the bankfull discharge
@@ -77,5 +78,5 @@ def hydrograph(args):
         show=args.show,
         save=True,
         title=args.title,
-        plot_code=args.plots_to_be_created
+        plot_code=args.plots_to_be_created,
     )
