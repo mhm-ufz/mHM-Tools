@@ -105,6 +105,8 @@ class Hydrograph:
         if not p.is_dir():
             msg = 'The given path "{path}" is not a directory.'
             raise NotADirectoryError(msg)
+
+
     def gen_hydrograph(self, input_path, filename, show, save, title, plot_code):
         """
         Read in discharge data and plot the simulated against the observed discharge
