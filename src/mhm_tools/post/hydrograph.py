@@ -1,15 +1,10 @@
 """
 26.01.2023
 """
-import datetime
 import itertools
 import hydroeval as he
-import matplotlib.gridspec as gridspec
-import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
-import seaborn as sns
-import pandas as pd
 import xarray as xr
 import logging
 
@@ -177,9 +172,6 @@ class Hydrograph:
                 fontsize="x-large",
             )
 
-            sns.set_theme()
-            sns.set_context("paper")
-            sns.set_style("white")
             if self.plots[0]:
                 self.logger.info('generating discharge plot')
                 r, c = self.get_row_col()
