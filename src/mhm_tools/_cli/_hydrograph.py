@@ -10,17 +10,18 @@ def add_args(parser):
     parser : argparse.ArgumentParser
         the main argument parser
     """
+
     parser.add_argument(
-        "-p",
-        "--path",
-        dest="path",
+        "-i",
+        "--input",
+        dest="in_dir",
         required=True,
         help="The path to input mhm output directory",
     )
     parser.add_argument(
-        "-f",
-        "--filename",
-        dest="filename",
+        "-o",
+        "--output",
+        dest="out_file",
         required=False,
         default="hydrograph.pdf",
         help="The name of the output file. By default `hydrograph.png` If it contains no path the file is written to "
@@ -73,8 +74,8 @@ def hydrograph(args):
     """
     hydro = Hydrograph(args.log_level)
     hydro.gen_hydrograph(
-        input_path=args.path,
-        filename=args.filename,
+        input_path=args.in_dir,
+        filename=args.out_file,
         show=args.show,
         save=True,
         title=args.title,
