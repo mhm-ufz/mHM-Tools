@@ -21,7 +21,7 @@ class Hydrograph:
     }
     grid = None
     logging.basicConfig(format="%(asctime)s - %(levelname)-8s - %(message)s")
-    logger = logging.getLogger("hydrograph")
+    logger = logging.getLogger(__name__)
     plots = (0, 0, 0, 0)
 
     def __init__(self, log_level):
@@ -38,6 +38,7 @@ class Hydrograph:
 
     def is_last_plot(self, n):
         # finds the first unused gridcell for the next plot
+        self.logger.debug(f"{n} is last plot {np.sum(self.plots[n:]) == 1}")
         return np.sum(self.plots[n:]) == 1
 
     def get_catchment_area(self, path, ndecimal=0):
@@ -157,8 +158,8 @@ class Hydrograph:
             nrows = sum(self.plots) // 2 + 1
             ncols = 2
             self.grid = [
-                False * ncols
-            ] * nrows  # generate a grid indicating used and unused cells
+                [False] * ncols for i in range(nrows)
+            ]  # generate a grid indicating used and unused cells
             self.logger.debug(f"nrows = {nrows} and ncols = {ncols}")
             # gs = gridspec.GridSpec(nrows=nrows, ncols=ncols, figure=fig)
             gs = fig.add_gridspec(nrows, ncols, width_ratios=[1, 1])
@@ -266,9 +267,10 @@ class Hydrograph:
             if self.plots[1]:
                 self.logger.info("generating yearly discharge plot")
                 r, c = self.get_row_col()
+                self.logger.debug(f"yearly plot as row {r} and col {c}")
                 if r == 0 or self.is_last_plot(1):
                     ax3 = fig.add_subplot(gs[r, c:])
-                    self.grid[r] = [True for c in self.grid[r]]
+                    self.grid[r] = [True for col in self.grid[r]]
                 else:
                     ax3 = fig.add_subplot(gs[r, c])
                     self.grid[r][c] = True
@@ -301,7 +303,7 @@ class Hydrograph:
                 r, c = self.get_row_col()
                 if r == 0 or self.is_last_plot(2):
                     ax4 = fig.add_subplot(gs[r, c:])
-                    self.grid[r] = [True for c in self.grid[r]]
+                    self.grid[r] = [True for col in self.grid[r]]
                 else:
                     ax4 = fig.add_subplot(gs[r, c])
                     self.grid[r][c] = True
