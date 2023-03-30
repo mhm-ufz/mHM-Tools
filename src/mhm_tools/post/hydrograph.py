@@ -3,6 +3,7 @@
 """
 import itertools
 import logging
+from pathlib import Path
 
 import hydroeval as he
 import matplotlib.pyplot as plt
@@ -26,38 +27,30 @@ class Hydrograph:
     def __init__(self, log_level):
         self.logger.setLevel(self.levels[log_level])
 
-    def generate_grid(self, nrows, ncols):
-        # generate a grid with the rows and colums indicating which cells are already used
-        self.grid = []
-        for i in range(nrows):
-            row = []
-            for j in range(ncols):
-                row.append(False)
-            self.grid.append(row)
-
     def get_row_col(self):
         # finds the first unused gridcell for the next plot
         for i, row in enumerate(self.grid):
             for j, v in enumerate(row):
                 if not v:
                     return i, j
+        msg = "No unused gridcell left"
+        raise ValueError(msg)
 
     def is_last_plot(self, n):
         # finds the first unused gridcell for the next plot
         return np.sum(self.plots[n:]) == 1
 
     def get_catchment_area(self, path, ndecimal=0):
-        try:
-            with open(path + "ConfigFile.log", "r") as f:
-                doc = f.readlines()
-                for l in doc[::-1]:
-                    if l.strip():
-                        return (
-                            f"{float(l.replace('Total[km2]', '').strip()):.{ndecimal}f}"
-                        )
-        except:
-            self.logger.warning("Area could not be read.")
-            return ""
+        config_file = Path(path + "ConfigFile.log")
+        if config_file.exists():
+            doc = config_file.open("r").readlines()
+            for line in doc[::-1]:
+                if line.strip():
+                    return (
+                        f"{float(line.replace('Total[km2]', '').strip()):.{ndecimal}f}"
+                    )
+        self.logger.warning("Area could not be read.")
+        return ""
 
     def get_long_time_monthly_mean(self, variable):
         """Takes a variable and calculated the long time average value for every month of the year
@@ -91,27 +84,31 @@ class Hydrograph:
             function(xvalues, yvalue, **arguments)
 
     def check_which_plots_to_create(self, a):
-        a = int(a)
-        lst = list(itertools.product([0, 1], repeat=4))
-        for l in lst:
+        """
+        creates all possible permutations of 4 different plots and tests the plot_code (sum(a_i * 2*i) for a_i = 0 or 1)
+        against them to create a touple indicating which plots to produce
+        """
+        possible_permutations = list(itertools.product([0, 1], repeat=4))
+        for permutation in possible_permutations:
             check = 0
-            for i, v in enumerate(l):
-                check += v * 2 ** i
-            if a == check:
-                self.logger.debug(f"plots to be produced: {l}")
-                self.plots = l
+            for i, v in enumerate(permutation):
+                check += v * 2**i
+            if int(a) == check:
+                self.logger.debug(f"plots to be produced: {permutation}")
+                self.plots = permutation
                 return
         self.logger.warning("No plots will be produced since none were specified.")
 
     def gen_hydrograph(self, input_path, filename, show, save, title, plot_code):
         """
-        Read in discharge data and plot the simulated against the observed discharge for different time resolutions and a seasonality.
+        Read in discharge data and plot the simulated against the observed discharge
+        for different time resolutions and a seasonality as well as plotting simulated against observed discharge.
         :param input_path: Path to discharge.nc file
         :param filename: Filename of the resulting file. e.g. hydrograph.png
         :param show: bool if plots should be shown or not
         :param save: bool if plots should be saved or not
         :param title: title given to the hydrograph
-        :param log_level: log level for the function
+        :param plot_code: code indicating which plots to create
         """
 
         if input_path[-1] != "/":
@@ -127,12 +124,13 @@ class Hydrograph:
             discharge_timestep = ds.load()
             for v in discharge_timestep.variables:
                 if not isinstance(v, str):
-                    raise TypeError(f"variable name is not a string - {v} - {type(v)}")
+                    msg = f"variable name is not a string - {v} - {type(v)}"
+                    raise TypeError(msg)
                 for key in ["sim", "obs"]:
                     if key in v:
                         catchment = str(int(v.split("_")[1]))
                         discharge_timestep = discharge_timestep.rename({v: key})
-            discharge_monthly = discharge_timestep.resample(time="M").mean(skipna=False)
+            # discharge_monthly = discharge_timestep.resample(time="M").mean(skipna=False)
             discharge_yearly = discharge_timestep.resample(time="Y").mean(skipna=False)
 
             nse_timestep = he.evaluator(
@@ -141,12 +139,12 @@ class Hydrograph:
             kge_timestep, r_timestep, alpha_timestep, beta_timestep = he.evaluator(
                 he.kge, discharge_timestep["sim"], discharge_timestep["obs"]
             )
-            nse_monthly = he.evaluator(
-                he.nse, discharge_monthly["sim"], discharge_monthly["obs"]
-            )
-            kge_monthly, r_monthly, alpha_monthly, beta_monthly = he.evaluator(
-                he.kge, discharge_monthly["sim"], discharge_monthly["obs"]
-            )
+            # nse_monthly = he.evaluator(
+            #     he.nse, discharge_monthly["sim"], discharge_monthly["obs"]
+            # )
+            # kge_monthly, r_monthly, alpha_monthly, beta_monthly = he.evaluator(
+            #     he.kge, discharge_monthly["sim"], discharge_monthly["obs"]
+            # )
             nse_yearly = he.evaluator(
                 he.nse, discharge_yearly["sim"], discharge_yearly["obs"]
             )
@@ -157,8 +155,10 @@ class Hydrograph:
             fig = plt.figure(figsize=(7, 8))
             # fig.set_size_inches(7, 8)
             nrows = sum(self.plots) // 2 + 1
-            ncols = 2 if sum(self.plots) > 2 else 1
-            self.generate_grid(nrows, ncols)
+            ncols = 2
+            self.grid = [
+                False * ncols
+            ] * nrows  # generate a grid indicating used and unused cells
             self.logger.debug(f"nrows = {nrows} and ncols = {ncols}")
             # gs = gridspec.GridSpec(nrows=nrows, ncols=ncols, figure=fig)
             gs = fig.add_gridspec(nrows, ncols, width_ratios=[1, 1])
@@ -172,7 +172,7 @@ class Hydrograph:
             )
             if area:
                 fig.text(
-                    s=f"Area = " + area + r"$km^2$",
+                    s="Area = " + area + r"$km^2$",
                     x=0.5,
                     y=0.97,
                     horizontalalignment="center",
@@ -326,7 +326,7 @@ class Hydrograph:
                 )
                 if r == 0:
                     ax4.legend()
-                ax4.set_title(f"Seasonality", horizontalalignment="center")
+                ax4.set_title("Seasonality", horizontalalignment="center")
                 ax4.set_xlim(0.5, 12.5)
                 ax4.set_ylabel(r"Q $[m^3 s^{-1}]$")
                 ax4.set_xlabel(r"month")
@@ -365,7 +365,7 @@ class Hydrograph:
                 if r == 0:
                     ax5.legend()
                 ax5.set_title(
-                    f"relation simulated to observed discharge",
+                    "relation simulated to observed discharge",
                     horizontalalignment="center",
                 )
                 ax5.set_xlabel("Qobs $[m^3 s^{-1}]$")  # X Achsenbeschriftung

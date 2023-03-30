@@ -140,3 +140,6 @@ select = [
 ignore = [
   "E501",    # line to long (black decides)
 ]
+
+[tool.ruff.pylint]
+max-args = 7
