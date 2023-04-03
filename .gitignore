@@ -126,3 +126,5 @@ docs/source/api/generated/
 
 .vscode
 .ruff_cache
+tests/Q-bkfl.nc
+cov.xml
