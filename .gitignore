@@ -115,7 +115,7 @@ info/
 src/mhm_tools/_version.py
 
 # generated docs
-docs/source/api/generated/
+docs/source/api/
 
 /docs/build/
 *.csv

@@ -4,7 +4,7 @@ Bankfull discharge
 ==================
 
 .. autosummary::
-   :toctree: generated
+   :toctree:
 
     gen_bankfull_discharge
 """

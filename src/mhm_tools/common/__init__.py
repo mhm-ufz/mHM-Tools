@@ -1,25 +1,30 @@
 """Common routines and constants.
 
-Constants
-=========
+Subpackages
+===========
 
 .. autosummary::
-   :toctree: generated
+   :toctree:
 
-    NO_DATA
-    NC_ENCODE_DEFAULTS
+   constants
 
 NetCDF
 ======
 
 .. autosummary::
-   :toctree: generated
+   :toctree:
 
     set_netcdf_encoding
 
-----
-.. autodata:: NO_DATA
-.. autodata:: NC_ENCODE_DEFAULTS
+Constants
+=========
+
+.. currentmodule:: mhm_tools.common.constants
+
+.. autosummary::
+
+    NO_DATA
+    NC_ENCODE_DEFAULTS
 """
 
 from . import constants, netcdf

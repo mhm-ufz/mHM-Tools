@@ -12,7 +12,7 @@ Subpackages
 Built-in processing and tool functions.
 
 .. autosummary::
-   :toctree: generated
+   :toctree: api
    :caption: Subpackages
 
    common
