@@ -73,9 +73,10 @@ def process_grid(q_monthly, return_period):
     numpy.ma.MaskedArray
     """
     q_bkfl = np.ma.empty(q_monthly.shape[1:], q_monthly.dtype)
+    q_bkfl[...] = np.nan
     for i in range(q_monthly.shape[1]):
         for j in range(q_monthly.shape[2]):
-            if not np.all(q_monthly[:, i, j]):
+            if np.all(np.isfinite(q_monthly[:, i, j])):
                 q_bkfl[i, j] = calc_q_bkfl(q_monthly[:, i, j], return_period)
     return q_bkfl
 
