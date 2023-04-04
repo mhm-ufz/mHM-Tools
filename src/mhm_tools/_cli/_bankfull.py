@@ -39,6 +39,12 @@ def add_args(parser):
         dest="peri_bkfl",
         help="Additionally estimate the wetted perimeter.",
     )
+    parser.add_argument(
+        "-v",
+        "--var",
+        default="Qrouted",
+        help="Variable name for routed streamflow in the NetCDF file",
+    )
 
 
 def bankfull(args):
@@ -54,4 +60,5 @@ def bankfull(args):
         ncout_path=args.out_file,
         return_period=args.return_period,
         peri_bkfl=args.peri_bkfl,
+        var=args.var,
     )
