@@ -49,7 +49,7 @@ def add_args(parser):
 
 
 def bankfull(args):
-    """Calculate the bankfull discharge
+    """Calculate the bankfull discharge.
 
     Parameters
     ----------

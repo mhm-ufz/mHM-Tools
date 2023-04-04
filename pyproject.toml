@@ -64,6 +64,7 @@ check = [
   "black>=23,<24",
   "isort[colors]<6",
   "ruff==0.0.239",
+  "pydocstyle",
 ]
 
 [project.scripts]
@@ -96,6 +97,9 @@ target-version = ["py38"]
 [tool.isort]
 profile = "black"
 multi_line_output = 3
+
+[tool.pydocstyle]
+convention = "numpy"
 
 [tool.coverage]
 [tool.coverage.run]

@@ -1,6 +1,4 @@
 """
-Purpose
--------
 Calculate the river discharge at bankfull conditions and the bankfull width.
 
 Authors
@@ -42,7 +40,7 @@ def find_nearest_idx(array, value):
 
 
 def calc_q_bkfl(q_monthly, return_period):
-    """Calculates the discharge at bankfull conditions for a single time series.
+    """Calculate the discharge at bankfull conditions for a single time series.
 
     Parameters
     ----------
@@ -69,7 +67,7 @@ def calc_q_bkfl(q_monthly, return_period):
 
 
 def process_grid(q_monthly, return_period):
-    """Calculates the discharge at bankfull conditions for a complete grid.
+    """Calculate the discharge at bankfull conditions for a complete grid.
 
     Parameters
     ----------
@@ -94,19 +92,19 @@ def process_grid(q_monthly, return_period):
 def gen_bankfull_discharge(
     ncin_path, ncout_path, return_period=1.5, peri_bkfl=False, var="Qrouted"
 ):
-    """Calculate bankfull discharge. [1]_ [2]_
+    """Calculate bankfull discharge [1]_ [2]_.
 
     Parameters
     ----------
-    ncin_path : pathlike
+    ncin_path : :class:`~os.PathLike`
         The path of the mRM NetCDF file with the discharge data
-    ncout_path : pathlike
+    ncout_path : :class:`~os.PathLike`
         The path of the output NetCDF file
-    return_period : float, optional
+    return_period : :class:`float`, optional
         The return period of the flood, by default 1.5
-    peri_bkfl : bool, optional
+    peri_bkfl : :class:`bool`, optional
         Whether to also estimate the wetted perimeter, by default False
-    var : str, optional
+    var : :class:`str`, optional
         Variable name for routed streamflow in the NetCDF file, by default "Qrouted"
 
     References

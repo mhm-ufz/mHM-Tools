@@ -8,7 +8,7 @@ from . import _bankfull
 class CustomFormatter(
     argparse.ArgumentDefaultsHelpFormatter, argparse.RawDescriptionHelpFormatter
 ):
-    pass
+    """Custom formatter for argparse with help and raw text."""
 
 
 def _get_parser():
@@ -46,7 +46,7 @@ def _get_parser():
 
 def main(argv=None):
     """
-    Main CLI routine.
+    Execute main CLI routine.
 
     Parameters
     ----------

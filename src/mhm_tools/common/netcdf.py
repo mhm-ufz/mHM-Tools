@@ -1,6 +1,4 @@
-"""
-Common NetCDF routines.
-"""
+"""Common NetCDF routines."""
 from .constants import NC_ENCODE_DEFAULTS
 
 
@@ -10,11 +8,11 @@ def set_netcdf_encoding(ds, var_encoding=None):
 
     Parameters
     ----------
-    ds : dataset
+    ds : :class:`xarray.Dataset`
         xarray dataset to set the encoding.
-    var_encoding : dict, optional
+    var_encoding : :class:`dict`, optional
         Encoding for variables within the given dataset,
-        by default NC_ENCODE_DEFAULTS
+        by default :any:`NC_ENCODE_DEFAULTS`
     """
     var_encoding = var_encoding or NC_ENCODE_DEFAULTS
     # no FillValue for dim-coords and bounds
