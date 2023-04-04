@@ -7,10 +7,20 @@ Authors
 -------
 - Lennart Schüler
 - Sebastian Müller
+
+References
+----------
+.. [1] Sutanudjaja, E. H., van Beek, L. P. H., de Jong, S. M., van Geer, F. C., and Bierkens, M. F. P.:
+    Large-scale groundwater modeling using global datasets: a test case for the Rhine-Meuse basin,
+    Hydrol. Earth Syst. Sci., 15, 2913-2935, https://doi.org/10.5194/hess-15-2913-2011, 2011.
+.. [2] Savenije, H. H. G.: The width of a bankfull channel; Lacey's formula explained,
+    J. Hydrol., 276, 176-183, https://doi.org/10.1016/S0022-1694(03)00069-6, 2003.
 """
 
 import numpy as np
 import xarray as xr
+
+from ..common import NC_ENCODE_DEFAULTS, set_netcdf_encoding
 
 
 def find_nearest_idx(array, value):
@@ -81,8 +91,10 @@ def process_grid(q_monthly, return_period):
     return q_bkfl
 
 
-def gen_bankfull_discharge(ncin_path, ncout_path, return_period=1.5, peri_bkfl=False):
-    """Calculate bankfull discharge.
+def gen_bankfull_discharge(
+    ncin_path, ncout_path, return_period=1.5, peri_bkfl=False, var="Qrouted"
+):
+    """Calculate bankfull discharge. [1]_ [2]_
 
     Parameters
     ----------
@@ -94,11 +106,23 @@ def gen_bankfull_discharge(ncin_path, ncout_path, return_period=1.5, peri_bkfl=F
         The return period of the flood, by default 1.5
     peri_bkfl : bool, optional
         Whether to also estimate the wetted perimeter, by default False
-    """
+    var : str, optional
+        Variable name for routed streamflow in the NetCDF file, by default "Qrouted"
 
-    ds = xr.open_dataset(ncin_path, engine="netcdf4", mask_and_scale=False)
+    References
+    ----------
+    .. [1] Sutanudjaja, E. H., van Beek, L. P. H., de Jong, S. M., van Geer, F. C., and Bierkens, M. F. P.:
+       Large-scale groundwater modeling using global datasets: a test case for the Rhine-Meuse basin,
+       Hydrol. Earth Syst. Sci., 15, 2913-2935, https://doi.org/10.5194/hess-15-2913-2011, 2011.
+    .. [2] Savenije, H. H. G.: The width of a bankfull channel; Lacey's formula explained,
+       J. Hydrol., 276, 176-183, https://doi.org/10.1016/S0022-1694(03)00069-6, 2003.
+    """
+    ds = xr.open_dataset(ncin_path)
+    var_encode = {
+        key: ds[var].encoding.get(key, val) for key, val in NC_ENCODE_DEFAULTS.items()
+    }
     # bankfull discharge
-    q_monthly = ds["Qrouted"].resample(time="1M").mean()
+    q_monthly = ds[var].resample(time="1M").mean()
     q_bkfl_data = process_grid(q_monthly, return_period=return_period)
     q_bkfl = q_monthly.isel(time=0, drop=True).copy(data=q_bkfl_data)
     q_bkfl.attrs["long_name"] = "Discharge at bankfull conditions"
@@ -110,18 +134,15 @@ def gen_bankfull_discharge(ncin_path, ncout_path, return_period=1.5, peri_bkfl=F
     # perimeter
     if peri_bkfl:
         p_bkfl_data = np.copy(q_bkfl_data)
+        # "4.8" from Savenije, H. H. G.: The width of a bankfull channel; Lacey's formula explained
         p_bkfl_data[q_bkfl_data > 0] = 4.8 * np.sqrt(q_bkfl_data[q_bkfl_data > 0])
         p_bkfl = q_bkfl.copy(data=p_bkfl_data)
         p_bkfl.attrs["long_name"] = "Perimeter at bankfull conditions"
         p_bkfl.attrs["units"] = "m"
         ds["P_bkfl"] = p_bkfl
-    # no FillValue for coords and bounds
-    encoding = {}
-    for v in list(ds.data_vars) + list(ds.coords):
-        if not (v in ds.coords or v.endswith("_bnds")):
-            continue
-        ds[v].attrs.pop("_FillValue", None)
-        ds[v].attrs.pop("missing_value", None)
-        encoding[v] = {"_FillValue": None}
+
+    # no FillValue for dim-coords and bounds
+    set_netcdf_encoding(ds=ds, var_encoding=var_encode)
+
     # save
-    ds.to_netcdf(ncout_path, encoding=encoding)
+    ds.to_netcdf(ncout_path)
