@@ -25,8 +25,12 @@ def _get_parser():
         help="display version information",
     )
 
+    sub_help = (
+        "All tools are provided as sub-commands. "
+        "Please refer to the respective help texts."
+    )
     subparsers = parent_parser.add_subparsers(
-        title="subcommands", dest="command", required=True
+        title="Available Tools", dest="command", required=True, description=sub_help
     )
 
     # all sub-parsers should be added here

@@ -31,7 +31,7 @@ def add_args(parser):
         default="Qrouted",
         help="Variable name for routed streamflow in the NetCDF file",
     )
-    required_args = parser.add_argument_group("required named arguments")
+    required_args = parser.add_argument_group("Required Named Arguments")
     required_args.add_argument(
         "-i",
         "--input",
