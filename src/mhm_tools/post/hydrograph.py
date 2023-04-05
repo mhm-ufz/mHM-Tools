@@ -5,7 +5,6 @@ import itertools
 import logging
 from pathlib import Path
 
-import hydroeval as he
 import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
@@ -26,6 +25,32 @@ class Hydrograph:
 
     def __init__(self, log_level):
         self.logger.setLevel(self.levels[log_level])
+
+    def calc_beta(self, observed, simulated):
+        return np.nanmean(simulated) / np.nanmean(observed)
+
+    def calc_alpha(self, observed, simulated):
+        return np.nanstd(simulated) / np.nanstd(observed)
+
+    def calc_linear_correlation(self, observed, simulated):
+        r, b = np.polyfit(
+            observed, simulated, deg=1
+        )
+        self.logger.debug(r, b)
+        return r, b
+
+    def calc_kling_gupta_efficiency(self, observed, simulated):
+        alpha = self.calc_alpha(observed, simulated)
+        beta = self.calc_beta(observed, simulated)
+        r, b = self.calc_linear_correlation(observed, simulated)
+        return {'KGE': 1 - np.sqrt((r - 1) ** 2 + (alpha - 1) ** 2 + (beta - 1) ** 2),
+                'alpha': alpha,
+                'beta': beta,
+                'r': r,
+                'offset': b}
+
+    def calc_nash_sutcliff_efficiency(self, observed, simulated):
+        return 1 - (np.sum((observed - simulated) ** 2) / np.sum((observed - np.mean(observed)) ** 2))
 
     def get_row_col(self):
         # finds the first unused gridcell for the next plot
@@ -64,7 +89,7 @@ class Hydrograph:
         return np.array([np.mean(np.array(m)) for m in var_ses])
 
     def plot_on_axis(
-        self, function, xvalues, yvalues: list, colors=None, labels=None, **arguments
+            self, function, xvalues, yvalues: list, colors=None, labels=None, **arguments
     ):
         """
         Plots multiple graphs for specified function.
@@ -93,7 +118,7 @@ class Hydrograph:
         for permutation in possible_permutations:
             check = 0
             for i, v in enumerate(permutation):
-                check += v * 2**i
+                check += v * 2 ** i
             if int(a) == check:
                 self.logger.debug(f"plots to be produced: {permutation}")
                 self.plots = permutation
@@ -121,7 +146,7 @@ class Hydrograph:
         if input_path[-1] != "/":
             input_path += "/"
         if (
-            len(filename.split("/")) == 1
+                len(filename.split("/")) == 1
         ):  # by default the hydrograph is saved to the data directory
             filename = input_path + filename
         self.check_which_plots_to_create(plot_code)
@@ -138,30 +163,16 @@ class Hydrograph:
                     if key in v:
                         catchment = str(int(v.split("_")[1]))
                         discharge_timestep = discharge_timestep.rename({v: key})
-            # discharge_monthly = discharge_timestep.resample(time="M").mean(skipna=False)
             discharge_yearly = discharge_timestep.resample(time="Y").mean(skipna=False)
 
-            nse_timestep = he.evaluator(
-                he.nse, discharge_timestep["sim"], discharge_timestep["obs"]
+            nse_timestep = self.calc_nash_sutcliff_efficiency(discharge_timestep["sim"], discharge_timestep["obs"])
+            kge_parameters_timestep = self.calc_kling_gupta_efficiency(discharge_timestep["sim"], discharge_timestep["obs"])
+            nse_yearly = self.calc_nash_sutcliff_efficiency(
+                discharge_yearly["sim"], discharge_yearly["obs"]
             )
-            kge_timestep, r_timestep, alpha_timestep, beta_timestep = he.evaluator(
-                he.kge, discharge_timestep["sim"], discharge_timestep["obs"]
-            )
-            # nse_monthly = he.evaluator(
-            #     he.nse, discharge_monthly["sim"], discharge_monthly["obs"]
-            # )
-            # kge_monthly, r_monthly, alpha_monthly, beta_monthly = he.evaluator(
-            #     he.kge, discharge_monthly["sim"], discharge_monthly["obs"]
-            # )
-            nse_yearly = he.evaluator(
-                he.nse, discharge_yearly["sim"], discharge_yearly["obs"]
-            )
-            kge_yearly, r_yearly, alpha_yearly, beta_yearly = he.evaluator(
-                he.kge, discharge_yearly["sim"], discharge_yearly["obs"]
-            )
+            kge_parameters_yearly = self.calc_kling_gupta_efficiency(discharge_yearly["sim"], discharge_yearly["obs"])
 
             fig = plt.figure(figsize=(7, 8))
-            # fig.set_size_inches(7, 8)
             nrows = sum(self.plots) // 2 + 1
             ncols = 2
             self.grid = [
@@ -214,62 +225,17 @@ class Hydrograph:
                 )
                 ax1.legend()
                 ax1.set_title(
-                    f"KGE = {kge_timestep[0]:.2f}, "
-                    f"NSE = {nse_timestep[0]:.2f}, "
-                    f"alpha = {alpha_timestep[0]:.2f}, "
-                    f"beta = {beta_timestep[0]:.2f}, "
-                    f"r = {r_timestep[0]:.2f}",
+                    f"NSE = {nse_timestep:.2f}, "
+                    f"KGE = {kge_parameters_timestep['KGE']:.2f}, "
+                    f"alpha = {kge_parameters_timestep['alpha']:.2f}, "
+                    f"beta = {kge_parameters_timestep['beta']:.2f}, "
+                    f"r = {kge_parameters_timestep['r']:.2f}",
                     horizontalalignment="center",
-                )  # , alpha_day={alpha_timestep[0]:.2f} , beta_day={beta_timestep[0]:.2f} , r_day={r_timestep[0]:.2f}')
+                )
                 ax1.set_ylabel(r"Q $[m^3 s^{-1}]$")
                 ax1.set_xlim(
                     discharge_timestep["time"][0], discharge_timestep["time"][-1]
                 )
-
-            # if self.plots[1]:
-            #     self.logger.info('generating monthly discharge plot')
-            #     r, c = self.get_row_col()
-            #     if r == 0:
-            #         ax2 = fig.add_subplot(gs[r,c:])
-            #         self.grid[r] = [True for c in self.grid[r]]
-            #     else:
-            #         ax2 = fig.add_subplot(gs[r, c])
-            #         self.grid[r][c] = True
-            #     self.logger.debug(self.grid)
-            #     # time_years = [str(y.dt.year.data) for y in discharge_monthly["time"]]
-            #     time_datetime = discharge_monthly["time"]
-            #     # print(type(discharge_monthly['time'].values[0]), discharge_monthly['time'].values[0])
-            #     # time_datetime = discharge_monthly['time'].astype(datetime.datetime)
-            #     # print(type(discharge_monthly['time'].values[0].astype(datetime.datetime)))
-            #     self.plot_on_axis(
-            #         function=ax2.scatter,
-            #         xvalues=time_datetime,
-            #         yvalues=[discharge_monthly["sim"], discharge_monthly["obs"]],
-            #         s=1
-            #     )
-            #     self.plot_on_axis(
-            #         function=ax2.plot,
-            #         xvalues=time_datetime,
-            #         yvalues=[discharge_monthly["sim"], discharge_monthly["obs"]],
-            #         linewidth=.3
-            #     )
-            #     ax2.set_title(
-            #         f"Monthly:  KGE = {kge_monthly[0]:.2f} , NSE = {nse_monthly[0]:.2f}",
-            #         horizontalalignment="center"
-            #     )
-            #     if r == 0:
-            #         ax2.legend()
-            #     # xfmt = mdates.DateFormatter('%')
-            #     # ax2.xaxis.set_major_formatter(xfmt)
-            #     ax2.xaxis.set_major_formatter(
-            #         mdates.ConciseDateFormatter(ax2.xaxis.get_major_locator()))
-            #     # ax2.xaxis.set_tick_params() #.locator_params(axis='x', nbins=9//column)
-            #     # ax2.set_xticks(discharge_monthly['time'] // 2)
-            #     ax2.set_ylabel(r"Q $[m^3 s^{-1}]$")
-            #     # ax2.set_xlim(time_years[0], time_years[-1])
-            #     # print(time_years)
-            #     # tick_freq = len(time_years)/12 // 3 * 12 if len(time_years) > 3*12 else 12
-            #     # ax2.set_xticks(time_years[::int(tick_freq)])
 
             if self.plots[1]:
                 self.logger.info("generating yearly discharge plot")
@@ -298,7 +264,7 @@ class Hydrograph:
                 if r == 0:
                     ax3.legend()
                 ax3.set_title(
-                    f"Yearly:  KGE = {kge_yearly[0]:.2f} , NSE = {nse_yearly[0]:.2f}",
+                    f"Yearly:  KGE = {kge_parameters_yearly['KGE']:.2f} , NSE = {nse_yearly:.2f}",
                     horizontalalignment="center",
                 )
                 ax3.set_ylabel(r"Q $[m^3 s^{-1}]$")
@@ -361,32 +327,30 @@ class Hydrograph:
                     linewidth=0.3,
                     alpha=0.1,
                 )
-                m, b = np.polyfit(
-                    discharge_timestep["obs"], discharge_timestep["sim"], deg=1
-                )
+
                 self.plot_on_axis(
                     function=ax5.plot,
                     xvalues=np.array([0, 1e6]),
-                    yvalues=[m * np.array([0, 1e6]) + b, np.array([0, 1e6])],
+                    yvalues=[kge_parameters_timestep['r'] * np.array([0, 1e6]) + kge_parameters_timestep['offset'], np.array([0, 1e6])],
                     colors=["red", "black"],
                     linewidth=0.5,
                 )
                 if r == 0:
                     ax5.legend()
                 ax5.set_title(
-                    "relation simulated to observed discharge",
+                    "simulated against observed discharge",
                     horizontalalignment="center",
                 )
                 ax5.set_xlabel("Qobs $[m^3 s^{-1}]$")  # X Achsenbeschriftung
                 ax5.set_ylabel("Qsim $[m^3 s^{-1}]$")  # Y Achsenbeschriftung
                 lim = (
-                    np.max(
-                        [
-                            np.max(discharge_timestep["obs"]),
-                            np.max(discharge_timestep["sim"]),
-                        ]
-                    )
-                    * 1.1
+                        np.max(
+                            [
+                                np.max(discharge_timestep["obs"]),
+                                np.max(discharge_timestep["sim"]),
+                            ]
+                        )
+                        * 1.1
                 )
                 lim = lim - lim % 5 if lim - lim % 5 >= lim / 1.1 else lim + 5 - lim % 5
                 ax5.set_xlim(0, lim)

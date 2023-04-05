@@ -16,7 +16,7 @@ def add_args(parser):
         "--input",
         dest="in_dir",
         required=True,
-        help="The path to input mhm output directory",
+        help="The path to input (mhm output directory)",
     )
     parser.add_argument(
         "-o",
@@ -24,8 +24,8 @@ def add_args(parser):
         dest="out_file",
         required=False,
         default="hydrograph.pdf",
-        help="The name of the output file. By default `hydrograph.png` If it contains no path the file is written to "
-        "the input path. ",
+        help="The name of the output file. By default `hydrograph.png` If it contains no '/' the file is written to "
+        "the input path.",
     )
     parser.add_argument(
         "-t",
@@ -33,7 +33,7 @@ def add_args(parser):
         dest="title",
         required=False,
         default="",
-        help="The titel for the hydrograph",
+        help="The title for the hydrograph",
     )
     parser.add_argument(
         "-s",

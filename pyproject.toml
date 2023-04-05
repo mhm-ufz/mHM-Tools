@@ -39,7 +39,6 @@ dependencies = [
   "netCDF4",
   "xarray",
   "matplotlib>=3.6.1",
-  "hydroeval"
 ]
 
 [project.urls]
