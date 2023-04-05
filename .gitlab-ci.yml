@@ -12,6 +12,7 @@ check:
     - black --check --diff --color .
     - isort --check --diff --color .
     - ruff src/mhm_tools
+    - pydocstyle src/mhm_tools
 
 test:
   stage: test

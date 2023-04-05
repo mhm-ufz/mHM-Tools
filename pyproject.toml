@@ -57,13 +57,14 @@ doc = [
   "sphinxcontrib-mermaid>=0.7",
   "ablog>=0.10",
   "docutils>=0.18", # mdinclude with myst
-  "sphinxcontrib-autoprogram>=0.1.8", # CLI doc
+  "sphinx-argparse>=0.4.0", # CLI doc
 ]
 test = ["pytest-cov>=3"]
 check = [
   "black>=23,<24",
   "isort[colors]<6",
   "ruff==0.0.239",
+  "pydocstyle",
 ]
 
 [project.scripts]
@@ -97,6 +98,9 @@ target-version = ["py38"]
 profile = "black"
 multi_line_output = 3
 
+[tool.pydocstyle]
+convention = "numpy"
+
 [tool.coverage]
 [tool.coverage.run]
 source = ["mhm_tools"]
@@ -104,6 +108,7 @@ omit = [
   "*docs*",
   "*examples*",
   "*tests*",
+  "*_cli*",
 ]
 
 [tool.coverage.report]
