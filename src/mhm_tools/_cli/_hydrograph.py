@@ -44,8 +44,8 @@ def add_args(parser):
         help="Show the plots that are created the default is only saving them",
     )
     parser.add_argument(
-        "-g",
-        "--graphics",
+        "-p",
+        "--plots",
         default=15,
         required=False,
         dest="plots_to_be_created",
