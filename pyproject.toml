@@ -54,10 +54,8 @@ doc = [
   "numpydoc>=1.1",
   "sphinx-design>=0.3",
   "myst-parser>=0.18",
-  "sphinxcontrib-mermaid>=0.7",
-  "ablog>=0.10",
   "docutils>=0.18", # mdinclude with myst
-  "sphinx-argparse>=0.4.0", # CLI doc
+  "sphinx-argparse-cli>=1.11.0", # CLI doc
 ]
 test = ["pytest-cov>=3"]
 check = [

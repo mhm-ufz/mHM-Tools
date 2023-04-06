@@ -24,7 +24,7 @@ def add_command_from_module(subparsers, name, module):
     module : module
         Module containing the `add_args` and `run` functions defining the command.
     """
-    desc = module.__doc__
+    desc = module.__doc__ or ""
     help = desc.splitlines()[0] if desc else ""
     parser = subparsers.add_parser(
         name, description=desc, help=help, formatter_class=Formatter
@@ -35,6 +35,7 @@ def add_command_from_module(subparsers, name, module):
 
 def _get_parser():
     parent_parser = argparse.ArgumentParser(
+        prog="mhm-tools",
         description=__doc__,
         formatter_class=Formatter,
     )
