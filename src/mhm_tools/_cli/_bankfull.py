@@ -1,5 +1,5 @@
 """Calculate the river discharge at bankfull conditions and the bankfull width."""
-from ..post.bankfull_discharge import gen_bankfull_discharge
+from ..post.bankfull import bankfull_discharge
 
 
 def add_args(parser):
@@ -48,7 +48,7 @@ def add_args(parser):
     )
 
 
-def bankfull(args):
+def run(args):
     """Calculate the bankfull discharge.
 
     Parameters
@@ -56,7 +56,7 @@ def bankfull(args):
     args : argparse.Namespace
         parsed command line arguments
     """
-    gen_bankfull_discharge(
+    bankfull_discharge(
         ncin_path=args.in_file,
         ncout_path=args.out_file,
         return_period=args.return_period,

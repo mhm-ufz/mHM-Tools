@@ -5,16 +5,38 @@ from .. import __version__
 from . import _bankfull
 
 
-class CustomFormatter(
+class Formatter(
     argparse.ArgumentDefaultsHelpFormatter, argparse.RawDescriptionHelpFormatter
 ):
     """Custom formatter for argparse with help and raw text."""
 
 
+def add_command_from_module(subparsers, name, module):
+    """
+    Add a subcommand from a given module.
+
+    Parameters
+    ----------
+    subparsers : subparsers
+        Subparser to add the command to.
+    name : str
+        Name of the command to add.
+    module : module
+        Module containing the `add_args` and `run` functions defining the command.
+    """
+    desc = module.__doc__
+    help = desc.splitlines()[0] if desc else ""
+    parser = subparsers.add_parser(
+        name, description=desc, help=help, formatter_class=Formatter
+    )
+    module.add_args(parser)
+    parser.set_defaults(func=module.run)
+
+
 def _get_parser():
     parent_parser = argparse.ArgumentParser(
         description=__doc__,
-        formatter_class=CustomFormatter,
+        formatter_class=Formatter,
     )
 
     parent_parser.add_argument(
@@ -35,14 +57,9 @@ def _get_parser():
 
     # all sub-parsers should be added here
     # documentation taken from docstring of respective cli module (first line summary)
+    # module needs two functions: add_args and run
 
-    desc = _bankfull.__doc__
-    help = desc.splitlines()[0]
-    parser = subparsers.add_parser(
-        "bankfull", description=desc, help=help, formatter_class=CustomFormatter
-    )
-    _bankfull.add_args(parser)
-    parser.set_defaults(func=_bankfull.bankfull)
+    add_command_from_module(subparsers, "bankfull", _bankfull)
 
     # return the parser
     return parent_parser
