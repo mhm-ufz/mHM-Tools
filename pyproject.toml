@@ -108,7 +108,7 @@ omit = [
   "*docs*",
   "*examples*",
   "*tests*",
-  "*_cli*",
+  "*/_cli/*",
 ]
 
 [tool.coverage.report]
