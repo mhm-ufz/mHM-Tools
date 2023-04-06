@@ -89,7 +89,7 @@ def process_grid(q_monthly, return_period):
     return q_bkfl
 
 
-def gen_bankfull_discharge(
+def bankfull_discharge(
     ncin_path, ncout_path, return_period=1.5, peri_bkfl=False, var="Qrouted"
 ):
     """Calculate bankfull discharge [1]_ [2]_.
@@ -131,8 +131,9 @@ def gen_bankfull_discharge(
     ds["Q_bkfl"] = q_bkfl
     # perimeter
     if peri_bkfl:
+        # "4.8" from Savenije, H. H. G.:
+        # The width of a bankfull channel; Lacey's formula explained
         p_bkfl_data = np.copy(q_bkfl_data)
-        # "4.8" from Savenije, H. H. G.: The width of a bankfull channel; Lacey's formula explained
         p_bkfl_data[q_bkfl_data > 0] = 4.8 * np.sqrt(q_bkfl_data[q_bkfl_data > 0])
         p_bkfl = q_bkfl.copy(data=p_bkfl_data)
         p_bkfl.attrs["long_name"] = "Perimeter at bankfull conditions"
