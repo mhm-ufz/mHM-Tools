@@ -12,10 +12,11 @@ Subpackages
 Built-in processing and tool functions.
 
 .. autosummary::
-   :toctree: generated
+   :toctree: api
    :caption: Subpackages
 
-    post
+   common
+   post
 """
 
 try:
@@ -24,7 +25,7 @@ except ModuleNotFoundError:  # pragma: no cover
     # package is not installed
     __version__ = "0.0.0.dev0"
 
-from . import post
+from . import common, post
 
 __all__ = ["__version__"]
-__all__ += ["post"]
+__all__ += ["common", "post"]

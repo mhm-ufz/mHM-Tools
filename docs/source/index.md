@@ -34,13 +34,13 @@ mhm-tools brings you an intuitive command line interface to pre- and post-proces
 :::
 
 :::{grid-item-card} {octicon}`code-square;1.5em;sd-mr-1` Well-documented API
-:link: api/index
+:link: api
 :link-type: doc
 
 The API is designed to be as intuitive as possible and is thoroughly documented.
 
 +++
-[Learn more »](api/index)
+[Learn more »](api)
 :::
 
 :::{grid-item-card} {octicon}`light-bulb;1.5em;sd-mr-1` Example Gallery
@@ -84,7 +84,7 @@ Information about the API of mHM-Tools.
 
 ```{toctree}
 :maxdepth: 3
-api/index
+api
 ```
 
 ## About
