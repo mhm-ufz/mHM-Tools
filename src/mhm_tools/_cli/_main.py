@@ -24,11 +24,11 @@ def add_command_from_module(subparsers, name, module):
     module : module
         Module containing the `add_args` and `run` functions defining the command.
     """
-    desc = module.__doc__ or ""
-    help = desc.splitlines()[0] if desc else ""
-    parser = subparsers.add_parser(
-        name, description=desc, help=help, formatter_class=Formatter
-    )
+    desc = module.__doc__
+    kwargs = {"description": desc}
+    if desc:
+        kwargs["help"] = desc.splitlines()[0]
+    parser = subparsers.add_parser(name, formatter_class=Formatter, **kwargs)
     module.add_args(parser)
     parser.set_defaults(func=module.run)
 
@@ -45,7 +45,7 @@ def _get_parser():
         "--version",
         action="version",
         version=__version__,
-        help="display version information",
+        help="Display version information.",
     )
 
     sub_help = (
