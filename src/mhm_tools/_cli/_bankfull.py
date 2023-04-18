@@ -1,5 +1,10 @@
-"""Calculate the river discharge at bankfull conditions and the bankfull width."""
-from ..post.bankfull_discharge import gen_bankfull_discharge
+"""
+Calculate the river discharge at bankfull conditions and the bankfull width.
+
+Bankfull discharge is determined as the yearly peak flow from monthly average discharge
+with a recurrence interval given by ``return_period``, which is 1.5 years by default.
+"""
+from ..post.bankfull import bankfull_discharge
 
 
 def add_args(parser):
@@ -11,11 +16,11 @@ def add_args(parser):
         the main argument parser
     """
     parser.add_argument(
-        "-p",
+        "-r",
         "--return_period",
         type=float,
         default=1.5,
-        help="The return period of the flood.",
+        help="The return period of the flood in years.",
     )
     parser.add_argument(
         "-w",
@@ -31,7 +36,7 @@ def add_args(parser):
         default="Qrouted",
         help="Variable name for routed streamflow in the NetCDF file",
     )
-    required_args = parser.add_argument_group("Required Named Arguments")
+    required_args = parser.add_argument_group("required arguments")
     required_args.add_argument(
         "-i",
         "--input",
@@ -48,7 +53,7 @@ def add_args(parser):
     )
 
 
-def bankfull(args):
+def run(args):
     """Calculate the bankfull discharge.
 
     Parameters
@@ -56,7 +61,7 @@ def bankfull(args):
     args : argparse.Namespace
         parsed command line arguments
     """
-    gen_bankfull_discharge(
+    bankfull_discharge(
         ncin_path=args.in_file,
         ncout_path=args.out_file,
         return_period=args.return_period,

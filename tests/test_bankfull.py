@@ -44,7 +44,7 @@ class TestBankfull(unittest.TestCase):
         )
 
     def test_bankfull(self):
-        mt.post.gen_bankfull_discharge(self.in_file, self.out_file, peri_bkfl=True)
+        mt.post.bankfull_discharge(self.in_file, self.out_file, peri_bkfl=True)
         self.assertTrue(self.out_file.is_file())
         ds = xr.load_dataset(self.out_file)
         self.assertIn("Q_bkfl", ds.variables)

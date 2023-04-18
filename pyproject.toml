@@ -38,6 +38,7 @@ dependencies = [
   "numpy>=1.17.3",
   "netCDF4",
   "xarray",
+  "pandas<2; python_version=='3.8'",
 ]
 
 [project.urls]
@@ -50,14 +51,12 @@ Changelog = "https://git.ufz.de/mhm/mhm/-/blob/main/CHANGELOG.md"
 [project.optional-dependencies]
 doc = [
   "sphinx>=5",
-  "pydata-sphinx-theme==0.11",
+  "pydata-sphinx-theme>=0.13",
   "numpydoc>=1.1",
   "sphinx-design>=0.3",
   "myst-parser>=0.18",
-  "sphinxcontrib-mermaid>=0.7",
-  "ablog>=0.10",
   "docutils>=0.18", # mdinclude with myst
-  "sphinx-argparse>=0.4.0", # CLI doc
+  "sphinx-argparse-cli>=1.11.0", # CLI doc
 ]
 test = ["pytest-cov>=3"]
 check = [
@@ -108,7 +107,7 @@ omit = [
   "*docs*",
   "*examples*",
   "*tests*",
-  "*_cli*",
+  "*/_cli/*",
 ]
 
 [tool.coverage.report]

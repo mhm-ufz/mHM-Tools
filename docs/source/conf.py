@@ -25,7 +25,7 @@ extensions = [
     "sphinx.ext.viewcode",
     "sphinx.ext.napoleon",  # parameters look better than with numpydoc only
     "numpydoc",
-    "sphinxarg.ext",  # documentation of the CLI
+    "sphinx_argparse_cli",  # documentation of the CLI
 ]
 
 # autosummaries from source-files
@@ -75,8 +75,8 @@ html_logo = "_static/logo_large.png"
 html_favicon = "_static/logo.png"
 
 html_theme_options = {
-    "page_sidebar_items": ["page-toc"],
-    "footer_items": ["copyright"],
+    "secondary_sidebar_items": ["page-toc"],
+    "footer_start": ["copyright"],
     "show_nav_level": 2,
     "show_toc_level": 2,
     "icon_links": [
