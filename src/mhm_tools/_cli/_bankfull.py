@@ -1,4 +1,9 @@
-"""Calculate the river discharge at bankfull conditions and the bankfull width."""
+"""
+Calculate the river discharge at bankfull conditions and the bankfull width.
+
+Bankfull discharge is determined as the yearly peak flow from monthly average discharge
+with a recurrence interval given by ``return_period``, which is 1.5 years by default.
+"""
 from ..post.bankfull import bankfull_discharge
 
 
@@ -11,11 +16,11 @@ def add_args(parser):
         the main argument parser
     """
     parser.add_argument(
-        "-p",
+        "-r",
         "--return_period",
         type=float,
         default=1.5,
-        help="The return period of the flood.",
+        help="The return period of the flood in years.",
     )
     parser.add_argument(
         "-w",
