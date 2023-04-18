@@ -5,14 +5,6 @@ Authors
 -------
 - Lennart Schüler
 - Sebastian Müller
-
-References
-----------
-.. [1] Sutanudjaja, E. H., van Beek, L. P. H., de Jong, S. M., van Geer, F. C., and Bierkens, M. F. P.:
-    Large-scale groundwater modeling using global datasets: a test case for the Rhine-Meuse basin,
-    Hydrol. Earth Syst. Sci., 15, 2913-2935, https://doi.org/10.5194/hess-15-2913-2011, 2011.
-.. [2] Savenije, H. H. G.: The width of a bankfull channel; Lacey's formula explained,
-    J. Hydrol., 276, 176-183, https://doi.org/10.1016/S0022-1694(03)00069-6, 2003.
 """
 
 import numpy as np
@@ -44,7 +36,7 @@ def calc_q_bkfl(q_yearly_peak, return_period):
 
     Parameters
     ----------
-    q_yearly_peak : arraylike
+    q_yearly_peak : numpy.ndarray
         yearly peak discharge from monthly means (3d ndarray)
     return_period : float
         The return period of the flood in years
@@ -73,13 +65,14 @@ def bankfull_discharge(
 ):
     """Calculate bankfull discharge and perimeter.
 
-    Bankfull discharge is determined as the yearly peak flow from monthly average discharge
+    Bankfull discharge is determined as the yearly peak flow
     with a recurrence interval given by ``return_period``, which is 1.5 years by default.
     Perimeter is estimated from bankfull discharge with Lacey's formula.
     See [1]_, [2]_ and [3]_.
 
     .. note::
        This will simply use the closest flood event in terms of its recurrence interval.
+       Also, any input time-stepping is accepted but daily or sub-daily data is preferred.
 
     Parameters
     ----------

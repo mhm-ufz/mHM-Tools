@@ -1,8 +1,11 @@
 """
 Calculate the river discharge at bankfull conditions and the bankfull width.
 
-Bankfull discharge is determined as the yearly peak flow from monthly average discharge
-with a recurrence interval given by ``return_period``, which is 1.5 years by default.
+Bankfull discharge is determined as the yearly peak flow
+with a recurrence interval given by "return_period", which is 1.5 years by default.
+
+This routine will simply use the closest flood event in terms of its recurrence interval.
+Also, any input time-stepping is accepted but daily or sub-daily data is preferred.
 """
 from ..post.bankfull import bankfull_discharge
 
