@@ -16,35 +16,35 @@ class TestBankfull(unittest.TestCase):
         self.out_file.unlink(missing_ok=True)
         self.q_ref = np.array(
             [
-                [np.nan, np.nan, 0.4079, 69.2566, np.nan, np.nan],
-                [0.6511, 5.4555, 67.2125, 68.4389, np.nan, np.nan],
-                [0.167, 3.4875, 58.2526, 0.5125, np.nan, np.nan],
-                [np.nan, 1.4072, 55.1022, 2.3058, 1.072, 0.0315],
-                [np.nan, 0.8413, 51.0577, 3.9395, 2.0886, 0.2707],
-                [np.nan, 0.0476, 41.8436, 37.3851, 19.3875, 3.016],
-                [np.nan, np.nan, 2.4074, 14.0697, 13.5038, 5.8762],
-                [np.nan, np.nan, 0.0138, 10.8045, 9.7246, 1.2178],
-                [np.nan, np.nan, np.nan, np.nan, 2.1156, np.nan],
+                [np.nan, np.nan, 5.8775, 541.3693, np.nan, np.nan],
+                [7.854, 72.6613, 566.7343, 550.3261, np.nan, np.nan],
+                [1.8963, 45.3326, 498.84, 7.659, np.nan, np.nan],
+                [np.nan, 21.0789, 494.9771, 28.3122, 13.4768, 0.383],
+                [np.nan, 11.8728, 470.2629, 48.0984, 24.2233, 2.2134],
+                [np.nan, 0.736, 410.4428, 356.59, 185.3501, 23.8731],
+                [np.nan, np.nan, 41.2516, 152.2119, 131.5352, 59.0854],
+                [np.nan, np.nan, 0.1082, 103.5214, 93.6477, 11.6922],
+                [np.nan, np.nan, np.nan, np.nan, 17.2395, np.nan],
             ],
             dtype=np.float32,
         )
         self.p_ref = np.array(
             [
-                [np.nan, np.nan, 3.0657, 39.9459, np.nan, np.nan],
-                [3.8731, 11.2114, 39.352, 39.7094, np.nan, np.nan],
-                [1.9618, 8.9639, 36.6352, 3.4362, np.nan, np.nan],
-                [np.nan, 5.694, 35.6308, 7.2888, 4.9698, 0.8519],
-                [np.nan, 4.4028, 34.2983, 9.5272, 6.9369, 2.4975],
-                [np.nan, 1.0477, 31.0496, 29.3488, 21.135, 8.336],
-                [np.nan, np.nan, 7.4477, 18.0046, 17.6388, 11.6356],
-                [np.nan, np.nan, 0.5629, 15.7777, 14.9685, 5.297],
-                [np.nan, np.nan, np.nan, np.nan, 6.9817, np.nan],
+                [np.nan, np.nan, 11.6369, 111.6833, np.nan, np.nan],
+                [13.452, 40.916, 114.2697, 112.6033, np.nan, np.nan],
+                [6.61, 32.3181, 107.2067, 13.284, np.nan, np.nan],
+                [np.nan, 22.0376, 106.7908, 25.5404, 17.6212, 2.9706],
+                [np.nan, 16.5393, 104.0906, 33.2895, 23.6243, 7.1411],
+                [np.nan, 4.118, 97.2451, 90.6412, 65.3488, 23.4529],
+                [np.nan, np.nan, 30.8292, 59.2196, 55.0506, 36.8962],
+                [np.nan, np.nan, 1.5789, 48.8378, 46.4504, 16.413],
+                [np.nan, np.nan, np.nan, np.nan, 19.9298, np.nan],
             ],
             dtype=np.float32,
         )
 
     def test_bankfull(self):
-        mt.post.bankfull_discharge(self.in_file, self.out_file, peri_bkfl=True)
+        mt.post.bankfull_discharge(self.in_file, self.out_file, wetted_perimeter=True)
         self.assertTrue(self.out_file.is_file())
         ds = xr.load_dataset(self.out_file)
         self.assertIn("Q_bkfl", ds.variables)
