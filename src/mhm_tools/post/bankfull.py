@@ -61,14 +61,15 @@ def calc_q_bkfl(q_yearly_peak, return_period):
 
 
 def bankfull_discharge(
-    ncin_path, ncout_path, return_period=1.5, peri_bkfl=False, var="Qrouted"
+    in_file, out_file, return_period=1.5, wetted_perimeter=False, var="Qrouted"
 ):
     """Calculate bankfull discharge and perimeter.
 
     Bankfull discharge is determined as the yearly peak flow
     with a recurrence interval given by ``return_period``, which is 1.5 years by default.
-    Perimeter is estimated from bankfull discharge with Lacey's formula.
-    See [1]_, [2]_ and [3]_.
+    The wetted perimeter is estimated from bankfull discharge with Lacey's formula.
+    Ouput variables in the created NetCDF file are called "Q_bkfl" and "P_bkfl".
+    See [1]_, [2]_ and [3]_ for more information.
 
     .. note::
        This will simply use the closest flood event in terms of its recurrence interval.
@@ -76,16 +77,17 @@ def bankfull_discharge(
 
     Parameters
     ----------
-    ncin_path : :class:`~os.PathLike`
+    in_file : :class:`~os.PathLike`
         The path of the mRM NetCDF file with the discharge data
-    ncout_path : :class:`~os.PathLike`
+    out_file : :class:`~os.PathLike`
         The path of the output NetCDF file
     return_period : :class:`float`, optional
         The return period of the flood in years, by default 1.5
-    peri_bkfl : :class:`bool`, optional
+    wetted_perimeter : :class:`bool`, optional
         Whether to also estimate the wetted perimeter, by default False
     var : :class:`str`, optional
-        Variable name for routed streamflow in the NetCDF file, by default "Qrouted"
+        Variable name for routed streamflow in the input NetCDF file,
+        by default "Qrouted"
 
     References
     ----------
@@ -98,7 +100,7 @@ def bankfull_discharge(
        Toward a Better Understanding of Recurrence Intervals, Bankfull, and Their Importance.
        J. Contemp. Water Res. Educ., 166, 35-45, https://doi.org/10.1111/j.1936-704X.2019.03300.x, 2019.
     """
-    ds = xr.open_dataset(ncin_path)
+    ds = xr.open_dataset(in_file)
     var_encode = {
         key: ds[var].encoding.get(key, val) for key, val in NC_ENCODE_DEFAULTS.items()
     }
@@ -113,7 +115,7 @@ def bankfull_discharge(
     # add new variable
     ds["Q_bkfl"] = q_bkfl
     # perimeter
-    if peri_bkfl:
+    if wetted_perimeter:
         # "4.8" from Savenije, H. H. G.:
         # The width of a bankfull channel; Lacey's formula explained
         p_bkfl_data = np.copy(q_bkfl_data)
@@ -127,4 +129,4 @@ def bankfull_discharge(
     set_netcdf_encoding(ds=ds, var_encoding=var_encode)
 
     # save
-    ds.to_netcdf(ncout_path)
+    ds.to_netcdf(out_file)
