@@ -39,6 +39,7 @@ dependencies = [
   "netCDF4",
   "xarray",
   "pandas<2; python_version=='3.8'",
+  "pyproj",
 ]
 
 [project.urls]
