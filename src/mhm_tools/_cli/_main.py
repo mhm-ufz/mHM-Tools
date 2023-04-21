@@ -2,7 +2,7 @@
 import argparse
 
 from .. import __version__
-from . import _bankfull
+from . import _bankfull, _latlon
 
 
 class Formatter(
@@ -61,6 +61,7 @@ def _get_parser():
     # module needs two functions: add_args and run
 
     add_command_from_module(subparsers, "bankfull", _bankfull)
+    add_command_from_module(subparsers, "latlon", _latlon)
 
     # return the parser
     return parent_parser
