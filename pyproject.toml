@@ -64,7 +64,6 @@ check = [
   "black>=23,<24",
   "isort[colors]<6",
   "ruff==0.0.239",
-  "pydocstyle",
 ]
 
 [project.scripts]
@@ -97,9 +96,6 @@ target-version = ["py38"]
 [tool.isort]
 profile = "black"
 multi_line_output = 3
-
-[tool.pydocstyle]
-convention = "numpy"
 
 [tool.coverage]
 [tool.coverage.run]
@@ -139,7 +135,18 @@ select = [
   "T20",         # flake8-print
   "UP",          # pyupgrade
   "YTT",         # flake8-2020
+  "D",           # pydocstyle
 ]
 ignore = [
   "E501",    # line to long (black decides)
+  "PLR2004", # magic values as constant
 ]
+
+# Same as Black.
+line-length = 88
+
+[tool.ruff.pylint]
+max-args = 15
+
+[tool.ruff.pydocstyle]
+convention = "numpy"
