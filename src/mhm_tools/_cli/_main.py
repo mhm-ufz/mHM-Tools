@@ -5,10 +5,16 @@ from .. import __version__
 from . import _bankfull, _hydrograph
 
 
+class CustomFormatter(
+    argparse.ArgumentDefaultsHelpFormatter, argparse.RawDescriptionHelpFormatter
+):
+    """Custom formatter for argparse with help and raw text."""
+
+
 def _get_parser():
     parent_parser = argparse.ArgumentParser(
         description=__doc__,
-        formatter_class=argparse.RawDescriptionHelpFormatter,
+        formatter_class=CustomFormatter,
     )
 
     parent_parser.add_argument(
@@ -19,14 +25,22 @@ def _get_parser():
         help="display version information",
     )
 
+    sub_help = (
+        "All tools are provided as sub-commands. "
+        "Please refer to the respective help texts."
+    )
     subparsers = parent_parser.add_subparsers(
-        title="subcommands", dest="command", required=True
+        title="Available Tools", dest="command", required=True, description=sub_help
     )
 
     # all sub-parsers should be added here
+    # documentation taken from docstring of respective cli module (first line summary)
 
-    # bankfull discharge
-    parser = subparsers.add_parser("bankfull", description=_bankfull.__doc__)
+    desc = _bankfull.__doc__
+    help = desc.splitlines()[0]
+    parser = subparsers.add_parser(
+        "bankfull", description=desc, help=help, formatter_class=CustomFormatter
+    )
     _bankfull.add_args(parser)
     parser.set_defaults(func=_bankfull.bankfull)
 
@@ -41,7 +55,7 @@ def _get_parser():
 
 def main(argv=None):
     """
-    Main CLI routine.
+    Execute main CLI routine.
 
     Parameters
     ----------

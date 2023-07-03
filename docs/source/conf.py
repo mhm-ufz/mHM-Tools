@@ -25,7 +25,7 @@ extensions = [
     "sphinx.ext.viewcode",
     "sphinx.ext.napoleon",  # parameters look better than with numpydoc only
     "numpydoc",
-    "sphinxcontrib.autoprogram",  # documentation of the CLI
+    "sphinxarg.ext",  # documentation of the CLI
 ]
 
 # autosummaries from source-files
