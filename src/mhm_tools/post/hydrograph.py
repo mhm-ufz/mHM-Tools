@@ -131,6 +131,38 @@ class Hydrograph:
             msg = 'The given path "{path}" is not a directory.'
             raise NotADirectoryError(msg)
 
+    def generating_discharge_plot(self, fig, gs):
+        self.logger.info("generating discharge plot")
+        r, c = self.get_row_col()
+        ax1 = fig.add_subplot(gs[r, c:])
+        self.grid[r] = [True for c in self.grid[r]]
+        self.logger.debug(self.grid)
+        self.plot_on_axis(
+            function=ax1.scatter,
+            xvalues=discharge_timestep["time"],
+            yvalues=[discharge_timestep["sim"], discharge_timestep["obs"]],
+            s=1.0,
+        )
+        self.plot_on_axis(
+            function=ax1.plot,
+            xvalues=discharge_timestep["time"],
+            yvalues=[discharge_timestep["sim"], discharge_timestep["obs"]],
+            linewidth=0.3,
+        )
+        ax1.legend()
+        ax1.set_title(
+            f"NSE = {nse_timestep:.2f}, "
+            f"KGE = {kge_parameters_timestep['KGE']:.2f}, "
+            f"alpha = {kge_parameters_timestep['alpha']:.2f}, "
+            f"beta = {kge_parameters_timestep['beta']:.2f}, "
+            f"r = {kge_parameters_timestep['r']:.2f}",
+            horizontalalignment="center",
+        )
+        ax1.set_ylabel(r"Q $[m^3 s^{-1}]$")
+        ax1.set_xlim(
+            discharge_timestep["time"][0], discharge_timestep["time"][-1]
+        )
+
     def gen_hydrograph(self, input_path, filename, show, save, title, plot_code):
         """
         Read in discharge data and plot the simulated against the observed discharge
@@ -179,7 +211,6 @@ class Hydrograph:
                 [False] * ncols for i in range(nrows)
             ]  # generate a grid indicating used and unused cells
             self.logger.debug(f"nrows = {nrows} and ncols = {ncols}")
-            # gs = gridspec.GridSpec(nrows=nrows, ncols=ncols, figure=fig)
             gs = fig.add_gridspec(nrows, ncols, width_ratios=[1, 1])
             area = self.get_catchment_area(input_path, ndecimal=0)
             fig.text(
@@ -206,36 +237,7 @@ class Hydrograph:
             )
 
             if self.plots[0]:
-                self.logger.info("generating discharge plot")
-                r, c = self.get_row_col()
-                ax1 = fig.add_subplot(gs[r, c:])
-                self.grid[r] = [True for c in self.grid[r]]
-                self.logger.debug(self.grid)
-                self.plot_on_axis(
-                    function=ax1.scatter,
-                    xvalues=discharge_timestep["time"],
-                    yvalues=[discharge_timestep["sim"], discharge_timestep["obs"]],
-                    s=1.0,
-                )
-                self.plot_on_axis(
-                    function=ax1.plot,
-                    xvalues=discharge_timestep["time"],
-                    yvalues=[discharge_timestep["sim"], discharge_timestep["obs"]],
-                    linewidth=0.3,
-                )
-                ax1.legend()
-                ax1.set_title(
-                    f"NSE = {nse_timestep:.2f}, "
-                    f"KGE = {kge_parameters_timestep['KGE']:.2f}, "
-                    f"alpha = {kge_parameters_timestep['alpha']:.2f}, "
-                    f"beta = {kge_parameters_timestep['beta']:.2f}, "
-                    f"r = {kge_parameters_timestep['r']:.2f}",
-                    horizontalalignment="center",
-                )
-                ax1.set_ylabel(r"Q $[m^3 s^{-1}]$")
-                ax1.set_xlim(
-                    discharge_timestep["time"][0], discharge_timestep["time"][-1]
-                )
+                self.generating_discharge_plot()
 
             if self.plots[1]:
                 self.logger.info("generating yearly discharge plot")
