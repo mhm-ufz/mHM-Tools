@@ -6,11 +6,11 @@ Bankfull discharge
 .. autosummary::
    :toctree:
 
-    gen_bankfull_discharge
+    bankfull_discharge
 """
 
-from . import bankfull_discharge
-from .bankfull_discharge import gen_bankfull_discharge
+from . import bankfull
+from .bankfull import bankfull_discharge
 
-__all__ = ["bankfull_discharge"]
-__all__ += ["gen_bankfull_discharge"]
+__all__ = ["bankfull"]
+__all__ += ["bankfull_discharge"]
