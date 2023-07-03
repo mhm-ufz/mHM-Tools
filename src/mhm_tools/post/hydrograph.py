@@ -36,7 +36,7 @@ class Hydrograph:
         r, b = np.polyfit(
             observed, simulated, deg=1
         )
-        self.logger.debug(r, b)
+        self.logger.debug(f"linear correlation with slope {r} and offset {b}")
         return r, b
 
     def calc_kling_gupta_efficiency(self, observed, simulated):
@@ -50,7 +50,7 @@ class Hydrograph:
                 'offset': b}
 
     def calc_nash_sutcliff_efficiency(self, observed, simulated):
-        return 1 - (np.sum((observed - simulated) ** 2) / np.sum((observed - np.mean(observed)) ** 2))
+        return 1 - (np.nansum((observed - simulated) ** 2) / np.nansum((observed - np.mean(observed)) ** 2))
 
     def get_row_col(self):
         # finds the first unused gridcell for the next plot
@@ -131,38 +131,6 @@ class Hydrograph:
             msg = 'The given path "{path}" is not a directory.'
             raise NotADirectoryError(msg)
 
-    def generating_discharge_plot(self, fig, gs):
-        self.logger.info("generating discharge plot")
-        r, c = self.get_row_col()
-        ax1 = fig.add_subplot(gs[r, c:])
-        self.grid[r] = [True for c in self.grid[r]]
-        self.logger.debug(self.grid)
-        self.plot_on_axis(
-            function=ax1.scatter,
-            xvalues=discharge_timestep["time"],
-            yvalues=[discharge_timestep["sim"], discharge_timestep["obs"]],
-            s=1.0,
-        )
-        self.plot_on_axis(
-            function=ax1.plot,
-            xvalues=discharge_timestep["time"],
-            yvalues=[discharge_timestep["sim"], discharge_timestep["obs"]],
-            linewidth=0.3,
-        )
-        ax1.legend()
-        ax1.set_title(
-            f"NSE = {nse_timestep:.2f}, "
-            f"KGE = {kge_parameters_timestep['KGE']:.2f}, "
-            f"alpha = {kge_parameters_timestep['alpha']:.2f}, "
-            f"beta = {kge_parameters_timestep['beta']:.2f}, "
-            f"r = {kge_parameters_timestep['r']:.2f}",
-            horizontalalignment="center",
-        )
-        ax1.set_ylabel(r"Q $[m^3 s^{-1}]$")
-        ax1.set_xlim(
-            discharge_timestep["time"][0], discharge_timestep["time"][-1]
-        )
-
     def gen_hydrograph(self, input_path, filename, show, save, title, plot_code):
         """
         Read in discharge data and plot the simulated against the observed discharge
@@ -183,6 +151,7 @@ class Hydrograph:
             filename = input_path + filename
         self.check_which_plots_to_create(plot_code)
         if sum(self.plots) == 0:
+            self.logger.debug('Create no plots')
             return
         self.raise_if_not_directory(input_path)
         with xr.open_dataset(input_path + "discharge.nc") as ds:
@@ -197,21 +166,28 @@ class Hydrograph:
                         discharge_timestep = discharge_timestep.rename({v: key})
             discharge_yearly = discharge_timestep.resample(time="Y").mean(skipna=False)
 
+            # calculate metrics at timestep resolution (generally hourly)
             nse_timestep = self.calc_nash_sutcliff_efficiency(discharge_timestep["sim"], discharge_timestep["obs"])
             kge_parameters_timestep = self.calc_kling_gupta_efficiency(discharge_timestep["sim"], discharge_timestep["obs"])
+            # calculate metrics at yearly resolution
             nse_yearly = self.calc_nash_sutcliff_efficiency(
                 discharge_yearly["sim"], discharge_yearly["obs"]
             )
             kge_parameters_yearly = self.calc_kling_gupta_efficiency(discharge_yearly["sim"], discharge_yearly["obs"])
-
+            
+            # create figure and determining the number of rows and cols
             fig = plt.figure(figsize=(7, 8))
             nrows = sum(self.plots) // 2 + 1
             ncols = 2
+            self.logger.debug(f"nrows = {nrows} and ncols = {ncols}")
+
+            # generate a grid indicating used and unused cells
             self.grid = [
                 [False] * ncols for i in range(nrows)
-            ]  # generate a grid indicating used and unused cells
-            self.logger.debug(f"nrows = {nrows} and ncols = {ncols}")
+            ]
             gs = fig.add_gridspec(nrows, ncols, width_ratios=[1, 1])
+
+            # write title
             area = self.get_catchment_area(input_path, ndecimal=0)
             fig.text(
                 s=f"{catchment}",
@@ -235,9 +211,39 @@ class Hydrograph:
                 horizontalalignment="center",
                 fontsize="x-large",
             )
-
+            
+            # generate plots
             if self.plots[0]:
-                self.generating_discharge_plot()
+                self.logger.info("generating discharge plot")
+                r, c = self.get_row_col()
+                ax1 = fig.add_subplot(gs[r, c:])
+                self.grid[r] = [True for c in self.grid[r]]
+                self.logger.debug(self.grid)
+                self.plot_on_axis(
+                    function=ax1.scatter,
+                    xvalues=discharge_timestep["time"],
+                    yvalues=[discharge_timestep["sim"], discharge_timestep["obs"]],
+                    s=1.0,  
+                )
+                self.plot_on_axis(
+                    function=ax1.plot,
+                    xvalues=discharge_timestep["time"],
+                    yvalues=[discharge_timestep["sim"], discharge_timestep["obs"]],
+                    linewidth=0.3,
+                )
+                ax1.legend()
+                ax1.set_title(
+                    f"NSE = {nse_timestep:.2f}, "
+                    f"KGE = {kge_parameters_timestep['KGE']:.2f}, "
+                    f"alpha = {kge_parameters_timestep['alpha']:.2f}, "
+                    f"beta = {kge_parameters_timestep['beta']:.2f}, "
+                    f"r = {kge_parameters_timestep['r']:.2f}",
+                    horizontalalignment="center",
+                )
+                ax1.set_ylabel(r"Q $[m^3 s^{-1}]$")
+                ax1.set_xlim(
+                    discharge_timestep["time"][0], discharge_timestep["time"][-1]
+                )
 
             if self.plots[1]:
                 self.logger.info("generating yearly discharge plot")
