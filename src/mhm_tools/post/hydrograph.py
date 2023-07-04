@@ -151,6 +151,12 @@ class Hydrograph:
             msg = 'The given path "{path}" is not a directory.'
             raise NotADirectoryError(msg)
 
+    def load_data_from_path(self, path):
+        self.raise_if_not_directory(path)
+        with xr.open_dataset(path + "discharge.nc") as ds:
+            discharge_timestep = ds.load()
+        return discharge_timestep
+
     def gen_hydrograph(self, input_path, filename, show, save, title, plot_code):
         """
         Read in discharge data and plot the simulated against the observed discharge
@@ -163,229 +169,229 @@ class Hydrograph:
         :param plot_code: code indicating which plots to create
         """
 
-        if input_path[-1] != "/":
-            input_path += "/"
-        if (
-                len(filename.split("/")) == 1
-        ):  # by default the hydrograph is saved to the data directory
-            filename = input_path + filename
         self.check_which_plots_to_create(plot_code)
         if sum(self.plots) == 0:
-            self.logger.debug('Create no plots')
+            self.logger.warn('Create no plots')
             return
-        self.raise_if_not_directory(input_path)
-        with xr.open_dataset(input_path + "discharge.nc") as ds:
-            discharge_timestep = ds.load()
-            for v in discharge_timestep.variables:
-                if not isinstance(v, str):
-                    msg = f"variable name is not a string - {v} - {type(v)}"
-                    raise TypeError(msg)
-                for key in ["sim", "obs"]:
-                    if key in v:
-                        catchment = str(int(v.split("_")[1]))
-                        discharge_timestep = discharge_timestep.rename({v: key})
-            discharge_yearly = discharge_timestep.resample(time="Y").mean(skipna=False)
+        
+        # load data
+        if input_path[-1] != "/":
+                input_path += "/"
+        discharge_timestep = self.load_data_from_path(input_path)
+        for v in discharge_timestep.variables:
+            if not isinstance(v, str):
+                msg = f"variable name is not a string - {v} - {type(v)}"
+                raise TypeError(msg)
+            for key in ["sim", "obs"]:
+                if key in v:
+                    catchment = str(int(v.split("_")[1]))
+                    discharge_timestep = discharge_timestep.rename({v: key})
+        discharge_yearly = discharge_timestep.resample(time="Y").mean(skipna=False)
 
-            # calculate metrics at timestep resolution (generally hourly)
-            nse_timestep, kge_parameters_timestep = self.calc_objectives(discharge_timestep["sim"], discharge_timestep["obs"])
-            # calculate metrics at yearly resolution
-            nse_yearly, kge_parameters_yearly = self.calc_objectives(
-                discharge_yearly["sim"], discharge_yearly["obs"]
-            )
-            
-            # create figure and determining the number of rows and cols
-            fig = plt.figure(figsize=(7, 8))
-            nrows = sum(self.plots) // 2 + 1
-            ncols = 2
-            self.logger.debug(f"nrows = {nrows} and ncols = {ncols}")
+        # calculate metrics at timestep resolution (generally hourly)
+        nse_timestep, kge_parameters_timestep = self.calc_objectives(discharge_timestep["sim"], discharge_timestep["obs"])
+        # calculate metrics at yearly resolution
+        nse_yearly, kge_parameters_yearly = self.calc_objectives(
+            discharge_yearly["sim"], discharge_yearly["obs"]
+        )
+        
+        # create figure and determining the number of rows and cols
+        fig = plt.figure(figsize=(7, 8))
+        nrows = sum(self.plots) // 2 + 1
+        ncols = 2
+        self.logger.debug(f"nrows = {nrows} and ncols = {ncols}")
 
-            # generate a grid indicating used and unused cells
-            self.grid = [
-                [False] * ncols for i in range(nrows)
-            ]
-            gs = fig.add_gridspec(nrows, ncols, width_ratios=[1, 1])
+        # generate a grid indicating used and unused cells
+        self.grid = [
+            [False] * ncols for i in range(nrows)
+        ]
+        gs = fig.add_gridspec(nrows, ncols, width_ratios=[1, 1])
 
-            # write title
-            area = self.get_catchment_area(input_path, ndecimal=0)
+        # write title
+        area = self.get_catchment_area(input_path, ndecimal=0)
+        fig.text(
+            s=f"{catchment}",
+            x=0.01,
+            y=0.97,
+            horizontalalignment="left",
+            fontsize="x-large",
+        )
+        if area:
             fig.text(
-                s=f"{catchment}",
-                x=0.01,
-                y=0.97,
-                horizontalalignment="left",
-                fontsize="x-large",
-            )
-            if area:
-                fig.text(
-                    s="Area = " + area + r"$km^2$",
-                    x=0.5,
-                    y=0.97,
-                    horizontalalignment="center",
-                    fontsize="x-large",
-                )
-            fig.suptitle(
-                t=f"\n{title}\n",
+                s="Area = " + area + r"$km^2$",
                 x=0.5,
                 y=0.97,
                 horizontalalignment="center",
                 fontsize="x-large",
             )
-            
-            # generate plots
-            if self.plots[0]:
-                self.logger.info("generating discharge plot")
-                r, c = self.get_row_col()
-                ax1 = fig.add_subplot(gs[r, c:])
-                self.grid[r] = [True for c in self.grid[r]]
-                self.logger.debug(self.grid)
-                self.plot_on_axis(
-                    function=ax1.scatter,
-                    xvalues=discharge_timestep["time"],
-                    yvalues=[discharge_timestep["sim"], discharge_timestep["obs"]],
-                    s=1.0,  
-                )
-                self.plot_on_axis(
-                    function=ax1.plot,
-                    xvalues=discharge_timestep["time"],
-                    yvalues=[discharge_timestep["sim"], discharge_timestep["obs"]],
-                    linewidth=0.3,
-                )
-                ax1.legend()
-                ax1.set_title(
-                    f"NSE = {nse_timestep:.2f}, "
-                    f"KGE = {kge_parameters_timestep['KGE']:.2f}, "
-                    f"alpha = {kge_parameters_timestep['alpha']:.2f}, "
-                    f"beta = {kge_parameters_timestep['beta']:.2f}, "
-                    f"r = {kge_parameters_timestep['r']:.2f}",
-                    horizontalalignment="center",
-                )
-                ax1.set_ylabel(r"Q $[m^3 s^{-1}]$")
-                ax1.set_xlim(
-                    discharge_timestep["time"][0], discharge_timestep["time"][-1]
-                )
+        fig.suptitle(
+            t=f"\n{title}\n",
+            x=0.5,
+            y=0.97,
+            horizontalalignment="center",
+            fontsize="x-large",
+        )
+        
+        # generate plots
+        if self.plots[0]:
+            self.logger.info("generating discharge plot")
+            r, c = self.get_row_col()
+            ax1 = fig.add_subplot(gs[r, c:])
+            self.grid[r] = [True for c in self.grid[r]]
+            self.logger.debug(self.grid)
+            self.plot_on_axis(
+                function=ax1.scatter,
+                xvalues=discharge_timestep["time"],
+                yvalues=[discharge_timestep["sim"], discharge_timestep["obs"]],
+                s=1.0,  
+            )
+            self.plot_on_axis(
+                function=ax1.plot,
+                xvalues=discharge_timestep["time"],
+                yvalues=[discharge_timestep["sim"], discharge_timestep["obs"]],
+                linewidth=0.3,
+            )
+            ax1.legend()
+            ax1.set_title(
+                f"NSE = {nse_timestep:.2f}, "
+                f"KGE = {kge_parameters_timestep['KGE']:.2f}, "
+                f"alpha = {kge_parameters_timestep['alpha']:.2f}, "
+                f"beta = {kge_parameters_timestep['beta']:.2f}, "
+                f"r = {kge_parameters_timestep['r']:.2f}",
+                horizontalalignment="center",
+            )
+            ax1.set_ylabel(r"Q $[m^3 s^{-1}]$")
+            ax1.set_xlim(
+                discharge_timestep["time"][0], discharge_timestep["time"][-1]
+            )
 
-            if self.plots[1]:
-                self.logger.info("generating yearly discharge plot")
-                r, c = self.get_row_col()
-                self.logger.debug(f"yearly plot as row {r} and col {c}")
-                if r == 0 or self.is_last_plot(1):
-                    ax3 = fig.add_subplot(gs[r, c:])
-                    self.grid[r] = [True for col in self.grid[r]]
-                else:
-                    ax3 = fig.add_subplot(gs[r, c])
-                    self.grid[r][c] = True
-                self.logger.debug(self.grid)
-                time_yearly = [str(y.dt.year.data) for y in discharge_yearly["time"]]
-                self.plot_on_axis(
-                    function=ax3.scatter,
-                    xvalues=time_yearly,
-                    yvalues=[discharge_yearly["sim"], discharge_yearly["obs"]],
-                    s=1.0,
-                )
-                self.plot_on_axis(
-                    function=ax3.plot,
-                    xvalues=time_yearly,
-                    yvalues=[discharge_yearly["sim"], discharge_yearly["obs"]],
-                    linewidth=0.3,
-                )
-                if r == 0:
-                    ax3.legend()
-                ax3.set_title(
-                    f"Yearly:  KGE = {kge_parameters_yearly['KGE']:.2f} , NSE = {nse_yearly:.2f}",
-                    horizontalalignment="center",
-                )
-                ax3.set_ylabel(r"Q $[m^3 s^{-1}]$")
-                ax3.set_xlim(time_yearly[0], time_yearly[-1])
-                ax3.set_xticks(time_yearly[:: len(time_yearly) // 3])
-
-            if self.plots[2]:
-                self.logger.info("generating discharge seasonality plot")
-                r, c = self.get_row_col()
-                if r == 0 or self.is_last_plot(2):
-                    ax4 = fig.add_subplot(gs[r, c:])
-                    self.grid[r] = [True for col in self.grid[r]]
-                else:
-                    ax4 = fig.add_subplot(gs[r, c])
-                    self.grid[r][c] = True
-                self.logger.debug(self.grid)
-                self.plot_on_axis(
-                    function=ax4.scatter,
-                    xvalues=range(1, 13),
-                    yvalues=[
-                        self.get_long_time_monthly_mean(discharge_timestep["sim"]),
-                        self.get_long_time_monthly_mean(discharge_timestep["obs"]),
-                    ],
-                    s=1,
-                )
-                self.plot_on_axis(
-                    function=ax4.plot,
-                    xvalues=np.arange(1, 13),
-                    yvalues=[
-                        self.get_long_time_monthly_mean(discharge_timestep["sim"]),
-                        self.get_long_time_monthly_mean(discharge_timestep["obs"]),
-                    ],
-                    linewidth=0.3,
-                )
-                if r == 0:
-                    ax4.legend()
-                ax4.set_title("Seasonality", horizontalalignment="center")
-                ax4.set_xlim(0.5, 12.5)
-                ax4.set_ylabel(r"Q $[m^3 s^{-1}]$")
-                ax4.set_xlabel(r"month")
-            if self.plots[3]:
-                self.logger.info("generating discharge scatter plot")
-                r, c = self.get_row_col()
-                if r == 0 or self.is_last_plot(3):
-                    self.logger.debug("scatter is last")
-                    ax5 = fig.add_subplot(gs[r, c:])
-                    self.grid[r] = [True for col in self.grid[r][c:]]
-                else:
-                    ax5 = fig.add_subplot(gs[r, c])
-                    self.grid[r][c] = True
-                self.logger.debug(self.grid)
-                # add linear regression line to scatterplot
-                self.plot_on_axis(
-                    function=ax5.scatter,
-                    xvalues=discharge_timestep["obs"],
-                    yvalues=[discharge_timestep["sim"]],
-                    s=50.0,
-                    colors=["black"],
-                    edgecolor="white",
-                    linewidth=0.3,
-                    alpha=0.1,
-                )
-
-                self.plot_on_axis(
-                    function=ax5.plot,
-                    xvalues=np.array([0, 1e6]),
-                    yvalues=[kge_parameters_timestep['r'] * np.array([0, 1e6]) + kge_parameters_timestep['offset'], np.array([0, 1e6])],
-                    colors=["red", "black"],
-                    linewidth=0.5,
-                )
-                if r == 0:
-                    ax5.legend()
-                ax5.set_title(
-                    "simulated against observed discharge",
-                    horizontalalignment="center",
-                )
-                ax5.set_xlabel("Qobs $[m^3 s^{-1}]$")  # X Achsenbeschriftung
-                ax5.set_ylabel("Qsim $[m^3 s^{-1}]$")  # Y Achsenbeschriftung
-                lim = (
-                        np.max(
-                            [
-                                np.max(discharge_timestep["obs"]),
-                                np.max(discharge_timestep["sim"]),
-                            ]
-                        )
-                        * 1.1
-                )
-                lim = lim - lim % 5 if lim - lim % 5 >= lim / 1.1 else lim + 5 - lim % 5
-                ax5.set_xlim(0, lim)
-                ax5.set_ylim(0, lim)
-            plt.tight_layout()
-            if save:
-                fig.savefig(filename, bbox_inches="tight")
-                self.logger.info(f"saved hydrograph to '{filename}'")
-            if show:
-                plt.show()
+        if self.plots[1]:
+            self.logger.info("generating yearly discharge plot")
+            r, c = self.get_row_col()
+            self.logger.debug(f"yearly plot as row {r} and col {c}")
+            if r == 0 or self.is_last_plot(1):
+                ax3 = fig.add_subplot(gs[r, c:])
+                self.grid[r] = [True for col in self.grid[r]]
             else:
-                plt.close()
+                ax3 = fig.add_subplot(gs[r, c])
+                self.grid[r][c] = True
+            self.logger.debug(self.grid)
+            time_yearly = [str(y.dt.year.data) for y in discharge_yearly["time"]]
+            self.plot_on_axis(
+                function=ax3.scatter,
+                xvalues=time_yearly,
+                yvalues=[discharge_yearly["sim"], discharge_yearly["obs"]],
+                s=1.0,
+            )
+            self.plot_on_axis(
+                function=ax3.plot,
+                xvalues=time_yearly,
+                yvalues=[discharge_yearly["sim"], discharge_yearly["obs"]],
+                linewidth=0.3,
+            )
+            if r == 0:
+                ax3.legend()
+            ax3.set_title(
+                f"Yearly:  KGE = {kge_parameters_yearly['KGE']:.2f} , NSE = {nse_yearly:.2f}",
+                horizontalalignment="center",
+            )
+            ax3.set_ylabel(r"Q $[m^3 s^{-1}]$")
+            ax3.set_xlim(time_yearly[0], time_yearly[-1])
+            ax3.set_xticks(time_yearly[:: len(time_yearly) // 3])
+
+        if self.plots[2]:
+            self.logger.info("generating discharge seasonality plot")
+            r, c = self.get_row_col()
+            if r == 0 or self.is_last_plot(2):
+                ax4 = fig.add_subplot(gs[r, c:])
+                self.grid[r] = [True for col in self.grid[r]]
+            else:
+                ax4 = fig.add_subplot(gs[r, c])
+                self.grid[r][c] = True
+            self.logger.debug(self.grid)
+            self.plot_on_axis(
+                function=ax4.scatter,
+                xvalues=range(1, 13),
+                yvalues=[
+                    self.get_long_time_monthly_mean(discharge_timestep["sim"]),
+                    self.get_long_time_monthly_mean(discharge_timestep["obs"]),
+                ],
+                s=1,
+            )
+            self.plot_on_axis(
+                function=ax4.plot,
+                xvalues=np.arange(1, 13),
+                yvalues=[
+                    self.get_long_time_monthly_mean(discharge_timestep["sim"]),
+                    self.get_long_time_monthly_mean(discharge_timestep["obs"]),
+                ],
+                linewidth=0.3,
+            )
+            if r == 0:
+                ax4.legend()
+            ax4.set_title("Seasonality", horizontalalignment="center")
+            ax4.set_xlim(0.5, 12.5)
+            ax4.set_ylabel(r"Q $[m^3 s^{-1}]$")
+            ax4.set_xlabel(r"month")
+        if self.plots[3]:
+            self.logger.info("generating discharge scatter plot")
+            r, c = self.get_row_col()
+            if r == 0 or self.is_last_plot(3):
+                self.logger.debug("scatter is last")
+                ax5 = fig.add_subplot(gs[r, c:])
+                self.grid[r] = [True for col in self.grid[r][c:]]
+            else:
+                ax5 = fig.add_subplot(gs[r, c])
+                self.grid[r][c] = True
+            self.logger.debug(self.grid)
+            # add linear regression line to scatterplot
+            self.plot_on_axis(
+                function=ax5.scatter,
+                xvalues=discharge_timestep["obs"],
+                yvalues=[discharge_timestep["sim"]],
+                s=50.0,
+                colors=["black"],
+                edgecolor="white",
+                linewidth=0.3,
+                alpha=0.1,
+            )
+
+            self.plot_on_axis(
+                function=ax5.plot,
+                xvalues=np.array([0, 1e6]),
+                yvalues=[kge_parameters_timestep['r'] * np.array([0, 1e6]) + kge_parameters_timestep['offset'], np.array([0, 1e6])],
+                colors=["red", "black"],
+                linewidth=0.5,
+            )
+            if r == 0:
+                ax5.legend()
+            ax5.set_title(
+                "simulated against observed discharge",
+                horizontalalignment="center",
+            )
+            ax5.set_xlabel("Qobs $[m^3 s^{-1}]$")  # X Achsenbeschriftung
+            ax5.set_ylabel("Qsim $[m^3 s^{-1}]$")  # Y Achsenbeschriftung
+            lim = (
+                    np.max(
+                        [
+                            np.max(discharge_timestep["obs"]),
+                            np.max(discharge_timestep["sim"]),
+                        ]
+                    )
+                    * 1.1
+            )
+            lim = lim - lim % 5 if lim - lim % 5 >= lim / 1.1 else lim + 5 - lim % 5
+            ax5.set_xlim(0, lim)
+            ax5.set_ylim(0, lim)
+        plt.tight_layout()
+        if save:
+            if (
+                    len(filename.split("/")) == 1
+            ):  # by default the hydrograph is saved to the data directory
+                filename = path + filename
+            fig.savefig(filename, bbox_inches="tight")
+            self.logger.info(f"saved hydrograph to '{filename}'")
+        if show:
+            plt.show()
+        else:
+            plt.close()
