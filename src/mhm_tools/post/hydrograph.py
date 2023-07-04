@@ -26,6 +26,17 @@ class Hydrograph:
     def __init__(self, log_level):
         self.logger.setLevel(self.levels[log_level])
 
+    def remove_empty_values(self, arr1, arr2):
+        if len(arr1) != len(arr2):
+            raise Exception('The two timeseries do not have the same length.')
+        arr1_ret, arr2_ret = [], []
+        for i, v in enumerate(arr1):
+            w = arr2[i]
+            if v is not None and v is not np.nan and w is not None and w is not np.nan:
+                arr1_ret.append(v)
+                arr2_ret.append(w)
+        return np.array(arr1_ret), np.array(arr2_ret)
+
     def calc_beta(self, observed, simulated):
         return np.nanmean(simulated) / np.nanmean(observed)
 
@@ -51,6 +62,15 @@ class Hydrograph:
 
     def calc_nash_sutcliff_efficiency(self, observed, simulated):
         return 1 - (np.nansum((observed - simulated) ** 2) / np.nansum((observed - np.mean(observed)) ** 2))
+
+
+    def calc_objectives(self, observed, simulated):
+        observed, simulated = self.remove_empty_values(observed, simulated)
+        nse = self.calc_nash_sutcliff_efficiency(
+                observed, simulated
+            )
+        kge = self.calc_kling_gupta_efficiency(observed, simulated)
+        return nse, kge     
 
     def get_row_col(self):
         # finds the first unused gridcell for the next plot
@@ -167,13 +187,11 @@ class Hydrograph:
             discharge_yearly = discharge_timestep.resample(time="Y").mean(skipna=False)
 
             # calculate metrics at timestep resolution (generally hourly)
-            nse_timestep = self.calc_nash_sutcliff_efficiency(discharge_timestep["sim"], discharge_timestep["obs"])
-            kge_parameters_timestep = self.calc_kling_gupta_efficiency(discharge_timestep["sim"], discharge_timestep["obs"])
+            nse_timestep, kge_parameters_timestep = self.calc_objectives(discharge_timestep["sim"], discharge_timestep["obs"])
             # calculate metrics at yearly resolution
-            nse_yearly = self.calc_nash_sutcliff_efficiency(
+            nse_yearly, kge_parameters_yearly = self.calc_objectives(
                 discharge_yearly["sim"], discharge_yearly["obs"]
             )
-            kge_parameters_yearly = self.calc_kling_gupta_efficiency(discharge_yearly["sim"], discharge_yearly["obs"])
             
             # create figure and determining the number of rows and cols
             fig = plt.figure(figsize=(7, 8))
