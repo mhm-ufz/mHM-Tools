@@ -8,6 +8,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
+from scipy.optimize import curve_fit
 
 
 class Catchment:
@@ -44,29 +45,15 @@ class Hydrograph:
                 arr2_ret.append(w)
         return np.array(arr1_ret), np.array(arr2_ret)
 
-    def calc_beta(self, observed, simulated):
-        return np.nanmean(simulated) / np.nanmean(observed)
-
-    def calc_alpha(self, observed, simulated):
-        return np.nanstd(simulated) / np.nanstd(observed)
-
-    def calc_linear_correlation(self, observed, simulated):
-        off, r = np.polynomial.polynomial.polyfit(  # switch to np.polinominal
-            observed, simulated, deg=1
-        )
-        self.logger.debug(f"linear correlation with slope {r} and offset {off}")
-        return r, off
-
     def calc_kling_gupta_efficiency(self, observed, simulated):
-        alpha = self.calc_alpha(observed, simulated)
-        beta = self.calc_beta(observed, simulated)
-        r, off = self.calc_linear_correlation(observed, simulated)
+        alpha = np.nanstd(simulated) / np.nanstd(observed)
+        beta = np.nanmean(simulated) / np.nanmean(observed)
+        r = np.corrcoef(observed, simulated)[1, 0]
         result = {
             "KGE": 1 - np.sqrt((r - 1) ** 2 + (alpha - 1) ** 2 + (beta - 1) ** 2),
             "alpha": alpha,
             "beta": beta,
             "r": r,
-            "offset": off,
         }
         self.logger.debug(result)
         return result
@@ -256,12 +243,16 @@ class Hydrograph:
                 linewidth=0.3,
             )
             ax1.legend()
-            ax1.set_title(
+            title = (
                 f"NSE = {nse_timestep:.2f}, "
                 f"KGE = {kge_parameters_timestep['KGE']:.2f}, "
                 f"alpha = {kge_parameters_timestep['alpha']:.2f}, "
-                f"beta = {kge_parameters_timestep['beta']:.2f}, "
-                f"r = {kge_parameters_timestep['r']:.2f}",
+                f"beta = {kge_parameters_timestep['beta']:.2f}"
+            )
+            if not self.plots[3]:
+                title += f", r = {kge_parameters_timestep['r']:.2f}"
+            ax1.set_title(
+                title,
                 horizontalalignment="center",
             )
             ax1.set_ylabel(r"Q $[m^3 s^{-1}]$")
@@ -369,8 +360,7 @@ class Hydrograph:
                 function=ax5.plot,
                 xvalues=xvalues,
                 yvalues=[
-                    kge_parameters_timestep["r"] * xvalues
-                    + kge_parameters_timestep["offset"],
+                    kge_parameters_timestep["r"] * xvalues,
                     xvalues,
                 ],
                 colors=["red", "black"],
@@ -379,7 +369,7 @@ class Hydrograph:
             if r == 0:
                 ax5.legend()
             ax5.set_title(
-                "simulated against observed discharge",
+                f'correlation coeff r = {kge_parameters_timestep["r"]:.2f}',
                 horizontalalignment="center",
             )
             ax5.set_xlabel("Qobs $[m^3 s^{-1}]$")  # X Achsenbeschriftung
