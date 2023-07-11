@@ -10,6 +10,11 @@ import numpy as np
 import xarray as xr
 
 
+class Catchment:
+    name = None
+    area = None
+
+
 class Hydrograph:
     levels = {
         "info": logging.INFO,
@@ -22,13 +27,15 @@ class Hydrograph:
     logging.basicConfig(format="%(asctime)s - %(levelname)-8s - %(message)s")
     logger = logging.getLogger(__name__)
     plots = (0, 0, 0, 0)
+    catchment = Catchment()
+    discharge_data = None
 
     def __init__(self, log_level):
         self.logger.setLevel(self.levels[log_level])
 
     def remove_empty_values(self, arr1, arr2):
         if len(arr1) != len(arr2):
-            raise Exception('The two timeseries do not have the same length.')
+            raise Exception("The two timeseries do not have the same length.")
         arr1_ret, arr2_ret = [], []
         for i, v in enumerate(arr1):
             w = arr2[i]
@@ -44,33 +51,37 @@ class Hydrograph:
         return np.nanstd(simulated) / np.nanstd(observed)
 
     def calc_linear_correlation(self, observed, simulated):
-        r, b = np.polyfit(
+        off, r = np.polynomial.polynomial.polyfit(  # switch to np.polinominal
             observed, simulated, deg=1
         )
-        self.logger.debug(f"linear correlation with slope {r} and offset {b}")
-        return r, b
+        self.logger.debug(f"linear correlation with slope {r} and offset {off}")
+        return r, off
 
     def calc_kling_gupta_efficiency(self, observed, simulated):
         alpha = self.calc_alpha(observed, simulated)
         beta = self.calc_beta(observed, simulated)
-        r, b = self.calc_linear_correlation(observed, simulated)
-        return {'KGE': 1 - np.sqrt((r - 1) ** 2 + (alpha - 1) ** 2 + (beta - 1) ** 2),
-                'alpha': alpha,
-                'beta': beta,
-                'r': r,
-                'offset': b}
+        r, off = self.calc_linear_correlation(observed, simulated)
+        result = {
+            "KGE": 1 - np.sqrt((r - 1) ** 2 + (alpha - 1) ** 2 + (beta - 1) ** 2),
+            "alpha": alpha,
+            "beta": beta,
+            "r": r,
+            "offset": off,
+        }
+        self.logger.debug(result)
+        return result
 
     def calc_nash_sutcliff_efficiency(self, observed, simulated):
-        return 1 - (np.nansum((observed - simulated) ** 2) / np.nansum((observed - np.mean(observed)) ** 2))
-
+        return 1 - (
+            np.nansum((observed - simulated) ** 2)
+            / np.nansum((observed - np.mean(observed)) ** 2)
+        )
 
     def calc_objectives(self, observed, simulated):
         observed, simulated = self.remove_empty_values(observed, simulated)
-        nse = self.calc_nash_sutcliff_efficiency(
-                observed, simulated
-            )
+        nse = self.calc_nash_sutcliff_efficiency(observed, simulated)
         kge = self.calc_kling_gupta_efficiency(observed, simulated)
-        return nse, kge     
+        return nse, kge
 
     def get_row_col(self):
         # finds the first unused gridcell for the next plot
@@ -92,11 +103,10 @@ class Hydrograph:
             doc = config_file.open("r").readlines()
             for line in doc[::-1]:
                 if line.strip():
-                    return (
+                    self.catchment.area = (
                         f"{float(line.replace('Total[km2]', '').strip()):.{ndecimal}f}"
                     )
         self.logger.warning("Area could not be read.")
-        return ""
 
     def get_long_time_monthly_mean(self, variable):
         """Takes a variable and calculated the long time average value for every month of the year
@@ -109,7 +119,7 @@ class Hydrograph:
         return np.array([np.mean(np.array(m)) for m in var_ses])
 
     def plot_on_axis(
-            self, function, xvalues, yvalues: list, colors=None, labels=None, **arguments
+        self, function, xvalues, yvalues: list, colors=None, labels=None, **arguments
     ):
         """
         Plots multiple graphs for specified function.
@@ -138,7 +148,7 @@ class Hydrograph:
         for permutation in possible_permutations:
             check = 0
             for i, v in enumerate(permutation):
-                check += v * 2 ** i
+                check += v * 2**i
             if int(a) == check:
                 self.logger.debug(f"plots to be produced: {permutation}")
                 self.plots = permutation
@@ -154,15 +164,22 @@ class Hydrograph:
     def load_data_from_path(self, path):
         self.raise_if_not_directory(path)
         with xr.open_dataset(path + "discharge.nc") as ds:
-            discharge_timestep = ds.load()
-        return discharge_timestep
+            self.discharge_data = ds.load()
+            for v in self.discharge_data.variables:
+                if not isinstance(v, str):
+                    msg = f"variable name is not a string - {v} - {type(v)}"
+                    raise TypeError(msg)
+                for key in ["sim", "obs"]:
+                    if key in v:
+                        self.catchment.name = str(int(v.split("_")[1]))
+                        self.discharge_data = self.discharge_data.rename({v: key})
 
-    def gen_hydrograph(self, input_path, filename, show, save, title, plot_code):
+    def gen_hydrograph(self, input_path, output_file, show, save, title, plot_code):
         """
         Read in discharge data and plot the simulated against the observed discharge
         for different time resolutions and a seasonality as well as plotting simulated against observed discharge.
         :param input_path: Path to discharge.nc file
-        :param filename: Filename of the resulting file. e.g. hydrograph.png
+        :param output_file: Filename of the resulting file. e.g. hydrograph.png
         :param show: bool if plots should be shown or not
         :param save: bool if plots should be saved or not
         :param title: title given to the hydrograph
@@ -171,30 +188,19 @@ class Hydrograph:
 
         self.check_which_plots_to_create(plot_code)
         if sum(self.plots) == 0:
-            self.logger.warn('Create no plots')
+            self.logger.warn("Create no plots")
             return
-        
+
         # load data
         if input_path[-1] != "/":
-                input_path += "/"
-        discharge_timestep = self.load_data_from_path(input_path)
-        for v in discharge_timestep.variables:
-            if not isinstance(v, str):
-                msg = f"variable name is not a string - {v} - {type(v)}"
-                raise TypeError(msg)
-            for key in ["sim", "obs"]:
-                if key in v:
-                    catchment = str(int(v.split("_")[1]))
-                    discharge_timestep = discharge_timestep.rename({v: key})
-        discharge_yearly = discharge_timestep.resample(time="Y").mean(skipna=False)
+            input_path += "/"
+        self.load_data_from_path(input_path)
 
         # calculate metrics at timestep resolution (generally hourly)
-        nse_timestep, kge_parameters_timestep = self.calc_objectives(discharge_timestep["sim"], discharge_timestep["obs"])
-        # calculate metrics at yearly resolution
-        nse_yearly, kge_parameters_yearly = self.calc_objectives(
-            discharge_yearly["sim"], discharge_yearly["obs"]
+        nse_timestep, kge_parameters_timestep = self.calc_objectives(
+            self.discharge_data["sim"], self.discharge_data["obs"]
         )
-        
+
         # create figure and determining the number of rows and cols
         fig = plt.figure(figsize=(7, 8))
         nrows = sum(self.plots) // 2 + 1
@@ -202,23 +208,21 @@ class Hydrograph:
         self.logger.debug(f"nrows = {nrows} and ncols = {ncols}")
 
         # generate a grid indicating used and unused cells
-        self.grid = [
-            [False] * ncols for i in range(nrows)
-        ]
+        self.grid = [[False] * ncols for i in range(nrows)]
         gs = fig.add_gridspec(nrows, ncols, width_ratios=[1, 1])
 
         # write title
-        area = self.get_catchment_area(input_path, ndecimal=0)
+        self.get_catchment_area(input_path, ndecimal=0)
         fig.text(
-            s=f"{catchment}",
+            s=f"{self.catchment.name}",
             x=0.01,
             y=0.97,
             horizontalalignment="left",
             fontsize="x-large",
         )
-        if area:
+        if self.catchment.area:
             fig.text(
-                s="Area = " + area + r"$km^2$",
+                s="Area = " + self.catchment.area + r"$km^2$",
                 x=0.5,
                 y=0.97,
                 horizontalalignment="center",
@@ -231,7 +235,7 @@ class Hydrograph:
             horizontalalignment="center",
             fontsize="x-large",
         )
-        
+
         # generate plots
         if self.plots[0]:
             self.logger.info("generating discharge plot")
@@ -241,14 +245,14 @@ class Hydrograph:
             self.logger.debug(self.grid)
             self.plot_on_axis(
                 function=ax1.scatter,
-                xvalues=discharge_timestep["time"],
-                yvalues=[discharge_timestep["sim"], discharge_timestep["obs"]],
-                s=1.0,  
+                xvalues=self.discharge_data["time"],
+                yvalues=[self.discharge_data["sim"], self.discharge_data["obs"]],
+                s=1.0,
             )
             self.plot_on_axis(
                 function=ax1.plot,
-                xvalues=discharge_timestep["time"],
-                yvalues=[discharge_timestep["sim"], discharge_timestep["obs"]],
+                xvalues=self.discharge_data["time"],
+                yvalues=[self.discharge_data["sim"], self.discharge_data["obs"]],
                 linewidth=0.3,
             )
             ax1.legend()
@@ -262,7 +266,7 @@ class Hydrograph:
             )
             ax1.set_ylabel(r"Q $[m^3 s^{-1}]$")
             ax1.set_xlim(
-                discharge_timestep["time"][0], discharge_timestep["time"][-1]
+                self.discharge_data["time"][0], self.discharge_data["time"][-1]
             )
 
         if self.plots[1]:
@@ -276,6 +280,11 @@ class Hydrograph:
                 ax3 = fig.add_subplot(gs[r, c])
                 self.grid[r][c] = True
             self.logger.debug(self.grid)
+            discharge_yearly = self.discharge_data.resample(time="Y").mean(skipna=False)
+            # calculate metrics at yearly resolution
+            nse_yearly, kge_parameters_yearly = self.calc_objectives(
+                discharge_yearly["sim"], discharge_yearly["obs"]
+            )
             time_yearly = [str(y.dt.year.data) for y in discharge_yearly["time"]]
             self.plot_on_axis(
                 function=ax3.scatter,
@@ -313,8 +322,8 @@ class Hydrograph:
                 function=ax4.scatter,
                 xvalues=range(1, 13),
                 yvalues=[
-                    self.get_long_time_monthly_mean(discharge_timestep["sim"]),
-                    self.get_long_time_monthly_mean(discharge_timestep["obs"]),
+                    self.get_long_time_monthly_mean(self.discharge_data["sim"]),
+                    self.get_long_time_monthly_mean(self.discharge_data["obs"]),
                 ],
                 s=1,
             )
@@ -322,8 +331,8 @@ class Hydrograph:
                 function=ax4.plot,
                 xvalues=np.arange(1, 13),
                 yvalues=[
-                    self.get_long_time_monthly_mean(discharge_timestep["sim"]),
-                    self.get_long_time_monthly_mean(discharge_timestep["obs"]),
+                    self.get_long_time_monthly_mean(self.discharge_data["sim"]),
+                    self.get_long_time_monthly_mean(self.discharge_data["obs"]),
                 ],
                 linewidth=0.3,
             )
@@ -347,19 +356,23 @@ class Hydrograph:
             # add linear regression line to scatterplot
             self.plot_on_axis(
                 function=ax5.scatter,
-                xvalues=discharge_timestep["obs"],
-                yvalues=[discharge_timestep["sim"]],
+                xvalues=self.discharge_data["obs"],
+                yvalues=[self.discharge_data["sim"]],
                 s=50.0,
                 colors=["black"],
                 edgecolor="white",
                 linewidth=0.3,
                 alpha=0.1,
             )
-
+            xvalues = np.linspace(0, 1e6, 10000)
             self.plot_on_axis(
                 function=ax5.plot,
-                xvalues=np.array([0, 1e6]),
-                yvalues=[kge_parameters_timestep['r'] * np.array([0, 1e6]) + kge_parameters_timestep['offset'], np.array([0, 1e6])],
+                xvalues=xvalues,
+                yvalues=[
+                    kge_parameters_timestep["r"] * xvalues
+                    + kge_parameters_timestep["offset"],
+                    xvalues,
+                ],
                 colors=["red", "black"],
                 linewidth=0.5,
             )
@@ -372,13 +385,13 @@ class Hydrograph:
             ax5.set_xlabel("Qobs $[m^3 s^{-1}]$")  # X Achsenbeschriftung
             ax5.set_ylabel("Qsim $[m^3 s^{-1}]$")  # Y Achsenbeschriftung
             lim = (
-                    np.max(
-                        [
-                            np.max(discharge_timestep["obs"]),
-                            np.max(discharge_timestep["sim"]),
-                        ]
-                    )
-                    * 1.1
+                np.max(
+                    [
+                        np.max(self.discharge_data["obs"]),
+                        np.max(self.discharge_data["sim"]),
+                    ]
+                )
+                * 1.1
             )
             lim = lim - lim % 5 if lim - lim % 5 >= lim / 1.1 else lim + 5 - lim % 5
             ax5.set_xlim(0, lim)
@@ -386,11 +399,11 @@ class Hydrograph:
         plt.tight_layout()
         if save:
             if (
-                    len(filename.split("/")) == 1
+                len(output_file.split("/")) == 1
             ):  # by default the hydrograph is saved to the data directory
-                filename = path + filename
-            fig.savefig(filename, bbox_inches="tight")
-            self.logger.info(f"saved hydrograph to '{filename}'")
+                output_file = input_path + output_file
+            fig.savefig(output_file, bbox_inches="tight")
+            self.logger.info(f"saved hydrograph to '{output_file}'")
         if show:
             plt.show()
         else:

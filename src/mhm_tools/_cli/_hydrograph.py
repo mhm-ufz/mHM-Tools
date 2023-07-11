@@ -75,7 +75,7 @@ def hydrograph(args):
     hydro = Hydrograph(args.log_level)
     hydro.gen_hydrograph(
         input_path=args.in_dir,
-        filename=args.out_file,
+        output_file=args.out_file,
         show=args.show,
         save=True,
         title=args.title,
