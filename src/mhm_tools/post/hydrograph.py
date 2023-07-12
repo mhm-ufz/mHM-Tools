@@ -15,6 +15,7 @@ class Catchment:
     name = None
     area = None
 
+
 class Objectives:
     kge = None
     nse = None
@@ -59,7 +60,9 @@ class Hydrograph:
         alpha = np.nanstd(simulated) / np.nanstd(observed)
         beta = np.nanmean(simulated) / np.nanmean(observed)
         r = np.corrcoef(observed, simulated)[1, 0]
-        self.objectives.kge = 1 - np.sqrt((r - 1) ** 2 + (alpha - 1) ** 2 + (beta - 1) ** 2)
+        self.objectives.kge = 1 - np.sqrt(
+            (r - 1) ** 2 + (alpha - 1) ** 2 + (beta - 1) ** 2
+        )
         self.objectives.alpha = alpha
         self.objectives.beta = beta
         self.objectives.r = r
@@ -191,9 +194,7 @@ class Hydrograph:
         self.load_data_from_path(input_path)
 
         # calculate metrics at timestep resolution (generally hourly)
-        self.calc_objectives(
-            self.discharge_data["sim"], self.discharge_data["obs"]
-        )
+        self.calc_objectives(self.discharge_data["sim"], self.discharge_data["obs"])
 
         # create figure and determining the number of rows and cols
         fig = plt.figure(figsize=(7, 8))
@@ -343,7 +344,7 @@ class Hydrograph:
             if r == 0:
                 ax4.legend()
             ax4.set_title("Seasonality", horizontalalignment="center")
-            ax4.set_xlim(0.9, 12.1 )
+            ax4.set_xlim(0.9, 12.1)
             ax4.set_ylabel(r"Q $[m^3 s^{-1}]$")
             ax4.set_xlabel(r"month")
         if self.plots[3]:
@@ -382,7 +383,7 @@ class Hydrograph:
             if r == 0:
                 ax5.legend()
             ax5.set_title(
-                f'correlation coeff r = {self.objectives.r:.2f}',
+                f"correlation coeff r = {self.objectives.r:.2f}",
                 horizontalalignment="center",
             )
             ax5.set_xlabel("Qobs $[m^3 s^{-1}]$")  # X Achsenbeschriftung
