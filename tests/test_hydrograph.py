@@ -24,14 +24,14 @@ class TestHydrograph(unittest.TestCase):
             self.hydro.discharge_data["obs"], self.hydro.discharge_data["obs"]
         )
         self.assertTrue(np.abs(self.hydro.objectives.kge - 1) < 1e-4)
-        self.assertTrue(np.abs(self.hydro.objectives.nse- 1) < 1e-4)
+        self.assertTrue(np.abs(self.hydro.objectives.nse - 1) < 1e-4)
 
         # test offset
         self.hydro.calc_objectives(
             self.hydro.discharge_data["obs"], self.hydro.discharge_data["obs"] * 2
         )
         self.assertTrue(np.abs(self.hydro.objectives.kge - 1) > 1e-4)
-        self.assertTrue(np.abs(self.hydro.objectives.nse- 1) > 1e-4)
+        self.assertTrue(np.abs(self.hydro.objectives.nse - 1) > 1e-4)
 
         self.hydro.calc_objectives(
             np.random.normal(2, 0.5, 1000000), np.random.normal(1, 1, 1000000)
@@ -43,9 +43,7 @@ class TestHydrograph(unittest.TestCase):
             np.abs(self.hydro.objectives.beta - 0.5) < 1e-1
         )  # test if the relation of the mean is correct
 
-        self.hydro.calc_objectives(
-            np.linspace(0, 10, 100), np.linspace(1, 11, 100)
-        )
+        self.hydro.calc_objectives(np.linspace(0, 10, 100), np.linspace(1, 11, 100))
         self.assertTrue(np.abs(self.hydro.objectives.r - 1) < 1e-4)  # slope
 
         # test for wrong input
@@ -60,7 +58,7 @@ class TestHydrograph(unittest.TestCase):
         # test if nan and None values are removed correctly
         q_test_2 = np.array([1, 2, 3, None, 5, 6, np.nan, 8])
         self.hydro.calc_objectives(q_test_2, np.arange(1, 9))
-        self.assertTrue(self.hydro.objectives.nse- 1 < 1e-6)
+        self.assertTrue(self.hydro.objectives.nse - 1 < 1e-6)
         self.assertTrue(self.hydro.objectives.kge - 1 < 1e-6)
 
         # test for right result
