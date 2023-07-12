@@ -8,7 +8,6 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
-from scipy.optimize import curve_fit
 
 
 class Catchment:
@@ -45,9 +44,11 @@ class Hydrograph:
     def __init__(self, log_level):
         self.logger.setLevel(self.levels[log_level])
 
-    def remove_empty_values(self, arr1, arr2):
+    @staticmethod
+    def remove_empty_values(arr1, arr2):
         if len(arr1) != len(arr2):
-            raise Exception("The two timeseries do not have the same length.")
+            exeption = "The two timeseries do not have the same length."
+            raise Exception(exeption)
         arr1_ret, arr2_ret = [], []
         for i, v in enumerate(arr1):
             w = arr2[i]
@@ -105,7 +106,8 @@ class Hydrograph:
                     )
         self.logger.warning("Area could not be read.")
 
-    def get_long_time_monthly_mean(self, variable):
+    @staticmethod
+    def get_long_time_monthly_mean(variable):
         """Takes a variable and calculated the long time average value for every month of the year
         :param variable: xarray with a variable and a time
         :return: list of twelve numbers corresponding to the long term average value for each month of the year
@@ -115,8 +117,9 @@ class Hydrograph:
             var_ses[int(variable.time[i].dt.month.data) - 1].append(variable[i])
         return np.array([np.mean(np.array(m)) for m in var_ses])
 
+    @staticmethod
     def plot_on_axis(
-        self, function, xvalues, yvalues: list, colors=None, labels=None, **arguments
+            function, xvalues, yvalues: list, colors=None, labels=None, **arguments
     ):
         """
         Plots multiple graphs for specified function.
@@ -125,7 +128,7 @@ class Hydrograph:
         :param yvalues: list of arrays with the y values
         :param colors: optional list of colors (default red, blue)
         :param labels: optional list of labels  (default simulated discharge, observed discharge)
-        :param arguments: other plot relevant arguemts corresponding to the given input function. e.g. linewidth=0.5 for plt.plot
+        :param arguments: other arguments relevant for the given input function. e.g. linewidth=0.5 for 'plt.plot'
         """
         if labels is None:
             labels = ["simulated discharge", "observed discharge"]
@@ -152,7 +155,8 @@ class Hydrograph:
                 return
         self.logger.warning("No plots will be produced since none were specified.")
 
-    def raise_if_not_directory(self, path):
+    @staticmethod
+    def raise_if_not_directory(path):
         p = Path(path)
         if not p.is_dir():
             msg = 'The given path "{path}" is not a directory.'
@@ -185,7 +189,7 @@ class Hydrograph:
 
         self.check_which_plots_to_create(plot_code)
         if sum(self.plots) == 0:
-            self.logger.warn("Create no plots")
+            self.logger.warning("Create no plots")
             return
 
         # load data
@@ -203,7 +207,7 @@ class Hydrograph:
         self.logger.debug(f"nrows = {nrows} and ncols = {ncols}")
 
         # generate a grid indicating used and unused cells
-        self.grid = [[False] * ncols for i in range(nrows)]
+        self.grid = [[False] * ncols for _ in range(nrows)]
         gs = fig.add_gridspec(nrows, ncols, width_ratios=[1, 1])
 
         # write title
@@ -236,7 +240,7 @@ class Hydrograph:
             self.logger.info("generating discharge plot")
             r, c = self.get_row_col()
             ax1 = fig.add_subplot(gs[r, c:])
-            self.grid[r] = [True for c in self.grid[r]]
+            self.grid[r] = [True for _ in self.grid[r]]
             self.logger.debug(self.grid)
             self.plot_on_axis(
                 function=ax1.scatter,
@@ -274,7 +278,7 @@ class Hydrograph:
             self.logger.debug(f"yearly plot as row {r} and col {c}")
             if r == 0 or self.is_last_plot(1):
                 ax3 = fig.add_subplot(gs[r, c:])
-                self.grid[r] = [True for col in self.grid[r]]
+                self.grid[r] = [True for _ in self.grid[r]]
             else:
                 ax3 = fig.add_subplot(gs[r, c])
                 self.grid[r][c] = True
@@ -318,7 +322,7 @@ class Hydrograph:
             r, c = self.get_row_col()
             if r == 0 or self.is_last_plot(2):
                 ax4 = fig.add_subplot(gs[r, c:])
-                self.grid[r] = [True for col in self.grid[r]]
+                self.grid[r] = [True for _ in self.grid[r]]
             else:
                 ax4 = fig.add_subplot(gs[r, c])
                 self.grid[r][c] = True
@@ -353,7 +357,7 @@ class Hydrograph:
             if r == 0 or self.is_last_plot(3):
                 self.logger.debug("scatter is last")
                 ax5 = fig.add_subplot(gs[r, c:])
-                self.grid[r] = [True for col in self.grid[r][c:]]
+                self.grid[r] = [True for _ in self.grid[r][c:]]
             else:
                 ax5 = fig.add_subplot(gs[r, c])
                 self.grid[r][c] = True
