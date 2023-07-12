@@ -15,6 +15,15 @@ class Catchment:
     name = None
     area = None
 
+class Objectives:
+    kge = None
+    nse = None
+    alpha = None
+    beta = None
+    r = None
+    diff = None
+    rel_diff = None
+
 
 class Hydrograph:
     levels = {
@@ -30,6 +39,7 @@ class Hydrograph:
     plots = (0, 0, 0, 0)
     catchment = Catchment()
     discharge_data = None
+    objectives = Objectives()
 
     def __init__(self, log_level):
         self.logger.setLevel(self.levels[log_level])
@@ -49,26 +59,23 @@ class Hydrograph:
         alpha = np.nanstd(simulated) / np.nanstd(observed)
         beta = np.nanmean(simulated) / np.nanmean(observed)
         r = np.corrcoef(observed, simulated)[1, 0]
-        result = {
-            "KGE": 1 - np.sqrt((r - 1) ** 2 + (alpha - 1) ** 2 + (beta - 1) ** 2),
-            "alpha": alpha,
-            "beta": beta,
-            "r": r,
-        }
-        self.logger.debug(result)
-        return result
+        self.objectives.kge = 1 - np.sqrt((r - 1) ** 2 + (alpha - 1) ** 2 + (beta - 1) ** 2)
+        self.objectives.alpha = alpha
+        self.objectives.beta = beta
+        self.objectives.r = r
 
     def calc_nash_sutcliff_efficiency(self, observed, simulated):
-        return 1 - (
+        self.objectives.nse = 1 - (
             np.nansum((observed - simulated) ** 2)
             / np.nansum((observed - np.mean(observed)) ** 2)
         )
 
     def calc_objectives(self, observed, simulated):
         observed, simulated = self.remove_empty_values(observed, simulated)
-        nse = self.calc_nash_sutcliff_efficiency(observed, simulated)
-        kge = self.calc_kling_gupta_efficiency(observed, simulated)
-        return nse, kge
+        self.calc_nash_sutcliff_efficiency(observed, simulated)
+        self.calc_kling_gupta_efficiency(observed, simulated)
+        self.objectives.diff = np.sum(simulated) - np.sum(observed)
+        self.objectives.rel_diff = self.objectives.diff / np.sum(observed)
 
     def get_row_col(self):
         # finds the first unused gridcell for the next plot
@@ -184,7 +191,7 @@ class Hydrograph:
         self.load_data_from_path(input_path)
 
         # calculate metrics at timestep resolution (generally hourly)
-        nse_timestep, kge_parameters_timestep = self.calc_objectives(
+        self.calc_objectives(
             self.discharge_data["sim"], self.discharge_data["obs"]
         )
 
@@ -244,13 +251,13 @@ class Hydrograph:
             )
             ax1.legend()
             title = (
-                f"NSE = {nse_timestep:.2f}, "
-                f"KGE = {kge_parameters_timestep['KGE']:.2f}, "
-                f"alpha = {kge_parameters_timestep['alpha']:.2f}, "
-                f"beta = {kge_parameters_timestep['beta']:.2f}"
+                f"NSE = {self.objectives.nse:.2f}, "
+                f"KGE = {self.objectives.kge:.2f}, "
+                f"alpha = {self.objectives.alpha:.2f}, "
+                f"beta = {self.objectives.beta:.2f}"
             )
             if not self.plots[3]:
-                title += f", r = {kge_parameters_timestep['r']:.2f}"
+                title += f", r = {self.objectives.r:.2f}"
             ax1.set_title(
                 title,
                 horizontalalignment="center",
@@ -270,12 +277,10 @@ class Hydrograph:
             else:
                 ax3 = fig.add_subplot(gs[r, c])
                 self.grid[r][c] = True
+            # ax32 = ax3.twinx()
             self.logger.debug(self.grid)
             discharge_yearly = self.discharge_data.resample(time="Y").mean(skipna=False)
             # calculate metrics at yearly resolution
-            nse_yearly, kge_parameters_yearly = self.calc_objectives(
-                discharge_yearly["sim"], discharge_yearly["obs"]
-            )
             time_yearly = [str(y.dt.year.data) for y in discharge_yearly["time"]]
             self.plot_on_axis(
                 function=ax3.scatter,
@@ -289,12 +294,20 @@ class Hydrograph:
                 yvalues=[discharge_yearly["sim"], discharge_yearly["obs"]],
                 linewidth=0.3,
             )
+            # self.plot_on_axis(
+            #     function=ax32.plot,
+            #     xvalues=time_yearly,
+            #     yvalues=[discharge_yearly["sim"]-discharge_yearly["obs"]],
+            #     color=['black'],
+            #     linewidth=0.3,
+            # )
             if r == 0:
                 ax3.legend()
             ax3.set_title(
-                f"Yearly:  KGE = {kge_parameters_yearly['KGE']:.2f} , NSE = {nse_yearly:.2f}",
+                f"sim - obs = {self.objectives.diff:.0f}$m^3$ or {self.objectives.rel_diff*100:.0f}%",
                 horizontalalignment="center",
             )
+            # ax32.set_ylabel(r"difference $[m^3 s^{-1}]$")
             ax3.set_ylabel(r"Q $[m^3 s^{-1}]$")
             ax3.set_xlim(time_yearly[0], time_yearly[-1])
             ax3.set_xticks(time_yearly[:: len(time_yearly) // 3])
@@ -330,7 +343,7 @@ class Hydrograph:
             if r == 0:
                 ax4.legend()
             ax4.set_title("Seasonality", horizontalalignment="center")
-            ax4.set_xlim(0.5, 12.5)
+            ax4.set_xlim(0.9, 12.1 )
             ax4.set_ylabel(r"Q $[m^3 s^{-1}]$")
             ax4.set_xlabel(r"month")
         if self.plots[3]:
@@ -360,7 +373,7 @@ class Hydrograph:
                 function=ax5.plot,
                 xvalues=xvalues,
                 yvalues=[
-                    kge_parameters_timestep["r"] * xvalues,
+                    self.objectives.r * xvalues,
                     xvalues,
                 ],
                 colors=["red", "black"],
@@ -369,7 +382,7 @@ class Hydrograph:
             if r == 0:
                 ax5.legend()
             ax5.set_title(
-                f'correlation coeff r = {kge_parameters_timestep["r"]:.2f}',
+                f'correlation coeff r = {self.objectives.r:.2f}',
                 horizontalalignment="center",
             )
             ax5.set_xlabel("Qobs $[m^3 s^{-1}]$")  # X Achsenbeschriftung
