@@ -61,7 +61,6 @@ myst_enable_extensions = [
 templates_path = ["_templates"]
 exclude_patterns = []
 
-
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
@@ -72,6 +71,7 @@ html_sidebars = {"**": ["sidebar-nav-bs", "sidebar-ethical-ads"]}
 html_theme_options = {
     "secondary_sidebar_items": ["page-toc"],
     "footer_start": ["copyright"],
+    "navigation_with_keys": False,
     "show_nav_level": 2,
     "show_toc_level": 2,
     "icon_links": [
