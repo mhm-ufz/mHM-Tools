@@ -61,9 +61,9 @@ doc = [
 ]
 test = ["pytest-cov>=3"]
 check = [
-  "black>=23,<24",
-  "isort[colors]<6",
-  "ruff==0.0.239",
+  "black>=24,<25",
+  "isort[colors]",
+  "ruff>=0.4,<0.5",
 ]
 
 [project.scripts]
@@ -115,6 +115,10 @@ exclude_lines = [
 ]
 
 [tool.ruff]
+# Same as Black.
+line-length = 88
+
+[tool.ruff.lint]
 select = [
   "E", "F", "W", # flake8
   "B",  "B904",  # flake8-bugbear
@@ -142,11 +146,10 @@ ignore = [
   "PLR2004", # magic values as constant
 ]
 
-# Same as Black.
-line-length = 88
-
-[tool.ruff.pylint]
+[tool.ruff.lint.pylint]
 max-args = 15
+max-branches = 20
+max-statements = 80
 
-[tool.ruff.pydocstyle]
+[tool.ruff.lint.pydocstyle]
 convention = "numpy"

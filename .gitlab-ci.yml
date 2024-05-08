@@ -11,7 +11,7 @@ check:
     - pip3 install --editable .[check]
     - black --check --diff --color .
     - isort --check --diff --color .
-    - ruff src/mhm_tools
+    - ruff check src/mhm_tools
 
 test:
   stage: test
