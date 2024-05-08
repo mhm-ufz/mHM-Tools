@@ -178,8 +178,8 @@ def write_grid(file, header, data=None, dtype="f4"):
         msg = f"write_grid: data type needs to be integer or float. Got: {dtype}"
         raise ValueError(msg)
     is_int = issubclass(np.dtype(dtype).type, np.integer)
-    if data:
-        data = np.asarray(data, dtype=dtype, ndmin=2)
+    if data is not None:
+        data = np.array(data, dtype=dtype, copy=False, ndmin=2)
         if data.ndim != 2:
             msg = f"write_grid: data needs to be 2D. Got: {data.ndim}D"
             raise ValueError(msg)
@@ -198,7 +198,7 @@ def write_grid(file, header, data=None, dtype="f4"):
             print(key, header[key], file=f)
         typ = int if is_int else float
         print("nodata_value", typ(header["nodata_value"]), file=f)
-        if data:
+        if data is not None:
             np.savetxt(f, data, fmt="%i" if is_int else "%f")
 
 
@@ -235,7 +235,7 @@ def check_resolutions(
     """
     if first_finer and cellsize_1 > cellsize_2:
         msg = (
-            f"Cell Size missmatch: "
+            "Cell Size missmatch: "
             f"{name_1} ({cellsize_1}) should be finer than "
             f"{name_2} ({cellsize_2})"
         )
@@ -247,7 +247,7 @@ def check_resolutions(
     # same check as done by mHM
     if not np.isclose(ratio, f_ratio, atol=1e-7, rtol=0.0):
         msg = (
-            f"Cell Size missmatch: "
+            "Cell Size missmatch: "
             f"{name_1} ({cellsize_1}) and "
             f"{name_2} ({cellsize_2}) are not compatible. "
             f"Ratio: {f_ratio}"
@@ -340,10 +340,10 @@ def check_grid_compatibility(header_1, header_2, name_1="LA", name_2="LB"):
         or header_1["yllcorner"] != header_2["yllcorner"]
     ):
         msg = (
-            f"Lower-left corner missmatch: "
+            "Lower-left corner missmatch: "
             f"{name_1} ({header_1['xllcorner']}, {header_1['yllcorner']})  and "
             f"{name_2} ({header_2['xllcorner']}, {header_2['yllcorner']})  and "
-            f"don't share the same lower-left corner."
+            "don't share the same lower-left corner."
         )
         raise ValueError(msg)
     # find the finer grid
@@ -360,7 +360,7 @@ def check_grid_compatibility(header_1, header_2, name_1="LA", name_2="LB"):
     )
     if ncols != header_2["ncols"] or nrows != header_2["nrows"]:
         msg = (
-            f"Extend missmatch: "
+            "Extend missmatch: "
             f"{name_2} (ncols={header_2['ncols']}, nrows={header_2['nrows']}) "
             f"would need an extend of ({ncols=}, {nrows=}) "
             f"to be compatible with {name_1}."
