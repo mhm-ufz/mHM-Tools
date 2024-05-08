@@ -7,12 +7,14 @@ import xarray as xr
 import mhm_tools as mt
 
 HERE = Path(__file__).parent
+TMP = HERE / "tmp"
+TMP.mkdir(parents=True, exist_ok=True)
 
 
 class TestBankfull(unittest.TestCase):
     def setUp(self):
-        self.in_file = HERE / "output" / "mRM_Fluxes_States.nc"
-        self.out_file = HERE / "Q-bkfl.nc"
+        self.in_file = HERE / "files" / "mRM_Fluxes_States.nc"
+        self.out_file = TMP / "Q-bkfl.nc"
         self.out_file.unlink(missing_ok=True)
         self.q_ref = np.array(
             [
