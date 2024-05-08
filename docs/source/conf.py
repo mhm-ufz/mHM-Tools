@@ -66,14 +66,9 @@ exclude_patterns = []
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
 html_theme = "pydata_sphinx_theme"
-html_static_path = ["_static"]
-html_css_files = [
-    "css/custom.css",
-]
-
 html_logo = "_static/logo_large.png"
 html_favicon = "_static/logo.png"
-
+html_sidebars = {"**": ["sidebar-nav-bs", "sidebar-ethical-ads"]}
 html_theme_options = {
     "secondary_sidebar_items": ["page-toc"],
     "footer_start": ["copyright"],
@@ -102,9 +97,9 @@ html_theme_options = {
 
 # Example configuration for intersphinx: refer to the Python standard library.
 intersphinx_mapping = {
-    "Python": ("https://docs.python.org/", None),
-    "NumPy": ("http://docs.scipy.org/doc/numpy/", None),
-    "matplotlib": ("http://matplotlib.org/stable/", None),
+    "Python": ("https://docs.python.org/3/", None),
+    "NumPy": ("https://numpy.org/doc/stable/", None),
+    "matplotlib": ("https://matplotlib.org/stable/", None),
     "xarray": ("https://docs.xarray.dev/en/stable/", None),
     "pytest": ("https://docs.pytest.org/en/7.1.x/", None),
 }

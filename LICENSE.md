@@ -4,7 +4,7 @@ mHM-Tools is a toolbox to pre- and post-process data for and from mHM.
 
 ## Copyright Notice
 
-Copyright © 2023, the mHM developers from Helmholtz-Zentrum für Umweltforschung GmbH - UFZ. All rights reserved.
+Copyright © 2023 - 2024, the mHM developers from Helmholtz-Zentrum für Umweltforschung GmbH - UFZ. All rights reserved.
 
 ***The code is a property of:***
 
