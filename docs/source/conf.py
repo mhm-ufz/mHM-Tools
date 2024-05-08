@@ -67,7 +67,7 @@ exclude_patterns = []
 html_theme = "pydata_sphinx_theme"
 html_logo = "_static/logo_large.png"
 html_favicon = "_static/logo.png"
-html_sidebars = {"**": ["sidebar-nav-bs", "sidebar-ethical-ads"]}
+html_sidebars = {"**": ["sidebar-nav-bs", "sidebar-ethical-ads"], "cli": []}
 html_theme_options = {
     "secondary_sidebar_items": ["page-toc"],
     "footer_start": ["copyright"],
