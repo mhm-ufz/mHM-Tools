@@ -1,4 +1,5 @@
 """Command line interface for mhm-tools."""
+
 import argparse
 
 from .. import __version__

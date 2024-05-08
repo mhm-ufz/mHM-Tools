@@ -5,6 +5,7 @@ Authors
 -------
 - Sebastian Müller
 """
+
 import time
 
 import numpy as np

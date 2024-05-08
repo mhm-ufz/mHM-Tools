@@ -8,6 +8,7 @@ Level-0 can be given as a file or a dictionary containing an ascii grid
 header. Other levels can then be given by only a cell-size and will be
 determined from Level-0.
 """
+
 import ast
 from pathlib import Path
 

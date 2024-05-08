@@ -1,4 +1,5 @@
 """Common NetCDF/xarray routines."""
+
 import xarray as xr
 
 from .constants import NC_ENCODE_DEFAULTS

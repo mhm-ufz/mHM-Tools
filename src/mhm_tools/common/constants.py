@@ -21,6 +21,7 @@ Constants
 .. autodata:: ESRI_REQ
 
 """
+
 __all__ = ["NO_DATA", "NC_ENCODE_DEFAULTS"]
 
 NO_DATA = -9999.0
