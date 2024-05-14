@@ -3,7 +3,7 @@
 import argparse
 
 from .. import __version__
-from . import _bankfull, _latlon
+from . import _bankfull, _create_catchment, _latlon
 
 
 class Formatter(
@@ -63,6 +63,7 @@ def _get_parser():
 
     add_command_from_module(subparsers, "bankfull", _bankfull)
     add_command_from_module(subparsers, "latlon", _latlon)
+    add_command_from_module(subparsers, "create_catchment", _create_catchment)
 
     # return the parser
     return parent_parser

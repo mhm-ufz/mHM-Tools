@@ -10,7 +10,8 @@ latlon file creation
     xy_to_latlon
 """
 
-from . import latlon
+from . import catchment, latlon
+from .catchment import create_catchment, merge_catchment
 from .latlon import create_latlon, xy_to_latlon
 
 __all__ = ["latlon"]
