@@ -85,7 +85,7 @@ def run(args):
     create_catchment(
         input_file=args.input_file,
         output_path=args.output_path,
-        var_name=args.var_name,
+        var_name=args.varname,
         var=args.var,
         ftype=args.ftype,
     )
