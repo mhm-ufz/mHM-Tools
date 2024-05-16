@@ -54,6 +54,24 @@ def add_args(parser):
             "Level-2 information wont be written to the latlon file."
         ),
     )
+    parser.add_argument(
+        "--vn",
+        "--varname",
+        default="flwdir",
+        help=("Name of variable in output file"),
+    )
+    parser.add_argument(
+        "-v",
+        "--var",
+        default="fdir",
+        help=("Input variable, use 'fdir' or 'dem'"),
+    )
+    parser.add_argument(
+        "--ftp",
+        "--ftype",
+        default="ldd",
+        help=("ftype of input variable, use 'nextxy', 'ldd' or 'd8'"),
+    )
 
 
 def run(args):
@@ -67,4 +85,7 @@ def run(args):
     create_catchment(
         input_file=args.input_file,
         output_path=args.output_path,
+        var_name=args.var_name,
+        var=args.var,
+        ftype=args.ftype,
     )

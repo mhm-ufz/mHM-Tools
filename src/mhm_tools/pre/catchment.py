@@ -275,12 +275,12 @@ def merge_catchment(path1, path2, out_path):
     merged.to_netcdf(out_path)
 
 
-def create_catchment(input_file, output_path):
+def create_catchment(input_file, output_path, var_name, var, ftype):
     c = Catchment(
-        file_name=pl.Path(input_file, output_path),
-        var_name="flwdir",
-        var="fdir",  # use 'fdir' or 'dem'
-        ftype="ldd",  # use 'nextxy', 'ldd' or 'd8'
+        file_name=pl.Path(input_file),
+        var_name=var_name,
+        var=var,
+        ftype=ftype,
         transform=(0.05, 0.0, -180, 0, 0.05, -90),
         latlon=True,
         # do_shift=True
