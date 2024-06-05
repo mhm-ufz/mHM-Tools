@@ -17,6 +17,7 @@ Built-in processing and tool functions.
 
    common
    post
+   pre
 """
 
 try:
@@ -25,7 +26,7 @@ except ModuleNotFoundError:  # pragma: no cover
     # package is not installed
     __version__ = "0.0.0.dev0"
 
-from . import common, post
+from . import common, post, pre
 
 __all__ = ["__version__"]
-__all__ += ["common", "post"]
+__all__ += ["common", "post", "pre"]

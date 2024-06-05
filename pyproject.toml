@@ -40,6 +40,7 @@ dependencies = [
   "xarray",
   "matplotlib>=3.6.1",
   "pandas<2; python_version=='3.8'",
+  "pyproj",
 ]
 
 [project.urls]
@@ -61,10 +62,9 @@ doc = [
 ]
 test = ["pytest-cov>=3"]
 check = [
-  "black>=23,<24",
-  "isort[colors]<6",
-  "ruff==0.0.239",
-  "pydocstyle",
+  "black>=24,<25",
+  "isort[colors]",
+  "ruff>=0.4,<0.5",
 ]
 
 [project.scripts]
@@ -98,9 +98,6 @@ target-version = ["py38"]
 profile = "black"
 multi_line_output = 3
 
-[tool.pydocstyle]
-convention = "numpy"
-
 [tool.coverage]
 [tool.coverage.run]
 source = ["mhm_tools"]
@@ -119,6 +116,10 @@ exclude_lines = [
 ]
 
 [tool.ruff]
+# Same as Black.
+line-length = 88
+
+[tool.ruff.lint]
 select = [
   "E", "F", "W", # flake8
   "B",  "B904",  # flake8-bugbear
@@ -139,9 +140,11 @@ select = [
   "T20",         # flake8-print
   "UP",          # pyupgrade
   "YTT",         # flake8-2020
+  "D",           # pydocstyle
 ]
 ignore = [
   "E501",    # line to long (black decides)
+  "PLR2004", # magic values as constant
 ]
 
 [tool.ruff.pylint]

@@ -126,5 +126,5 @@ docs/source/api/
 
 .vscode
 .ruff_cache
-tests/Q-bkfl.nc
+tests/tmp
 cov.xml

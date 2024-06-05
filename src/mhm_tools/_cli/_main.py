@@ -1,8 +1,9 @@
 """Command line interface for mhm-tools."""
+
 import argparse
 
 from .. import __version__
-from . import _bankfull, _hydrograph
+from . import _bankfull, _latlon, _hydrograph
 
 
 class Formatter(
@@ -61,6 +62,7 @@ def _get_parser():
     # module needs two functions: add_args and run
 
     add_command_from_module(subparsers, "bankfull", _bankfull)
+    add_command_from_module(subparsers, "latlon", _latlon)
 
     # hydrograph
     parser = subparsers.add_parser("hydrograph", description=_hydrograph.__doc__)
