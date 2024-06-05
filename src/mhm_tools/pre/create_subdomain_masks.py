@@ -41,7 +41,7 @@ FILL_VALUE = -9999
 # CLASSES
 class CreateSubdomainMasks:
 
-    def __init__(self, base_path, **kwargs):
+    def __init__(self, base_path):
         # set paths (e.g. on Eve HPC)
         self.base_path = Path(base_path)
         if not self.base_path.is_dir():
@@ -150,16 +150,16 @@ class CreateSubdomainMasks:
             # )
             # da.to_netcdf(fname, encoding={'mask': COMPRESSION_DICT})
 
-            fname = self.out_path.format('river_network', i)
+            fname = self.out_path.format('river_network', i)    
             ds_sub_ref_file = ds_ref_file.copy()
             for data_var in ds_sub_ref_file.data_vars:
                 ds_sub_ref_file[data_var].values[~sub_mask] = np.nan
 
             ds_sub_ref_file.to_netcdf(fname, encoding=REF_FILE_ENCODING)
 
-def create_subdomain_masks(base_path):
+def create_subdomain_masks(input_file):
     csm = CreateSubdomainMasks(
-        base_path=base_path
+        base_path=input_file,
     )
     csm.create_subdomains()
 

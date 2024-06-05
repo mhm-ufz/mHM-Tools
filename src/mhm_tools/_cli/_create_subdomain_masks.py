@@ -22,16 +22,6 @@ def add_args(parser):
         required=True,
         help=("Path to the input file"),
     )
-    required_args.add_argument(
-        "-o",
-        "--output_path",
-        required=True,
-        help=(
-            "Path to the output file. If a single file is written "
-            "this is the path to this file, if multiple files are "
-            "written, this is the prefix."
-        ),
-    )
 
 def run(args):
     """Create the catchment file.
@@ -42,4 +32,5 @@ def run(args):
         parsed command line arguments
     """
     create_subdomain_masks(
+        input_file=args.input_file,
     )
