@@ -147,5 +147,11 @@ ignore = [
   "PLR2004", # magic values as constant
 ]
 
-[tool.ruff.pylint]
-max-args = 7
+[tool.ruff.lint.pylint]
+max-args = 15
+max-branches = 20
+max-statements = 80
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
+
