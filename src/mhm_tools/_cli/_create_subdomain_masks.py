@@ -26,15 +26,13 @@ def add_args(parser):
     parser.add_argument(
         "-o",
         "--output_dir",
-        default='subdomain_river_masks_3min',
-        help=(
-            "specify an output directory as path from the input_dir"
-        ),
+        default="subdomain_river_masks_3min",
+        help=("specify an output directory as path from the input_dir"),
     )
     parser.add_argument(
         "-f",
         "--output_file_name",
-        default='river_network_subdomain',
+        default="river_network_subdomain",
         help=(
             "stem for the output filename, which is then numbered for the different basin clusters"
         ),
@@ -42,24 +40,31 @@ def add_args(parser):
     parser.add_argument(
         "-b",
         "--basin_ids",
-        default='hydro_merged_03min.nc',
-        help=("file containing unique basins ids for all river basins"
-              "they need to be in variable 'basin'")
+        default="hydro_merged_03min.nc",
+        help=(
+            "file containing unique basins ids for all river basins"
+            "they need to be in variable 'basin'"
+        ),
     )
     parser.add_argument(
         "-c",
         "--basin_clusters",
-        default='basin_clusters.nc',
-        help=("file containing clustered basins ids e.g. of the 53 subbasins from PGB reference"
-              "they need to be in variable 'mask' but can have any resolution")
+        default="basin_clusters.nc",
+        help=(
+            "file containing clustered basins ids e.g. of the 53 subbasins from PGB reference"
+            "they need to be in variable 'mask' but can have any resolution"
+        ),
     )
     parser.add_argument(
         "-l",
         "--land_mask",
-        default='land_mask_remapped_03min.nc',
-        help=("File containing a mask of all land surfaces"
-              "grid of target resolution, need to be in integer variable 'land_mask'")
+        default="land_mask_remapped_03min.nc",
+        help=(
+            "File containing a mask of all land surfaces"
+            "grid of target resolution, need to be in integer variable 'land_mask'"
+        ),
     )
+
 
 def run(args):
     """Create the catchment file.
@@ -75,5 +80,5 @@ def run(args):
         output_file_name=args.output_file_name,
         basin_id_file=args.basin_ids,
         basin_clusters=args.basin_clusters,
-        land_mask=args.land_mask
+        land_mask=args.land_mask,
     )

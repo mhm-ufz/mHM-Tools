@@ -10,29 +10,37 @@ Based on a script by
 - Matthias Kelbling
 """
 
-import xarray as xr
-import numpy as np
-from time import asctime
-import matplotlib as mpl
-from scipy.interpolate import NearestNDInterpolator
 from pathlib import Path
+from time import asctime
 
+import matplotlib as mpl
+import numpy as np
+import xarray as xr
+from scipy.interpolate import NearestNDInterpolator
 
 # GLOBAL VARIABLES
 # Coordinate arrays for the shape of Greenland in lons, lats
 REF_FILE_ENCODING = {
-    'elevtn': {'dtype': 'float32', '_FillValue': -9999., 'zlib': True, 'complevel': 4},
-    'basin': {'dtype': 'int32', '_FillValue': -9999, 'zlib': True, 'complevel': 4},
-    'flwdir': {'dtype': 'int32', '_FillValue': -9999, 'zlib': True, 'complevel': 4},
-    'upgrid': {'dtype': 'int32', '_FillValue': -9999, 'zlib': True, 'complevel': 4},
-    'uparea_grid': {'dtype': 'float32', '_FillValue': -9999., 'zlib': True, 'complevel': 4},
-    'lat': {'dtype': 'float32', '_FillValue': -9999., 'zlib': True, 'complevel': 4},
-    'lon': {'dtype': 'float32', '_FillValue': -9999., 'zlib': True, 'complevel': 4},
+    "elevtn": {"dtype": "float32", "_FillValue": -9999.0, "zlib": True, "complevel": 4},
+    "basin": {"dtype": "int32", "_FillValue": -9999, "zlib": True, "complevel": 4},
+    "flwdir": {"dtype": "int32", "_FillValue": -9999, "zlib": True, "complevel": 4},
+    "upgrid": {"dtype": "int32", "_FillValue": -9999, "zlib": True, "complevel": 4},
+    "uparea_grid": {
+        "dtype": "float32",
+        "_FillValue": -9999.0,
+        "zlib": True,
+        "complevel": 4,
+    },
+    "lat": {"dtype": "float32", "_FillValue": -9999.0, "zlib": True, "complevel": 4},
+    "lon": {"dtype": "float32", "_FillValue": -9999.0, "zlib": True, "complevel": 4},
 }
-COMPRESSION_DICT = {'zlib': True, 'complevel': 4}
-GREENLAND_COORDS = np.array([
+COMPRESSION_DICT = {"zlib": True, "complevel": 4}
+GREENLAND_COORDS = np.array(
+    [
         [-43.65, -17.25, -7.05, -56.05, -60.05, -69.85, -73.65, -71.85, -46.65],
-        [58.25, 69.85, 84.65, 85.85, 82.65, 79.45, 79.05, 75.25, 57.65]]).T
+        [58.25, 69.85, 84.65, 85.85, 82.65, 79.45, 79.05, 75.25, 57.65],
+    ]
+).T
 FILL_VALUE = -9999
 
 # FUNCTIONS
@@ -41,24 +49,26 @@ FILL_VALUE = -9999
 # CLASSES
 class CreateSubdomainMasks:
 
-    def __init__(self, 
-                 input_dir,
-                 output_dir, 
-                 output_file_name,
-                 basin_id_file,
-                 basin_clusters,
-                 land_mask):
+    def __init__(
+        self,
+        input_dir,
+        output_dir,
+        output_file_name,
+        basin_id_file,
+        basin_clusters,
+        land_mask,
+    ):
         # set paths (e.g. on Eve HPC)
         self.base_path = Path(input_dir)
         if not self.base_path.is_dir():
             raise ValueError("input path must be a directory")
-        
+
         # unique basins ids, need to be in variable 'basin'
         self.ref_file = self.base_path / basin_id_file
-        
+
         # clustered basins ids, need to be in variable 'mask', can be any resolution
         self.pgb_file = self.base_path / basin_clusters
-        
+
         # land mask and grid of target resolution, need to be in integer variable 'land_mask'
         self.land_file = self.base_path / land_mask
 
@@ -84,71 +94,94 @@ class CreateSubdomainMasks:
         lon2d, lat2d = np.meshgrid(arr.lon[bbox_lon_mask], arr.lat[bbox_lat_mask])
         points = np.hstack((lon2d.reshape(-1, 1), lat2d.reshape(-1, 1)))
         # mask out the values
-        bbox_mask = polygon.contains_points(points).reshape(int(bbox_lat_mask.sum()), int(bbox_lon_mask.sum()))
+        bbox_mask = polygon.contains_points(points).reshape(
+            int(bbox_lat_mask.sum()), int(bbox_lon_mask.sum())
+        )
 
         # global mask, set to False
         mask = np.zeros_like(arr.data, dtype=bool)
         # insert the local mask into the global one
         mask[np.ix_(bbox_lat_mask, bbox_lon_mask)] = bbox_mask
         return mask
+
     def create_subdomains(self):
-        new_ids = self.read_var(fname=self.ref_file, var_name='basin')
-        orig_ids = self.read_var(fname=self.pgb_file, var_name='mask')
-        land_mask = self.read_var(fname=self.land_file, var_name='land_mask').astype(bool)
-        ds_ref_file = xr.open_dataset(self.ref_file).sel(lat=land_mask.lat, lon=land_mask.lon, method='nearest')
-        for coord in ['latitude', 'longitude']:
+        new_ids = self.read_var(fname=self.ref_file, var_name="basin")
+        orig_ids = self.read_var(fname=self.pgb_file, var_name="mask")
+        land_mask = self.read_var(fname=self.land_file, var_name="land_mask").astype(
+            bool
+        )
+        ds_ref_file = xr.open_dataset(self.ref_file).sel(
+            lat=land_mask.lat, lon=land_mask.lon, method="nearest"
+        )
+        for coord in ["latitude", "longitude"]:
             if coord in ds_ref_file:
                 ds_ref_file = ds_ref_file.drop(coord)
 
-        file_basins_remapped = self.base_path / 'unique_basin_ids_03min_agg54classes.nc'
+        file_basins_remapped = self.base_path / "unique_basin_ids_03min_agg54classes.nc"
         if not file_basins_remapped.is_file():
             # map the 53 subbasins from PGB reference onto target grid
-            print('remapping orignal subbasins to target grid and adding Greenland id')
-            orig_remapped = orig_ids.sel(lat=land_mask.lat, lon=land_mask.lon, method='nearest')
+            print("remapping orignal subbasins to target grid and adding Greenland id")
+            orig_remapped = orig_ids.sel(
+                lat=land_mask.lat, lon=land_mask.lon, method="nearest"
+            )
             # add one additional subbasin for greenland
             greenland_mask = self.get_mask_from_polygon(orig_remapped, GREENLAND_COORDS)
             orig_remapped.values[greenland_mask] = 54
 
             # for all subbasins where the land_mask is nan, also set nan
-            print('remapping new subbasins to target grid')
-            new_ids_remapped = new_ids.sel(lat=land_mask.lat, lon=land_mask.lon, method='nearest')
+            print("remapping new subbasins to target grid")
+            new_ids_remapped = new_ids.sel(
+                lat=land_mask.lat, lon=land_mask.lon, method="nearest"
+            )
             new_ids_remapped.values[np.isnan(land_mask)] = np.nan
 
             # for all original subbasins that do not cover new subbasins, interpolate
             # https://stackoverflow.com/questions/68197762/fill-nan-with-nearest-neighbor-in-numpy-array
             # in contrast to previous version, we interpolate the whole globe to ensure we do not use a nan as fill value
-            print('interpolating missing values in original subbasins')
+            print("interpolating missing values in original subbasins")
             mask_fill = np.where(~np.isnan(orig_remapped.values))
-            interp = NearestNDInterpolator(np.transpose(mask_fill), orig_remapped.values[mask_fill])
+            interp = NearestNDInterpolator(
+                np.transpose(mask_fill), orig_remapped.values[mask_fill]
+            )
             filled_data = interp(*np.indices(orig_remapped.values.shape))
 
             # 2nd step --- set exactly one subdomain mask for each river
-            print('assigning each new subbasin to class defined in original subbasins')
-            basin_ids = np.unique(new_ids_remapped.values[~np.isnan(new_ids_remapped.values)])
+            print("assigning each new subbasin to class defined in original subbasins")
+            basin_ids = np.unique(
+                new_ids_remapped.values[~np.isnan(new_ids_remapped.values)]
+            )
             for basin_id in basin_ids:
                 # print('processing subdomain {}'.format(basin_id))
                 # get mask of all cells for this river
                 river_mask = new_ids_remapped.values == basin_id
                 # get all ids of the original basins for this id
-                sel_ids, sel_counts = np.unique(filled_data[river_mask], return_counts=True)
+                sel_ids, sel_counts = np.unique(
+                    filled_data[river_mask], return_counts=True
+                )
                 # select the most commonly occurring one
                 new_ids_remapped.values[river_mask] = sel_ids[sel_counts.argmax()]
 
             # 3rd step --- write masks
             # read land_mask to intersect with subdomain_mask
-            new_ids_remapped.to_netcdf(file_basins_remapped,
-                                       encoding={new_ids_remapped.name: {'_FillValue': FILL_VALUE, 'dtype': 'int16'}})
+            new_ids_remapped.to_netcdf(
+                file_basins_remapped,
+                encoding={
+                    new_ids_remapped.name: {"_FillValue": FILL_VALUE, "dtype": "int16"}
+                },
+            )
         else:
-            print('using cached remapped basin ids')
+            print("using cached remapped basin ids")
             new_ids_remapped = xr.open_dataarray(file_basins_remapped)
-        basin_ids = np.unique(new_ids_remapped.values[~np.isnan(new_ids_remapped.values)])
+        basin_ids = np.unique(
+            new_ids_remapped.values[~np.isnan(new_ids_remapped.values)]
+        )
 
-        print('writing output files')
+        print("writing output files")
         for i, basin_id in enumerate(basin_ids, 1):
 
-            print('processing subdomain {}'.format(i))
+            print("processing subdomain {}".format(i))
 
-            sub_mask = (new_ids_remapped.values == basin_id)
+            sub_mask = new_ids_remapped.values == basin_id
 
             # fname = out_path.format('land', basin_id)
             # da = xr.DataArray(
@@ -163,25 +196,23 @@ class CreateSubdomainMasks:
             # )
             # da.to_netcdf(fname, encoding={'mask': COMPRESSION_DICT})
 
-            fname = str(self.out_file_name) + f'_{i:02}.nc'
+            fname = str(self.out_file_name) + f"_{i:02}.nc"
             ds_sub_ref_file = ds_ref_file.copy()
             for data_var in ds_sub_ref_file.data_vars:
                 ds_sub_ref_file[data_var].values[~sub_mask] = np.nan
 
             ds_sub_ref_file.to_netcdf(fname, encoding=REF_FILE_ENCODING)
 
-def create_subdomain_masks(input_dir,
-        output_dir, output_file_name,
-        basin_id_file,
-        basin_clusters,
-        land_mask):
+
+def create_subdomain_masks(
+    input_dir, output_dir, output_file_name, basin_id_file, basin_clusters, land_mask
+):
     csm = CreateSubdomainMasks(
         input_dir=input_dir,
-        output_dir=output_dir, 
+        output_dir=output_dir,
         output_file_name=output_file_name,
         basin_id_file=basin_id_file,
         basin_clusters=basin_clusters,
-        land_mask=land_mask
+        land_mask=land_mask,
     )
     csm.create_subdomains()
-
