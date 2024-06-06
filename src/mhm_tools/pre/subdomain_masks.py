@@ -1,5 +1,5 @@
 """
-Create the catchment file for mRM
+Create the catchment file for mRM.
 
 Authors
 -------
@@ -11,7 +11,6 @@ Based on a script by
 """
 
 from pathlib import Path
-from time import asctime
 
 import matplotlib as mpl
 import numpy as np
@@ -46,8 +45,31 @@ FILL_VALUE = -9999
 # FUNCTIONS
 
 
-# CLASSES
 class CreateSubdomainMasks:
+    """
+    A class for creating subdomain masks based on input data.
+
+    Parameters
+    ----------
+    input_dir : str
+        The directory path where the input files are located.
+    output_dir : str
+        The directory path where the output files will be saved.
+    output_file_name : str
+        The name of the output file.
+    basin_id_file : str
+        The file name of the reference basin IDs.
+    basin_clusters : str
+        The file name of the basin cluster IDs.
+    land_mask : str
+        The file name of the land mask and grid of target resolution.
+
+    Raises
+    ------
+    ValueError
+        If the input path is not a directory.
+
+    """
 
     def __init__(
         self,
@@ -61,7 +83,8 @@ class CreateSubdomainMasks:
         # set paths (e.g. on Eve HPC)
         self.base_path = Path(input_dir)
         if not self.base_path.is_dir():
-            raise ValueError("input path must be a directory")
+            msg = "input path must be a directory"
+            raise ValueError(msg)
 
         # unique basins ids, need to be in variable 'basin'
         self.ref_file = self.base_path / basin_id_file
@@ -79,13 +102,13 @@ class CreateSubdomainMasks:
 
     @staticmethod
     def read_var(fname, var_name):
-        """Reads a variable from a netcdf file."""
+        """Read a variable from a netcdf file."""
         with xr.open_dataset(fname) as ds:
             return ds[var_name]
 
     @staticmethod
     def get_mask_from_polygon(arr, vertices):
-        """Creates a mask on an array with lon and lat attributes for given list of vertices."""
+        """Create a mask on an array with lon and lat attributes for given list of vertices."""
         polygon = mpl.path.Path(vertices)
         # mask out only the values in arr that fall within bbox of polygon, convert them to points
         bbox = polygon.get_extents()
@@ -105,6 +128,14 @@ class CreateSubdomainMasks:
         return mask
 
     def create_subdomains(self):
+        """
+        Create subdomain masks based on the input data.
+
+        Returns
+        -------
+        None
+
+        """
         new_ids = self.read_var(fname=self.ref_file, var_name="basin")
         orig_ids = self.read_var(fname=self.pgb_file, var_name="mask")
         land_mask = self.read_var(fname=self.land_file, var_name="land_mask").astype(
@@ -120,7 +151,7 @@ class CreateSubdomainMasks:
         file_basins_remapped = self.base_path / "unique_basin_ids_03min_agg54classes.nc"
         if not file_basins_remapped.is_file():
             # map the 53 subbasins from PGB reference onto target grid
-            print("remapping orignal subbasins to target grid and adding Greenland id")
+            # print("remapping orignal subbasins to target grid and adding Greenland id")
             orig_remapped = orig_ids.sel(
                 lat=land_mask.lat, lon=land_mask.lon, method="nearest"
             )
@@ -129,7 +160,7 @@ class CreateSubdomainMasks:
             orig_remapped.values[greenland_mask] = 54
 
             # for all subbasins where the land_mask is nan, also set nan
-            print("remapping new subbasins to target grid")
+            # print("remapping new subbasins to target grid")
             new_ids_remapped = new_ids.sel(
                 lat=land_mask.lat, lon=land_mask.lon, method="nearest"
             )
@@ -138,7 +169,7 @@ class CreateSubdomainMasks:
             # for all original subbasins that do not cover new subbasins, interpolate
             # https://stackoverflow.com/questions/68197762/fill-nan-with-nearest-neighbor-in-numpy-array
             # in contrast to previous version, we interpolate the whole globe to ensure we do not use a nan as fill value
-            print("interpolating missing values in original subbasins")
+            # print("interpolating missing values in original subbasins")
             mask_fill = np.where(~np.isnan(orig_remapped.values))
             interp = NearestNDInterpolator(
                 np.transpose(mask_fill), orig_remapped.values[mask_fill]
@@ -146,12 +177,11 @@ class CreateSubdomainMasks:
             filled_data = interp(*np.indices(orig_remapped.values.shape))
 
             # 2nd step --- set exactly one subdomain mask for each river
-            print("assigning each new subbasin to class defined in original subbasins")
+            # print("assigning each new subbasin to class defined in original subbasins")
             basin_ids = np.unique(
                 new_ids_remapped.values[~np.isnan(new_ids_remapped.values)]
             )
             for basin_id in basin_ids:
-                # print('processing subdomain {}'.format(basin_id))
                 # get mask of all cells for this river
                 river_mask = new_ids_remapped.values == basin_id
                 # get all ids of the original basins for this id
@@ -170,31 +200,18 @@ class CreateSubdomainMasks:
                 },
             )
         else:
-            print("using cached remapped basin ids")
+            # print("using cached remapped basin ids")
             new_ids_remapped = xr.open_dataarray(file_basins_remapped)
         basin_ids = np.unique(
             new_ids_remapped.values[~np.isnan(new_ids_remapped.values)]
         )
 
-        print("writing output files")
+        # print("writing output files")
         for i, basin_id in enumerate(basin_ids, 1):
 
-            print("processing subdomain {}".format(i))
+            # print(f"processing subdomain {i}")
 
             sub_mask = new_ids_remapped.values == basin_id
-
-            # fname = out_path.format('land', basin_id)
-            # da = xr.DataArray(
-            #     data=sub_mask.astype(int),
-            #     coords=new_ids_remapped.coords,
-            #     name='mask',
-            #     attrs={
-            #         'author': 'Robert Schweppe (robert.schweppe@ufz.de)',
-            #         'created': asctime(),
-            #         'institutions': 'Helmholtz Centre for Environmental Research (UFZ)',
-            #         'projects': 'Ulysses (C3S2_410_LOT1_UFZ)'}
-            # )
-            # da.to_netcdf(fname, encoding={'mask': COMPRESSION_DICT})
 
             fname = str(self.out_file_name) + f"_{i:02}.nc"
             ds_sub_ref_file = ds_ref_file.copy()
@@ -207,6 +224,21 @@ class CreateSubdomainMasks:
 def create_subdomain_masks(
     input_dir, output_dir, output_file_name, basin_id_file, basin_clusters, land_mask
 ):
+    """
+    Create subdomain masks based on the provided input parameters.
+
+    Args:
+        input_dir (str): The directory containing the input files.
+        output_dir (str): The directory where the output files will be saved.
+        output_file_name (str): The name of the output file.
+        basin_id_file (str): The file containing the basin IDs.
+        basin_clusters (str): The file containing the basin clusters.
+        land_mask (str): The land mask file.
+
+    Returns
+    -------
+        None
+    """
     csm = CreateSubdomainMasks(
         input_dir=input_dir,
         output_dir=output_dir,
