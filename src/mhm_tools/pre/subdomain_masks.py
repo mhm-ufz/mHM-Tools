@@ -41,18 +41,31 @@ FILL_VALUE = -9999
 # CLASSES
 class CreateSubdomainMasks:
 
-    def __init__(self, base_path):
+    def __init__(self, 
+                 input_dir,
+                 output_dir, 
+                 output_file_name,
+                 basin_id_file,
+                 basin_clusters,
+                 land_mask):
         # set paths (e.g. on Eve HPC)
-        self.base_path = Path(base_path)
+        self.base_path = Path(input_dir)
         if not self.base_path.is_dir():
-            raise ValueError("base path must be a directory")
+            raise ValueError("input path must be a directory")
+        
         # unique basins ids, need to be in variable 'basin'
-        self.ref_file = self.base_path / 'hydro_merged_03min.nc'
+        self.ref_file = self.base_path / basin_id_file
+        
         # clustered basins ids, need to be in variable 'mask', can be any resolution
-        self.pgb_file = self.base_path / 'basin_clusters.nc'
+        self.pgb_file = self.base_path / basin_clusters
+        
         # land mask and grid of target resolution, need to be in integer variable 'land_mask'
-        self.land_file = self.base_path / 'land_mask_remapped_03min.nc'
-        self.out_path = self.base_path / 'subdomain_river_masks_3min/{{}}_subdomain_{{:02}}.nc'
+        self.land_file = self.base_path / land_mask
+
+        out_dir_path = self.base_path / output_dir
+        if not out_dir_path.is_dir():
+            out_dir_path.mkdir(parents=True)
+        self.out_file_name = out_dir_path / output_file_name
 
     @staticmethod
     def read_var(fname, var_name):
@@ -150,16 +163,25 @@ class CreateSubdomainMasks:
             # )
             # da.to_netcdf(fname, encoding={'mask': COMPRESSION_DICT})
 
-            fname = self.out_path.format('river_network', i)    
+            fname = str(self.out_file_name) + f'_{i:02}.nc'
             ds_sub_ref_file = ds_ref_file.copy()
             for data_var in ds_sub_ref_file.data_vars:
                 ds_sub_ref_file[data_var].values[~sub_mask] = np.nan
 
             ds_sub_ref_file.to_netcdf(fname, encoding=REF_FILE_ENCODING)
 
-def create_subdomain_masks(input_file):
+def create_subdomain_masks(input_dir,
+        output_dir, output_file_name,
+        basin_id_file,
+        basin_clusters,
+        land_mask):
     csm = CreateSubdomainMasks(
-        base_path=input_file,
+        input_dir=input_dir,
+        output_dir=output_dir, 
+        output_file_name=output_file_name,
+        basin_id_file=basin_id_file,
+        basin_clusters=basin_clusters,
+        land_mask=land_mask
     )
     csm.create_subdomains()
 
