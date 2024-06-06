@@ -1,4 +1,5 @@
 """Create a hydrograph showing the simulated and observed discharge."""
+
 from ..post.hydrograph import Hydrograph
 
 
@@ -9,8 +10,8 @@ def add_args(parser):
     ----------
     parser : argparse.ArgumentParser
         the main argument parser
-    """
 
+    """
     parser.add_argument(
         "-i",
         "--input",
@@ -43,15 +44,26 @@ def add_args(parser):
         action="store_true",
         help="Show the plots that are created the default is only saving them",
     )
+    # parser.add_argument(
+    #     "-p",
+    #     "--plots",
+    #     default=15,
+    #     required=False,
+    #     dest="plots_to_be_created",
+    #     help="specifies which graphics are generated. Sum up the numbers of the plots you want: "
+    #     "1 model timestep, 2 yearly, 4 seasonality, 8 scatter e.g. "
+    #     "all with out seasonality (advised for performance) = 11 "
+    #     "default is all",
+    # )
     parser.add_argument(
         "-p",
         "--plots",
-        default=15,
+        default="tysc",
         required=False,
         dest="plots_to_be_created",
-        help="specifies which graphics are generated. Sum up the numbers of the plots you want: "
-        "1 model timestep, 2 yearly, 4 seasonality, 8 scatter e.g. "
-        "all with out seasonality (advised for performance) = 11 "
+        help="specifies which graphics are generated."
+        "t model timestep, y yearly, s seasonality, c scatter e.g. "
+        "all with out seasonality (advised for performance) = tyc"
         "default is all",
     )
     parser.add_argument(
@@ -64,13 +76,14 @@ def add_args(parser):
     )
 
 
-def hydrograph(args):
+def run(args):
     """Calculate the bankfull discharge
 
     Parameters
     ----------
     args : argparse.Namespace
         parsed command line arguments
+
     """
     hydro = Hydrograph(args.log_level)
     hydro.gen_hydrograph(

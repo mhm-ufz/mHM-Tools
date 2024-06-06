@@ -1,6 +1,6 @@
+"""26.01.2023
 """
-26.01.2023
-"""
+
 import itertools
 import logging
 from pathlib import Path
@@ -121,8 +121,7 @@ class Hydrograph:
     def plot_on_axis(
         function, xvalues, yvalues: list, colors=None, labels=None, **arguments
     ):
-        """
-        Plots multiple graphs for specified function.
+        """Plots multiple graphs for specified function.
         :param function: matplotlib plot function e.g. ax.plot, plt.plot, ax.scatter, ax.errorbar, ...
         :param xvalues: list of x values
         :param yvalues: list of arrays with the y values
@@ -139,21 +138,21 @@ class Hydrograph:
             arguments["label"] = labels[i]
             function(xvalues, yvalue, **arguments)
 
-    def check_which_plots_to_create(self, a):
+    def check_which_plots_to_create(self, code):
+        """Determines which plots to create based on the given code.
+        the produced tuple as a one at the index of the selected plots:
+          model timestep (0), yearly (1), seasonality (2), scatter (3)
         """
-        creates all possible permutations of 4 different plots and tests the plot_code (sum(a_i * 2*i) for a_i = 0 or 1)
-        against them to create a touple indicating which plots to produce
-        """
-        possible_permutations = list(itertools.product([0, 1], repeat=4))
-        for permutation in possible_permutations:
-            check = 0
-            for i, v in enumerate(permutation):
-                check += v * 2**i
-            if int(a) == check:
-                self.logger.debug(f"plots to be produced: {permutation}")
-                self.plots = permutation
-                return
-        self.logger.warning("No plots will be produced since none were specified.")
+        if not code:
+            self.logger.warning("No plots will be produced since none were specified.")
+        if "t" in code:
+            self.plots[0] = 1
+        if "y" in code:
+            self.plots[1] = 1
+        if "s" in code:
+            self.plots[2] = 1
+        if "c" in code:
+            self.plots[3] = 1
 
     @staticmethod
     def raise_if_not_directory(path):
@@ -176,8 +175,7 @@ class Hydrograph:
                         self.discharge_data = self.discharge_data.rename({v: key})
 
     def gen_hydrograph(self, input_path, output_file, show, save, title, plot_code):
-        """
-        Read in discharge data and plot the simulated against the observed discharge
+        """Read in discharge data and plot the simulated against the observed discharge
         for different time resolutions and a seasonality as well as plotting simulated against observed discharge.
         :param input_path: Path to discharge.nc file
         :param output_file: Filename of the resulting file. e.g. hydrograph.png
@@ -186,7 +184,6 @@ class Hydrograph:
         :param title: title given to the hydrograph
         :param plot_code: code indicating which plots to create
         """
-
         self.check_which_plots_to_create(plot_code)
         if sum(self.plots) == 0:
             self.logger.warning("Create no plots")
