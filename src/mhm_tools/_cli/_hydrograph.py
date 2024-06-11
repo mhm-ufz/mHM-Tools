@@ -64,7 +64,6 @@ def add_args(parser):
         help="specifies which graphics are generated."
         "t model timestep, y yearly, s seasonality, c scatter e.g. "
         "all with out seasonality (advised for performance) = tyc"
-        "default is all",
     )
     parser.add_argument(
         "-l",
@@ -73,6 +72,13 @@ def add_args(parser):
         required=False,
         dest="log_level",
         help="log level (debug, info, warning) default is warning",
+    )
+    parser.add_argument(
+        "--prec",
+        dest="prec",
+        required=False,
+        default="",
+        help="path of the precipiation file",
     )
 
 
@@ -93,4 +99,5 @@ def run(args):
         save=True,
         title=args.title,
         plot_code=args.plots_to_be_created,
+        prec_path=args.prec
     )

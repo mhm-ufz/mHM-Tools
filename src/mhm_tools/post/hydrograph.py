@@ -8,6 +8,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
+import matplotlib.gridspec as gridspec
 
 
 class Catchment:
@@ -36,7 +37,7 @@ class Hydrograph:
     grid = None
     logging.basicConfig(format="%(asctime)s - %(levelname)-8s - %(message)s")
     logger = logging.getLogger(__name__)
-    plots = (0, 0, 0, 0)
+    plots = [0, 0, 0, 0]
     catchment = Catchment()
     discharge_data = None
     objectives = Objectives()
@@ -46,16 +47,22 @@ class Hydrograph:
 
     @staticmethod
     def remove_empty_values(arr1, arr2):
+        arr1 = np.array(arr1)
+        arr2 = np.array(arr2)
         if len(arr1) != len(arr2):
             exeption = "The two timeseries do not have the same length."
             raise Exception(exeption)
-        arr1_ret, arr2_ret = [], []
-        for i, v in enumerate(arr1):
-            w = arr2[i]
-            if v is not None and v is not np.nan and w is not None and w is not np.nan:
-                arr1_ret.append(v)
-                arr2_ret.append(w)
-        return np.array(arr1_ret), np.array(arr2_ret)
+        data = np.transpose(np.array([arr1.flatten(), arr2.flatten()]))
+        data = data[~np.isnan(data).any(1)]
+        return data[:, 0], data[:, 1]
+
+        # arr1_ret, arr2_ret = [], []
+        # for i, v in enumerate(arr1):
+        #     w = arr2[i]
+        #     if v is not None and v is not np.nan and w is not None and w is not np.nan:
+        #         arr1_ret.append(v)
+        #         arr2_ret.append(w)
+        # return np.array(arr1_ret), np.array(arr2_ret)
 
     def calc_kling_gupta_efficiency(self, observed, simulated):
         alpha = np.nanstd(simulated) / np.nanstd(observed)
@@ -75,11 +82,12 @@ class Hydrograph:
         )
 
     def calc_objectives(self, observed, simulated):
-        observed, simulated = self.remove_empty_values(observed, simulated)
+        observed, simulated = self.remove_empty_values(observed,simulated)
         self.calc_nash_sutcliff_efficiency(observed, simulated)
         self.calc_kling_gupta_efficiency(observed, simulated)
-        self.objectives.diff = np.sum(simulated) - np.sum(observed)
-        self.objectives.rel_diff = self.objectives.diff / np.sum(observed)
+        self.logger.debug('sim', np.nansum(simulated), 'obs', np.nansum(observed))
+        self.objectives.diff = np.nansum(simulated) - np.nansum(observed)
+        self.objectives.rel_diff = self.objectives.diff / np.nansum(observed)
 
     def get_row_col(self):
         # finds the first unused gridcell for the next plot
@@ -115,7 +123,7 @@ class Hydrograph:
         var_ses = [[], [], [], [], [], [], [], [], [], [], [], []]
         for i in range(len(variable)):
             var_ses[int(variable.time[i].dt.month.data) - 1].append(variable[i])
-        return np.array([np.mean(np.array(m)) for m in var_ses])
+        return np.array([np.nanmean(np.array(m)) for m in var_ses])
 
     @staticmethod
     def plot_on_axis(
@@ -135,7 +143,8 @@ class Hydrograph:
             colors = ["#EF4340", "#3A4F99"]
         for i, yvalue in enumerate(yvalues):
             arguments["color"] = colors[i]
-            arguments["label"] = labels[i]
+            if labels:
+                arguments["label"] = labels[i]
             function(xvalues, yvalue, **arguments)
 
     def check_which_plots_to_create(self, code):
@@ -174,7 +183,7 @@ class Hydrograph:
                         self.catchment.name = str(int(v.split("_")[1]))
                         self.discharge_data = self.discharge_data.rename({v: key})
 
-    def gen_hydrograph(self, input_path, output_file, show, save, title, plot_code):
+    def gen_hydrograph(self, input_path, output_file, show, save, title, plot_code, prec_path):
         """Read in discharge data and plot the simulated against the observed discharge
         for different time resolutions and a seasonality as well as plotting simulated against observed discharge.
         :param input_path: Path to discharge.nc file
@@ -195,7 +204,8 @@ class Hydrograph:
         self.load_data_from_path(input_path)
 
         # calculate metrics at timestep resolution (generally hourly)
-        self.calc_objectives(self.discharge_data["sim"], self.discharge_data["obs"])
+        self.logger.debug(self.discharge_data["sim"])
+        self.calc_objectives(self.discharge_data["obs"],self.discharge_data["sim"])
 
         # create figure and determining the number of rows and cols
         fig = plt.figure(figsize=(7, 8))
@@ -232,7 +242,7 @@ class Hydrograph:
             fontsize="x-large",
         )
 
-        # generate plots
+        # generateself plots
         if self.plots[0]:
             self.logger.info("generating discharge plot")
             r, c = self.get_row_col()
@@ -250,6 +260,7 @@ class Hydrograph:
                 xvalues=self.discharge_data["time"],
                 yvalues=[self.discharge_data["sim"], self.discharge_data["obs"]],
                 linewidth=0.3,
+                labels=[] # no labels
             )
             ax1.legend()
             title = (
@@ -279,9 +290,8 @@ class Hydrograph:
             else:
                 ax3 = fig.add_subplot(gs[r, c])
                 self.grid[r][c] = True
-            # ax32 = ax3.twinx()
             self.logger.debug(self.grid)
-            discharge_yearly = self.discharge_data.resample(time="Y").mean(skipna=False)
+            discharge_yearly = self.discharge_data.resample(time="YE").mean(skipna=True)
             # calculate metrics at yearly resolution
             time_yearly = [str(y.dt.year.data) for y in discharge_yearly["time"]]
             self.plot_on_axis(
@@ -318,18 +328,67 @@ class Hydrograph:
             self.logger.info("generating discharge seasonality plot")
             r, c = self.get_row_col()
             if r == 0 or self.is_last_plot(2):
-                ax4 = fig.add_subplot(gs[r, c:])
+                outer_gs = gs[r, c:]
                 self.grid[r] = [True for _ in self.grid[r]]
             else:
-                ax4 = fig.add_subplot(gs[r, c])
+                outer_gs = gs[r, c]
                 self.grid[r][c] = True
-            self.logger.debug(self.grid)
+            
+            if prec_path is not None and Path(prec_path).is_file():
+                pre = xr.open_dataset('/home/luedke/data/test_data_hydrograph/pre.nc')
+            else:
+                self.logger.warning('No precipitation file.')
+                pre=None
+            if pre is not None:
+                inner_gs = gridspec.GridSpecFromSubplotSpec(3, 1, subplot_spec=outer_gs, height_ratios=[1, 1, 1])
+                ax4_pre = fig.add_subplot(inner_gs[0])
+                ax4_pre.set_title("Seasonality", horizontalalignment="center")
+                ax4_pre.spines['top'].set_visible(False)
+                ax4_pre.spines['right'].set_visible(False)
+                ax4_pre.spines['bottom'].set_visible(False)
+                # plot precipitation as bar plot
+                pre_monthly = self.get_long_time_monthly_mean(pre['pre'])
+                ax4_pre.bar(np.arange(1,13), -pre_monthly, color='darkblue', alpha=0.6, label='Precipitation')
+                ax4_pre.set_ylim(-np.max(pre_monthly) - np.max(pre_monthly)/6, 0)
+                # ax4_pre.set_yticks([-100, -75, -50, -25, 0])  # Set specific tick positions for clarity
+                ax4_pre.set_yticklabels([f'{int(abs(tick))}' for tick in ax4_pre.get_yticks()])
+                ax4_pre.set_ylabel('pre [mm/day]', color='darkblue')
+                ax4_pre.tick_params(axis='y', labelcolor='darkblue')
+                # ax4_pre.set_xticks([])  # Hide x-ticks for the upper plot
+                ax4_pre.yaxis.set_label_position('right')
+                ax4_pre.tick_params(top=False, labeltop=False, bottom=False, labelbottom=False)
+                inner_gs_update = gridspec.GridSpecFromSubplotSpec(3, 1, subplot_spec=outer_gs, height_ratios=[0.75, 1.25, 1])
+                ax4 = fig.add_subplot(inner_gs_update[1:],sharex=ax4_pre)
+                ax4.spines['top'].set_visible(False)
+                ax4.spines['right'].set_visible(False)
+
+            else:
+                ax4 = fig.add_subplot(outer_gs)
+                ax4.set_title("Seasonality", horizontalalignment="center")
+                # ax4_pre = ax4.twinx()
+                # pre_monthly = self.get_long_time_monthly_mean(pre['pre'])
+                # self.plot_on_axis(
+                #     function=ax4_pre.bar,
+                #     xvalues=np.arange(1,13),
+                #     yvalues=[pre_monthly],
+                #     colors=['darkblue'],
+                #     labels=['precipitation'],
+                #     bottom=np.max(pre_monthly)/2
+                # )
+                # ax4_pre.set_ylim(0,np.max(pre_monthly))
+                # ax4_pre.invert_yaxis()
+                # # ax4_pre.set_aspect(aspect=0.3) 
+                # ax4_pre.set_ylabel('pre [mm/day]')
+            season_sim = self.get_long_time_monthly_mean(self.discharge_data["sim"])
+            season_obs = self.get_long_time_monthly_mean(self.discharge_data["obs"])
+            self.logger.debug(f'sim: {season_sim}')
+            self.logger.debug(f'osb: {season_obs}')
             self.plot_on_axis(
                 function=ax4.scatter,
                 xvalues=range(1, 13),
                 yvalues=[
-                    self.get_long_time_monthly_mean(self.discharge_data["sim"]),
-                    self.get_long_time_monthly_mean(self.discharge_data["obs"]),
+                    season_sim,
+                    season_obs,
                 ],
                 s=1,
             )
@@ -337,14 +396,15 @@ class Hydrograph:
                 function=ax4.plot,
                 xvalues=np.arange(1, 13),
                 yvalues=[
-                    self.get_long_time_monthly_mean(self.discharge_data["sim"]),
-                    self.get_long_time_monthly_mean(self.discharge_data["obs"]),
+                    season_sim,
+                    season_obs
                 ],
                 linewidth=0.3,
             )
+            
             if r == 0:
                 ax4.legend()
-            ax4.set_title("Seasonality", horizontalalignment="center")
+            
             ax4.set_xlim(0.9, 12.1)
             ax4.set_ylabel(r"Q $[m^3 s^{-1}]$")
             ax4.set_xlabel(r"month")
@@ -375,10 +435,12 @@ class Hydrograph:
                 function=ax5.plot,
                 xvalues=xvalues,
                 yvalues=[
-                    self.objectives.r * xvalues,
+                    # self.objectives.r * xvalues,
                     xvalues,
                 ],
-                colors=["red", "black"],
+                colors=["red",
+                        # "black"
+                        ],
                 linewidth=0.5,
             )
             if r == 0:
@@ -387,8 +449,8 @@ class Hydrograph:
                 f"correlation coeff r = {self.objectives.r:.2f}",
                 horizontalalignment="center",
             )
-            ax5.set_xlabel("Qobs $[m^3 s^{-1}]$")  # X Achsenbeschriftung
-            ax5.set_ylabel("Qsim $[m^3 s^{-1}]$")  # Y Achsenbeschriftung
+            ax5.set_xlabel("observed $[m^3 s^{-1}]$")  # X Achsenbeschriftung
+            ax5.set_ylabel("simulated $[m^3 s^{-1}]$")  # Y Achsenbeschriftung
             lim = (
                 np.max(
                     [
