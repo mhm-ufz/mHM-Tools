@@ -182,6 +182,26 @@ class Hydrograph:
                     if key in v:
                         self.catchment.name = str(int(v.split("_")[1]))
                         self.discharge_data = self.discharge_data.rename({v: key})
+    def load_precipiation_data(self, path):
+        if path is None:
+            return None
+        path = Path(path)
+        if path.is_dir():
+            if (path / 'pre.nc').is_file():
+                path = path / 'pre.nc'
+            elif (path / 'pre' / 'pre.nc').is_file():
+                path = path / 'pre' / 'pre.nc'
+            else: 
+                msg = f'no precipitation file found in the directory {path}'
+                self.logger.warning(msg)
+                return None    
+        elif not path.is_file:
+            msg = f'{path} is nether dir nor file'
+            self.logger.warning(msg)
+            return None 
+        with xr.open_dataset(path) as ds:
+            data = ds.load()
+            return data
 
     def gen_hydrograph(self, input_path, output_file, show, save, title, plot_code, prec_path):
         """Read in discharge data and plot the simulated against the observed discharge
@@ -202,7 +222,8 @@ class Hydrograph:
         if input_path[-1] != "/":
             input_path += "/"
         self.load_data_from_path(input_path)
-
+        pre = self.load_precipiation_data(prec_path)
+        
         # calculate metrics at timestep resolution (generally hourly)
         self.logger.debug(self.discharge_data["sim"])
         self.calc_objectives(self.discharge_data["obs"],self.discharge_data["sim"])
@@ -285,15 +306,52 @@ class Hydrograph:
             r, c = self.get_row_col()
             self.logger.debug(f"yearly plot as row {r} and col {c}")
             if r == 0 or self.is_last_plot(1):
-                ax3 = fig.add_subplot(gs[r, c:])
+                outer_gs = gs[r, c:]
+                # ax3 = fig.add_subplot(gs[r, c:])
                 self.grid[r] = [True for _ in self.grid[r]]
             else:
-                ax3 = fig.add_subplot(gs[r, c])
+                outer_gs = gs[r, c]
+                # ax3 = fig.add_subplot()
                 self.grid[r][c] = True
             self.logger.debug(self.grid)
             discharge_yearly = self.discharge_data.resample(time="YE").mean(skipna=True)
+                
+            if pre is not None:
+               
+                inner_gs = gridspec.GridSpecFromSubplotSpec(3, 1, subplot_spec=outer_gs, height_ratios=[1, 1, 1])
+                ax3_pre = fig.add_subplot(inner_gs[0])
+                ax3_pre.spines['top'].set_visible(False)
+                ax3_pre.spines['right'].set_visible(False)
+                ax3_pre.spines['bottom'].set_visible(False)
+                # plot precipitation as bar plot
+                pre_yearly = pre['pre'].resample(time="YE").mean(skipna=True)
+                time_yearly_pre = [int(y.dt.year.data) for y in pre_yearly["time"]]
+                pre_yearly = np.nanmean(pre_yearly, axis=(1,2))
+                ax3_pre.bar(time_yearly_pre, -pre_yearly, color='darkblue', alpha=0.6, label='Precipitation')
+                ax3_pre.set_ylim(-np.max(pre_yearly) - np.max(pre_yearly)/6, 0)
+                # ax3_pre.set_yticks([-100, -75, -50, -25, 0])  # Set specific tick positions for clarity
+                ax3_pre.set_yticklabels([f'{int(abs(tick))}' for tick in ax3_pre.get_yticks()])
+                ax3_pre.set_ylabel('pre [mm/day]', color='darkblue')
+                ax3_pre.tick_params(axis='y', labelcolor='darkblue')
+                # ax3_pre.set_xticks([])  # Hide x-ticks for the upper plot
+                ax3_pre.yaxis.set_label_position('right')
+                ax3_pre.tick_params(top=False, labeltop=False, bottom=False, labelbottom=False)
+                inner_gs_update = gridspec.GridSpecFromSubplotSpec(3, 1, subplot_spec=outer_gs, height_ratios=[0.75, 1.25, 1])
+                ax3 = fig.add_subplot(inner_gs_update[1:],sharex=ax3_pre)
+                ax3.spines['top'].set_visible(False)
+                ax3.spines['right'].set_visible(False)
+                ax3_pre.set_title(
+                f"sim - obs = {self.objectives.diff:.0f}$m^3$ or {self.objectives.rel_diff*100:.0f}%",
+                horizontalalignment="center",
+            )
+            else:
+                ax3 = fig.add_subplot(outer_gs)
+                ax3.set_title(
+                f"sim - obs = {self.objectives.diff:.0f}$m^3$ or {self.objectives.rel_diff*100:.0f}%",
+                horizontalalignment="center",
+            )
             # calculate metrics at yearly resolution
-            time_yearly = [str(y.dt.year.data) for y in discharge_yearly["time"]]
+            time_yearly = [int(y.dt.year.data) for y in discharge_yearly["time"]]
             self.plot_on_axis(
                 function=ax3.scatter,
                 xvalues=time_yearly,
@@ -306,22 +364,10 @@ class Hydrograph:
                 yvalues=[discharge_yearly["sim"], discharge_yearly["obs"]],
                 linewidth=0.3,
             )
-            # self.plot_on_axis(
-            #     function=ax32.plot,
-            #     xvalues=time_yearly,
-            #     yvalues=[discharge_yearly["sim"]-discharge_yearly["obs"]],
-            #     color=['black'],
-            #     linewidth=0.3,
-            # )
             if r == 0:
                 ax3.legend()
-            ax3.set_title(
-                f"sim - obs = {self.objectives.diff:.0f}$m^3$ or {self.objectives.rel_diff*100:.0f}%",
-                horizontalalignment="center",
-            )
-            # ax32.set_ylabel(r"difference $[m^3 s^{-1}]$")
             ax3.set_ylabel(r"Q $[m^3 s^{-1}]$")
-            ax3.set_xlim(time_yearly[0], time_yearly[-1])
+            ax3.set_xlim(time_yearly[0]-0.5, time_yearly[-1]+0.5)
             ax3.set_xticks(time_yearly[:: len(time_yearly) // 3])
 
         if self.plots[2]:
@@ -334,11 +380,6 @@ class Hydrograph:
                 outer_gs = gs[r, c]
                 self.grid[r][c] = True
             
-            if prec_path is not None and Path(prec_path).is_file():
-                pre = xr.open_dataset('/home/luedke/data/test_data_hydrograph/pre.nc')
-            else:
-                self.logger.warning('No precipitation file.')
-                pre=None
             if pre is not None:
                 inner_gs = gridspec.GridSpecFromSubplotSpec(3, 1, subplot_spec=outer_gs, height_ratios=[1, 1, 1])
                 ax4_pre = fig.add_subplot(inner_gs[0])
@@ -405,7 +446,7 @@ class Hydrograph:
             if r == 0:
                 ax4.legend()
             
-            ax4.set_xlim(0.9, 12.1)
+            ax4.set_xlim(0.7, 12.3)
             ax4.set_ylabel(r"Q $[m^3 s^{-1}]$")
             ax4.set_xlabel(r"month")
         if self.plots[3]:
