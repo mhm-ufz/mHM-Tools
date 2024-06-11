@@ -63,7 +63,7 @@ def add_args(parser):
         dest="plots_to_be_created",
         help="specifies which graphics are generated."
         "t model timestep, y yearly, s seasonality, c scatter e.g. "
-        "all with out seasonality (advised for performance) = tyc"
+        "all with out seasonality (advised for performance) = tyc",
     )
     parser.add_argument(
         "-l",
@@ -83,7 +83,8 @@ def add_args(parser):
 
 
 def run(args):
-    """Calculate the bankfull discharge
+    """
+    Calculate the bankfull discharge.
 
     Parameters
     ----------
@@ -99,5 +100,5 @@ def run(args):
         save=True,
         title=args.title,
         plot_code=args.plots_to_be_created,
-        prec_path=args.prec
+        prec_path=args.prec,
     )
