@@ -4,7 +4,7 @@ from ..post.hydrograph import Hydrograph
 
 
 def add_args(parser):
-    """Add cli arguments for the bankfull subcommand.
+    """Add cli arguments for the hydrograph subcommand.
 
     Parameters
     ----------
@@ -84,7 +84,7 @@ def add_args(parser):
 
 def run(args):
     """
-    Calculate the bankfull discharge.
+    Create the hydrograph plots.
 
     Parameters
     ----------
