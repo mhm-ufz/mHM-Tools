@@ -104,8 +104,7 @@ class Hydrograph:
         self.logger.setLevel(levels[log_level])
         self.plots = [0, 0, 0, 0]
 
-    @staticmethod
-    def remove_empty_values(arr1, arr2):
+    def remove_empty_values(self, arr1, arr2, recursive=True):
         """
         Remove empty values from two arrays and return the cleaned data.
 
@@ -124,11 +123,20 @@ class Hydrograph:
         arr2 = np.array(arr2)
         if len(arr1) != len(arr2):
             exeption = "The two timeseries do not have the same length."
-            raise Exception(exeption)
+            raise ValueError(exeption)
         data = np.transpose(np.array([arr1.flatten(), arr2.flatten()]))
-        data = data[~np.isnan(data).any(1)]
-        return data[:, 0], data[:, 1]
-
+        try:
+            data = data[~np.isnan(data).any(1)]
+            return data[:, 0], data[:, 1]
+        except TypeError as te:
+            if recursive:
+                return self.remove_empty_values(
+                    [v if v is not None else np.nan for v in arr1],
+                    [v if v is not None else np.nan for v in arr2],
+                    recursive=False,
+                )
+            msg = "While removing the empty values a wrong input type was detected."
+            raise TypeError(msg) from te
         # arr1_ret, arr2_ret = [], []
         # for i, v in enumerate(arr1):
         #     w = arr2[i]
@@ -255,12 +263,13 @@ class Hydrograph:
         """
         config_file = Path(path + "ConfigFile.log")
         if config_file.exists():
-            doc = config_file.open("r").readlines()
-            for line in doc[::-1]:
-                if line.strip():
-                    self.catchment.area = (
-                        f"{float(line.replace('Total[km2]', '').strip()):.{ndecimal}f}"
-                    )
+            with config_file.open() as f:
+                doc = f.readlines()
+                for line in doc[::-1]:
+                    if line.strip() and "Total[km2]" in line:
+                        self.catchment.area = f"{float(line.replace('Total[km2]', '').strip()):.{ndecimal}f}"
+                        self.logger.debug(f"Area: {self.catchment.area}")
+                        return
         self.logger.warning("Area could not be read.")
 
     @staticmethod
