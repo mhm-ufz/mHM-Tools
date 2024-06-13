@@ -9,10 +9,11 @@ Authors
 import logging
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
+import matplotlib.pyplot as plt
 from matplotlib import gridspec
+import matplotlib.dates as mdates
 
 
 class Catchment:
@@ -273,7 +274,7 @@ class Hydrograph:
         self.logger.warning("Area could not be read.")
 
     @staticmethod
-    def get_long_time_monthly_mean(variable):
+    def get_long_time_monthly_mean(variable, long=False):
         """
         Calculate the long-term average value for every month of the year for a given variable.
 
@@ -285,7 +286,10 @@ class Hydrograph:
         var_ses = [[], [], [], [], [], [], [], [], [], [], [], []]
         for i in range(len(variable)):
             var_ses[int(variable.time[i].dt.month.data) - 1].append(variable[i])
-        return np.array([np.nanmean(np.array(m)) for m in var_ses])
+        var_ses = [np.nanmean(var_ses[i]) for i in range(12)]
+        if long:
+            var_ses = [var_ses[-1]] + var_ses + [var_ses[0]]
+        return np.array(var_ses)
 
     @staticmethod
     def plot_on_axis(
@@ -427,18 +431,18 @@ class Hydrograph:
         ax1 = fig.add_subplot(gs[r, c:])
         self.grid[r] = [True for _ in self.grid[r]]
         self.logger.debug(self.grid)
-        self.plot_on_axis(
-            function=ax1.scatter,
-            xvalues=self.discharge_data["time"],
-            yvalues=[self.discharge_data["sim"], self.discharge_data["obs"]],
-            s=1.0,
-        )
+        # self.plot_on_axis(
+        #     function=ax1.scatter,
+        #     xvalues=self.discharge_data["time"],
+        #     yvalues=[self.discharge_data["sim"], self.discharge_data["obs"]],
+        #     s=1.0,
+        # )
         self.plot_on_axis(
             function=ax1.plot,
             xvalues=self.discharge_data["time"],
             yvalues=[self.discharge_data["sim"], self.discharge_data["obs"]],
             linewidth=0.3,
-            labels=[],  # no labels
+            # labels=[],  # no labels
         )
         ax1.legend()
         title = (
@@ -455,6 +459,10 @@ class Hydrograph:
         )
         ax1.set_ylabel(r"Q $[m^3 s^{-1}]$")
         ax1.set_xlim(self.discharge_data["time"][0], self.discharge_data["time"][-1])
+        ax1.spines["top"].set_visible(False)
+        ax1.spines["right"].set_visible(False)
+        ax1.xaxis.set_major_formatter(mdates.ConciseDateFormatter(ax1.xaxis.get_major_locator()))
+
 
     def create_plot_yearly(self, fig, gs, pre):
         """
@@ -487,7 +495,7 @@ class Hydrograph:
                 3, 1, subplot_spec=outer_gs, height_ratios=[1, 1, 1]
             )
             ax2_pre = fig.add_subplot(inner_gs[0])
-            ax2_pre.spines["top"].set_visible(False)
+            # ax2_pre.spines["top"].set_visible(False)
             ax2_pre.spines["right"].set_visible(False)
             ax2_pre.spines["bottom"].set_visible(False)
             # plot precipitation as bar plot
@@ -515,8 +523,6 @@ class Hydrograph:
                 3, 1, subplot_spec=outer_gs, height_ratios=[0.75, 1.25, 1]
             )
             ax2 = fig.add_subplot(inner_gs_update[1:], sharex=ax2_pre)
-            ax2.spines["top"].set_visible(False)
-            ax2.spines["right"].set_visible(False)
             ax2_pre.set_title(
                 f"sim - obs = {self.objectives.diff:.0f}$m^3$ or {self.objectives.rel_diff*100:.0f}%",
                 horizontalalignment="center",
@@ -527,6 +533,8 @@ class Hydrograph:
                 f"sim - obs = {self.objectives.diff:.0f}$m^3$ or {self.objectives.rel_diff*100:.0f}%",
                 horizontalalignment="center",
             )
+        ax2.spines["top"].set_visible(False)
+        ax2.spines["right"].set_visible(False)
         # calculate metrics at yearly resolution
         time_yearly = [int(y.dt.year.data) for y in discharge_yearly["time"]]
         self.plot_on_axis(
@@ -575,7 +583,7 @@ class Hydrograph:
             )
             ax3_pre = fig.add_subplot(inner_gs[0])
             ax3_pre.set_title("Seasonality", horizontalalignment="center")
-            ax3_pre.spines["top"].set_visible(False)
+            # ax3_pre.spines["top"].set_visible(False)
             ax3_pre.spines["right"].set_visible(False)
             ax3_pre.spines["bottom"].set_visible(False)
             # plot precipitation as bar plot
@@ -603,19 +611,19 @@ class Hydrograph:
                 3, 1, subplot_spec=outer_gs, height_ratios=[0.75, 1.25, 1]
             )
             ax3 = fig.add_subplot(inner_gs_update[1:], sharex=ax3_pre)
-            ax3.spines["top"].set_visible(False)
-            ax3.spines["right"].set_visible(False)
 
         else:
             ax3 = fig.add_subplot(outer_gs)
             ax3.set_title("Seasonality", horizontalalignment="center")
-        season_sim = self.get_long_time_monthly_mean(self.discharge_data["sim"])
-        season_obs = self.get_long_time_monthly_mean(self.discharge_data["obs"])
+        ax3.spines["top"].set_visible(False)
+        ax3.spines["right"].set_visible(False)
+        season_sim = self.get_long_time_monthly_mean(self.discharge_data["sim"], long=True)
+        season_obs = self.get_long_time_monthly_mean(self.discharge_data["obs"], long=True)
         self.logger.debug(f"sim: {season_sim}")
         self.logger.debug(f"osb: {season_obs}")
         self.plot_on_axis(
             function=ax3.scatter,
-            xvalues=range(1, 13),
+            xvalues=np.arange(0, 14),
             yvalues=[
                 season_sim,
                 season_obs,
@@ -624,7 +632,7 @@ class Hydrograph:
         )
         self.plot_on_axis(
             function=ax3.plot,
-            xvalues=np.arange(1, 13),
+            xvalues=np.arange(0, 14),
             yvalues=[season_sim, season_obs],
             linewidth=0.3,
         )
@@ -632,9 +640,9 @@ class Hydrograph:
         if r == 0:
             ax3.legend()
 
-        ax3.set_xlim(0.7, 12.3)
+        ax3.set_xlim(0.5, 12.5)
+        ax3.set_xticks(np.arange(1, 13),)
         ax3.set_ylabel(r"Q $[m^3 s^{-1}]$")
-        ax3.set_xlabel(r"month")
 
     def create_plot_scatter(self, fig, gs):
         """
@@ -691,6 +699,8 @@ class Hydrograph:
         )
         ax4.set_xlabel("observed $[m^3 s^{-1}]$")  # X Achsenbeschriftung
         ax4.set_ylabel("simulated $[m^3 s^{-1}]$")  # Y Achsenbeschriftung
+        ax4.spines["top"].set_visible(False)
+        ax4.spines["right"].set_visible(False)
         lim = (
             np.max(
                 [
