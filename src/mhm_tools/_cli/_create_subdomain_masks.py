@@ -23,12 +23,13 @@ def add_args(parser):
         required=True,
         help=("Path to the input files"),
     )
+    
     # optional arguments
     parser.add_argument(
         "-o",
         "--output_dir",
         default="subdomain_river_masks_3min",
-        help=("specify an output directory as path from the input_dir"),
+        help=("specify an output directory path"),
     )
     parser.add_argument(
         "-f",
