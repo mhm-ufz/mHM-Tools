@@ -80,6 +80,7 @@ class Catchment:
         self.out_var_name = out_var_name
         self.do_shift = do_shift
         self.ds = ds
+
         data = self._modify_data(self.ds[var_name])
 
         if self.do_shift and self.is_data_global:
@@ -120,7 +121,7 @@ class Catchment:
         Inits the FlwdirRaster class from dem.
         """
         # perform checks
-        self.elevtn = self._modify_data(data).data
+        self.elevtn = data.data
         if self._fdir is None:
             # Create a flow direction object
             self._fdir = pyflwdir.from_dem(data=self.elevtn, nodata=np.nan, **kwargs)
@@ -329,6 +330,4 @@ def create_catchment(input_file, output_path, var_name, var, ftype):
         pl.Path(output_path, "hydro_merged_03min.nc"),
     )
 
-    print(
-        f"\nNetCDF basins file has been stored! \nSee {output_path}/hydro_merged_03min_test.nc\n"
-    )
+    print(f"\nNetCDF basins file has been stored! \nSee {output_path}/hydro_merged_03min.nc\n")
