@@ -50,6 +50,8 @@ class MorphFiles:
                 continue
             key_files = list(filepath.glob(f"{key}*.nc"))
             if len(key_files) == 0:
+                if not key in self.member_key_synonyms.keys():
+                    continue # should raise an error
                 for synonym in self.member_key_synonyms[key]:
                     key_files = list(filepath.glob(f"{synonym}*.nc"))
                     if len(key_files) != 0:
@@ -111,11 +113,22 @@ class Domain:
         self.l0 = l0
         self.l1 = l1
 
-        if (not self.l0.is_fully_defined() or not self.l1.is_fully_defined()) and latlon_file is not None:
+        if (self.l0 is None or not self.l0.is_fully_defined() or self.l1 is None or not self.l1.is_fully_defined()) and latlon_file is not None:
             self.read_latlon(latlon_file)
 
     def read_latlon(self, latlon_file: Path):
+        with xr.open_dataset(latlon_file) as ds:
+            x0 = ds['xc_l0'].to_numpy()
+            y0 = ds['yc_l0'].to_numpy()
+            self.l0 = LatLon(lon_min=x0.min(), lon_max=x0.max(), lat_min=y0.min(), lat_max=y0.max(), resolution=x0[1] - x0[0])
+            x1 = ds['xc'].to_numpy()
+            y1 = ds['yc'].to_numpy()
+            self.l1 = LatLon(lon_min=x1.min(), lon_max=x1.max(), lat_min=y1.min(), lat_max=y1.max(), resolution=x1[1] - x1[0])
+
         pass  # read latlon file and set self.l0 and self.l1
+
+    def read_morph_files(self):
+        self.morph_files.read_files(self.path)
 
 
 class MHMRestartFile:
@@ -159,9 +172,9 @@ class MHMRestartFile:
         self.parameter_file = None
         self.work_dir = None
         self.increment_l1 = increment_l1
-        self.increment_l0 = (
-            self.increment_l1 * self.domain.l0.resolution / self.domain.l1.resolution
-        )
+        self.increment_l0 = int(
+            self.increment_l1 * self.domain.l1.resolution / self.domain.l0.resolution
+        ) if self.increment_l1 is not None else None
 
     def _create_namelist(self, replace_dict, template, out_file_path, overwrite=False):
         if not out_file_path.exists() or overwrite:
@@ -209,8 +222,12 @@ class MHMRestartFile:
 
         Subdomains are subsets of the original domain with a size of increment x increment grid cells.
         """
-        sub_domain_paths = []
+        if self.increment_l0 is None:
+            raise ValueError("Increment for splitting domains is not set")
+        sub_domain_paths = {}
         for file_path in self.domain.morph_files.get_files_as_list():
+            if file_path is None:
+                continue # should raise error
             ds = xr.open_dataset(file_path)
             for i, isel_start in enumerate(
                 range(0, self.domain.l0.get_n_lon(), self.increment_l0)
@@ -227,9 +244,27 @@ class MHMRestartFile:
                         longitude=slice(isel_start, isel_start + self.increment_l0),
                         latitude=slice(jsel_start, jsel_start + self.increment_l0),
                     ).to_netcdf(out_path)
-                    if out_path not in sub_domain_paths:
-                        sub_domain_paths.append(out_path)
-        self.subdomains = [Domain(p, p.name) for p in sub_domain_paths]
+                    l0 = LatLon(
+                        lon_min=ds.longitude.isel(longitude=isel_start),
+                        lon_max=ds.longitude.isel(
+                            longitude=isel_start + self.increment_l0
+                        ),
+                        lat_min=ds.latitude.isel(latitude=jsel_start),
+                        lat_max=ds.latitude.isel(
+                            latitude=jsel_start + self.increment_l0
+                        ),
+                        resolution=self.domain.l0.resolution,
+                    )
+                    l1 = LatLon(
+                        lon_min = l0.lon_min,
+                        lon_max = l0.lon_max,
+                        lat_min = l0.lat_min,
+                        lat_max = l0.lat_max,
+                        resolution = self.domain.l1.resolution
+                    )
+                    if out_path not in sub_domain_paths.keys():
+                        sub_domain_paths[out_path] = {'l0':l0, 'l1':l1}
+        self.subdomains = [Domain(k, **v) for k, v in sub_domain_paths.items()]
 
     def _call_mpr(self, namelist):
         tmpdir = os.getcwd()
