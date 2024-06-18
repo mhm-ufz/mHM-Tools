@@ -28,28 +28,28 @@ class TestCreateRestart(unittest.TestCase):
 
     def test_read_morph_files(self):
         mf = mt.pre.MorphFiles(self.morph_dir)
-        assert mf.aspect == self.morph_dir / "aspect.nc"
-        assert mf.slope == self.morph_dir / "slope.nc"
-        assert mf.geology == self.morph_dir / "geology.nc"
-        assert mf.clay_content == self.morph_dir / "CLYPPT.nc"
-        assert mf.sand_content == self.morph_dir / "sand_content.nc"
-        assert mf.bulk_density == self.morph_dir / "BLDFIE.nc"
-        assert mf.land_cover == [self.morph_dir / "land_cover_1990.nc", self.morph_dir / "land_cover_2020.nc"]
-        assert mf.get_file('lai') == self.morph_dir / "lai.nc"
+        self.assertTrue(mf.aspect == self.morph_dir / "aspect.nc")
+        self.assertTrue(mf.slope == self.morph_dir / "slope.nc")
+        self.assertTrue(mf.geology == self.morph_dir / "geology.nc")
+        self.assertTrue(mf.clay_content == self.morph_dir / "CLYPPT.nc")
+        self.assertTrue(mf.sand_content == self.morph_dir / "sand_content.nc")
+        self.assertTrue(mf.bulk_density == self.morph_dir / "BLDFIE.nc")
+        self.assertTrue(mf.land_cover == [self.morph_dir / "land_cover_1990.nc", self.morph_dir / "land_cover_2020.nc"])
+        self.assertTrue(mf.get_file('lai') == self.morph_dir / "lai.nc")
     
     def test_read_latlon(self):
         p = Path(HERE / "files" / "test_create_restart" / "latlon_0p0625.nc")
         d = mt.pre.Domain(file_path=self.morph_dir, latlon_file=p)
-        assert d.l0.lon_min - 11.500977 < 1e-6
-        assert d.l0.lon_max  -  12.999023  < 1e-6
-        assert d.l0.lat_max  -  50.249023 < 1e-6
-        assert d.l0.lat_min  -  49.000977 < 1e-6
-        assert d.l0.resolution  -  0.001953125 < 1e-6
-        assert d.l1.lon_min  -  11.53125 < 1e-6
-        assert d.l1.lon_max  -  12.96875 < 1e-6
-        assert d.l1.lat_max  -  50.21875 < 1e-6
-        assert d.l1.lat_min  -  49.03125 < 1e-6
-        assert d.l1.resolution  -  0.0625 < 1e-6
+        self.assertTrue(d.l0.lon_min - 11.500977 < 1e-6)
+        self.assertTrue(d.l0.lon_max  -  12.999023  < 1e-6)
+        self.assertTrue(d.l0.lat_max  -  50.249023 < 1e-6)
+        self.assertTrue(d.l0.lat_min  -  49.000977 < 1e-6)
+        self.assertTrue(d.l0.resolution  -  0.001953125 < 1e-6)
+        self.assertTrue(d.l1.lon_min  -  11.53125 < 1e-6)
+        self.assertTrue(d.l1.lon_max  -  12.96875 < 1e-6)
+        self.assertTrue(d.l1.lat_max  -  50.21875 < 1e-6)
+        self.assertTrue(d.l1.lat_min  -  49.03125 < 1e-6)
+        self.assertTrue(d.l1.resolution  -  0.0625 < 1e-6)
 
     
     def test_split_domain(self):
@@ -65,30 +65,30 @@ class TestCreateRestart(unittest.TestCase):
         m = mt.pre.MHMRestartFile(input_file_path=morph, output_path=TMP, nml_template=morph / 'mpr_mhm_template.nml', lon_min_target_grid=lon_min_target_grid, lon_max_target_grid=lon_max_target_grid, lat_min_target_grid=lat_min_target_grid, lat_max_target_grid=lat_max_target_grid, l0_resolution=l0_resolution, l1_resolution=l1_resolution
                                   , increment_l1=increment_l1)
         # test setup successful
-        assert m.domain.l0.lon_min - -10 < 1e-6
-        assert m.domain.l0.lon_max  -  10  < 1e-6
-        assert m.domain.l0.lat_max  -  10 < 1e-6
-        assert m.domain.l0.lat_min  -  -10 < 1e-6
-        assert m.domain.l0.resolution  -  0.002 < 1e-6
-        assert m.domain.l1.lon_min  -  -10 < 1e-6
-        assert m.domain.l1.lon_max  -  10 < 1e-6
-        assert m.domain.l1.lat_max  -  10 < 1e-6
-        assert m.domain.l1.lat_min  -  -10 < 1e-6
-        assert m.domain.l1.resolution  -  0.1 < 1e-6
-        assert m.domain.morph_files.geology == morph / "geology_0.002.nc"
+        self.assertTrue(m.domain.l0.lon_min - -10 < 1e-6)
+        self.assertTrue(m.domain.l0.lon_max  -  10  < 1e-6)
+        self.assertTrue(m.domain.l0.lat_max  -  10 < 1e-6)
+        self.assertTrue(m.domain.l0.lat_min  -  -10 < 1e-6)
+        self.assertTrue(m.domain.l0.resolution  -  0.002 < 1e-6)
+        self.assertTrue(m.domain.l1.lon_min  -  -10 < 1e-6)
+        self.assertTrue(m.domain.l1.lon_max  -  10 < 1e-6)
+        self.assertTrue(m.domain.l1.lat_max  -  10 < 1e-6)
+        self.assertTrue(m.domain.l1.lat_min  -  -10 < 1e-6)
+        self.assertTrue(m.domain.l1.resolution  -  0.1 < 1e-6)
+        self.assertTrue(m.domain.morph_files.geology == morph / "geology_0.002.nc")
 
         print(m.domain.morph_files.get_files_as_list(), flush=True)
         # split domain
         m._split_domain()
-        assert len(m.subdomains) == 100
+        self.assertEqual(len(m.subdomains), 100)
         
         for sd in m.subdomains:
             # print(sd.morph_files.geology, flush=True)
             with xr.open_dataset(sd.morph_files.geology) as ds:
-                assert ds['longitude'].min() == sd.l0.lon_min
-                assert ds['longitude'].max() == sd.l0.lon_max
-                assert ds['latitude'].min() == sd.l0.lat_min
-                assert ds['latitude'].max() == sd.l0.lat_max
+                self.assertEqual(ds['longitude'].min(), sd.l0.lon_min)
+                self.assertEqual(ds['longitude'].max(), sd.l0.lon_max)
+                self.assertEqual(ds['latitude'].min(), sd.l0.lat_min)
+                self.assertEqual(ds['latitude'].max(), sd.l0.lat_max)
                         
 
     def test_write_namelists(self):
@@ -97,7 +97,7 @@ class TestCreateRestart(unittest.TestCase):
 
     # def test_latlon_from_file(self):
     #     ll = mt.pre.LatLon()
-    #     assert not ll.is_fully_defined()
+    #     self.assertTrue(not ll.is_fully_defined()
 
 
 if __name__ == "__main__":
