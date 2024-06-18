@@ -53,17 +53,43 @@ class TestCreateRestart(unittest.TestCase):
 
     
     def test_split_domain(self):
+        pass
         morph = Path(HERE / "files" / "test_create_restart")
-
-        m = mt.pre.MHMRestartFile(input_file_path=morph, latlon_file=morph / 'latlon_0p0625.nc', output_path=TMP, nml_template=morph / 'mpr_mhm_template.nml')
+        lon_min_target_grid=-10
+        lon_max_target_grid=10
+        lat_min_target_grid=-10
+        lat_max_target_grid=10
+        l0_resolution=0.002
+        l1_resolution=0.1
+        increment_l1 = 20 # thats 2 degree
+        m = mt.pre.MHMRestartFile(input_file_path=morph, output_path=TMP, nml_template=morph / 'mpr_mhm_template.nml', lon_min_target_grid=lon_min_target_grid, lon_max_target_grid=lon_max_target_grid, lat_min_target_grid=lat_min_target_grid, lat_max_target_grid=lat_max_target_grid, l0_resolution=l0_resolution, l1_resolution=l1_resolution
+                                  , increment_l1=increment_l1)
         # test setup successful
-        assert m.domain.l0.lon_min - 11.500977 < 1e-6
-        assert m.domain.l0.lon_max  -  12.999023  < 1e-6
-        assert m.domain.morph_files.lai == morph / "lai.nc"
+        assert m.domain.l0.lon_min - -10 < 1e-6
+        assert m.domain.l0.lon_max  -  10  < 1e-6
+        assert m.domain.l0.lat_max  -  10 < 1e-6
+        assert m.domain.l0.lat_min  -  -10 < 1e-6
+        assert m.domain.l0.resolution  -  0.002 < 1e-6
+        assert m.domain.l1.lon_min  -  -10 < 1e-6
+        assert m.domain.l1.lon_max  -  10 < 1e-6
+        assert m.domain.l1.lat_max  -  10 < 1e-6
+        assert m.domain.l1.lat_min  -  -10 < 1e-6
+        assert m.domain.l1.resolution  -  0.1 < 1e-6
+        assert m.domain.morph_files.geology == morph / "geology_0.002.nc"
 
+        print(m.domain.morph_files.get_files_as_list(), flush=True)
         # split domain
         m._split_domain()
-        print(len(m.subdomains))
+        assert len(m.subdomains) == 100
+        
+        for sd in m.subdomains:
+            # print(sd.morph_files.geology, flush=True)
+            with xr.open_dataset(sd.morph_files.geology) as ds:
+                assert ds['longitude'].min() == sd.l0.lon_min
+                assert ds['longitude'].max() == sd.l0.lon_max
+                assert ds['latitude'].min() == sd.l0.lat_min
+                assert ds['latitude'].max() == sd.l0.lat_max
+                        
 
     def test_write_namelists(self):
         pass

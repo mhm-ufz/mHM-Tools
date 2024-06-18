@@ -3,6 +3,7 @@ import multiprocessing as mp
 from subprocess import Popen, PIPE, TimeoutExpired
 import os
 import xarray as xr
+import logging
 
 
 class MorphFiles:
@@ -36,30 +37,31 @@ class MorphFiles:
         #     "aspect": self.aspect,
         #     "geology": self.geology,
         # }
-        self.member_key_synonyms = {
-                "bulk_density": ["BLDFIE"],
-                "sand_content": ["SNDPPT"],
-                "clay_content": ["CLYPPT"],
-            }
+        
         if filepath is not None:
             self.read_files(filepath)
 
     def read_files(self, filepath: Path, overwrite=False):
+        member_key_synonyms = {
+                "bulk_density": ["BLDFIE"],
+                "sand_content": ["SNDPPT"],
+                "clay_content": ["CLYPPT"],
+            }
         for key in self.__dict__.keys():
             if not overwrite and self.__dict__.get(key, None) is not None:
                 continue
             key_files = list(filepath.glob(f"{key}*.nc"))
             if len(key_files) == 0:
-                if not key in self.member_key_synonyms.keys():
+                if not key in member_key_synonyms.keys():
                     continue # should raise an error
-                for synonym in self.member_key_synonyms[key]:
+                for synonym in member_key_synonyms[key]:
                     key_files = list(filepath.glob(f"{synonym}*.nc"))
                     if len(key_files) != 0:
                         break
             if len(key_files) != 1:
-                self.__dict__[key] = [f for f in key_files]
+                self.__dict__[key] = [f if f.is_file() else None for f in key_files]
             else:
-                self.__dict__[key] = key_files[0]
+                self.__dict__[key] = key_files[0] if key_files[0].is_file() else None
     
     def get_file(self, key):
         return self.__dict__.get(key, None)
@@ -132,6 +134,8 @@ class Domain:
 
 
 class MHMRestartFile:
+    logging.basicConfig(format="%(asctime)s - %(levelname)-8s - %(message)s")
+    logger = logging.getLogger(__name__)
     def __init__(
         self,
         input_file_path: Path,
@@ -146,8 +150,10 @@ class MHMRestartFile:
         lat_min_target_grid=None,
         lat_max_target_grid=None,
         l0_resolution=None,
-        l1_resolution=None
+        l1_resolution=None,
+        log_level=logging.DEBUG
     ):
+        self.logger.setLevel(logging.DEBUG)
         self.nml_template = nml_template
         self.output_path = output_path
         domain_latlon_l0 = LatLon(
@@ -228,43 +234,47 @@ class MHMRestartFile:
         for file_path in self.domain.morph_files.get_files_as_list():
             if file_path is None:
                 continue # should raise error
+            self.logger.info(f"Splitting {file_path}")
             ds = xr.open_dataset(file_path)
+            self.logger.debug(f'0, {self.domain.l0.get_n_lon()}, {self.increment_l0}')
             for i, isel_start in enumerate(
                 range(0, self.domain.l0.get_n_lon(), self.increment_l0)
             ):
                 for j, jsel_start in enumerate(
-                    range(0, self.domain.l0.get_n_lon(), self.increment_l0)
+                    range(0, self.domain.l0.get_n_lat(), self.increment_l0)
                 ):
                     out_dir = Path(self.output_path) / f"slice_{i}_{j}"
                     out_dir.mkdir(parents=True, exist_ok=True)
-                    # mkdir outpath / slice{i}_{j}
 
-                    out_path = out_dir / f"{file_path.name}.nc"
-                    ds.isel(
+                    out_path = out_dir / f"{file_path.stem}.nc"
+                    ds_cut = ds.isel(
                         longitude=slice(isel_start, isel_start + self.increment_l0),
                         latitude=slice(jsel_start, jsel_start + self.increment_l0),
-                    ).to_netcdf(out_path)
+                    )
+                    try:
+                        ds_cut.to_netcdf(out_path)
+                    except Exception as e:
+                        self.logger.debug(f"{jsel_start}, {jsel_start + self.increment_l0}")
+                        self.logger.debug(ds_cut['latitude'].values)
+                        return
                     l0 = LatLon(
-                        lon_min=ds.longitude.isel(longitude=isel_start),
-                        lon_max=ds.longitude.isel(
-                            longitude=isel_start + self.increment_l0
-                        ),
-                        lat_min=ds.latitude.isel(latitude=jsel_start),
-                        lat_max=ds.latitude.isel(
-                            latitude=jsel_start + self.increment_l0
-                        ),
+                        lon_min=ds_cut.longitude.min(),
+                        lon_max=ds_cut.longitude.max(),
+                        lat_min=ds_cut.latitude.min(),
+                        lat_max=ds_cut.latitude.max(),
                         resolution=self.domain.l0.resolution,
                     )
                     l1 = LatLon(
-                        lon_min = l0.lon_min,
-                        lon_max = l0.lon_max,
-                        lat_min = l0.lat_min,
-                        lat_max = l0.lat_max,
+                        lon_min=ds_cut.longitude.min(),
+                        lon_max=ds_cut.longitude.max(),
+                        lat_min=ds_cut.latitude.min(),
+                        lat_max=ds_cut.latitude.max(),
                         resolution = self.domain.l1.resolution
                     )
-                    if out_path not in sub_domain_paths.keys():
-                        sub_domain_paths[out_path] = {'l0':l0, 'l1':l1}
-        self.subdomains = [Domain(k, **v) for k, v in sub_domain_paths.items()]
+                    if out_dir not in sub_domain_paths.keys():
+                        sub_domain_paths[out_dir] = {'l0':l0, 'l1':l1, 'name':f"slice_{i}_{j}"}
+            self.logger.debug(f"Splitting {file_path} done")
+        self.subdomains = [Domain(file_path=k, **v) for k, v in sub_domain_paths.items()]
 
     def _call_mpr(self, namelist):
         tmpdir = os.getcwd()
