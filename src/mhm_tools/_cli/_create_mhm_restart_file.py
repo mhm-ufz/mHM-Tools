@@ -85,6 +85,6 @@ def run(args):
         lat_max_target_grid=lat_max_target_grid,
         l0_resolution=l0_resolution,
         l1_resolution=l1_resolution,
-        l1_increment=args.l1_increment
+        l1_increment=args.l1_increment,
     )
     restart_creator.create_restart_file()
