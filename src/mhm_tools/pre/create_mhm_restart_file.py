@@ -1,3 +1,5 @@
+"""Create the mHM restart file."""
+
 import logging
 import os
 from pathlib import Path
@@ -7,6 +9,21 @@ import xarray as xr
 
 
 class MorphFiles:
+    """
+    A class representing a collection of morphological files.
+
+    Attributes
+    ----------
+        land_cover (Path): The path to the land cover file.
+        bulk_density (Path): The path to the bulk density file.
+        sand_content (Path): The path to the sand content file.
+        clay_content (Path): The path to the clay content file.
+        slope (Path): The path to the slope file.
+        lai (Path): The path to the leaf area index file.
+        aspect (Path): The path to the aspect file.
+        geology (Path): The path to the geology file.
+    """
+
     def __init__(
         self,
         filepath=None,
@@ -27,21 +44,19 @@ class MorphFiles:
         self.lai = lai
         self.aspect = aspect
         self.geology = geology
-        # self.member_dir = {
-        #     "land_cover": self.land_cover,
-        #     "bulk_density": self.bulk_density,
-        #     "sand_content": self.sand_content,
-        #     "clay_content": self.clay_content,
-        #     "slope": self.slope,
-        #     "lai": self.lai,
-        #     "aspect": self.aspect,
-        #     "geology": self.geology,
-        # }
 
         if filepath is not None:
             self.read_files(filepath)
 
     def read_files(self, filepath: Path, overwrite=False):
+        """
+        Read files from the specified filepath and assigns them to the corresponding attributes.
+
+        Args:
+            filepath (Path): The path to the directory containing the files.
+            overwrite (bool, optional): If False, existing attribute values will not be overwritten.
+                Defaults to False.
+        """
         member_key_synonyms = {
             "bulk_density": ["BLDFIE"],
             "sand_content": ["SNDPPT"],
@@ -64,9 +79,31 @@ class MorphFiles:
                 self.__dict__[key] = key_files[0] if key_files[0].is_file() else None
 
     def get_file(self, key):
+        """
+        Retrieve the file path associated with the given name of the member variable.
+
+        Parameters
+        ----------
+            key (str): The member-variable name to retrieve the filepath for.
+
+        Returns
+        -------
+            object: The filepath or list of filepaths associated with the given key, or None if the key is not found.
+        """
         return self.__dict__.get(key, None)
 
     def get_files_as_list(self):
+        """
+        Return a list of all files in the object's attributes.
+
+        This method iterates over all attributes of the object and checks if they are lists.
+        If an attribute is a list, its elements are added to the file_list.
+        If an attribute is not a list, it is directly appended to the file_list.
+
+        Returns
+        -------
+            list: A list of all files in the object's attributes.
+        """
         file_list = []
         for value in self.__dict__.values():
             if isinstance(value, list):
@@ -76,10 +113,29 @@ class MorphFiles:
         return file_list
 
     def get_files_as_dir(self):
+        """
+        Return a dictionary of all files in the object's attributes.
+
+        Returns
+        -------
+            dict: A dictionary containing all files in the object's attributes.
+        """
         return self.__dict__
 
 
 class LatLon:
+    """
+    Represents a latitude-longitude coordinate system.
+
+    Attributes
+    ----------
+        lat_min (float): The minimum latitude value.
+        lon_min (float): The minimum longitude value.
+        lat_max (float): The maximum latitude value.
+        lon_max (float): The maximum longitude value.
+        resolution (float): The resolution of the coordinate system.
+    """
+
     def __init__(
         self, lat_min=None, lon_min=None, lat_max=None, lon_max=None, resolution=None
     ):
@@ -90,12 +146,33 @@ class LatLon:
         self.resolution = resolution
 
     def get_n_lat(self):
+        """
+        Calculate the number of latitude points based on the given latitude range and resolution.
+
+        Returns
+        -------
+            int: The number of latitude points.
+        """
         return int((self.lat_max - self.lat_min) / self.resolution)
 
     def get_n_lon(self):
+        """
+        Calculate the number of longitude points based on the given longitude range and resolution.
+
+        Returns
+        -------
+            int: The number of longitude points.
+        """
         return int((self.lon_max - self.lon_min) / self.resolution)
 
     def is_fully_defined(self):
+        """
+        Check if all the required attributes are fully defined.
+
+        Returns
+        -------
+            bool: True if all the required attributes are not None, False otherwise.
+        """
         return all(
             [
                 self.lat_min is not None,
@@ -108,6 +185,20 @@ class LatLon:
 
 
 class Domain:
+    """
+    Represents a geographical area for wich morphological data exists.
+
+    This domain is used to run the mPR model. It does not need to contain a whole catchment, but can be a subset of it or multiple catchments at once.
+
+    Attributes
+    ----------
+        file_path (Path): The file path of the domain.
+        name (str): The name of the domain.
+        latlon_file (str): The file path of the latlon file.
+        l0 (LatLon): The lower-left corner of the domain.
+        l1 (LatLon): The upper-right corner of the domain.
+    """
+
     def __init__(
         self,
         file_path: Path,
@@ -131,6 +222,16 @@ class Domain:
             self.read_latlon(latlon_file)
 
     def read_latlon(self, latlon_file: Path):
+        """
+        Read the latlon file and sets the lower-left (l0) and upper-right (l1) corners of the domain as well as the resolution.
+
+        Args:
+            latlon_file (Path): The file path of the latlon file.
+
+        Returns
+        -------
+            None
+        """
         with xr.open_dataset(latlon_file) as ds:
             x0 = ds["xc_l0"].to_numpy()
             y0 = ds["yc_l0"].to_numpy()
@@ -151,13 +252,67 @@ class Domain:
                 resolution=x1[1] - x1[0],
             )
 
-        # read latlon file and set self.l0 and self.l1
-
     def read_morph_files(self):
+        """
+        Read the morph files from the specified path.
+
+        This method uses the `read_files` function from the `MorphFiles` object to read the morph files
+        located at the specified path.
+
+        Args:
+            self: The instance of the class.
+
+        Returns
+        -------
+            None
+        """
         self.morph_files.read_files(self.path)
 
 
 class MHMRestartFile:
+    """
+    A class for creating a restart file for the MHM model.
+
+    This class provides methods to split the domain (if necessary), write the domain namelist,
+    call the mpr executable, merge the restart files (if applicable), and delete temporary files (if specified).
+
+    Attributes
+    ----------
+    input_file_path : Path
+        The path to the directory containing the input files.
+    nml_template : Path
+        The path to the namelist template file.
+    output_path : Path
+        The path to the output directory.
+    latlon_file : Optional[Path]
+        The path to the latlon file.
+    split_domain : bool
+        Whether to split the domain into subdomains.
+    clean_temp_files : bool
+        Whether to clean temporary files.
+    increment_l1 : int
+        The increment for splitting the domain in number of coarse grid (l1) cells.
+    lon_min_target_grid : Optional[float]
+        The minimum longitude of the target grid.
+    lon_max_target_grid : Optional[float]
+        The maximum longitude of the target grid.
+    lat_min_target_grid : Optional[float]
+        The minimum latitude of the target grid.
+
+    Methods
+    -------
+    split_domain_if_necessary()
+        Split the domain into subdomains if necessary.
+    write_domain_namelist()
+        Write the domain namelist file.
+    call_mpr_executable()
+        Call the mpr executable.
+    merge_restart_files()
+        Merge the restart files if applicable.
+    delete_temporary_files()
+        Delete temporary files if specified.
+    """
+
     logging.basicConfig(format="%(asctime)s - %(levelname)-8s - %(message)s")
     logger = logging.getLogger(__name__)
 
@@ -259,12 +414,13 @@ class MHMRestartFile:
 
     def _split_domain(self):  # has do addapted to different file types not just .nc
         """
-        Split the domain into subdomains and write them to disk
+        Split the domain into subdomains and write them to disk.
 
         Subdomains are subsets of the original domain with a size of increment x increment grid cells.
         """
         if self.increment_l0 is None:
-            raise ValueError("Increment for splitting domains is not set")
+            error_message = "Increment for splitting domains is not set"
+            raise ValueError(error_message)
         sub_domain_paths = {}
         for file_path in self.domain.morph_files.get_files_as_list():
             if file_path is None:
@@ -320,17 +476,17 @@ class MHMRestartFile:
         ]
 
     def _call_mpr(self, namelist):
-        """Call the mpr executable with the given namelist and parameter file"""
-        tmpdir = os.getcwd()
+        """Call the mpr executable with the given namelist and parameter file."""
+        tmpdir = Path.cwd()
         os.chdir(self.work_dir)
         command = f"{self.mpr_executable} -c {namelist} -p {self.parameter_file}"
-        print(f"Running command: {command}", flush=True)
+        self.logger.info(f"Running mPR with: {command}")
 
         p = Popen(command, shell=True, stdout=PIPE, stderr=PIPE)
         try:
             data, error_data = p.communicate()
             if error_data:
-                print("Failed with STDERR %s", error_data, flush=True)
+                self.logger.error(f"Failed with STDERR {error_data}")
         except TimeoutExpired:
             p.kill()
         finally:
@@ -343,7 +499,7 @@ class MHMRestartFile:
         self.logger.info("Deleting temporary files")
         # remove all temporary files meaning all files in the morph_files of each subdomain
         for subdomain in self.subdomains:
-            for file_type, file_path in subdomain.morph_files.get_files_as_dir():
+            for file_path in subdomain.morph_files.get_files_as_list():
                 if isinstance(file_path, list):
                     for f in file_path:
                         f.unlink()
@@ -351,6 +507,22 @@ class MHMRestartFile:
                     file_path.unlink()
 
     def create_restart_file(self):
+        """
+        Create a restart file for the MHM model.
+
+        This method creates a restart file by splitting the domain (if necessary),
+        writing the domain namelist, calling the mpr executable, merging the restart
+        files (if applicable), and deleting temporary files (if specified).
+
+        Returns
+        -------
+            None
+
+        Raises
+        ------
+            Any exceptions that occur during the execution of the method.
+        """
+        self.logger.info("Creating restart file")
         if self.split_domain:
             self._split_domain()
             for subdomain in self.subdomains:  # parallelize this
@@ -362,6 +534,7 @@ class MHMRestartFile:
         else:
             nml = self._write_domain_namelist(self.domain)
             self._call_mpr(nml)
+        self.logger.info("Restart file created")
 
 
 if __name__ == "__main__":

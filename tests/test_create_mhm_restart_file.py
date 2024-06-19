@@ -2,8 +2,9 @@ import shutil
 import unittest
 from pathlib import Path
 
-import mhm_tools as mt
 import xarray as xr
+
+import mhm_tools as mt
 
 HERE = Path(__file__).parent
 TMP = HERE / "tmp"

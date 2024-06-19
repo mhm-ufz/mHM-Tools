@@ -75,7 +75,6 @@ def run(args):
     lat_max_target_grid = float(coords[3])
     l0_resolution = float(coords[4])
     l1_resolution = float(coords[5])
-    increment_l1 = 20  # thats 2 degree
     restart_creator = MHMRestartFile(
         input_file_path=args.input_dir,
         output_path=args.output_dir,
@@ -86,6 +85,6 @@ def run(args):
         lat_max_target_grid=lat_max_target_grid,
         l0_resolution=l0_resolution,
         l1_resolution=l1_resolution,
-        l1_increment=args.l1_increment,
+        l1_increment=args.l1_increment
     )
     restart_creator.create_restart_file()
