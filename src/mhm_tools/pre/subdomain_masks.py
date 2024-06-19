@@ -10,12 +10,18 @@ Based on a script by
 - Matthias Kelbling
 """
 
+import logging
 from pathlib import Path
 
 import matplotlib as mpl
 import numpy as np
 import xarray as xr
 from scipy.interpolate import NearestNDInterpolator
+
+# logger
+logging.basicConfig(format="%(asctime)s - %(levelname)-8s - %(message)s")
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 # GLOBAL VARIABLES
 # Coordinate arrays for the shape of Greenland in lons, lats
@@ -151,7 +157,9 @@ class CreateSubdomainMasks:
         file_basins_remapped = self.base_path / "unique_basin_ids_03min_agg54classes.nc"
         if not file_basins_remapped.is_file():
             # map the 53 subbasins from PGB reference onto target grid
-            # print("remapping orignal subbasins to target grid and adding Greenland id")
+            logger.info(
+                "remapping orignal subbasins to target grid and adding Greenland id"
+            )
             orig_remapped = orig_ids.sel(
                 lat=land_mask.lat, lon=land_mask.lon, method="nearest"
             )
@@ -160,7 +168,7 @@ class CreateSubdomainMasks:
             orig_remapped.values[greenland_mask] = 54
 
             # for all subbasins where the land_mask is nan, also set nan
-            # print("remapping new subbasins to target grid")
+            logger.info("remapping new subbasins to target grid")
             new_ids_remapped = new_ids.sel(
                 lat=land_mask.lat, lon=land_mask.lon, method="nearest"
             )
@@ -169,7 +177,7 @@ class CreateSubdomainMasks:
             # for all original subbasins that do not cover new subbasins, interpolate
             # https://stackoverflow.com/questions/68197762/fill-nan-with-nearest-neighbor-in-numpy-array
             # in contrast to previous version, we interpolate the whole globe to ensure we do not use a nan as fill value
-            # print("interpolating missing values in original subbasins")
+            logger.info("interpolating missing values in original subbasins")
             mask_fill = np.where(~np.isnan(orig_remapped.values))
             interp = NearestNDInterpolator(
                 np.transpose(mask_fill), orig_remapped.values[mask_fill]
@@ -177,7 +185,9 @@ class CreateSubdomainMasks:
             filled_data = interp(*np.indices(orig_remapped.values.shape))
 
             # 2nd step --- set exactly one subdomain mask for each river
-            # print("assigning each new subbasin to class defined in original subbasins")
+            logger.info(
+                "assigning each new subbasin to class defined in original subbasins"
+            )
             basin_ids = np.unique(
                 new_ids_remapped.values[~np.isnan(new_ids_remapped.values)]
             )
@@ -200,16 +210,16 @@ class CreateSubdomainMasks:
                 },
             )
         else:
-            # print("using cached remapped basin ids")
+            logger.info("using cached remapped basin ids")
             new_ids_remapped = xr.open_dataarray(file_basins_remapped)
         basin_ids = np.unique(
             new_ids_remapped.values[~np.isnan(new_ids_remapped.values)]
         )
 
-        # print("writing output files")
+        logger.info("writing output files")
         for i, basin_id in enumerate(basin_ids, 1):
 
-            # print(f"processing subdomain {i}")
+            logger.info(f"processing subdomain {i}")
 
             sub_mask = new_ids_remapped.values == basin_id
 
