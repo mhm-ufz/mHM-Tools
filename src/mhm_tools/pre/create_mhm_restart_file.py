@@ -332,6 +332,7 @@ class MHMRestartFile:
         l0_resolution=None,
         l1_resolution=None,
         log_level=logging.DEBUG,
+        mpr_executable=None
     ):
         self.logger.setLevel(log_level)
         self.nml_template = nml_template
@@ -359,7 +360,7 @@ class MHMRestartFile:
         self.subdomains = []  # list of Domain objects
         self.split_domain = split_domain
         self.clean_temp_files = clean_temp_files
-        self.mpr_executable = None
+        self.mpr_executable = mpr_executable
         self.parameter_file = None
         self.work_dir = None
         self.increment_l1 = increment_l1
@@ -494,6 +495,7 @@ class MHMRestartFile:
 
     def _merge_restart_files(self):
         self.logger.info("Merging restart files")
+        self.logger.info("Not implemented yet")
 
     def _delete_temp_files(self):
         self.logger.info("Deleting temporary files")
@@ -535,25 +537,3 @@ class MHMRestartFile:
             nml = self._write_domain_namelist(self.domain)
             self._call_mpr(nml)
         self.logger.info("Restart file created")
-
-
-if __name__ == "__main__":
-    split_domain = False
-    restart_creator = MHMRestartFile(
-        input_file_path=Path(
-            "/work-local/ottor/ulysses/"
-        ),  # path to all the input files
-        output_path=Path(
-            "/work-local/ottor/ulysses/MPR_namelists"
-        ),  # path where the output files will be written
-        nml_template=Path(
-            "/home/ottor/projects/htessel_mpr/05_mhm_global_param/nml/mpr_mhm_global_sel3_slice_template.nml"
-        ),  # path to the namelist template
-        latlon_file=Path(
-            "/work-local/ottor/ulysses/latlon.nc"
-        ),  # path to the latlon file maybe not needed
-        split_domain=split_domain,  # split the domain into subdomains or not
-        clean_temp_files=True,
-    )  # clean temporary files or not
-
-    restart_creator.create_restart_file()

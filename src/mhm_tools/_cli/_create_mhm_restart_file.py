@@ -41,6 +41,14 @@ def add_args(parser):
         ),
     )
 
+    required_args.add_argument(
+        "--mpr",
+        required=True,
+        help=(
+            "path to the mPR executable"
+        ),
+    )
+
     parser.add_argument(
         "--l1_increment",
         required=True,
@@ -86,5 +94,6 @@ def run(args):
         l0_resolution=l0_resolution,
         l1_resolution=l1_resolution,
         l1_increment=args.l1_increment,
+        mpr_executable=args.mpr,
     )
     restart_creator.create_restart_file()
