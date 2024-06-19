@@ -2,9 +2,8 @@ import shutil
 import unittest
 from pathlib import Path
 
-import xarray as xr
-
 import mhm_tools as mt
+import xarray as xr
 
 HERE = Path(__file__).parent
 TMP = HERE / "tmp"
@@ -66,7 +65,6 @@ class TestCreateRestart(unittest.TestCase):
         assert d.l1.resolution - 0.0625 < 1e-6
 
     def test_split_domain(self):
-        pass
         morph = Path(HERE / "files" / "test_create_restart")
         lon_min_target_grid = -10
         lon_max_target_grid = 10
@@ -115,6 +113,7 @@ class TestCreateRestart(unittest.TestCase):
 
     def test_write_namelists(self):
         pass
+
 
 if __name__ == "__main__":
     unittest.main()

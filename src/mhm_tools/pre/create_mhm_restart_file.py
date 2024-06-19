@@ -1,15 +1,15 @@
-from pathlib import Path
-import multiprocessing as mp
-from subprocess import Popen, PIPE, TimeoutExpired
-import os
-import xarray as xr
 import logging
+import os
+from pathlib import Path
+from subprocess import PIPE, Popen, TimeoutExpired
+
+import xarray as xr
 
 
 class MorphFiles:
     def __init__(
         self,
-        filepath: Path = None,
+        filepath=None,
         land_cover=None,
         bulk_density=None,
         sand_content=None,
@@ -37,23 +37,23 @@ class MorphFiles:
         #     "aspect": self.aspect,
         #     "geology": self.geology,
         # }
-        
+
         if filepath is not None:
             self.read_files(filepath)
 
     def read_files(self, filepath: Path, overwrite=False):
         member_key_synonyms = {
-                "bulk_density": ["BLDFIE"],
-                "sand_content": ["SNDPPT"],
-                "clay_content": ["CLYPPT"],
-            }
-        for key in self.__dict__.keys():
+            "bulk_density": ["BLDFIE"],
+            "sand_content": ["SNDPPT"],
+            "clay_content": ["CLYPPT"],
+        }
+        for key in self.__dict__:
             if not overwrite and self.__dict__.get(key, None) is not None:
                 continue
             key_files = list(filepath.glob(f"{key}*.nc"))
             if len(key_files) == 0:
-                if not key in member_key_synonyms.keys():
-                    continue # should raise an error
+                if key not in member_key_synonyms:
+                    continue  # should raise an error
                 for synonym in member_key_synonyms[key]:
                     key_files = list(filepath.glob(f"{synonym}*.nc"))
                     if len(key_files) != 0:
@@ -62,7 +62,7 @@ class MorphFiles:
                 self.__dict__[key] = [f if f.is_file() else None for f in key_files]
             else:
                 self.__dict__[key] = key_files[0] if key_files[0].is_file() else None
-    
+
     def get_file(self, key):
         return self.__dict__.get(key, None)
 
@@ -108,26 +108,50 @@ class LatLon:
 
 
 class Domain:
-    def __init__(self, file_path: Path, name=None, latlon_file=None, l0: LatLon=None, l1: LatLon = None):
+    def __init__(
+        self,
+        file_path: Path,
+        name=None,
+        latlon_file=None,
+        l0: LatLon = None,
+        l1: LatLon = None,
+    ):
         self.morph_files = MorphFiles(filepath=file_path)
         self.name = name
         self.path = file_path
         self.l0 = l0
         self.l1 = l1
 
-        if (self.l0 is None or not self.l0.is_fully_defined() or self.l1 is None or not self.l1.is_fully_defined()) and latlon_file is not None:
+        if (
+            self.l0 is None
+            or not self.l0.is_fully_defined()
+            or self.l1 is None
+            or not self.l1.is_fully_defined()
+        ) and latlon_file is not None:
             self.read_latlon(latlon_file)
 
     def read_latlon(self, latlon_file: Path):
         with xr.open_dataset(latlon_file) as ds:
-            x0 = ds['xc_l0'].to_numpy()
-            y0 = ds['yc_l0'].to_numpy()
-            self.l0 = LatLon(lon_min=x0.min(), lon_max=x0.max(), lat_min=y0.min(), lat_max=y0.max(), resolution=x0[1] - x0[0])
-            x1 = ds['xc'].to_numpy()
-            y1 = ds['yc'].to_numpy()
-            self.l1 = LatLon(lon_min=x1.min(), lon_max=x1.max(), lat_min=y1.min(), lat_max=y1.max(), resolution=x1[1] - x1[0])
+            x0 = ds["xc_l0"].to_numpy()
+            y0 = ds["yc_l0"].to_numpy()
+            self.l0 = LatLon(
+                lon_min=x0.min(),
+                lon_max=x0.max(),
+                lat_min=y0.min(),
+                lat_max=y0.max(),
+                resolution=x0[1] - x0[0],
+            )
+            x1 = ds["xc"].to_numpy()
+            y1 = ds["yc"].to_numpy()
+            self.l1 = LatLon(
+                lon_min=x1.min(),
+                lon_max=x1.max(),
+                lat_min=y1.min(),
+                lat_max=y1.max(),
+                resolution=x1[1] - x1[0],
+            )
 
-        pass  # read latlon file and set self.l0 and self.l1
+        # read latlon file and set self.l0 and self.l1
 
     def read_morph_files(self):
         self.morph_files.read_files(self.path)
@@ -136,12 +160,13 @@ class Domain:
 class MHMRestartFile:
     logging.basicConfig(format="%(asctime)s - %(levelname)-8s - %(message)s")
     logger = logging.getLogger(__name__)
+
     def __init__(
         self,
         input_file_path: Path,
         nml_template: Path,
         output_path: Path,
-        latlon_file: Path = None,
+        latlon_file=None,
         split_domain=False,
         clean_temp_files=True,
         increment_l1=2,
@@ -151,9 +176,9 @@ class MHMRestartFile:
         lat_max_target_grid=None,
         l0_resolution=None,
         l1_resolution=None,
-        log_level=logging.DEBUG
+        log_level=logging.DEBUG,
     ):
-        self.logger.setLevel(logging.DEBUG)
+        self.logger.setLevel(log_level)
         self.nml_template = nml_template
         self.output_path = output_path
         domain_latlon_l0 = LatLon(
@@ -170,7 +195,12 @@ class MHMRestartFile:
             lon_max=lon_max_target_grid,
             resolution=l1_resolution,
         )
-        self.domain = Domain(input_file_path, latlon_file=latlon_file, l0=domain_latlon_l0, l1=domain_latlon_l1)
+        self.domain = Domain(
+            input_file_path,
+            latlon_file=latlon_file,
+            l0=domain_latlon_l0,
+            l1=domain_latlon_l1,
+        )
         self.subdomains = []  # list of Domain objects
         self.split_domain = split_domain
         self.clean_temp_files = clean_temp_files
@@ -178,17 +208,23 @@ class MHMRestartFile:
         self.parameter_file = None
         self.work_dir = None
         self.increment_l1 = increment_l1
-        self.increment_l0 = int(
-            self.increment_l1 * self.domain.l1.resolution / self.domain.l0.resolution
-        ) if self.increment_l1 is not None else None
+        self.increment_l0 = (
+            int(
+                self.increment_l1
+                * self.domain.l1.resolution
+                / self.domain.l0.resolution
+            )
+            if self.increment_l1 is not None
+            else None
+        )
 
     def _create_namelist(self, replace_dict, template, out_file_path, overwrite=False):
         if not out_file_path.exists() or overwrite:
-            with open(template) as f:
+            with template.open("r") as f:
                 nml = f.read()
             for replace_key, replace_value in replace_dict.items():
                 nml = nml.replace(replace_key, replace_value)
-            with open(out_file_path, "w") as f:
+            with out_file_path.open("w") as f:
                 f.write(nml)
         return out_file_path
 
@@ -215,14 +251,13 @@ class MHMRestartFile:
             "${lai}": domain.morph_files.lai,
             "${aspect}": domain.morph_files.aspect,
             "${geology}": domain.morph_files.geology,
-            "${land_cover}": domain.morph_files.land_cover, # this should be a list but the template only has one
-            
+            "${land_cover}": domain.morph_files.land_cover,  # this should be a list but the template only has one
         }
         return self._create_namelist(
             replace_dict, self.nml_template, domain.output_path / "mpr.nml"
         )
 
-    def _split_domain(self): # has do addapted to different file types not just .nc
+    def _split_domain(self):  # has do addapted to different file types not just .nc
         """
         Split the domain into subdomains and write them to disk
 
@@ -233,10 +268,10 @@ class MHMRestartFile:
         sub_domain_paths = {}
         for file_path in self.domain.morph_files.get_files_as_list():
             if file_path is None:
-                continue # should raise error
+                continue  # should raise error
             self.logger.info(f"Splitting {file_path}")
             ds = xr.open_dataset(file_path)
-            self.logger.debug(f'0, {self.domain.l0.get_n_lon()}, {self.increment_l0}')
+            self.logger.debug(f"0, {self.domain.l0.get_n_lon()}, {self.increment_l0}")
             for i, isel_start in enumerate(
                 range(0, self.domain.l0.get_n_lon(), self.increment_l0)
             ):
@@ -253,9 +288,11 @@ class MHMRestartFile:
                     )
                     try:
                         ds_cut.to_netcdf(out_path)
-                    except Exception as e:
-                        self.logger.debug(f"{jsel_start}, {jsel_start + self.increment_l0}")
-                        self.logger.debug(ds_cut['latitude'].values)
+                    except Exception:
+                        self.logger.debug(
+                            f"{jsel_start}, {jsel_start + self.increment_l0}"
+                        )
+                        self.logger.debug(ds_cut["latitude"].values)
                         return
                     l0 = LatLon(
                         lon_min=ds_cut.longitude.min(),
@@ -269,14 +306,21 @@ class MHMRestartFile:
                         lon_max=ds_cut.longitude.max(),
                         lat_min=ds_cut.latitude.min(),
                         lat_max=ds_cut.latitude.max(),
-                        resolution = self.domain.l1.resolution
+                        resolution=self.domain.l1.resolution,
                     )
-                    if out_dir not in sub_domain_paths.keys():
-                        sub_domain_paths[out_dir] = {'l0':l0, 'l1':l1, 'name':f"slice_{i}_{j}"}
+                    if out_dir not in sub_domain_paths:
+                        sub_domain_paths[out_dir] = {
+                            "l0": l0,
+                            "l1": l1,
+                            "name": f"slice_{i}_{j}",
+                        }
             self.logger.debug(f"Splitting {file_path} done")
-        self.subdomains = [Domain(file_path=k, **v) for k, v in sub_domain_paths.items()]
+        self.subdomains = [
+            Domain(file_path=k, **v) for k, v in sub_domain_paths.items()
+        ]
 
     def _call_mpr(self, namelist):
+        """Call the mpr executable with the given namelist and parameter file"""
         tmpdir = os.getcwd()
         os.chdir(self.work_dir)
         command = f"{self.mpr_executable} -c {namelist} -p {self.parameter_file}"
@@ -293,9 +337,10 @@ class MHMRestartFile:
             os.chdir(tmpdir)
 
     def _merge_restart_files(self):
-        pass
+        self.logger.info("Merging restart files")
 
-    def _clean_temp_files(self):
+    def _delete_temp_files(self):
+        self.logger.info("Deleting temporary files")
         # remove all temporary files meaning all files in the morph_files of each subdomain
         for subdomain in self.subdomains:
             for file_type, file_path in subdomain.morph_files.get_files_as_dir():
@@ -310,13 +355,13 @@ class MHMRestartFile:
             self._split_domain()
             for subdomain in self.subdomains:  # parallelize this
                 nml = self._write_domain_namelist(subdomain)
-                self._call_mpr(subdomain, nml)
+                self._call_mpr(nml)
             self._merge_restart_files()
             if self.clean_temp_files:
-                self._clean_temp_files()
+                self._delete_temp_files()
         else:
             nml = self._write_domain_namelist(self.domain)
-            self._call_mpr(self.domain, nml)
+            self._call_mpr(nml)
 
 
 if __name__ == "__main__":

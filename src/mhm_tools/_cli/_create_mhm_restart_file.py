@@ -7,6 +7,7 @@ A restart file contains all the static information to run mHM on a specific doma
 
 from ..pre import MHMRestartFile
 
+
 def add_args(parser):
     """Add cli arguments for the create_mhm_restart_file subcommand.
 
@@ -29,25 +30,24 @@ def add_args(parser):
         help=("output directory as path"),
     )
     required_args.add_argument(
-        "-n",
-        "--nml_template",
-        required=True,
-        help=("nml_template file for mPR")
+        "-n", "--nml_template", required=True, help=("nml_template file for mPR")
     )
-    
+
     required_args.add_argument(
         "--coords",
         required=True,
-        help=("coordinates in the form of 'lon_min,lon_max,lat_min,lat_max,resolution_l0,resolution_l1'")
+        help=(
+            "coordinates in the form of 'lon_min,lon_max,lat_min,lat_max,resolution_l0,resolution_l1'"
+        ),
     )
-    
+
     parser.add_argument(
         "--l1_increment",
         required=True,
         default=20,
-        help=("increment for l1 resolution in number of cells")
+        help=("increment for l1 resolution in number of cells"),
     )
-    
+
     parser.add_argument(
         "-s",
         "--split",
@@ -68,7 +68,7 @@ def run(args):
     args : argparse.Namespace
         parsed command line arguments
     """
-    coords = args.coords.split(',')
+    coords = args.coords.split(",")
     lon_min_target_grid = float(coords[0])
     lon_max_target_grid = float(coords[1])
     lat_min_target_grid = float(coords[2])
