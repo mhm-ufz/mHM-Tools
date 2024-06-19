@@ -101,10 +101,13 @@ class CreateSubdomainMasks:
         # land mask and grid of target resolution, need to be in integer variable 'land_mask'
         self.land_file = self.base_path / land_mask
 
-        out_dir_path = self.base_path / output_dir
+        if Path(output_dir).is_absolute():
+            out_dir_path = Path(output_dir) / output_file_name
+        else:
+            out_dir_path = self.base_path / output_dir
         if not out_dir_path.is_dir():
             out_dir_path.mkdir(parents=True)
-        self.out_file_name = out_dir_path / output_file_name
+        self.out_file_name = str(out_dir_path / Path(output_file_name).stem)
 
     @staticmethod
     def read_var(fname, var_name):
@@ -223,7 +226,7 @@ class CreateSubdomainMasks:
 
             sub_mask = new_ids_remapped.values == basin_id
 
-            fname = str(self.out_file_name) + f"_{i:02}.nc"
+            fname = self.out_file_name + f"_{i:02}.nc"
             ds_sub_ref_file = ds_ref_file.copy()
             for data_var in ds_sub_ref_file.data_vars:
                 ds_sub_ref_file[data_var].values[~sub_mask] = np.nan
