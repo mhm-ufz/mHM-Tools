@@ -366,7 +366,7 @@ class MHMRestartFile:
         self.clean_temp_files = clean_temp_files
         self.mpr_executable = mpr_executable
         self.parameter_file = None
-        self.work_dir = None
+        self.work_dir = '.'
         self.increment_l1 = increment_l1
         self.increment_l0 = (
             int(
