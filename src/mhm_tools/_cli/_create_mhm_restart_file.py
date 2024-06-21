@@ -53,7 +53,8 @@ def add_args(parser):
         "--l1_increment",
         required=True,
         default=20,
-        help=("increment for l1 resolution in number of cells"),
+        type=int,
+        help=("integer increment for l1 resolution in number of cells"),
     )
 
     parser.add_argument(
