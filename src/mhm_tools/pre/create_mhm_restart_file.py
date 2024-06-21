@@ -66,7 +66,7 @@ class MorphFiles:
         }
         if type(filepath) is not Path:
             filepath = Path(filepath)
-        logger.info(f'reading morph files from {filepaht}')
+        logger.info(f'reading morph files from {filepath}')
         for key in self.__dict__:
             if not overwrite and self.__dict__.get(key, None) is not None:
                 continue
