@@ -426,6 +426,7 @@ class MHMRestartFile:
 
         Subdomains are subsets of the original domain with a size of increment x increment grid cells.
         """
+        self.info("Splitting domain")
         if self.increment_l0 is None:
             error_message = "Increment for splitting domains is not set"
             raise ValueError(error_message)
@@ -482,6 +483,7 @@ class MHMRestartFile:
         self.subdomains = [
             Domain(file_path=k, **v) for k, v in sub_domain_paths.items()
         ]
+        self.debug("Splitting domain done")
 
     def _call_mpr(self, namelist):
         """Call the mpr executable with the given namelist and parameter file."""
@@ -535,6 +537,7 @@ class MHMRestartFile:
         if self.split_domain:
             self._split_domain()
             for subdomain in self.subdomains:  # parallelize this
+                logger.debug(subdomain)
                 nml = self._write_domain_namelist(subdomain)
                 self._call_mpr(nml)
             self._merge_restart_files()
