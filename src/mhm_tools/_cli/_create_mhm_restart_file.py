@@ -96,5 +96,6 @@ def run(args):
         l1_resolution=l1_resolution,
         increment_l1=args.l1_increment,
         mpr_executable=args.mpr,
+        split_domain=args.split,
     )
     restart_creator.create_restart_file()

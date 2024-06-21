@@ -355,7 +355,8 @@ class MHMRestartFile:
             resolution=l1_resolution,
         )
         self.domain = Domain(
-            Path(input_file_path),
+            file_path=Path(input_file_path),
+            name="whole domain",
             latlon_file=latlon_file,
             l0=domain_latlon_l0,
             l1=domain_latlon_l1,
@@ -444,6 +445,8 @@ class MHMRestartFile:
                     range(0, self.domain.l0.get_n_lat(), self.increment_l0)
                 ):
                     out_dir = Path(self.output_path) / f"slice_{i}_{j}"
+                    if not out_dir.exists():
+                        logger.debug(f"Creating {out_dir}")
                     out_dir.mkdir(parents=True, exist_ok=True)
 
                     out_path = out_dir / f"{file_path.stem}.nc"
@@ -535,6 +538,7 @@ class MHMRestartFile:
         """
         logger.info("Creating restart file")
         if self.split_domain:
+            logger.info('Domain will be split and processed in parallel')
             self._split_domain()
             for subdomain in self.subdomains:  # parallelize this
                 logger.debug(subdomain)
@@ -544,6 +548,7 @@ class MHMRestartFile:
             if self.clean_temp_files:
                 self._delete_temp_files()
         else:
+            logger.info('Domain will be processed as a whole')
             nml = self._write_domain_namelist(self.domain)
             self._call_mpr(nml)
         logger.info("Restart file created")
