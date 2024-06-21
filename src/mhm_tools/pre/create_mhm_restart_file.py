@@ -7,6 +7,8 @@ from subprocess import PIPE, Popen, TimeoutExpired
 
 import xarray as xr
 
+logging.basicConfig(format="%(asctime)s - %(levelname)-8s - %(message)s")
+logger = logging.getLogger(__name__)
 
 class MorphFiles:
     """
@@ -62,6 +64,9 @@ class MorphFiles:
             "sand_content": ["SNDPPT"],
             "clay_content": ["CLYPPT"],
         }
+        if type(filepath) is not Path:
+            filepath = Path(filepath)
+        logger.info(f'reading morph files from {filepaht}')
         for key in self.__dict__:
             if not overwrite and self.__dict__.get(key, None) is not None:
                 continue
@@ -313,9 +318,6 @@ class MHMRestartFile:
         Delete temporary files if specified.
     """
 
-    logging.basicConfig(format="%(asctime)s - %(levelname)-8s - %(message)s")
-    logger = logging.getLogger(__name__)
-
     def __init__(
         self,
         input_file_path: Path,
@@ -334,7 +336,7 @@ class MHMRestartFile:
         log_level=logging.DEBUG,
         mpr_executable=None
     ):
-        self.logger.setLevel(log_level)
+        logger.setLevel(log_level)
         self.nml_template = nml_template
         self.output_path = output_path
         domain_latlon_l0 = LatLon(
@@ -426,9 +428,9 @@ class MHMRestartFile:
         for file_path in self.domain.morph_files.get_files_as_list():
             if file_path is None:
                 continue  # should raise error
-            self.logger.info(f"Splitting {file_path}")
+            logger.info(f"Splitting {file_path}")
             ds = xr.open_dataset(file_path)
-            self.logger.debug(f"0, {self.domain.l0.get_n_lon()}, {self.increment_l0}")
+            logger.debug(f"0, {self.domain.l0.get_n_lon()}, {self.increment_l0}")
             for i, isel_start in enumerate(
                 range(0, self.domain.l0.get_n_lon(), self.increment_l0)
             ):
@@ -446,10 +448,10 @@ class MHMRestartFile:
                     try:
                         ds_cut.to_netcdf(out_path)
                     except Exception:
-                        self.logger.debug(
+                        logger.debug(
                             f"{jsel_start}, {jsel_start + self.increment_l0}"
                         )
-                        self.logger.debug(ds_cut["latitude"].values)
+                        logger.debug(ds_cut["latitude"].values)
                         return
                     l0 = LatLon(
                         lon_min=ds_cut.longitude.min(),
@@ -471,7 +473,7 @@ class MHMRestartFile:
                             "l1": l1,
                             "name": f"slice_{i}_{j}",
                         }
-            self.logger.debug(f"Splitting {file_path} done")
+            logger.debug(f"Splitting {file_path} done")
         self.subdomains = [
             Domain(file_path=k, **v) for k, v in sub_domain_paths.items()
         ]
@@ -481,24 +483,24 @@ class MHMRestartFile:
         tmpdir = Path.cwd()
         os.chdir(self.work_dir)
         command = f"{self.mpr_executable} -c {namelist} -p {self.parameter_file}"
-        self.logger.info(f"Running mPR with: {command}")
+        logger.info(f"Running mPR with: {command}")
 
         p = Popen(command, shell=True, stdout=PIPE, stderr=PIPE)
         try:
             data, error_data = p.communicate()
             if error_data:
-                self.logger.error(f"Failed with STDERR {error_data}")
+                logger.error(f"Failed with STDERR {error_data}")
         except TimeoutExpired:
             p.kill()
         finally:
             os.chdir(tmpdir)
 
     def _merge_restart_files(self):
-        self.logger.info("Merging restart files")
-        self.logger.info("Not implemented yet")
+        logger.info("Merging restart files")
+        logger.info("Not implemented yet")
 
     def _delete_temp_files(self):
-        self.logger.info("Deleting temporary files")
+        logger.info("Deleting temporary files")
         # remove all temporary files meaning all files in the morph_files of each subdomain
         for subdomain in self.subdomains:
             for file_path in subdomain.morph_files.get_files_as_list():
@@ -524,7 +526,7 @@ class MHMRestartFile:
         ------
             Any exceptions that occur during the execution of the method.
         """
-        self.logger.info("Creating restart file")
+        logger.info("Creating restart file")
         if self.split_domain:
             self._split_domain()
             for subdomain in self.subdomains:  # parallelize this
@@ -536,4 +538,4 @@ class MHMRestartFile:
         else:
             nml = self._write_domain_namelist(self.domain)
             self._call_mpr(nml)
-        self.logger.info("Restart file created")
+        logger.info("Restart file created")
