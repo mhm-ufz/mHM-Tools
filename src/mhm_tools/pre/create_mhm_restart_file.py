@@ -212,6 +212,7 @@ class Domain:
         l0: LatLon = None,
         l1: LatLon = None,
     ):
+        file_path = Path(file_path)
         self.morph_files = MorphFiles(filepath=file_path)
         self.name = name
         self.path = file_path
@@ -338,7 +339,7 @@ class MHMRestartFile:
     ):
         logger.setLevel(log_level)
         self.nml_template = nml_template
-        self.output_path = output_path
+        self.output_path = Path(output_path)
         domain_latlon_l0 = LatLon(
             lat_min=lat_min_target_grid,
             lon_min=lon_min_target_grid,
@@ -354,7 +355,7 @@ class MHMRestartFile:
             resolution=l1_resolution,
         )
         self.domain = Domain(
-            input_file_path,
+            Path(input_file_path),
             latlon_file=latlon_file,
             l0=domain_latlon_l0,
             l1=domain_latlon_l1,
@@ -377,6 +378,8 @@ class MHMRestartFile:
         )
 
     def _create_namelist(self, replace_dict, template, out_file_path, overwrite=False):
+        if type(out_file_path) is not Path:
+            out_file_path = Path(out_file_path)
         if not out_file_path.exists() or overwrite:
             with template.open("r") as f:
                 nml = f.read()
