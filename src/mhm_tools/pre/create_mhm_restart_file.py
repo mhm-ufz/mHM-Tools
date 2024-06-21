@@ -414,6 +414,8 @@ class MHMRestartFile:
             "${geology}": domain.morph_files.geology,
             "${land_cover}": domain.morph_files.land_cover,  # this should be a list but the template only has one
         }
+        logger.info(f"Writing namelist for {domain.name}")
+        logger.debug(replace_dict)
         return self._create_namelist(
             replace_dict, domain.path / "mpr.nml"
         )
