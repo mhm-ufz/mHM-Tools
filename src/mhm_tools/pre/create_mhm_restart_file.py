@@ -415,7 +415,7 @@ class MHMRestartFile:
             "${land_cover}": domain.morph_files.land_cover,  # this should be a list but the template only has one
         }
         return self._create_namelist(
-            replace_dict, self.nml_template, domain.output_path / "mpr.nml"
+            replace_dict, self.nml_template, domain.path / "mpr.nml"
         )
 
     def _split_domain(self):  # has do addapted to different file types not just .nc
