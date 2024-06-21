@@ -383,11 +383,11 @@ class MHMRestartFile:
             out_file_path = Path(out_file_path)
         if not out_file_path.exists() or overwrite:
             with self.nml_template.open("r") as f:
-                nml = f.read()
+                nml_data = f.read()
             for replace_key, replace_value in replace_dict.items():
-                nml = nml.replace(replace_key, replace_value)
+                nml_data = nml_data.replace(str(replace_key), str(replace_value))
             with out_file_path.open("w") as f:
-                f.write(nml)
+                f.write(nml_data)
         return out_file_path
 
     def _write_domain_namelist(self, domain: Domain):
