@@ -338,7 +338,7 @@ class MHMRestartFile:
         mpr_executable=None
     ):
         logger.setLevel(log_level)
-        self.nml_template = nml_template
+        self.nml_template = Path(nml_template)
         self.output_path = Path(output_path)
         domain_latlon_l0 = LatLon(
             lat_min=lat_min_target_grid,
@@ -377,11 +377,11 @@ class MHMRestartFile:
             else None
         )
 
-    def _create_namelist(self, replace_dict, template, out_file_path, overwrite=False):
+    def _create_namelist(self, replace_dict, out_file_path, overwrite=False):
         if type(out_file_path) is not Path:
             out_file_path = Path(out_file_path)
         if not out_file_path.exists() or overwrite:
-            with template.open("r") as f:
+            with self.nml_template.open("r") as f:
                 nml = f.read()
             for replace_key, replace_value in replace_dict.items():
                 nml = nml.replace(replace_key, replace_value)
@@ -415,7 +415,7 @@ class MHMRestartFile:
             "${land_cover}": domain.morph_files.land_cover,  # this should be a list but the template only has one
         }
         return self._create_namelist(
-            replace_dict, self.nml_template, domain.path / "mpr.nml"
+            replace_dict, domain.path / "mpr.nml"
         )
 
     def _split_domain(self):  # has do addapted to different file types not just .nc
