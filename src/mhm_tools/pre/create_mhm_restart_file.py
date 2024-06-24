@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 from subprocess import PIPE, Popen, TimeoutExpired
 import sys 
+import numpy as np
 
 import xarray as xr
 
