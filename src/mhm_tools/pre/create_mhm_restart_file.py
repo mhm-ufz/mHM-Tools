@@ -82,7 +82,7 @@ class MorphFiles:
                 self.__dict__[key] = [f for f in key_files if f.is_file()]
             else:
                 self.__dict__[key] = key_files[0] if key_files[0].is_file() else None
-            if self.__dict__[key] is None or not self.__dict__['key']:
+            if self.__dict__[key] is None or not self.__dict__[key]:
                 logger.warning(f"Could not find {key} file in {filepath}")
         logger.debug(self.get_files_as_dir())
 
