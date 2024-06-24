@@ -4,6 +4,7 @@ import logging
 import os
 from pathlib import Path
 from subprocess import PIPE, Popen, TimeoutExpired
+import sys 
 
 import xarray as xr
 
@@ -442,8 +443,17 @@ class MHMRestartFile:
             if file_path is None:
                 continue  # should raise error
             logger.info(f"Splitting {file_path}")
-            ds = xr.open_dataset(file_path)
+            self._split_file(file_path, sub_domain_paths)
+            logger.debug(f"Splitting {file_path} done")
+        self.subdomains = [
+            Domain(file_path=k, **v) for k, v in sub_domain_paths.items()
+        ]
+        logger.debug("Splitting domain done")
+
+    def _split_file(self, file_path, sub_domain_paths):
+        with xr.open_dataset(file_path) as ds:
             logger.debug(f"0, {self.domain.l0.get_n_lon()}, {self.increment_l0}")
+            logger.debug(f'opening {file_path} uses {sys.getsizeof(ds)} bytes of memory')
             for i, isel_start in enumerate(
                 range(0, self.domain.l0.get_n_lon(), self.increment_l0)
             ):
@@ -463,6 +473,7 @@ class MHMRestartFile:
                     try:
                         ds_cut.to_netcdf(out_path)
                     except Exception:
+                        logger.error(f"Failed to write {out_path}")
                         logger.debug(
                             f"{jsel_start}, {jsel_start + self.increment_l0}"
                         )
@@ -488,11 +499,6 @@ class MHMRestartFile:
                             "l1": l1,
                             "name": f"slice_{i}_{j}",
                         }
-            logger.debug(f"Splitting {file_path} done")
-        self.subdomains = [
-            Domain(file_path=k, **v) for k, v in sub_domain_paths.items()
-        ]
-        logger.debug("Splitting domain done")
 
     def _call_mpr(self, namelist):
         """Call the mpr executable with the given namelist and parameter file."""
