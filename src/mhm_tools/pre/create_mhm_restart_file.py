@@ -196,19 +196,19 @@ class LatLon:
         )
 
 
-class Domain:
+class Grid:
     """
     Represents a geographical area for wich morphological data exists.
 
-    This domain is used to run the mPR model. It does not need to contain a whole catchment, but can be a subset of it or multiple catchments at once.
+    This grid is used to run the mPR model. It does not need to contain a whole catchment, but can be a subset of it or multiple catchments at once.
 
     Attributes
     ----------
-        file_path (Path): The file path of the domain.
-        name (str): The name of the domain.
+        file_path (Path): The file path of the grid.
+        name (str): The name of the grid.
         latlon_file (str): The file path of the latlon file.
-        l0 (LatLon): The lower-left corner of the domain.
-        l1 (LatLon): The upper-right corner of the domain.
+        l0 (LatLon): The lower-left corner of the grid.
+        l1 (LatLon): The upper-right corner of the grid.
     """
 
     def __init__(
@@ -236,7 +236,7 @@ class Domain:
 
     def read_latlon(self, latlon_file: Path):
         """
-        Read the latlon file and sets the lower-left (l0) and upper-right (l1) corners of the domain as well as the resolution.
+        Read the latlon file and sets the lower-left (l0) and upper-right (l1) corners of the grid as well as the resolution.
 
         Args:
             latlon_file (Path): The file path of the latlon file.
@@ -286,7 +286,7 @@ class MHMRestartFile:
     """
     A class for creating a restart file for the MHM model.
 
-    This class provides methods to split the domain (if necessary), write the domain namelist,
+    This class provides methods to split the grid (if necessary), write the grid namelist,
     call the mpr executable, merge the restart files (if applicable), and delete temporary files (if specified).
 
     Attributes
@@ -299,12 +299,12 @@ class MHMRestartFile:
         The path to the output directory.
     latlon_file : Optional[Path]
         The path to the latlon file.
-    split_domain : bool
-        Whether to split the domain into subdomains.
+    split_grid : bool
+        Whether to split the grid into subgrids.
     clean_temp_files : bool
         Whether to clean temporary files.
     increment_l1 : int
-        The increment for splitting the domain in number of coarse grid (l1) cells.
+        The increment for splitting the grid in number of coarse grid (l1) cells.
     lon_min_target_grid : Optional[float]
         The minimum longitude of the target grid.
     lon_max_target_grid : Optional[float]
@@ -314,10 +314,10 @@ class MHMRestartFile:
 
     Methods
     -------
-    split_domain_if_necessary()
-        Split the domain into subdomains if necessary.
-    write_domain_namelist()
-        Write the domain namelist file.
+    split_grid_if_necessary()
+        Split the grid into subgrids if necessary.
+    write_grid_namelist()
+        Write the grid namelist file.
     call_mpr_executable()
         Call the mpr executable.
     merge_restart_files()
@@ -332,7 +332,7 @@ class MHMRestartFile:
         nml_template: Path,
         output_path: Path,
         latlon_file=None,
-        split_domain=False,
+        split_grid=False,
         clean_temp_files=True,
         increment_l1=2,
         lon_min_target_grid=None,
@@ -347,29 +347,29 @@ class MHMRestartFile:
         logger.setLevel(log_level)
         self.nml_template = Path(nml_template)
         self.output_path = Path(output_path)
-        domain_latlon_l0 = LatLon(
+        grid_latlon_l0 = LatLon(
             lat_min=lat_min_target_grid,
             lon_min=lon_min_target_grid,
             lat_max=lat_max_target_grid,
             lon_max=lon_max_target_grid,
             resolution=l0_resolution,
         )
-        domain_latlon_l1 = LatLon(
+        grid_latlon_l1 = LatLon(
             lat_min=lat_min_target_grid,
             lon_min=lon_min_target_grid,
             lat_max=lat_max_target_grid,
             lon_max=lon_max_target_grid,
             resolution=l1_resolution,
         )
-        self.domain = Domain(
+        self.grid = Grid(
             file_path=Path(input_file_path),
-            name="whole domain",
+            name="whole grid",
             latlon_file=latlon_file,
-            l0=domain_latlon_l0,
-            l1=domain_latlon_l1,
+            l0=grid_latlon_l0,
+            l1=grid_latlon_l1,
         )
-        self.subdomains = []  # list of Domain objects
-        self.split_domain = split_domain
+        self.subgrids = []  # list of grid objects
+        self.split_grid = split_grid
         self.clean_temp_files = clean_temp_files
         self.mpr_executable = mpr_executable
         self.parameter_file = None
@@ -378,8 +378,8 @@ class MHMRestartFile:
         self.increment_l0 = (
             int(
                 self.increment_l1
-                * self.domain.l1.resolution
-                / self.domain.l0.resolution
+                * self.grid.l1.resolution
+                / self.grid.l0.resolution
             )
             if self.increment_l1 is not None
             else None
@@ -397,68 +397,71 @@ class MHMRestartFile:
                 f.write(nml_data)
         return out_file_path
 
-    def _write_domain_namelist(self, domain: Domain):
+    def _write_grid_namelist(self, grid: Grid):
         replace_dict = {
-            "${slicei_j}": domain.name,
-            "${output_file}": domain.path / f"output_{domain.name}.nc",
-            "${lon_high_start}": f"{domain.l0.lon_min:.3f}",
-            "${lon_high_res}": f"{domain.l0.resolution:.3f}",
-            "${lon_high_n}": f"{domain.l0.get_n_lon()}",
-            "${lat_high_start}": f"{domain.l0.lat_min:.3f}",
-            "${lat_high_res}": f"{-domain.l0.resolution:.3f}",
-            "${lat_high_n}": f"{domain.l0.get_n_lat()}",
-            "${lon_low_start}": f"{domain.l1.lon_min:.2f}",
-            "${lon_low_res}": f"{domain.l1.resolution:.2f}",
-            "${lon_low_n}": f"{domain.l1.get_n_lon()}",
-            "${lat_low_start}": f"{domain.l1.lat_min:.2f}",
-            "${lat_low_res}": f"{-domain.l1.resolution:.2f}",
-            "${lat_low_n}": f"{domain.l1.get_n_lat()}",
-            "${bulk_density}": domain.morph_files.bulk_density,
-            "${sand_content}": domain.morph_files.sand_content,
-            "${clay_content}": domain.morph_files.clay_content,
-            "${slope}": domain.morph_files.slope,
-            "${lai}": domain.morph_files.lai,
-            "${aspect}": domain.morph_files.aspect,
-            "${geology}": domain.morph_files.geology,
-            "${land_cover}": domain.morph_files.land_cover,  # this should be a list but the template only has one
+            "${slicei_j}": grid.name,
+            "${output_file}": grid.path / f"output_{grid.name}.nc",
+            "${lon_high_start}": f"{grid.l0.lon_min:.3f}",
+            "${lon_high_res}": f"{grid.l0.resolution:.3f}",
+            "${lon_high_n}": f"{grid.l0.get_n_lon()}",
+            "${lat_high_start}": f"{grid.l0.lat_min:.3f}",
+            "${lat_high_res}": f"{-grid.l0.resolution:.3f}",
+            "${lat_high_n}": f"{grid.l0.get_n_lat()}",
+            "${lon_low_start}": f"{grid.l1.lon_min:.2f}",
+            "${lon_low_res}": f"{grid.l1.resolution:.2f}",
+            "${lon_low_n}": f"{grid.l1.get_n_lon()}",
+            "${lat_low_start}": f"{grid.l1.lat_min:.2f}",
+            "${lat_low_res}": f"{-grid.l1.resolution:.2f}",
+            "${lat_low_n}": f"{grid.l1.get_n_lat()}",
+            "${bulk_density}": grid.morph_files.bulk_density,
+            "${sand_content}": grid.morph_files.sand_content,
+            "${clay_content}": grid.morph_files.clay_content,
+            "${slope}": grid.morph_files.slope,
+            "${lai}": grid.morph_files.lai,
+            "${aspect}": grid.morph_files.aspect,
+            "${geology}": grid.morph_files.geology,
+            "${land_cover}": grid.morph_files.land_cover,  # this should be a list but the template only has one
         }
-        logger.info(f"Writing namelist for {domain.name}")
+        logger.info(f"Writing namelist for {grid.name}")
         logger.debug(replace_dict)
         return self._create_namelist(
-            replace_dict, domain.path / "mpr.nml"
+            replace_dict, grid.path / "mpr.nml"
         )
 
-    def _split_domain(self):  # has do addapted to different file types not just .nc
+    def _split_grid(self):  # has do addapted to different file types not just .nc
         """
-        Split the domain into subdomains and write them to disk.
+        Split the grid into subgrids and write them to disk.
 
-        Subdomains are subsets of the original domain with a size of increment x increment grid cells.
+        Subgrids are subsets of the original grid with a size of increment x increment grid cells.
         """
-        logger.info("Splitting domain")
+        logger.info("Splitting grid")
         if self.increment_l0 is None:
-            error_message = "Increment for splitting domains is not set"
+            error_message = "Increment for splitting grids is not set"
             raise ValueError(error_message)
-        sub_domain_paths = {}
-        for file_path in self.domain.morph_files.get_files_as_list():
+        sub_grid_paths = {}
+        for file_path in self.grid.morph_files.get_files_as_list():
             if file_path is None:
                 continue  # should raise error
             logger.info(f"Splitting {file_path}")
-            self._split_file(file_path, sub_domain_paths)
+            self._split_file(file_path, sub_grid_paths)
             logger.debug(f"Splitting {file_path} done")
-        self.subdomains = [
-            Domain(file_path=k, **v) for k, v in sub_domain_paths.items()
+        self.subgrids = [
+            Grid(file_path=k, **v) for k, v in sub_grid_paths.items()
         ]
-        logger.debug("Splitting domain done")
+        logger.debug("Splitting grid done")
 
-    def _split_file(self, file_path, sub_domain_paths):
+    def _split_file(self, file_path, sub_grid_paths):
+        logger.debug(f"Splitting {file_path}")
+        logger.debug(f"is file {file_path.is_file()}")
+        logger.debug(f"is link {file_path.is_symlink()}")
         with xr.open_dataset(file_path) as ds:
-            logger.debug(f"0, {self.domain.l0.get_n_lon()}, {self.increment_l0}")
+            logger.debug(f"0, {self.grid.l0.get_n_lon()}, {self.increment_l0}")
             logger.debug(f'opening {file_path} uses {sys.getsizeof(ds)} bytes of memory')
             for i, isel_start in enumerate(
-                range(0, self.domain.l0.get_n_lon(), self.increment_l0)
+                range(0, self.grid.l0.get_n_lon(), self.increment_l0)
             ):
                 for j, jsel_start in enumerate(
-                    range(0, self.domain.l0.get_n_lat(), self.increment_l0)
+                    range(0, self.grid.l0.get_n_lat(), self.increment_l0)
                 ):
                     out_dir = Path(self.output_path) / f"slice_{i}_{j}"
                     if not out_dir.exists():
@@ -484,17 +487,17 @@ class MHMRestartFile:
                         lon_max=ds_cut.longitude.max(),
                         lat_min=ds_cut.latitude.min(),
                         lat_max=ds_cut.latitude.max(),
-                        resolution=self.domain.l0.resolution,
+                        resolution=self.grid.l0.resolution,
                     )
                     l1 = LatLon(
                         lon_min=ds_cut.longitude.min(),
                         lon_max=ds_cut.longitude.max(),
                         lat_min=ds_cut.latitude.min(),
                         lat_max=ds_cut.latitude.max(),
-                        resolution=self.domain.l1.resolution,
+                        resolution=self.grid.l1.resolution,
                     )
-                    if out_dir not in sub_domain_paths:
-                        sub_domain_paths[out_dir] = {
+                    if out_dir not in sub_grid_paths:
+                        sub_grid_paths[out_dir] = {
                             "l0": l0,
                             "l1": l1,
                             "name": f"slice_{i}_{j}",
@@ -523,9 +526,9 @@ class MHMRestartFile:
 
     def _delete_temp_files(self):
         logger.info("Deleting temporary files")
-        # remove all temporary files meaning all files in the morph_files of each subdomain
-        for subdomain in self.subdomains:
-            for file_path in subdomain.morph_files.get_files_as_list():
+        # remove all temporary files meaning all files in the morph_files of each subgrid
+        for subgrid in self.subgrids:
+            for file_path in subgrid.morph_files.get_files_as_list():
                 if isinstance(file_path, list):
                     for f in file_path:
                         f.unlink()
@@ -536,8 +539,8 @@ class MHMRestartFile:
         """
         Create a restart file for the MHM model.
 
-        This method creates a restart file by splitting the domain (if necessary),
-        writing the domain namelist, calling the mpr executable, merging the restart
+        This method creates a restart file by splitting the grid (if necessary),
+        writing the grid namelist, calling the mpr executable, merging the restart
         files (if applicable), and deleting temporary files (if specified).
 
         Returns
@@ -549,18 +552,18 @@ class MHMRestartFile:
             Any exceptions that occur during the execution of the method.
         """
         logger.info("Creating restart file")
-        if self.split_domain:
-            logger.info('Domain will be split and processed in parallel')
-            self._split_domain()
-            for subdomain in self.subdomains:  # parallelize this
-                logger.debug(subdomain)
-                nml = self._write_domain_namelist(subdomain)
+        if self.split_grid:
+            logger.info('grid will be split and processed in parallel')
+            self._split_grid()
+            for subgrid in self.subgrids:  # parallelize this
+                logger.debug(subgrid)
+                nml = self._write_grid_namelist(subgrid)
                 self._call_mpr(nml)
             self._merge_restart_files()
             if self.clean_temp_files:
                 self._delete_temp_files()
         else:
-            logger.info('Domain will be processed as a whole')
-            nml = self._write_domain_namelist(self.domain)
+            logger.info('grid will be processed as a whole')
+            nml = self._write_grid_namelist(self.grid)
             self._call_mpr(nml)
         logger.info("Restart file created")
