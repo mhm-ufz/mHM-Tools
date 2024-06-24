@@ -79,9 +79,12 @@ class MorphFiles:
                     if len(key_files) != 0:
                         break
             if len(key_files) != 1:
-                self.__dict__[key] = [f if f.is_file() else None for f in key_files]
+                self.__dict__[key] = [f for f in key_files if f.is_file()]
             else:
                 self.__dict__[key] = key_files[0] if key_files[0].is_file() else None
+            if self.__dict__[key] is None or not self.__dict__['key']:
+                logger.warning(f"Could not find {key} file in {filepath}")
+        logger.debug(self.get_files_as_dir())
 
     def get_file(self, key):
         """
@@ -492,7 +495,7 @@ class MHMRestartFile:
         """Call the mpr executable with the given namelist and parameter file."""
         tmpdir = Path.cwd()
         os.chdir(self.work_dir)
-        command = f"{self.mpr_executable} -c {namelist} -p {self.parameter_file}"
+        command = f"{self.mpr_executable} -c {namelist}"# -p {self.parameter_file}"
         logger.info(f"Running mPR with: {command}")
 
         p = Popen(command, shell=True, stdout=PIPE, stderr=PIPE)
