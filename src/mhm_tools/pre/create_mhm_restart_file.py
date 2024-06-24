@@ -429,6 +429,7 @@ class MHMRestartFile:
             replace_dict, grid.path / "mpr.nml"
         )
 
+
     def _split_grid(self):  # has do addapted to different file types not just .nc
         """
         Split the grid into subgrids and write them to disk.
@@ -459,21 +460,26 @@ class MHMRestartFile:
         with xr.open_dataset(file_path) as ds:
             logger.debug(f"0, {self.grid.l0.get_n_lon()}, {self.increment_l0}")
             logger.debug(f'opening {file_path} uses {sys.getsizeof(ds)} bytes of memory')
-            for i, isel_start in enumerate(
-                range(0, self.grid.l0.get_n_lon(), self.increment_l0)
-            ):
-                for j, jsel_start in enumerate(
-                    range(0, self.grid.l0.get_n_lat(), self.increment_l0)
-                ):
+            for lon_min in np.linspace(self.grid.l0.lon_min, self.grid.l0.lon_max , self.grid.l0.get_n_lon()//self.increment_l0):
+            # for i, isel_start in enumerate(
+            #     range(0, self.grid.l0.get_n_lon(), self.increment_l0)
+            # ):
+                for lat_min in np.linspace(self.grid.l0.lat_min, self.grid.l0.lat_max, self.grid.l0.get_n_lat()//self.increment_l0):
+                # for j, jsel_start in enumerate(
+                #     range(0, self.grid.l0.get_n_lat(), self.increment_l0)
+                # ):
                     out_dir = Path(self.output_path) / f"slice_{i}_{j}"
                     if not out_dir.exists():
                         logger.debug(f"Creating {out_dir}")
                     out_dir.mkdir(parents=True, exist_ok=True)
 
                     out_path = out_dir / f"{file_path.stem}.nc"
+
+                    # lon_min, lon_max = isel_start, isel_start + self.increment_l0
+                    # lat_min, lat_max = jsel_start, jsel_start + self.increment_l0
                     ds_cut = ds.isel(
-                        longitude=slice(isel_start, isel_start + self.increment_l0),
-                        latitude=slice(jsel_start, jsel_start + self.increment_l0),
+                        longitude=slice(lon_min, lon_min + self.increment_l0 * self.grid.l0.resolution),
+                        latitude=slice(lat_min, lon_min + self.increment_l0 * self.grid.l0.resolution),
                     )
                     try:
                         ds_cut.to_netcdf(out_path)
@@ -484,18 +490,32 @@ class MHMRestartFile:
                         )
                         logger.debug(ds_cut["latitude"].values)
                         return
+                    # l0 = LatLon(
+                    #     lon_min=ds_cut.longitude.min(),
+                    #     lon_max=ds_cut.longitude.max(),
+                    #     lat_min=ds_cut.latitude.min(),
+                    #     lat_max=ds_cut.latitude.max(),
+                    #     resolution=self.grid.l0.resolution,
+                    # )
+                    # l1 = LatLon(
+                    #     lon_min=ds_cut.longitude.min(),
+                    #     lon_max=ds_cut.longitude.max(),
+                    #     lat_min=ds_cut.latitude.min(),
+                    #     lat_max=ds_cut.latitude.max(),
+                    #     resolution=self.grid.l1.resolution,
+                    # )
                     l0 = LatLon(
-                        lon_min=ds_cut.longitude.min(),
-                        lon_max=ds_cut.longitude.max(),
-                        lat_min=ds_cut.latitude.min(),
-                        lat_max=ds_cut.latitude.max(),
+                        lon_min=lon_min,
+                        lon_max=lon_min + self.increment_l0 * self.grid.l0.resolution,
+                        lat_min=lat_min,
+                        lat_max=lat_min + self.increment_l0 * self.grid.l0.resolution,
                         resolution=self.grid.l0.resolution,
                     )
                     l1 = LatLon(
-                        lon_min=ds_cut.longitude.min(),
-                        lon_max=ds_cut.longitude.max(),
-                        lat_min=ds_cut.latitude.min(),
-                        lat_max=ds_cut.latitude.max(),
+                        lon_min=lon_min,
+                        lon_max=lon_min + self.increment_l0 * self.grid.l0.resolution,
+                        lat_min=lat_min,
+                        lat_max=lat_min + self.increment_l0 * self.grid.l0.resolution,
                         resolution=self.grid.l1.resolution,
                     )
                     if out_dir not in sub_grid_paths:
