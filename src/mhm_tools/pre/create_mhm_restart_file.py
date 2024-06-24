@@ -72,7 +72,6 @@ class MorphFiles:
             if not overwrite and self.__dict__.get(key, None) is not None:
                 continue
             key_files = list(filepath.glob(f"*{key}*.nc"))
-            logger.debug(f"Found {len(key_files)} {key} files")
             if len(key_files) == 0:
                 if key not in member_key_synonyms:
                     continue  # should raise an error
@@ -80,10 +79,11 @@ class MorphFiles:
                     key_files = list(filepath.glob(f"{synonym}*.nc"))
                     if len(key_files) != 0:
                         break
+            logger.debug(f"Found {len(key_files)} {key} files: {key_files}")
             if len(key_files) != 1:
                 self.__dict__[key] = [f for f in key_files if f.is_file()]
             else:
-                self.__dict__[key] = key_files[0] if key_files[0].is_file() else None
+                self.__dict__[key] = key_files[0] # if key_files[0].is_file() else None
             logger.debug(f"Found {key} file(s): {self.__dict__[key]}")
             if self.__dict__[key] is None or not self.__dict__[key]:
                 logger.warning(f"Could not find {key} file in {filepath}")
