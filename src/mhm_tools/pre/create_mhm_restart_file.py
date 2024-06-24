@@ -345,6 +345,7 @@ class MHMRestartFile:
         mpr_executable=None
     ):
         logger.setLevel(log_level)
+        logger.debug(f"Creating MHMRestartFile object with {locals()}")
         self.nml_template = Path(nml_template)
         self.output_path = Path(output_path)
         grid_latlon_l0 = LatLon(
@@ -405,13 +406,13 @@ class MHMRestartFile:
             "${lon_high_res}": f"{grid.l0.resolution:.3f}",
             "${lon_high_n}": f"{grid.l0.get_n_lon()}",
             "${lat_high_start}": f"{grid.l0.lat_min:.3f}",
-            "${lat_high_res}": f"{-grid.l0.resolution:.3f}",
+            "${lat_high_res}": f"{grid.l0.resolution:.3f}",
             "${lat_high_n}": f"{grid.l0.get_n_lat()}",
             "${lon_low_start}": f"{grid.l1.lon_min:.2f}",
             "${lon_low_res}": f"{grid.l1.resolution:.2f}",
             "${lon_low_n}": f"{grid.l1.get_n_lon()}",
             "${lat_low_start}": f"{grid.l1.lat_min:.2f}",
-            "${lat_low_res}": f"{-grid.l1.resolution:.2f}",
+            "${lat_low_res}": f"{grid.l1.resolution:.2f}",
             "${lat_low_n}": f"{grid.l1.get_n_lat()}",
             "${bulk_density}": grid.morph_files.bulk_density,
             "${sand_content}": grid.morph_files.sand_content,
@@ -422,7 +423,7 @@ class MHMRestartFile:
             "${geology}": grid.morph_files.geology,
             "${land_cover}": grid.morph_files.land_cover,  # this should be a list but the template only has one
         }
-        logger.info(f"Writing namelist for {grid.name}")
+        logger.info(f"Writing namelist for {grid.name} to {grid.path / 'mpr.nml'}")
         logger.debug(replace_dict)
         return self._create_namelist(
             replace_dict, grid.path / "mpr.nml"
@@ -445,6 +446,7 @@ class MHMRestartFile:
             logger.info(f"Splitting {file_path}")
             self._split_file(file_path, sub_grid_paths)
             logger.debug(f"Splitting {file_path} done")
+        logger.debug("Creating subgrids")
         self.subgrids = [
             Grid(file_path=k, **v) for k, v in sub_grid_paths.items()
         ]
