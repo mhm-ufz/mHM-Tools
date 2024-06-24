@@ -12,7 +12,7 @@ latlon file creation
 
 from . import catchment, latlon
 from .catchment import create_catchment, merge_catchment
-from .create_mhm_restart_file import MHMRestartFile, Domain, MorphFiles, LatLon
+from .create_mhm_restart_file import MHMRestartFile, Grid, MorphFiles, LatLon
 from .latlon import create_latlon, xy_to_latlon
 from .subdomain_masks import create_subdomain_masks
 

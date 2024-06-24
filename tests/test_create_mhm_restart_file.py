@@ -53,7 +53,7 @@ class TestCreateRestart(unittest.TestCase):
 
     def test_read_latlon(self):
         p = Path(HERE / "files" / "test_create_restart" / "latlon_0p0625.nc")
-        d = mt.pre.Domain(file_path=self.morph_dir, latlon_file=p)
+        d = mt.pre.Grid(file_path=self.morph_dir, latlon_file=p)
         assert d.l0.lon_min - 11.500977 < 1e-6
         assert d.l0.lon_max - 12.999023 < 1e-6
         assert d.l0.lat_max - 50.249023 < 1e-6
