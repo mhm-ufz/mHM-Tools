@@ -558,7 +558,7 @@ class MHMRestartFile:
             logger.info('grid will be split and processed in parallel')
             self._split_grid()
             for subgrid in self.subgrids:  # parallelize this
-                logger.debug(subgrid)
+                logger.debug(f"Processing subgrid {subgrid.name}, {subgrid.path}, {subgrid.l0.lon_min}, {subgrid.l0.lon_max}, {subgrid.l0.lat_min}, {subgrid.l0.lat_max}")
                 nml = self._write_grid_namelist(subgrid)
                 self._call_mpr(nml)
             self._merge_restart_files()
