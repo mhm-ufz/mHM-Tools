@@ -65,7 +65,7 @@ class TestCreateRestart(unittest.TestCase):
         assert d.l1.lat_min - 49.03125 < 1e-6
         assert d.l1.resolution - 0.0625 < 1e-6
 
-    def test_split_domain(self):
+    def test_split_grid(self):
         morph = Path(HERE / "files" / "test_create_restart")
         lon_min_target_grid = -10
         lon_max_target_grid = 10
@@ -87,24 +87,24 @@ class TestCreateRestart(unittest.TestCase):
             increment_l1=increment_l1,
         )
         # test setup successful
-        assert m.domain.l0.lon_min - -10 < 1e-6
-        assert m.domain.l0.lon_max - 10 < 1e-6
-        assert m.domain.l0.lat_max - 10 < 1e-6
-        assert m.domain.l0.lat_min - -10 < 1e-6
-        assert m.domain.l0.resolution - 0.002 < 1e-6
-        assert m.domain.l1.lon_min - -10 < 1e-6
-        assert m.domain.l1.lon_max - 10 < 1e-6
-        assert m.domain.l1.lat_max - 10 < 1e-6
-        assert m.domain.l1.lat_min - -10 < 1e-6
-        assert m.domain.l1.resolution - 0.1 < 1e-6
-        assert m.domain.morph_files.geology == morph / "geology_0.002.nc"
+        assert m.grid.l0.lon_min - -10 < 1e-6
+        assert m.grid.l0.lon_max - 10 < 1e-6
+        assert m.grid.l0.lat_max - 10 < 1e-6
+        assert m.grid.l0.lat_min - -10 < 1e-6
+        assert m.grid.l0.resolution - 0.002 < 1e-6
+        assert m.grid.l1.lon_min - -10 < 1e-6
+        assert m.grid.l1.lon_max - 10 < 1e-6
+        assert m.grid.l1.lat_max - 10 < 1e-6
+        assert m.grid.l1.lat_min - -10 < 1e-6
+        assert m.grid.l1.resolution - 0.1 < 1e-6
+        assert m.grid.morph_files.geology == morph / "geology_0.002.nc"
 
-        print(m.domain.morph_files.get_files_as_list(), flush=True)
-        # split domain
-        m._split_domain()
-        assert len(m.subdomains) == 100
+        print(m.grid.morph_files.get_files_as_list(), flush=True)
+        # split grid
+        m._split_grid()
+        assert len(m.subgrids) == 100
 
-        for sd in m.subdomains:
+        for sd in m.subgrids:
             # print(sd.morph_files.geology, flush=True)
             with xr.open_dataset(sd.morph_files.geology) as ds:
                 assert ds["longitude"].min() == sd.l0.lon_min
