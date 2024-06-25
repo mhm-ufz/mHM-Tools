@@ -44,9 +44,7 @@ def add_args(parser):
     required_args.add_argument(
         "--mpr",
         required=True,
-        help=(
-            "path to the mPR executable"
-        ),
+        help=("path to the mPR executable"),
     )
 
     parser.add_argument(
