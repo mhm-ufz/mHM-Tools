@@ -2,15 +2,16 @@
 
 import logging
 import os
+import sys
 from pathlib import Path
 from subprocess import PIPE, Popen, TimeoutExpired
-import sys 
-import numpy as np
 
+import numpy as np
 import xarray as xr
 
 logging.basicConfig(format="%(asctime)s - %(levelname)-8s - %(message)s")
 logger = logging.getLogger(__name__)
+
 
 class MorphFiles:
     """
@@ -68,7 +69,7 @@ class MorphFiles:
         }
         if type(filepath) is not Path:
             filepath = Path(filepath)
-        logger.info(f'reading morph files from {filepath}')
+        logger.info(f"reading morph files from {filepath}")
         for key in self.__dict__:
             logger.debug(f"Looking for {key} file(s)")
             if not overwrite and self.__dict__.get(key, None) is not None:
@@ -85,7 +86,7 @@ class MorphFiles:
             if len(key_files) != 1:
                 self.__dict__[key] = [f for f in key_files if f.is_file()]
             else:
-                self.__dict__[key] = key_files[0] # if key_files[0].is_file() else None
+                self.__dict__[key] = key_files[0]  # if key_files[0].is_file() else None
             logger.debug(f"Found {key} file(s): {self.__dict__[key]}")
             if self.__dict__[key] is None or not self.__dict__[key]:
                 logger.warning(f"Could not find {key} file in {filepath}")
@@ -332,7 +333,6 @@ class MHMRestartFile:
         input_file_path: Path,
         nml_template: Path,
         output_path: Path,
-        latlon_file=None,
         split_grid=False,
         clean_temp_files=True,
         increment_l1=2,
@@ -343,7 +343,7 @@ class MHMRestartFile:
         l0_resolution=None,
         l1_resolution=None,
         log_level=logging.DEBUG,
-        mpr_executable=None
+        mpr_executable=None,
     ):
         logger.setLevel(log_level)
         logger.debug(f"Creating MHMRestartFile object with {locals()}")
@@ -366,7 +366,7 @@ class MHMRestartFile:
         self.grid = Grid(
             file_path=Path(input_file_path),
             name="whole grid",
-            latlon_file=latlon_file,
+            latlon_file=None,
             l0=grid_latlon_l0,
             l1=grid_latlon_l1,
         )
@@ -375,14 +375,10 @@ class MHMRestartFile:
         self.clean_temp_files = clean_temp_files
         self.mpr_executable = mpr_executable
         self.parameter_file = None
-        self.work_dir = '.'
+        self.work_dir = "."
         self.increment_l1 = increment_l1
         self.increment_l0 = (
-            int(
-                self.increment_l1
-                * self.grid.l1.resolution
-                / self.grid.l0.resolution
-            )
+            int(self.increment_l1 * self.grid.l1.resolution / self.grid.l0.resolution)
             if self.increment_l1 is not None
             else None
         )
@@ -426,10 +422,7 @@ class MHMRestartFile:
         }
         logger.info(f"Writing namelist for {grid.name} to {grid.path / 'mpr.nml'}")
         logger.debug(replace_dict)
-        return self._create_namelist(
-            replace_dict, grid.path / "mpr.nml"
-        )
-
+        return self._create_namelist(replace_dict, grid.path / "mpr.nml")
 
     def _split_grid(self):  # has do addapted to different file types not just .nc
         """
@@ -449,9 +442,7 @@ class MHMRestartFile:
             self._split_file(file_path, sub_grid_paths)
             logger.debug(f"Splitting {file_path} done")
         logger.debug("Creating subgrids")
-        self.subgrids = [
-            Grid(file_path=k, **v) for k, v in sub_grid_paths.items()
-        ]
+        self.subgrids = [Grid(file_path=k, **v) for k, v in sub_grid_paths.items()]
         logger.debug("Splitting grid done")
 
     def _split_file(self, file_path, sub_grid_paths):
@@ -460,9 +451,23 @@ class MHMRestartFile:
         logger.debug(f"is link {file_path.is_symlink()}")
         with xr.open_dataset(file_path) as ds:
             logger.debug(f"0, {self.grid.l0.get_n_lon()}, {self.increment_l0}")
-            logger.debug(f'opening {file_path} uses {sys.getsizeof(ds)} bytes of memory')
-            for i, lon_min in enumerate(np.linspace(self.grid.l0.lon_min, self.grid.l0.lon_max , self.grid.l0.get_n_lon()//self.increment_l0)):
-                for j, lat_min in enumerate(np.linspace(self.grid.l0.lat_min, self.grid.l0.lat_max, self.grid.l0.get_n_lat()//self.increment_l0)):
+            logger.debug(
+                f"opening {file_path} uses {sys.getsizeof(ds)} bytes of memory"
+            )
+            for i, lon_min in enumerate(
+                np.linspace(
+                    self.grid.l0.lon_min,
+                    self.grid.l0.lon_max,
+                    self.grid.l0.get_n_lon() // self.increment_l0,
+                )
+            ):
+                for j, lat_min in enumerate(
+                    np.linspace(
+                        self.grid.l0.lat_min,
+                        self.grid.l0.lat_max,
+                        self.grid.l0.get_n_lat() // self.increment_l0,
+                    )
+                ):
                     out_dir = Path(self.output_path) / f"slice_{i}_{j}"
                     if not out_dir.exists():
                         logger.debug(f"Creating {out_dir}")
@@ -472,27 +477,18 @@ class MHMRestartFile:
 
                     lon_max = lon_min + self.increment_l0 * self.grid.l0.resolution
                     lat_max = lat_min + self.increment_l0 * self.grid.l0.resolution
-                    logger.info(f'ds: {ds}')
                     ds_cut = ds.sel(
                         longitude=slice(lon_min, lon_max),
                         latitude=slice(lat_max, lat_min),
                     )
-                    if ds_cut['latitude'].size == 0:
-                        logger.debug(f"empty slice {lon_min}, {lon_max}, {lat_min}, {lat_max}")
-                        ds_cut = ds.sel(
-                            longitude=slice(lon_min, lon_max),
-                            latitude=slice(lat_min, lat_max),
-                        )
                     try:
-                        ds_cut.to_netcdf(out_path, 'w')
+                        ds_cut.to_netcdf(out_path, "w")
                     except Exception as e:
                         logger.error(f"Failed to write {out_path} with {e}")
-                        logger.debug(
-                            f"{lon_min}, {lon_max}, {lat_min}, {lat_max}"
-                        )
+                        logger.debug(f"{lon_min}, {lon_max}, {lat_min}, {lat_max}")
                         logger.debug(ds_cut["latitude"].values)
                         return
-                    
+
                     l0 = LatLon(
                         lon_min=lon_min,
                         lon_max=lon_max,
@@ -518,7 +514,7 @@ class MHMRestartFile:
         """Call the mpr executable with the given namelist and parameter file."""
         tmpdir = Path.cwd()
         os.chdir(self.work_dir)
-        command = f"{self.mpr_executable} -c {namelist}"# -p {self.parameter_file}"
+        command = f"{self.mpr_executable} -c {namelist}"  # -p {self.parameter_file}"
         logger.info(f"Running mPR with: {command}")
 
         p = Popen(command, shell=True, stdout=PIPE, stderr=PIPE)
@@ -564,17 +560,19 @@ class MHMRestartFile:
         """
         logger.info("Creating restart file")
         if self.split_grid:
-            logger.info('grid will be split and processed in parallel')
+            logger.info("grid will be split and processed in parallel")
             self._split_grid()
             for subgrid in self.subgrids:  # parallelize this
-                logger.debug(f"Processing subgrid {subgrid.name}, {subgrid.path}, {subgrid.l0.lon_min}, {subgrid.l0.lon_max}, {subgrid.l0.lat_min}, {subgrid.l0.lat_max}")
+                logger.debug(
+                    f"Processing subgrid {subgrid.name}, {subgrid.path}, {subgrid.l0.lon_min}, {subgrid.l0.lon_max}, {subgrid.l0.lat_min}, {subgrid.l0.lat_max}"
+                )
                 nml = self._write_grid_namelist(subgrid)
                 self._call_mpr(nml)
             self._merge_restart_files()
             if self.clean_temp_files:
                 self._delete_temp_files()
         else:
-            logger.info('grid will be processed as a whole')
+            logger.info("grid will be processed as a whole")
             nml = self._write_grid_namelist(self.grid)
             self._call_mpr(nml)
         logger.info("Restart file created")
