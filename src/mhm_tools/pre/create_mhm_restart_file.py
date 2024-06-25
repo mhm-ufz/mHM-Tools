@@ -483,9 +483,9 @@ class MHMRestartFile:
                         latitude=slice(lat_min, lon_min + self.increment_l0 * self.grid.l0.resolution),
                     )
                     try:
-                        ds_cut.to_netcdf(out_path)
-                    except Exception:
-                        logger.error(f"Failed to write {out_path}")
+                        ds_cut.to_netcdf(out_path, 'w')
+                    except Exception as e:
+                        logger.error(f"Failed to write {out_path} with {e}")
                         logger.debug(
                             f"{lon_min}, {lon_min + self.increment_l0 * self.grid.l0.resolution}, {lat_min}, {lat_min + self.increment_l0 * self.grid.l0.resolution}"
                         )
