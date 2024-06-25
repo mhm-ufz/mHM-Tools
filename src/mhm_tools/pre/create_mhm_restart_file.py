@@ -484,12 +484,18 @@ class MHMRestartFile:
                         longitude=slice(lon_min, lon_max),
                         latitude=slice(lat_max, lat_min),
                     )
+                    if ds_cut['latitude'].size == 0:
+                        logger.debug(f"empty slice {lon_min}, {lon_max}, {lat_min}, {lat_max}")
+                        ds_cut = ds.sel(
+                            longitude=slice(lon_min, lon_max),
+                            latitude=slice(lat_min, lat_max),
+                        )
                     try:
                         ds_cut.to_netcdf(out_path, 'w')
                     except Exception as e:
                         logger.error(f"Failed to write {out_path} with {e}")
                         logger.debug(
-                            f"{lon_min}, {lon_min + self.increment_l0 * self.grid.l0.resolution}, {lat_min}, {lat_min + self.increment_l0 * self.grid.l0.resolution}"
+                            f"{lon_min}, {lon_max}, {lat_min}, {lat_max}"
                         )
                         logger.debug(ds_cut["latitude"].values)
                         return
