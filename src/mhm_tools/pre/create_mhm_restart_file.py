@@ -471,7 +471,7 @@ class MHMRestartFile:
                     out_path = out_dir / f"{file_path.stem}.nc"
 
                     lon_max = lon_min + self.increment_l0 * self.grid.l0.resolution
-                    lat_max = lon_min + self.increment_l0 * self.grid.l0.resolution
+                    lat_max = lat_min + self.increment_l0 * self.grid.l0.resolution
                     logger.info(f'ds: {ds}')
                     ds_cut = ds.sel(
                         longitude=slice(lon_min, lon_max),
