@@ -478,7 +478,7 @@ class MHMRestartFile:
 
                     # lon_min, lon_max = isel_start, isel_start + self.increment_l0
                     # lat_min, lat_max = jsel_start, jsel_start + self.increment_l0
-                    ds_cut = ds.isel(
+                    ds_cut = ds.sel(
                         longitude=slice(lon_min, lon_min + self.increment_l0 * self.grid.l0.resolution),
                         latitude=slice(lat_min, lon_min + self.increment_l0 * self.grid.l0.resolution),
                     )
