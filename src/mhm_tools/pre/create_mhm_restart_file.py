@@ -487,7 +487,7 @@ class MHMRestartFile:
                     except Exception:
                         logger.error(f"Failed to write {out_path}")
                         logger.debug(
-                            f"{jsel_start}, {jsel_start + self.increment_l0}"
+                            f"{lon_min}, {lon_min + self.increment_l0 * self.grid.l0.resolution}, {lat_min}, {lat_min + self.increment_l0 * self.grid.l0.resolution}"
                         )
                         logger.debug(ds_cut["latitude"].values)
                         return
