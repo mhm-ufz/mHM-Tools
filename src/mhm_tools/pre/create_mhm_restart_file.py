@@ -462,13 +462,7 @@ class MHMRestartFile:
             logger.debug(f"0, {self.grid.l0.get_n_lon()}, {self.increment_l0}")
             logger.debug(f'opening {file_path} uses {sys.getsizeof(ds)} bytes of memory')
             for i, lon_min in enumerate(np.linspace(self.grid.l0.lon_min, self.grid.l0.lon_max , self.grid.l0.get_n_lon()//self.increment_l0)):
-            # for i, isel_start in enumerate(
-            #     range(0, self.grid.l0.get_n_lon(), self.increment_l0)
-            # ):
                 for j, lat_min in enumerate(np.linspace(self.grid.l0.lat_min, self.grid.l0.lat_max, self.grid.l0.get_n_lat()//self.increment_l0)):
-                # for j, jsel_start in enumerate(
-                #     range(0, self.grid.l0.get_n_lat(), self.increment_l0)
-                # ):
                     out_dir = Path(self.output_path) / f"slice_{i}_{j}"
                     if not out_dir.exists():
                         logger.debug(f"Creating {out_dir}")
@@ -476,10 +470,9 @@ class MHMRestartFile:
 
                     out_path = out_dir / f"{file_path.stem}.nc"
 
-                    # lon_min, lon_max = isel_start, isel_start + self.increment_l0
-                    # lat_min, lat_max = jsel_start, jsel_start + self.increment_l0
                     lon_max = lon_min + self.increment_l0 * self.grid.l0.resolution
                     lat_max = lon_min + self.increment_l0 * self.grid.l0.resolution
+                    logger.info(f'ds: {ds}')
                     ds_cut = ds.sel(
                         longitude=slice(lon_min, lon_max),
                         latitude=slice(lat_max, lat_min),
@@ -499,20 +492,7 @@ class MHMRestartFile:
                         )
                         logger.debug(ds_cut["latitude"].values)
                         return
-                    # l0 = LatLon(
-                    #     lon_min=ds_cut.longitude.min(),
-                    #     lon_max=ds_cut.longitude.max(),
-                    #     lat_min=ds_cut.latitude.min(),
-                    #     lat_max=ds_cut.latitude.max(),
-                    #     resolution=self.grid.l0.resolution,
-                    # )
-                    # l1 = LatLon(
-                    #     lon_min=ds_cut.longitude.min(),
-                    #     lon_max=ds_cut.longitude.max(),
-                    #     lat_min=ds_cut.latitude.min(),
-                    #     lat_max=ds_cut.latitude.max(),
-                    #     resolution=self.grid.l1.resolution,
-                    # )
+                    
                     l0 = LatLon(
                         lon_min=lon_min,
                         lon_max=lon_max,
