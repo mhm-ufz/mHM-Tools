@@ -461,11 +461,11 @@ class MHMRestartFile:
         with xr.open_dataset(file_path) as ds:
             logger.debug(f"0, {self.grid.l0.get_n_lon()}, {self.increment_l0}")
             logger.debug(f'opening {file_path} uses {sys.getsizeof(ds)} bytes of memory')
-            for lon_min in np.linspace(self.grid.l0.lon_min, self.grid.l0.lon_max , self.grid.l0.get_n_lon()//self.increment_l0):
+            for i, lon_min in enumerate(np.linspace(self.grid.l0.lon_min, self.grid.l0.lon_max , self.grid.l0.get_n_lon()//self.increment_l0)):
             # for i, isel_start in enumerate(
             #     range(0, self.grid.l0.get_n_lon(), self.increment_l0)
             # ):
-                for lat_min in np.linspace(self.grid.l0.lat_min, self.grid.l0.lat_max, self.grid.l0.get_n_lat()//self.increment_l0):
+                for j, lat_min in enumerate(np.linspace(self.grid.l0.lat_min, self.grid.l0.lat_max, self.grid.l0.get_n_lat()//self.increment_l0)):
                 # for j, jsel_start in enumerate(
                 #     range(0, self.grid.l0.get_n_lat(), self.increment_l0)
                 # ):
