@@ -478,9 +478,11 @@ class MHMRestartFile:
 
                     # lon_min, lon_max = isel_start, isel_start + self.increment_l0
                     # lat_min, lat_max = jsel_start, jsel_start + self.increment_l0
+                    lon_max = lon_min + self.increment_l0 * self.grid.l0.resolution
+                    lat_max = lon_min + self.increment_l0 * self.grid.l0.resolution
                     ds_cut = ds.sel(
-                        longitude=slice(lon_min, lon_min + self.increment_l0 * self.grid.l0.resolution),
-                        latitude=slice(lat_min, lon_min + self.increment_l0 * self.grid.l0.resolution),
+                        longitude=slice(lon_min, lon_max),
+                        latitude=slice(lat_max, lat_min),
                     )
                     try:
                         ds_cut.to_netcdf(out_path, 'w')
@@ -507,16 +509,16 @@ class MHMRestartFile:
                     # )
                     l0 = LatLon(
                         lon_min=lon_min,
-                        lon_max=lon_min + self.increment_l0 * self.grid.l0.resolution,
+                        lon_max=lon_max,
                         lat_min=lat_min,
-                        lat_max=lat_min + self.increment_l0 * self.grid.l0.resolution,
+                        lat_max=lat_max,
                         resolution=self.grid.l0.resolution,
                     )
                     l1 = LatLon(
                         lon_min=lon_min,
-                        lon_max=lon_min + self.increment_l0 * self.grid.l0.resolution,
+                        lon_max=lon_max,
                         lat_min=lat_min,
-                        lat_max=lat_min + self.increment_l0 * self.grid.l0.resolution,
+                        lat_max=lat_max,
                         resolution=self.grid.l1.resolution,
                     )
                     if out_dir not in sub_grid_paths:
