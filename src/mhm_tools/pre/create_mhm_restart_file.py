@@ -342,7 +342,7 @@ class MHMRestartFile:
         lat_max_target_grid=None,
         l0_resolution=None,
         l1_resolution=None,
-        log_level=logging.ERROR,
+        log_level=logging.DEBUG,
         mpr_executable=None,
     ):
         logger.setLevel(log_level)
@@ -456,15 +456,15 @@ class MHMRestartFile:
             )
             for i, lon_min in enumerate(
                 np.linspace(
-                    self.grid.l0.lon_min + self.grid.l0.resolution / 2,
-                    self.grid.l0.lon_max + self.grid.l0.resolution / 2,
+                    self.grid.l0.lon_min,
+                    self.grid.l0.lon_max,
                     self.grid.l0.get_n_lon() // self.increment_l0,
                 )
             ):
                 for j, lat_min in enumerate(
                     np.linspace(
-                        self.grid.l0.lat_min + self.grid.l0.resolution / 2,
-                        self.grid.l0.lat_max + self.grid.l0.resolution / 2,
+                        self.grid.l0.lat_min,
+                        self.grid.l0.lat_max,
                         self.grid.l0.get_n_lat() // self.increment_l0,
                     )
                 ):
