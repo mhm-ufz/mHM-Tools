@@ -65,6 +65,16 @@ def add_args(parser):
             "split the grid into subgrids based on the provided basin clusters if your grid is to large to run in one piece"
         ),
     )
+    parser.add_argument(
+        "-c",
+        "--clean-up",
+        dest="clean_up",
+        action="store_true",
+        required=False,
+        help=(
+            "delete the temporary files created during the process"
+        ),
+    )
 
 
 def run(args):
@@ -95,5 +105,6 @@ def run(args):
         increment_l1=args.l1_increment,
         mpr_executable=args.mpr,
         split_grid=args.split,
+        clean_temp_files=args.clean_up,
     )
     restart_creator.create_restart_file()
