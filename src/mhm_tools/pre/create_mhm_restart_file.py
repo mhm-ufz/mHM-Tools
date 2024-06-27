@@ -452,17 +452,17 @@ class MHMRestartFile:
         logger.debug(f"{self.grid.l0.get_n_lat()}, {self.increment_l0}, {self.grid.l0.get_n_lat() // self.increment_l0}")
         with xr.open_dataset(file_path) as ds:
             for i, lon_min in enumerate(
-                np.linspace(
-                    self.grid.l0.lon_min,
-                    self.grid.l0.lon_max,
-                    self.grid.l0.get_n_lon() // self.increment_l0,
+                np.arange(
+                    self.grid.l1.lon_min,
+                    self.grid.l1.lon_max,
+                    self.grid.l1.resolution * self.increment_l1
                 )
             ):
                 for j, lat_min in enumerate(
-                    np.linspace(
-                        self.grid.l0.lat_min,
-                        self.grid.l0.lat_max,
-                        self.grid.l0.get_n_lat() // self.increment_l0,
+                    np.arange(
+                        self.grid.l1.lat_min,
+                        self.grid.l1.lat_max,
+                        self.grid.l1.resolution * self.increment_l1
                     )
                 ):
                     out_dir = Path(self.output_path) / f"slice_{i}_{j}"
@@ -472,8 +472,8 @@ class MHMRestartFile:
 
                     out_path = out_dir / f"{file_path.stem}.nc"
 
-                    lon_max = lon_min + self.increment_l0 * self.grid.l0.resolution
-                    lat_max = lat_min + self.increment_l0 * self.grid.l0.resolution
+                    lon_max = lon_min + self.increment_l1 * self.grid.l1.resolution
+                    lat_max = lat_min + self.increment_l1 * self.grid.l1.resolution
                     ds_cut = ds.sel(
                         longitude=slice(lon_min, lon_max),
                         latitude=slice(lat_max, lat_min),
@@ -486,19 +486,21 @@ class MHMRestartFile:
                         logger.debug(f"{lon_min}, {lon_max}, {lat_min}, {lat_max}")
                         logger.debug(ds_cut["latitude"].values)
                         return
-
-                    l0 = LatLon(
-                        lon_min=lon_min,
-                        lon_max=lon_max,    
-                        lat_min=lat_min,
-                        lat_max=lat_max,
+                    
+                    # halve the resolution for the low resolution grid is added or subtracted to the min and max values to match the xarray slicing 
+                    # because xarray use center of the cell instead of ll corner
+                    l0 = LatLon( # this is the high resolution grid
+                        lon_min=lon_min + self.grid.l0.resolution / 2,
+                        lon_max=lon_max - self.grid.l0.resolution / 2,    
+                        lat_min=lat_min + self.grid.l0.resolution / 2,
+                        lat_max=lat_max - self.grid.l0.resolution / 2,
                         resolution=self.grid.l0.resolution,
                     )
-                    l1 = LatLon(
-                        lon_min=lon_min,
-                        lon_max=lon_max,
-                        lat_min=lat_min,
-                        lat_max=lat_max,
+                    l1 = LatLon( # this is the low resolution grid
+                        lon_min=lon_min + self.grid.l0.resolution / 2,
+                        lon_max=lon_max - self.grid.l0.resolution / 2,
+                        lat_min=lat_min + self.grid.l0.resolution / 2,
+                        lat_max=lat_max - self.grid.l0.resolution / 2,
                         resolution=self.grid.l1.resolution,
                     )
                     if out_dir not in sub_grid_paths:

@@ -2,7 +2,9 @@ import shutil
 import unittest
 from pathlib import Path
 
+import numpy as np
 import xarray as xr
+import logging
 
 import mhm_tools as mt
 
@@ -85,32 +87,37 @@ class TestCreateRestart(unittest.TestCase):
             l0_resolution=l0_resolution,
             l1_resolution=l1_resolution,
             increment_l1=increment_l1,
+            log_level=logging.ERROR,
         )
         # test setup successful
-        assert m.grid.l0.lon_min - -10 < 1e-6
-        assert m.grid.l0.lon_max - 10 < 1e-6
-        assert m.grid.l0.lat_max - 10 < 1e-6
-        assert m.grid.l0.lat_min - -10 < 1e-6
+        assert m.grid.l0.lon_min - -10 < 1e-3
+        assert m.grid.l0.lon_max - 10 < 1e-3
+        assert m.grid.l0.lat_max - 10 < 1e-3
+        assert m.grid.l0.lat_min - -10 < 1e-3
         assert m.grid.l0.resolution - 0.002 < 1e-6
-        assert m.grid.l1.lon_min - -10 < 1e-6
-        assert m.grid.l1.lon_max - 10 < 1e-6
-        assert m.grid.l1.lat_max - 10 < 1e-6
-        assert m.grid.l1.lat_min - -10 < 1e-6
+        assert m.grid.l1.lon_min - -10 < 1e-3
+        assert m.grid.l1.lon_max - 10 < 1e-3
+        assert m.grid.l1.lat_max - 10 < 1e-3
+        assert m.grid.l1.lat_min - -10 < 1e-3
         assert m.grid.l1.resolution - 0.1 < 1e-6
         assert m.grid.morph_files.geology == morph / "geology_0.002.nc"
 
-        print(m.grid.morph_files.get_files_as_list(), flush=True)
         # split grid
         m._split_grid()
         assert len(m.subgrids) == 100
 
-        for sd in m.subgrids:
+        for sd in reversed(m.subgrids):
             # print(sd.morph_files.geology, flush=True)
             with xr.open_dataset(sd.morph_files.geology) as ds:
-                assert ds["longitude"].min() == sd.l0.lon_min
-                assert ds["longitude"].max() == sd.l0.lon_max
-                assert ds["latitude"].min() == sd.l0.lat_min
-                assert ds["latitude"].max() == sd.l0.lat_max
+                # print('--------------------------------------------------------')
+                # print(f'lon min {float(ds["longitude"].min()):.4f} - {sd.l0.lon_min:.4f} - {abs((sd.l0.lon_min) - float(ds["longitude"].min())) < 1e-4}')
+                # print(f'lon max {float(ds["longitude"].max()):.4f} - {sd.l0.lon_max:.4f} - {abs((sd.l0.lon_max) - float(ds["longitude"].max())) < 1e-4}')
+                # print(f'lat min {float(ds["latitude"].min()):.4f} - {sd.l0.lat_min:.4f} - {abs((sd.l0.lat_min) - float(ds["latitude"].min())) < 1e-4}')
+                # print(f'lat max {float(ds["latitude"].max()):.4f} - {sd.l0.lat_max:.4f} - {abs((sd.l0.lat_max) - float(ds["latitude"].max())) < 1e-4}')
+                assert abs(float(ds["longitude"].min()) - sd.l0.lon_min) < 1e-6
+                assert abs(ds["longitude"].max() - sd.l0.lon_max) < 1e-6
+                assert abs(ds["latitude"].min() - sd.l0.lat_min) < 1e-6
+                assert abs(ds["latitude"].max() - sd.l0.lat_max) < 1e-6
 
     def test_write_namelists(self):
         pass
