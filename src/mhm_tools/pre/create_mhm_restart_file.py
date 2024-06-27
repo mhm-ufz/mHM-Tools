@@ -448,13 +448,9 @@ class MHMRestartFile:
 
     def _split_file(self, file_path, sub_grid_paths):
         logger.debug(f"Splitting {file_path}")
-        logger.debug(f"is file {file_path.is_file()}")
-        logger.debug(f"is link {file_path.is_symlink()}")
+        logger.debug(f"{self.grid.l0.get_n_lon()}, {self.increment_l0}, {self.grid.l0.get_n_lon() // self.increment_l0}")
+        logger.debug(f"{self.grid.l0.get_n_lat()}, {self.increment_l0}, {self.grid.l0.get_n_lat() // self.increment_l0}")
         with xr.open_dataset(file_path) as ds:
-            logger.debug(f"0, {self.grid.l0.get_n_lon()}, {self.increment_l0}")
-            logger.debug(
-                f"opening {file_path} uses {sys.getsizeof(ds)} bytes of memory"
-            )
             for i, lon_min in enumerate(
                 np.linspace(
                     self.grid.l0.lon_min,
@@ -484,6 +480,7 @@ class MHMRestartFile:
                     )
                     try:
                         ds_cut.to_netcdf(out_path, "w")
+                        logger.debug(f"Written {out_path}")
                     except Exception as e:
                         logger.error(f"Failed to write {out_path} with {e}")
                         logger.debug(f"{lon_min}, {lon_max}, {lat_min}, {lat_max}")
@@ -492,7 +489,7 @@ class MHMRestartFile:
 
                     l0 = LatLon(
                         lon_min=lon_min,
-                        lon_max=lon_max,
+                        lon_max=lon_max,    
                         lat_min=lat_min,
                         lat_max=lat_max,
                         resolution=self.grid.l0.resolution,
