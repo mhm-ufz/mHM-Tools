@@ -168,7 +168,8 @@ class LatLon:
         -------
             int: The number of latitude points.
         """
-        return int((self.lat_max - self.lat_min) / self.resolution)
+        # print('nlat',self.lat_max, self.lat_min, self.resolution, (self.lat_max - self.lat_min) / self.resolution, int((self.lat_max - self.lat_min) / self.resolution), flush=True)
+        return int((self.lat_max - self.lat_min) / self.resolution + 0.5) # + 0.5 to round up
 
     def get_n_lon(self):
         """
@@ -178,7 +179,8 @@ class LatLon:
         -------
             int: The number of longitude points.
         """
-        return int((self.lon_max - self.lon_min) / self.resolution)
+        # print('nlon', self.lon_max, self.lon_min, self.resolution, (self.lon_max - self.lon_min) / self.resolution, int((self.lon_max - self.lon_min) / self.resolution), flush=True)
+        return int((self.lon_max - self.lon_min) / self.resolution + 0.5) # + 0.5 to round up
 
     def is_fully_defined(self):
         """
@@ -400,16 +402,16 @@ class MHMRestartFile:
         replace_dict = {
             "${slicei_j}": grid.name,
             "${output_file}": grid.path / f"output_{grid.name}.nc",
-            "${lon_high_start}": f"{grid.l0.lon_min:.3f}",
+            "${lon_high_start}": f"{grid.l0.lon_min:.3f}", # does this need be changed to center of the cell?
             "${lon_high_res}": f"{grid.l0.resolution:.3f}",
             "${lon_high_n}": f"{grid.l0.get_n_lon()}",
-            "${lat_high_start}": f"{grid.l0.lat_min:.3f}",
+            "${lat_high_start}": f"{grid.l0.lat_min:.3f}",# does this need be changed to center of the cell?
             "${lat_high_res}": f"{grid.l0.resolution:.3f}",
             "${lat_high_n}": f"{grid.l0.get_n_lat()}",
-            "${lon_low_start}": f"{grid.l1.lon_min:.2f}",
+            "${lon_low_start}": f"{grid.l1.lon_min:.2f}",# does this need be changed to center of the cell?
             "${lon_low_res}": f"{grid.l1.resolution:.2f}",
             "${lon_low_n}": f"{grid.l1.get_n_lon()}",
-            "${lat_low_start}": f"{grid.l1.lat_min:.2f}",
+            "${lat_low_start}": f"{grid.l1.lat_min:.2f}",# does this need be changed to center of the cell?
             "${lat_low_res}": f"{grid.l1.resolution:.2f}",
             "${lat_low_n}": f"{grid.l1.get_n_lat()}",
             "${bulk_density}": grid.morph_files.bulk_density,
@@ -448,8 +450,8 @@ class MHMRestartFile:
 
     def _split_file(self, file_path, sub_grid_paths):
         logger.debug(f"Splitting {file_path}")
-        logger.debug(f"{self.grid.l0.get_n_lon()}, {self.increment_l0}, {self.grid.l0.get_n_lon() // self.increment_l0}")
-        logger.debug(f"{self.grid.l0.get_n_lat()}, {self.increment_l0}, {self.grid.l0.get_n_lat() // self.increment_l0}")
+        # logger.debug(f"{self.grid.l0.get_n_lon()}, {self.increment_l0}, {self.grid.l0.get_n_lon() // self.increment_l0}")
+        # logger.debug(f"{self.grid.l0.get_n_lat()}, {self.increment_l0}, {self.grid.l0.get_n_lat() // self.increment_l0}")
         with xr.open_dataset(file_path) as ds:
             for i, lon_min in enumerate(
                 np.arange(
@@ -487,20 +489,19 @@ class MHMRestartFile:
                         logger.debug(ds_cut["latitude"].values)
                         return
                     
-                    # halve the resolution for the low resolution grid is added or subtracted to the min and max values to match the xarray slicing 
-                    # because xarray use center of the cell instead of ll corner
+                    # grid saved in llc coordinates
                     l0 = LatLon( # this is the high resolution grid
-                        lon_min=lon_min + self.grid.l0.resolution / 2,
-                        lon_max=lon_max - self.grid.l0.resolution / 2,    
-                        lat_min=lat_min + self.grid.l0.resolution / 2,
-                        lat_max=lat_max - self.grid.l0.resolution / 2,
+                        lon_min=lon_min,
+                        lon_max=lon_max,
+                        lat_min=lat_min,
+                        lat_max=lat_max,
                         resolution=self.grid.l0.resolution,
                     )
                     l1 = LatLon( # this is the low resolution grid
-                        lon_min=lon_min + self.grid.l0.resolution / 2,
-                        lon_max=lon_max - self.grid.l0.resolution / 2,
-                        lat_min=lat_min + self.grid.l0.resolution / 2,
-                        lat_max=lat_max - self.grid.l0.resolution / 2,
+                        lon_min=lon_min,
+                        lon_max=lon_max,
+                        lat_min=lat_min,
+                        lat_max=lat_max,
                         resolution=self.grid.l1.resolution,
                     )
                     if out_dir not in sub_grid_paths:
