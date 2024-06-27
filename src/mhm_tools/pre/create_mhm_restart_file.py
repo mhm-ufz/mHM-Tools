@@ -66,6 +66,7 @@ class MorphFiles:
             "bulk_density": ["BLDFIE"],
             "sand_content": ["SNDPPT"],
             "clay_content": ["CLYPPT"],
+            "lai": ["LAI"],
         }
         if type(filepath) is not Path:
             filepath = Path(filepath)
@@ -512,8 +513,8 @@ class MHMRestartFile:
 
     def _call_mpr(self, namelist):
         """Call the mpr executable with the given namelist and parameter file."""
-        tmpdir = Path.cwd()
-        os.chdir(self.work_dir)
+        # tmpdir = Path.cwd()
+        # os.chdir(self.work_dir)
         command = f"{self.mpr_executable} -c {namelist}"  # -p {self.parameter_file}"
         logger.info(f"Running mPR with: {command}")
 
@@ -523,9 +524,10 @@ class MHMRestartFile:
             if error_data:
                 logger.error(f"Failed with STDERR {error_data}")
         except TimeoutExpired:
+            logger.error("Timeout expired")
             p.kill()
-        finally:
-            os.chdir(tmpdir)
+        # finally:
+            # os.chd    ir(tmpdir)
 
     def _merge_restart_files(self):
         logger.info("Merging restart files")
