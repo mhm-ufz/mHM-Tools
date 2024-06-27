@@ -335,7 +335,7 @@ class MHMRestartFile:
         nml_template: Path,
         output_path: Path,
         split_grid=False,
-        clean_temp_files=True,
+        clean_temp_files=False,
         increment_l1=2,
         lon_min_target_grid=None,
         lon_max_target_grid=None,
