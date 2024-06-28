@@ -402,16 +402,16 @@ class MHMRestartFile:
         replace_dict = {
             "${slicei_j}": grid.name,
             "${output_file}": grid.path / f"output_{grid.name}.nc",
-            "${lon_high_start}": f"{grid.l0.lon_min:.3f}", # does this need be changed to center of the cell?
+            "${lon_high_start}": f"{grid.l0.lon_min + grid.l0.resolution / 2:.3f}", # does this need be changed to center of the cell?
             "${lon_high_res}": f"{grid.l0.resolution:.3f}",
             "${lon_high_n}": f"{grid.l0.get_n_lon()}",
-            "${lat_high_start}": f"{grid.l0.lat_min:.3f}",# does this need be changed to center of the cell?
+            "${lat_high_start}": f"{grid.l0.lat_min + grid.l0.resolution / 2:.3f}",# does this need be changed to center of the cell?
             "${lat_high_res}": f"{grid.l0.resolution:.3f}",
             "${lat_high_n}": f"{grid.l0.get_n_lat()}",
-            "${lon_low_start}": f"{grid.l1.lon_min:.2f}",# does this need be changed to center of the cell?
+            "${lon_low_start}": f"{grid.l1.lon_min + grid.l1.resolution / 2:.2f}",# does this need be changed to center of the cell?
             "${lon_low_res}": f"{grid.l1.resolution:.2f}",
             "${lon_low_n}": f"{grid.l1.get_n_lon()}",
-            "${lat_low_start}": f"{grid.l1.lat_min:.2f}",# does this need be changed to center of the cell?
+            "${lat_low_start}": f"{grid.l1.lat_min + grid.l1.resolution / 2:.2f}",# does this need be changed to center of the cell?
             "${lat_low_res}": f"{grid.l1.resolution:.2f}",
             "${lat_low_n}": f"{grid.l1.get_n_lat()}",
             "${bulk_density}": grid.morph_files.bulk_density,
@@ -515,7 +515,8 @@ class MHMRestartFile:
         """Call the mpr executable with the given namelist and parameter file."""
         # tmpdir = Path.cwd()
         # os.chdir(self.work_dir)
-        command = f"{self.mpr_executable} -c {namelist}"  # -p {self.parameter_file}"
+        command = f"module load iomkl/2020b netCDF-Fortran/4.5.3 \
+        {self.mpr_executable} -c {namelist}"  # -p {self.parameter_file}"
         logger.info(f"Running mPR with: {command}")
 
         p = Popen(command, shell=True, stdout=PIPE, stderr=PIPE)
