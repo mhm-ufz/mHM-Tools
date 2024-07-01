@@ -48,6 +48,14 @@ def add_args(parser):
     )
 
     parser.add_argument(
+        "-p",
+        "--mpr_params",
+        required=False,
+        default=None,
+        help=("path to the mPR parameters file"),
+    )
+
+    parser.add_argument(
         "--l1_increment",
         required=True,
         default=20,
@@ -71,9 +79,20 @@ def add_args(parser):
         dest="clean_up",
         action="store_true",
         required=False,
-        help=(
-            "delete the temporary files created during the process"
-        ),
+        help=("delete the temporary files created during the process"),
+    )
+
+    parser.add_argument(
+        "--log_level",
+        default="INFO",
+        help=("Set the logging level"),
+    )
+
+    parser.add_argument(
+        "--ncpus",
+        default=1,
+        type=int,
+        help=("Number of CPUs to use"),
     )
 
 
@@ -106,5 +125,8 @@ def run(args):
         mpr_executable=args.mpr,
         split_grid=args.split,
         clean_temp_files=args.clean_up,
+        mpr_parameter_file=args.mpr_params,
+        ncpus=args.ncpus,
+        log_level=args.log_level,
     )
     restart_creator.create_restart_file()

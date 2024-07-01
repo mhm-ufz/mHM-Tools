@@ -1,10 +1,10 @@
+import logging
 import shutil
 import unittest
 from pathlib import Path
 
 import numpy as np
 import xarray as xr
-import logging
 
 import mhm_tools as mt
 
@@ -109,14 +109,28 @@ class TestCreateRestart(unittest.TestCase):
         for sd in reversed(m.subgrids):
             # print(sd.morph_files.geology, flush=True)
             with xr.open_dataset(sd.morph_files.geology) as ds:
-                assert abs(float(ds["longitude"].min()) - sd.l0.lon_min) - sd.l0.resolution / 2< 1e-6 # difference is half the resolution because the xarray grid provides the center of the cell
-                assert abs(ds["longitude"].max() - sd.l0.lon_max)- sd.l0.resolution / 2 < 1e-6
-                assert abs(ds["latitude"].min() - sd.l0.lat_min) - sd.l0.resolution / 2 < 1e-6
-                assert abs(ds["latitude"].max() - sd.l0.lat_max) - sd.l0.resolution / 2 < 1e-6
+                assert (
+                    abs(float(ds["longitude"].min()) - sd.l0.lon_min)
+                    - sd.l0.resolution / 2
+                    < 1e-6
+                )  # difference is half the resolution because the xarray grid provides the center of the cell
+                assert (
+                    abs(ds["longitude"].max() - sd.l0.lon_max) - sd.l0.resolution / 2
+                    < 1e-6
+                )
+                assert (
+                    abs(ds["latitude"].min() - sd.l0.lat_min) - sd.l0.resolution / 2
+                    < 1e-6
+                )
+                assert (
+                    abs(ds["latitude"].max() - sd.l0.lat_max) - sd.l0.resolution / 2
+                    < 1e-6
+                )
             assert sd.l1.get_n_lon() == 20
-            assert sd.l1.get_n_lat() == 20 
+            assert sd.l1.get_n_lat() == 20
             assert sd.l0.get_n_lon() == 1000
             assert sd.l0.get_n_lat() == 1000
+
     def test_write_namelists(self):
         pass
 

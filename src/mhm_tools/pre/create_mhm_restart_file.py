@@ -1,13 +1,14 @@
 """Create the mHM restart file."""
 
 import logging
-import os
-import sys
 from pathlib import Path
 from subprocess import PIPE, Popen, TimeoutExpired
 
 import numpy as np
 import xarray as xr
+from joblib import Parallel, delayed
+
+from mhm_tools.common.constants import LOG_LEVELS
 
 logging.basicConfig(format="%(asctime)s - %(levelname)-8s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -169,7 +170,9 @@ class LatLon:
             int: The number of latitude points.
         """
         # print('nlat',self.lat_max, self.lat_min, self.resolution, (self.lat_max - self.lat_min) / self.resolution, int((self.lat_max - self.lat_min) / self.resolution), flush=True)
-        return int((self.lat_max - self.lat_min) / self.resolution + 0.5) # + 0.5 to round up
+        return int(
+            (self.lat_max - self.lat_min) / self.resolution + 0.5
+        )  # + 0.5 to round up
 
     def get_n_lon(self):
         """
@@ -180,7 +183,9 @@ class LatLon:
             int: The number of longitude points.
         """
         # print('nlon', self.lon_max, self.lon_min, self.resolution, (self.lon_max - self.lon_min) / self.resolution, int((self.lon_max - self.lon_min) / self.resolution), flush=True)
-        return int((self.lon_max - self.lon_min) / self.resolution + 0.5) # + 0.5 to round up
+        return int(
+            (self.lon_max - self.lon_min) / self.resolution + 0.5
+        )  # + 0.5 to round up
 
     def is_fully_defined(self):
         """
@@ -336,19 +341,23 @@ class MHMRestartFile:
         input_file_path: Path,
         nml_template: Path,
         output_path: Path,
-        split_grid=False,
-        clean_temp_files=False,
-        increment_l1=2,
+        mpr_executable=None,
+        mpr_parameter_file=None,
         lon_min_target_grid=None,
         lon_max_target_grid=None,
         lat_min_target_grid=None,
         lat_max_target_grid=None,
         l0_resolution=None,
         l1_resolution=None,
+        increment_l1=2,
+        split_grid=False,
+        ncpus=1,
+        clean_temp_files=False,
         log_level=logging.DEBUG,
-        mpr_executable=None,
     ):
-        logger.setLevel(log_level)
+        logger.setLevel(
+            LOG_LEVELS[log_level] if log_level in LOG_LEVELS else logging.INFO
+        )
         logger.debug(f"Creating MHMRestartFile object with {locals()}")
         self.nml_template = Path(nml_template)
         self.output_path = Path(output_path)
@@ -374,10 +383,11 @@ class MHMRestartFile:
             l1=grid_latlon_l1,
         )
         self.subgrids = []  # list of grid objects
+        self.ncpus = ncpus
         self.split_grid = split_grid
         self.clean_temp_files = clean_temp_files
         self.mpr_executable = mpr_executable
-        self.parameter_file = None
+        self.parameter_file = mpr_parameter_file
         self.work_dir = "."
         self.increment_l1 = increment_l1
         self.increment_l0 = (
@@ -402,16 +412,16 @@ class MHMRestartFile:
         replace_dict = {
             "${slicei_j}": grid.name,
             "${output_file}": grid.path / f"output_{grid.name}.nc",
-            "${lon_high_start}": f"{grid.l0.lon_min + grid.l0.resolution / 2:.3f}", # does this need be changed to center of the cell?
+            "${lon_high_start}": f"{grid.l0.lon_min + grid.l0.resolution / 2:.3f}",  # changes to center of cell coordinates
             "${lon_high_res}": f"{grid.l0.resolution:.3f}",
             "${lon_high_n}": f"{grid.l0.get_n_lon()}",
-            "${lat_high_start}": f"{grid.l0.lat_min + grid.l0.resolution / 2:.3f}",# does this need be changed to center of the cell?
+            "${lat_high_start}": f"{grid.l0.lat_min + grid.l0.resolution / 2:.3f}",  # changes to center of cell coordinates
             "${lat_high_res}": f"{grid.l0.resolution:.3f}",
             "${lat_high_n}": f"{grid.l0.get_n_lat()}",
-            "${lon_low_start}": f"{grid.l1.lon_min + grid.l1.resolution / 2:.2f}",# does this need be changed to center of the cell?
+            "${lon_low_start}": f"{grid.l1.lon_min + grid.l1.resolution / 2:.2f}",  # changes to center of cell coordinates
             "${lon_low_res}": f"{grid.l1.resolution:.2f}",
             "${lon_low_n}": f"{grid.l1.get_n_lon()}",
-            "${lat_low_start}": f"{grid.l1.lat_min + grid.l1.resolution / 2:.2f}",# does this need be changed to center of the cell?
+            "${lat_low_start}": f"{grid.l1.lat_min + grid.l1.resolution / 2:.2f}",  # changes to center of cell coordinates
             "${lat_low_res}": f"{grid.l1.resolution:.2f}",
             "${lat_low_n}": f"{grid.l1.get_n_lat()}",
             "${bulk_density}": grid.morph_files.bulk_density,
@@ -438,39 +448,38 @@ class MHMRestartFile:
             error_message = "Increment for splitting grids is not set"
             raise ValueError(error_message)
         sub_grid_paths = {}
-        for file_path in self.grid.morph_files.get_files_as_list():
-            if file_path is None:
-                continue  # should raise error
-            logger.info(f"Splitting {file_path}")
-            self._split_file(file_path, sub_grid_paths)
-            logger.debug(f"Splitting {file_path} done")
+        Parallel(n_jobs=self.ncpus, backend="loky")(
+            delayed(self._split_file)(name, file_path, sub_grid_paths)
+            for name, file_path in self.grid.morph_files.get_files_as_dict()
+        ) # move the parallelization into the split_file function to improve performance 
         logger.debug("Creating subgrids")
         self.subgrids = [Grid(file_path=k, **v) for k, v in sub_grid_paths.items()]
         logger.debug("Splitting grid done")
 
-    def _split_file(self, file_path, sub_grid_paths):
+    def _split_file(self, name, file_path, sub_grid_paths):
+        if file_path is None:
+            logger.error(f"No file path provided for {name}")
+            return
         logger.debug(f"Splitting {file_path}")
-        # logger.debug(f"{self.grid.l0.get_n_lon()}, {self.increment_l0}, {self.grid.l0.get_n_lon() // self.increment_l0}")
-        # logger.debug(f"{self.grid.l0.get_n_lat()}, {self.increment_l0}, {self.grid.l0.get_n_lat() // self.increment_l0}")
         with xr.open_dataset(file_path) as ds:
             for i, lon_min in enumerate(
                 np.arange(
                     self.grid.l1.lon_min,
                     self.grid.l1.lon_max,
-                    self.grid.l1.resolution * self.increment_l1
+                    self.grid.l1.resolution * self.increment_l1,
                 )
             ):
                 for j, lat_min in enumerate(
                     np.arange(
                         self.grid.l1.lat_min,
                         self.grid.l1.lat_max,
-                        self.grid.l1.resolution * self.increment_l1
+                        self.grid.l1.resolution * self.increment_l1,
                     )
                 ):
                     out_dir = Path(self.output_path) / f"slice_{i}_{j}"
                     if not out_dir.exists():
                         logger.debug(f"Creating {out_dir}")
-                    out_dir.mkdir(parents=True, exist_ok=True)
+                        out_dir.mkdir(parents=True, exist_ok=True)
 
                     out_path = out_dir / f"{file_path.stem}.nc"
 
@@ -488,16 +497,16 @@ class MHMRestartFile:
                         logger.debug(f"{lon_min}, {lon_max}, {lat_min}, {lat_max}")
                         logger.debug(ds_cut["latitude"].values)
                         return
-                    
+
                     # grid saved in llc coordinates
-                    l0 = LatLon( # this is the high resolution grid
+                    l0 = LatLon(  # this is the high resolution grid
                         lon_min=lon_min,
                         lon_max=lon_max,
                         lat_min=lat_min,
                         lat_max=lat_max,
                         resolution=self.grid.l0.resolution,
                     )
-                    l1 = LatLon( # this is the low resolution grid
+                    l1 = LatLon(  # this is the low resolution grid
                         lon_min=lon_min,
                         lon_max=lon_max,
                         lat_min=lat_min,
@@ -510,6 +519,7 @@ class MHMRestartFile:
                             "l1": l1,
                             "name": f"slice_{i}_{j}",
                         }
+        logger.debug(f"Splitting {file_path} done")
 
     def _call_mpr(self, namelist):
         """Call the mpr executable with the given namelist and parameter file."""
@@ -528,7 +538,7 @@ class MHMRestartFile:
             logger.error("Timeout expired")
             p.kill()
         # finally:
-            # os.chd    ir(tmpdir)
+        # os.chd    ir(tmpdir)
 
     def _merge_restart_files(self):
         logger.info("Merging restart files")
@@ -544,6 +554,13 @@ class MHMRestartFile:
                         f.unlink()
                 else:
                     file_path.unlink()
+
+    def _create_restart_for_grid(self, grid):
+        logger.debug(
+            f"Processing subgrid {grid.name}, {grid.path}, {grid.l0.lon_min}, {grid.l0.lon_max}, {grid.l0.lat_min}, {grid.l0.lat_max}"
+        )
+        nml = self._write_grid_namelist(grid)
+        self._call_mpr(nml)
 
     def create_restart_file(self):
         """
@@ -565,17 +582,14 @@ class MHMRestartFile:
         if self.split_grid:
             logger.info("grid will be split and processed in parallel")
             self._split_grid()
-            for subgrid in self.subgrids:  # parallelize this
-                logger.debug(
-                    f"Processing subgrid {subgrid.name}, {subgrid.path}, {subgrid.l0.lon_min}, {subgrid.l0.lon_max}, {subgrid.l0.lat_min}, {subgrid.l0.lat_max}"
-                )
-                nml = self._write_grid_namelist(subgrid)
-                self._call_mpr(nml)
+            Parallel(n_jobs=self.ncpus, backend="loky")(
+                delayed(self._create_restart_for_grid)(subgrid)
+                for subgrid in self.subgrids
+            )
             self._merge_restart_files()
             if self.clean_temp_files:
                 self._delete_temp_files()
         else:
             logger.info("grid will be processed as a whole")
-            nml = self._write_grid_namelist(self.grid)
-            self._call_mpr(nml)
+            self._create_restart_for_grid(self.grid)
         logger.info("Restart file created")

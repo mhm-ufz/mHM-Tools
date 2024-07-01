@@ -44,3 +44,17 @@ ESRI_TYPES = {
 
 ESRI_REQ = {"ncols", "nrows", "xllcorner", "yllcorner", "cellsize"}
 """Required ESRI ASCII grid header information."""
+
+
+LOG_LEVELS = {
+    "info": logging.INFO,
+    "warning": logging.WARNING,
+    "warn": logging.WARNING,
+    "debug": logging.DEBUG,
+    "error": logging.ERROR,
+    "INFO": logging.INFO,
+    "WARNING": logging.WARNING,
+    "WARN": logging.WARNING,
+    "DEBUG": logging.DEBUG,
+    "ERROR": logging.ERROR,
+}
