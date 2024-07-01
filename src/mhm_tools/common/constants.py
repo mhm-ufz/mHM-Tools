@@ -47,14 +47,14 @@ ESRI_REQ = {"ncols", "nrows", "xllcorner", "yllcorner", "cellsize"}
 
 
 LOG_LEVELS = {
-    "info": logging.INFO,
-    "warning": logging.WARNING,
-    "warn": logging.WARNING,
-    "debug": logging.DEBUG,
-    "error": logging.ERROR,
-    "INFO": logging.INFO,
-    "WARNING": logging.WARNING,
-    "WARN": logging.WARNING,
-    "DEBUG": logging.DEBUG,
-    "ERROR": logging.ERROR,
+    "info": 20,
+    "warning": 30,
+    "warn": 30,
+    "debug": 10,
+    "error": 40,
+    "INFO": 20,
+    "WARNING": 30,
+    "WARN": 30,
+    "DEBUG": 10,
+    "ERROR": 40,
 }
