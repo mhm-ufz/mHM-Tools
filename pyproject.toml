@@ -42,7 +42,8 @@ dependencies = [
   "pyproj",
   "pyflwdir",
   "matplotlib",
-  "scipy"
+  "scipy",
+  "joblib"
 ]
 
 [project.urls]
