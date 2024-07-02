@@ -92,7 +92,7 @@ class MorphFiles:
             logger.debug(f"Found {key} file(s): {self.__dict__[key]}")
             if self.__dict__[key] is None or not self.__dict__[key]:
                 logger.warning(f"Could not find {key} file in {filepath}")
-        logger.debug(self.get_files_as_dir())
+        logger.debug(self.get_files_as_dict())
 
     def get_file(self, key):
         """
@@ -128,7 +128,7 @@ class MorphFiles:
                 file_list.append(value)
         return file_list
 
-    def get_files_as_dir(self):
+    def get_files_as_dict(self):
         """
         Return a dictionary of all files in the object's attributes.
 
@@ -533,10 +533,14 @@ class MHMRestartFile:
         try:
             data, error_data = p.communicate()
             if error_data:
-                logger.error(f"Failed with STDERR {error_data}")
+                # logger.error(f"Failed with STDERR {error_data}")
+                # msg = f"MPR failed with STDERR {error_data}"
+                raise RuntimeError(msg)
         except TimeoutExpired:
             logger.error("Timeout expired")
             p.kill()
+            # msg = "MPR failed with TimeoutExpired"
+            # raise TimeoutExpired("MPR timeout expired")
         # finally:
         # os.chd    ir(tmpdir)
 
