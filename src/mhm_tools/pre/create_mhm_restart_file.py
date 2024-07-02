@@ -447,10 +447,13 @@ class MHMRestartFile:
         if self.increment_l0 is None:
             error_message = "Increment for splitting grids is not set"
             raise ValueError(error_message)
-        sub_grid_paths = Parallel(n_jobs=self.ncpus, backend="loky")(
-            delayed(self._split_file)(name, file_path)
-            for name, file_path in self.grid.morph_files.get_files_as_dict()
-        ) # move the parallelization into the split_file function to improve performance 
+        # sub_grid_paths = Parallel(n_jobs=self.ncpus, backend="loky")(
+        #     delayed(self._split_file)(name, file_path)
+        #     for name, file_path in self.grid.morph_files.get_files_as_dict()
+        # ) # move the parallelization into the split_file function to improve performance 
+        sub_grid_paths = []
+        for name, file_path in self.grid.morph_files.get_files_as_dict().items():
+            sub_grid_paths.append(self._split_file(name, file_path))
         logger.debug("Creating subgrids")
         self.subgrids = [Grid(file_path=k, **v) for k, v in sub_grid_paths[0].items()]
         logger.debug("Splitting grid done")
