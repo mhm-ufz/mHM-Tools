@@ -525,8 +525,8 @@ class MHMRestartFile:
         """Call the mpr executable with the given namelist and parameter file."""
         # tmpdir = Path.cwd()
         # os.chdir(self.work_dir)
-        command = f"module load iomkl/2020b netCDF-Fortran/4.5.3 \
-        {self.mpr_executable} -c {namelist}"  # -p {self.parameter_file}"
+        command = f"""module load iomkl/2020b netCDF-Fortran/4.5.3
+        {self.mpr_executable} -c {namelist}"  # -p {self.parameter_file}"""
         logger.info(f"Running mPR with: {command}")
 
         p = Popen(command, shell=True, stdout=PIPE, stderr=PIPE)
@@ -584,7 +584,7 @@ class MHMRestartFile:
         """
         logger.info("Creating restart file")
         if self.split_grid:
-            logger.info("grid will be split and processed in parallel")
+            logger.info(f"grid will be split and processed in parallel on {self.ncpus} cores")
             self._split_grid()
             Parallel(n_jobs=self.ncpus, backend="loky")(
                 delayed(self._create_restart_for_grid)(subgrid)
