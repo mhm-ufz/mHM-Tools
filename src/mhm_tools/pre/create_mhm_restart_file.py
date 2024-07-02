@@ -526,7 +526,9 @@ class MHMRestartFile:
         # tmpdir = Path.cwd()
         # os.chdir(self.work_dir)
         command = f"""module load iomkl/2020b netCDF-Fortran/4.5.3
-        {self.mpr_executable} -c {namelist}"  # -p {self.parameter_file}"""
+        {self.mpr_executable} -c {namelist}"""
+        if self.parameter_file is not None:
+            command += f" -p {self.parameter_file}"
         logger.info(f"Running mPR with: {command}")
 
         p = Popen(command, shell=True, stdout=PIPE, stderr=PIPE)
