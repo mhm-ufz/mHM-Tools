@@ -129,7 +129,7 @@ class MorphFiles:
         return file_list
 
     def get_files_as_dict(self):
-        """
+        """ 
         Return a dictionary of all files in the object's attributes.
 
         Returns
@@ -447,16 +447,16 @@ class MHMRestartFile:
         if self.increment_l0 is None:
             error_message = "Increment for splitting grids is not set"
             raise ValueError(error_message)
-        sub_grid_paths = {}
-        Parallel(n_jobs=self.ncpus, backend="loky")(
-            delayed(self._split_file)(name, file_path, sub_grid_paths)
+        sub_grid_paths = Parallel(n_jobs=self.ncpus, backend="loky")(
+            delayed(self._split_file)(name, file_path)
             for name, file_path in self.grid.morph_files.get_files_as_dict()
         ) # move the parallelization into the split_file function to improve performance 
         logger.debug("Creating subgrids")
-        self.subgrids = [Grid(file_path=k, **v) for k, v in sub_grid_paths.items()]
+        self.subgrids = [Grid(file_path=k, **v) for k, v in sub_grid_paths[0].items()]
         logger.debug("Splitting grid done")
 
-    def _split_file(self, name, file_path, sub_grid_paths):
+    def _split_file(self, name, file_path):
+        sub_grid_paths = {}
         if file_path is None:
             logger.error(f"No file path provided for {name}")
             return
@@ -513,13 +513,13 @@ class MHMRestartFile:
                         lat_max=lat_max,
                         resolution=self.grid.l1.resolution,
                     )
-                    if out_dir not in sub_grid_paths:
-                        sub_grid_paths[out_dir] = {
-                            "l0": l0,
-                            "l1": l1,
-                            "name": f"slice_{i}_{j}",
-                        }
+                    sub_grid_paths[out_dir] = {
+                        "l0": l0,
+                        "l1": l1,
+                        "name": f"slice_{i}_{j}",
+                    }
         logger.debug(f"Splitting {file_path} done")
+        return sub_grid_paths
 
     def _call_mpr(self, namelist):
         """Call the mpr executable with the given namelist and parameter file."""
