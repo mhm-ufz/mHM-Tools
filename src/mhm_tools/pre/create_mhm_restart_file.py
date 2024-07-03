@@ -299,41 +299,46 @@ class MHMRestartFile:
     This class provides methods to split the grid (if necessary), write the grid namelist,
     call the mpr executable, merge the restart files (if applicable), and delete temporary files (if specified).
 
-    Attributes
-    ----------
-    input_file_path : Path
-        The path to the directory containing the input files.
-    nml_template : Path
-        The path to the namelist template file.
-    output_path : Path
-        The path to the output directory.
-    latlon_file : Optional[Path]
-        The path to the latlon file.
-    split_grid : bool
-        Whether to split the grid into subgrids.
-    clean_temp_files : bool
-        Whether to clean temporary files.
-    increment_l1 : int
-        The increment for splitting the grid in number of coarse grid (l1) cells.
-    lon_min_target_grid : Optional[float]
-        The minimum longitude of the target grid.
-    lon_max_target_grid : Optional[float]
-        The maximum longitude of the target grid.
-    lat_min_target_grid : Optional[float]
-        The minimum latitude of the target grid.
+    Parameters:
+        input_file_path (Path): The path to the input file.
+        nml_template (Path): The path to the namelist template file.
+        output_path (Path): The path to the output directory.
+        mpr_executable (str, optional): The path to the mpr executable. Defaults to None.
+        mpr_parameter_file (str, optional): The path to the mpr parameter file. Defaults to None.
+        lon_min_target_grid (float, optional): The minimum longitude of the target grid. Defaults to None.
+        lon_max_target_grid (float, optional): The maximum longitude of the target grid. Defaults to None.
+        lat_min_target_grid (float, optional): The minimum latitude of the target grid. Defaults to None.
+        lat_max_target_grid (float, optional): The maximum latitude of the target grid. Defaults to None.
+        l0_resolution (float, optional): The resolution of the high-resolution grid. Defaults to None.
+        l1_resolution (float, optional): The resolution of the low-resolution grid. Defaults to None.
+        increment_l1 (int, optional): The increment for splitting the grid. Defaults to 2.
+        split_grid (bool, optional): Whether to split the grid. Defaults to False.
+        ncpus (int, optional): The number of CPUs to use for parallelization. Defaults to 1.
+        clean_temp_files (bool, optional): Whether to clean temporary files. Defaults to False.
+        log_level (int, optional): The log level. Defaults to logging.DEBUG.
+        mpr_packages (str, optional): The mpr packages to load. Defaults to None.
 
-    Methods
-    -------
-    split_grid_if_necessary()
-        Split the grid into subgrids if necessary.
-    write_grid_namelist()
-        Write the grid namelist file.
-    call_mpr_executable()
-        Call the mpr executable.
-    merge_restart_files()
-        Merge the restart files if applicable.
-    delete_temporary_files()
-        Delete temporary files if specified.
+    Attributes:
+        nml_template (Path): The path to the namelist template file.
+        output_path (Path): The path to the output directory.
+        grid (Grid): The grid object.
+        subgrids (list): The list of subgrid objects.
+        ncpus (int): The number of CPUs to use for parallelization.
+        split_grid (bool): Whether to split the grid.
+        clean_temp_files (bool): Whether to clean temporary files.
+        mpr_executable (str): The path to the mpr executable.
+        mpr_packages (str): The mpr packages to load.
+        parameter_file (str): The path to the mpr parameter file.
+        work_dir (str): The working directory.
+        increment_l1 (int): The increment for splitting the grid.
+        increment_l0 (int): The increment for the high-resolution grid.
+
+    Methods:
+        _create_namelist(replace_dict, out_file_path, overwrite=False): Create a namelist file with the given replace dictionary.
+        _write_grid_namelist(grid): Write the namelist for a grid.
+        _split_grid(): Split the grid into subgrids and write them to disk.
+        _split_file(name, file_path): Split a file into subgrids.
+        _call_mpr(namelist): Call the mpr executable with the given namelist and parameter file.
     """
 
     def __init__(
@@ -354,6 +359,7 @@ class MHMRestartFile:
         ncpus=1,
         clean_temp_files=False,
         log_level=logging.DEBUG,
+        mpr_packages=None,
     ):
         logger.setLevel(
             LOG_LEVELS[log_level] if log_level in LOG_LEVELS else logging.INFO
@@ -387,6 +393,7 @@ class MHMRestartFile:
         self.split_grid = split_grid
         self.clean_temp_files = clean_temp_files
         self.mpr_executable = mpr_executable
+        self.mpr_packages = mpr_packages
         self.parameter_file = mpr_parameter_file
         self.work_dir = "."
         self.increment_l1 = increment_l1
@@ -525,8 +532,9 @@ class MHMRestartFile:
         """Call the mpr executable with the given namelist and parameter file."""
         # tmpdir = Path.cwd()
         # os.chdir(self.work_dir)
-        command = f"""module load iomkl/2020b netCDF-Fortran/4.5.3
-        {self.mpr_executable} -c {namelist}"""
+        command = f"module load {self.mpr_packages} \n" if self.mpr_packages is not None else ""
+        # command = f"""module load iomkl/2020b netCDF-Fortran/4.5.3
+        command += f"""{self.mpr_executable} -c {namelist}"""
         if self.parameter_file is not None:
             command += f" -p {self.parameter_file}"
         logger.info(f"Running mPR with: {command}")

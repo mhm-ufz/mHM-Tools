@@ -94,7 +94,11 @@ def add_args(parser):
         type=int,
         help=("Number of CPUs to use"),
     )
-
+    parser.add_argument(
+        "--mpr_packages",
+        default=None,
+        help=("Packages to load using module load before running mPR"),
+    )
 
 def run(args):
     """Create the catchment file.
@@ -128,5 +132,6 @@ def run(args):
         mpr_parameter_file=args.mpr_params,
         ncpus=args.ncpus,
         log_level=args.log_level,
+        mpr_packages=args.mpr_packages
     )
     restart_creator.create_restart_file()
