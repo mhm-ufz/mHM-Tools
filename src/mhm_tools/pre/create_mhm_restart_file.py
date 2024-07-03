@@ -419,6 +419,8 @@ class MHMRestartFile:
                 nml_data = f.read()
             for replace_key, replace_value in replace_dict.items():
                 nml_data = nml_data.replace(str(replace_key), str(replace_value))
+            if out_file_path.is_file():
+                out_file_path.unlink()
             with out_file_path.open("w") as f:
                 f.write(nml_data)
         return out_file_path
@@ -498,6 +500,9 @@ class MHMRestartFile:
                         out_dir.mkdir(parents=True, exist_ok=True)
 
                     out_path = out_dir / f"{file_path.stem}.nc"
+                    
+                    if out_path.is_file():
+                        out_path.unlink()
 
                     lon_max = lon_min + self.increment_l1 * self.grid.l1.resolution
                     lat_max = lat_min + self.increment_l1 * self.grid.l1.resolution
@@ -570,6 +575,7 @@ class MHMRestartFile:
         logger.debug(restart_files)
         self.grid.restart_file = self.output_path / f"restart_file_whole_grid.nc"
         logger.info(f"Merging restart files to {self.grid.restart_file}")
+        
         xr.combine_by_coords(restart_files).to_netcdf(self.grid.restart_file)
         logger.info("Merging restart files done")
 
