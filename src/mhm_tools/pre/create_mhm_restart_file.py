@@ -7,6 +7,7 @@ from subprocess import PIPE, Popen, TimeoutExpired
 import numpy as np
 import xarray as xr
 from joblib import Parallel, delayed
+import shutil
 
 from mhm_tools.common.constants import LOG_LEVELS
 
@@ -235,7 +236,8 @@ class Grid:
         self.path = file_path
         self.l0 = l0
         self.l1 = l1
-
+        self.restart_file = None
+        self.set_namelist_file = None
         if (
             self.l0 is None
             or not self.l0.is_fully_defined()
@@ -243,6 +245,12 @@ class Grid:
             or not self.l1.is_fully_defined()
         ) and latlon_file is not None:
             self.read_latlon(latlon_file)
+
+        def set_restart_file(self, restart_file):
+            self.restart_file = restart_file
+        
+        def set_namelist_file(self, namelist_file):
+            self.namelist_file = namelist_file
 
     def read_latlon(self, latlon_file: Path):
         """
@@ -440,9 +448,10 @@ class MHMRestartFile:
             "${geology}": grid.morph_files.geology,
             "${land_cover}": grid.morph_files.land_cover,  # this should be a list but the template only has one
         }
-        logger.info(f"Writing namelist for {grid.name} to {grid.path / 'mpr.nml'}")
+        grid.restart_file = grid.path / f"output_{grid.name}.nc"
         logger.debug(replace_dict)
-        return self._create_namelist(replace_dict, grid.path / "mpr.nml")
+        grid.namelist_file = self._create_namelist(replace_dict, grid.path / f"mpr_{grid.name}.nml")
+        logger.info(f"Wrote namelist for {grid.name} to {grid.namelist_file}")
 
     def _split_grid(self):  # has do addapted to different file types not just .nc
         """
@@ -528,13 +537,13 @@ class MHMRestartFile:
         logger.debug(f"Splitting {file_path} done")
         return sub_grid_paths
 
-    def _call_mpr(self, namelist):
+    def _call_mpr(self, grid: Grid):
         """Call the mpr executable with the given namelist and parameter file."""
         # tmpdir = Path.cwd()
         # os.chdir(self.work_dir)
         command = f"module load {self.mpr_packages} \n" if self.mpr_packages is not None else ""
         # command = f"""module load iomkl/2020b netCDF-Fortran/4.5.3
-        command += f"""{self.mpr_executable} -c {namelist}"""
+        command += f"""{self.mpr_executable} -c {grid.namelist_file}"""
         if self.parameter_file is not None:
             command += f" -p {self.parameter_file}"
         logger.info(f"Running mPR with: {command}")
@@ -556,7 +565,15 @@ class MHMRestartFile:
 
     def _merge_restart_files(self):
         logger.info("Merging restart files")
-        logger.info("Not implemented yet")
+        logger.warning("Not implemented yet")
+        restart_files = [subgrid.restart_file for subgrid in self.subgrids]
+        logger.debug(restart_files)
+        self.grid.restart_file = self.output_path / f"restart_file_whole_grid.nc"
+        logger.info(f"Merging restart files to {self.grid.restart_file}")
+        xr.combine_by_coords(restart_files).to_netcdf(self.grid.restart_file)
+        logger.info("Merging restart files done")
+
+
 
     def _delete_temp_files(self):
         logger.info("Deleting temporary files")
@@ -565,7 +582,8 @@ class MHMRestartFile:
             for file_path in subgrid.morph_files.get_files_as_list():
                 if isinstance(file_path, list):
                     for f in file_path:
-                        f.unlink()
+                        # f.unlink() # only deletes the file not the dir and not the namelist_file
+                        shutil.rmtree(f.parent)
                 else:
                     file_path.unlink()
 
@@ -573,8 +591,8 @@ class MHMRestartFile:
         logger.debug(
             f"Processing subgrid {grid.name}, {grid.path}, {grid.l0.lon_min}, {grid.l0.lon_max}, {grid.l0.lat_min}, {grid.l0.lat_max}"
         )
-        nml = self._write_grid_namelist(grid)
-        self._call_mpr(nml)
+        self._write_grid_namelist(grid)
+        self._call_mpr(grid)
 
     def create_restart_file(self):
         """
