@@ -7,6 +7,7 @@ from subprocess import PIPE, Popen, TimeoutExpired
 import numpy as np
 import xarray as xr
 from joblib import Parallel, delayed
+import re
 import shutil
 
 from mhm_tools.common.constants import LOG_LEVELS
@@ -570,13 +571,58 @@ class MHMRestartFile:
 
     def _merge_restart_files(self):
         logger.info("Merging restart files")
-        logger.warning("Not implemented yet")
-        restart_files = [subgrid.restart_file for subgrid in self.subgrids]
-        logger.debug(restart_files)
-        self.grid.restart_file = self.output_path / f"restart_file_whole_grid.nc"
-        logger.info(f"Merging restart files to {self.grid.restart_file}")
-        
-        xr.combine_by_coords(restart_files).to_netcdf(self.grid.restart_file)
+
+        # 1. create an empty file for the whole grid
+        ds_whole = xr.Dataset()
+        ds_whole['longitude'] = np.arange(self.grid.l0.lon_min,self.grid.l0.lon_max,self.grid.l0.resolution)
+        ds_whole['latitude'] = np.arange(self.grid.l0.lat_min,self.grid.l0.lat_max,self.grid.l0.resolution)
+        ds_whole['lon_out'] = np.arange(self.grid.l1.lon_min + self.grid.l1.resolution / 2, self.grid.l1.lon_max - self.grid.l1.resolution / 2,self.grid.l1.resolution)
+        ds_whole['lat_out'] = np.arange(self.grid.l1.lat_min + self.grid.l1.resolution / 2, self.grid.l1.lat_max - self.grid.l1.resolution / 2,self.grid.l1.resolution)
+
+        # 2. create all coordinates in the whole grid
+        cur_ds = xr.open_dataset(self.subgrids[0].restart_file)
+        for coord in cur_ds.coords:
+            if coord not in ds.coords:
+                ds_whole[coord] = cur_ds[coord]
+            # init the new bounds (e.g. horizons_out_bnds)
+            data_vars = [_ for _ in cur_ds.data_vars if _ not in ds.data_vars and _.endswith('_out_bnds')]
+            for data_var in data_vars:
+                if 'lat' in data_var:
+                    ds_whole[data_var] = np.arange(self.grid.l1.lat_min, self.grid.l1.lat_max,self.grid.l1.resolution)
+                elif 'lon' in data_var:
+                    ds_whole[data_var] = np.arange(self.grid.l1.lon_min, self.grid.l1.lon_max,self.grid.l1.resolution)
+                else:
+                    ds_whole[data_var] = cur_ds[data_var]
+                print(data_var, ds_whole[data_var].data)
+            # init the new DataArrays (set to nan)
+            data_vars = [_ for _ in cur_ds.data_vars if _.startswith('L1_')]
+            for data_var in data_vars:
+                coords = [_ for _ in cur_ds[data_var].coords]
+                print(data_var, coords)
+                ds_whole[data_var] = (coords, np.full([len(ds_whole[_]) for _ in coords], np.nan))
+
+        # 3. iterate over all subgrids and merge them into the whole grid
+        for subgrid in self.subgrids:
+            restart_file = subgrid.restart_file
+            ints = re.findall(r'\d+', str(restart_file))
+            isel_start = int(ints[-2])
+            jsel_start = int(ints[-1])
+            with xr.open_dataset(restart_file) as cur_ds:
+                # logger.warning(f"Could not open {restart_file}")
+                # continue
+                for data_var in data_vars:
+                    index_slice = dict(lon_out=slice(isel_start * INCREMENT, (isel_start+1) * INCREMENT),
+                                    lat_out=slice(jsel_start * INCREMENT, (jsel_start+1) * INCREMENT ),
+                                    )
+                    if cur_ds[data_var].shape != ds_whole[data_var][index_slice].shape:
+                        logger.warning(f"Shape mismatch for {data_var} in {restart_file}")
+                        dims = cur_ds[data_var].dims
+                        ds_whole[data_var] = ds_whole[data_var].transpose(*dims)  
+                        if cur_ds[data_var].shape != ds_whole[data_var][index_slice].shape:
+                            logger.error(f"Shape mismatch could not be resolved for {data_var} in {restart_file}")
+                            continue
+                    ds_whole[data_var][index_slice] = cur_ds[data_var].data
+        ds_whole.to_netcdf(self.grid.restart_file)
         logger.info("Merging restart files done")
 
 
