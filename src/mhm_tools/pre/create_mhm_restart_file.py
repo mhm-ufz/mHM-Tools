@@ -559,12 +559,12 @@ class MHMRestartFile:
             data, error_data = p.communicate()
             if error_data:
                 # logger.error(f"Failed with STDERR {error_data}")
-                msg = f"MPR failed with STDERR {error_data}"
+                msg = f"MPR failed with STDERR {error_data} for {grid.name} and command {command}"
                 raise RuntimeError(msg)
         except TimeoutExpired:
             # logger.error("Timeout expired")
             p.kill()
-            msg = "MPR failed with TimeoutExpired"
+            msg = "MPR failed with TimeoutExpired for {grid.name} and command {command}"
             raise TimeoutExpired("MPR timeout expired")
         # finally:
         # os.chd    ir(tmpdir)
