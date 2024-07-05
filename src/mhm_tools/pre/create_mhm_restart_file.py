@@ -580,26 +580,26 @@ class MHMRestartFile:
         ds_whole['lat_out'] = np.arange(self.grid.l1.lat_min + self.grid.l1.resolution / 2, self.grid.l1.lat_max - self.grid.l1.resolution / 2,self.grid.l1.resolution)
 
         # 2. create all coordinates in the whole grid
-        cur_ds = xr.open_dataset(self.subgrids[0].restart_file)
-        for coord in cur_ds.coords:
-            if coord not in ds.coords:
-                ds_whole[coord] = cur_ds[coord]
-            # init the new bounds (e.g. horizons_out_bnds)
-            data_vars = [_ for _ in cur_ds.data_vars if _ not in ds.data_vars and _.endswith('_out_bnds')]
-            for data_var in data_vars:
-                if 'lat' in data_var:
-                    ds_whole[data_var] = np.arange(self.grid.l1.lat_min, self.grid.l1.lat_max,self.grid.l1.resolution)
-                elif 'lon' in data_var:
-                    ds_whole[data_var] = np.arange(self.grid.l1.lon_min, self.grid.l1.lon_max,self.grid.l1.resolution)
-                else:
-                    ds_whole[data_var] = cur_ds[data_var]
-                print(data_var, ds_whole[data_var].data)
-            # init the new DataArrays (set to nan)
-            data_vars = [_ for _ in cur_ds.data_vars if _.startswith('L1_')]
-            for data_var in data_vars:
-                coords = [_ for _ in cur_ds[data_var].coords]
-                print(data_var, coords)
-                ds_whole[data_var] = (coords, np.full([len(ds_whole[_]) for _ in coords], np.nan))
+        # TODO: add dimensions to comments to make it more readable
+        with xr.open_dataset(self.subgrids[0].restart_file) as cur_ds:
+            for coord in cur_ds.coords:
+                if coord not in ds_whole.coords:
+                    ds_whole[coord] = cur_ds[coord]
+                # init the new bounds (e.g. horizons_out_bnds)
+                data_vars = [_ for _ in cur_ds.data_vars if _ not in ds_whole.data_vars and _.endswith('_out_bnds')]
+                for data_var in data_vars:
+                    if 'lat' in data_var:
+                        ds_whole[data_var] = np.arange(self.grid.l1.lat_min, self.grid.l1.lat_max,self.grid.l1.resolution)
+                    elif 'lon' in data_var:
+                        ds_whole[data_var] = np.arange(self.grid.l1.lon_min, self.grid.l1.lon_max,self.grid.l1.resolution)
+                    else:
+                        ds_whole[data_var] = cur_ds[data_var]
+                # init the new DataArrays (set to nan)
+                data_vars = [_ for _ in cur_ds.data_vars if _.startswith('L1_')]
+                for data_var in data_vars:
+                    coords = [_ for _ in cur_ds[data_var].coords]
+                    # print(data_var, coords)
+                    ds_whole[data_var] = (coords, np.full([len(ds_whole[_]) for _ in coords], np.nan))
 
         # 3. iterate over all subgrids and merge them into the whole grid
         for subgrid in self.subgrids:
@@ -611,8 +611,8 @@ class MHMRestartFile:
                 # logger.warning(f"Could not open {restart_file}")
                 # continue
                 for data_var in data_vars:
-                    index_slice = dict(lon_out=slice(isel_start * INCREMENT, (isel_start+1) * INCREMENT),
-                                    lat_out=slice(jsel_start * INCREMENT, (jsel_start+1) * INCREMENT ),
+                    index_slice = dict(lon_out=slice(isel_start * self.increment_l1, (isel_start+1) * self.increment_l1),
+                                    lat_out=slice(jsel_start * self.increment_l1, (jsel_start+1) * self.increment_l1),
                                     )
                     if cur_ds[data_var].shape != ds_whole[data_var][index_slice].shape:
                         logger.warning(f"Shape mismatch for {data_var} in {restart_file}")
