@@ -30,8 +30,6 @@ class MorphFiles:
         lai (Path): The path to the leaf area index file.
         aspect (Path): The path to the aspect file.
         geology (Path): The path to the geology file.
-        dem (Path): The path to the digital elevation model file.
-        facc (Path): The path to the flow accumulation file.
     """
 
     def __init__(
@@ -45,8 +43,6 @@ class MorphFiles:
         lai=None,
         aspect=None,
         geology=None,
-        dem=None,
-        facc=None,
     ):
         self.land_cover = land_cover
         self.bulk_density = bulk_density
@@ -56,8 +52,6 @@ class MorphFiles:
         self.lai = lai
         self.aspect = aspect
         self.geology = geology
-        self.dem = dem
-        self.facc = facc
 
         if filepath is not None:
             self.read_files(filepath)
@@ -594,7 +588,7 @@ class MHMRestartFile:
         logger.info(f"Opening {self.subgrids[0].restart_file}")
         if not self.subgrids[0].restart_file.is_file():
             logger.error(f"Could not open {self.subgrids[0].restart_file}")
-            return
+            # return
         with xr.open_dataset(self.subgrids[0].restart_file) as cur_ds:
             for coord in cur_ds.coords:
                 if coord not in ds_whole.coords:
