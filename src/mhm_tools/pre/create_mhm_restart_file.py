@@ -30,6 +30,8 @@ class MorphFiles:
         lai (Path): The path to the leaf area index file.
         aspect (Path): The path to the aspect file.
         geology (Path): The path to the geology file.
+        dem (Path): The path to the digital elevation model file.
+        facc (Path): The path to the flow accumulation file.
     """
 
     def __init__(
@@ -43,6 +45,8 @@ class MorphFiles:
         lai=None,
         aspect=None,
         geology=None,
+        dem=None,
+        facc=None,
     ):
         self.land_cover = land_cover
         self.bulk_density = bulk_density
@@ -52,6 +56,8 @@ class MorphFiles:
         self.lai = lai
         self.aspect = aspect
         self.geology = geology
+        self.dem = dem
+        self.facc = facc
 
         if filepath is not None:
             self.read_files(filepath)
@@ -70,6 +76,7 @@ class MorphFiles:
             "sand_content": ["SNDPPT"],
             "clay_content": ["CLYPPT"],
             "lai": ["LAI"],
+            "facc": ["flow_accumulation"],
         }
         if type(filepath) is not Path:
             filepath = Path(filepath)
@@ -412,18 +419,17 @@ class MHMRestartFile:
             else None
         )
 
-    def _create_namelist(self, replace_dict, out_file_path, overwrite=False):
+    def _create_namelist(self, replace_dict, out_file_path):
         if type(out_file_path) is not Path:
             out_file_path = Path(out_file_path)
-        if not out_file_path.exists() or overwrite:
-            with self.nml_template.open("r") as f:
-                nml_data = f.read()
-            for replace_key, replace_value in replace_dict.items():
-                nml_data = nml_data.replace(str(replace_key), str(replace_value))
-            if out_file_path.is_file():
-                out_file_path.unlink()
-            with out_file_path.open("w") as f:
-                f.write(nml_data)
+        with self.nml_template.open("r") as f:
+            nml_data = f.read()
+        for replace_key, replace_value in replace_dict.items():
+            nml_data = nml_data.replace(str(replace_key), str(replace_value))
+        if out_file_path.is_file():
+            out_file_path.unlink()
+        with out_file_path.open("w") as f:
+            f.write(nml_data)
         return out_file_path
 
     def _write_grid_namelist(self, grid: Grid):
@@ -449,6 +455,9 @@ class MHMRestartFile:
             "${lai}": grid.morph_files.lai,
             "${aspect}": grid.morph_files.aspect,
             "${geology}": grid.morph_files.geology,
+            # "${dem}": grid.morph_files.dem,
+            # "${facc}": grid.morph_files.facc,
+            # "${karstic}": "0",
             "${land_cover}": grid.morph_files.land_cover,  # this should be a list but the template only has one
         }
         grid.restart_file = grid.path / f"output_{grid.name}.nc"
