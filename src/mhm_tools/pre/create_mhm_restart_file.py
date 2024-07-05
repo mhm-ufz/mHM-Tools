@@ -590,6 +590,11 @@ class MHMRestartFile:
 
         # 2. create all coordinates in the whole grid
         # TODO: add dimensions to comments to make it more readable
+        logger.info(f"Creating whole grid with {self.grid.restart_file}")
+        logger.info(f"Opening {self.subgrids[0].restart_file}")
+        if not self.subgrids[0].restart_file.is_file():
+            logger.error(f"Could not open {self.subgrids[0].restart_file}")
+            return
         with xr.open_dataset(self.subgrids[0].restart_file) as cur_ds:
             for coord in cur_ds.coords:
                 if coord not in ds_whole.coords:
