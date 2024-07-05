@@ -239,7 +239,7 @@ class Grid:
         self.l0 = l0
         self.l1 = l1
         self.restart_file = None
-        self.set_namelist_file = None
+        self.namelist_file = None
         if (
             self.l0 is None
             or not self.l0.is_fully_defined()
@@ -454,10 +454,11 @@ class MHMRestartFile:
             # "${karstic}": "0",
             "${land_cover}": grid.morph_files.land_cover,  # this should be a list but the template only has one
         }
-        grid.restart_file = grid.path / f"output_{grid.name}.nc"
         logger.debug(replace_dict)
+        grid.restart_file = grid.path / f"output_{grid.name}.nc"
         grid.namelist_file = self._create_namelist(replace_dict, grid.path / f"mpr_{grid.name}.nml")
         logger.info(f"Wrote namelist for {grid.name} to {grid.namelist_file}")
+        return grid
 
     def _split_grid(self):  # has do addapted to different file types not just .nc
         """
@@ -561,6 +562,7 @@ class MHMRestartFile:
         try:
             data, error_data = p.communicate()
             if error_data:
+                grid.restart_file = None
                 # logger.error(f"Failed with STDERR {error_data}")
                 msg = f"MPR failed with STDERR {error_data} for {grid.name} and command {command}"
                 raise RuntimeError(msg)
@@ -651,8 +653,9 @@ class MHMRestartFile:
         logger.debug(
             f"Processing subgrid {grid.name}, {grid.path}, {grid.l0.lon_min}, {grid.l0.lon_max}, {grid.l0.lat_min}, {grid.l0.lat_max}"
         )
-        self._write_grid_namelist(grid)
+        grid = self._write_grid_namelist(grid)
         self._call_mpr(grid)
+        return grid
 
     def create_restart_file(self):
         """
@@ -674,10 +677,11 @@ class MHMRestartFile:
         if self.split_grid:
             logger.info(f"grid will be split and processed in parallel on {self.ncpus} cores")
             self._split_grid()
-            Parallel(n_jobs=self.ncpus, backend="loky")(
+            subgrids = Parallel(n_jobs=self.ncpus, backend="loky")(
                 delayed(self._create_restart_for_grid)(subgrid)
                 for subgrid in self.subgrids
             )
+            self.subgrids = subgrids
             self._merge_restart_files()
             if self.clean_temp_files:
                 self._delete_temp_files()
