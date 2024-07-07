@@ -83,7 +83,7 @@ def add_args(parser):
 
     parser.add_argument(
         "--merge_only",
-        dest="split",
+        dest="merge_only",
         action="store_true",
         required=False,
         help=(

@@ -626,10 +626,10 @@ class MHMRestartFile:
             ]
         else:
             restart_file_paths = [subgrid.restart_file for subgrid in self.subgrids]
+        restart_file_paths.sort()
         logger.info(f"Opening {restart_file_paths[0]} als reference")
         if not restart_file_paths[0].is_file():
             logger.error(f"Could not open {restart_file_paths[0]}")
-            # return
         with xr.open_dataset(restart_file_paths[0]) as cur_ds:
             for coord in cur_ds.coords:
                 if coord not in ds_whole.coords:
@@ -660,11 +660,11 @@ class MHMRestartFile:
                 for data_var in data_vars:
                     coords = [_ for _ in cur_ds[data_var].coords]
                     # print(data_var, coords)
-                    for coords in coords:
+                    for coord in coords:
                         if coord not in ds_whole:
                             logger.info(f"Adding {coord} to {data_var}")
                             logger.debug(f"cur_ds[coord] {cur_ds[coord]}")
-                            ds_whole[coords] = cur_ds[coords]
+                            ds_whole[coord] = cur_ds[coord]
                     ds_whole[data_var] = (
                         coords,
                         np.full([len(ds_whole[_]) for _ in coords], np.nan),
