@@ -149,7 +149,7 @@ def run(args):
         mpr_parameter_file=args.mpr_params,
         ncpus=args.ncpus,
         log_level=args.log_level,
-        mpr_packages=args.mpr_packages
+        mpr_packages=args.mpr_packages,
         merge=not args.no_merge,
         merge_only=args.merge_only
     )
