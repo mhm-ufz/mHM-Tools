@@ -590,12 +590,16 @@ class MHMRestartFile:
 
         # 2. create all coordinates in the whole grid
         # TODO: add dimensions to comments to make it more readable
-        logger.info(f"Creating whole grid with {self.grid.restart_file}")
-        logger.info(f"Opening {self.subgrids[0].restart_file}")
+        if self.grid.restart_file is None:
+            self.grid.restart_file = self.output_path / 'output_whole_grid_restart.nc'
+            logger.warning(f"No restart file for the whole grid setting it to {self.grid.restart_file}")
+        else:
+            logger.info(f"Creating whole grid with {self.grid.restart_file}")
         if self.merge_only:
             restart_file_paths = [file for dir in self.output_path.glob('slice_*') for file in dir.glob('output_*.nc')]
         else: 
             restart_file_paths = [subgrid.restart_file for subgrid in self.subgrids]
+        logger.info(f"Opening {restart_file_paths[0]} als reference")
         if not restart_file_paths[0].is_file():
             logger.error(f"Could not open {restart_file_paths[0]}")
             # return
@@ -617,6 +621,11 @@ class MHMRestartFile:
                 for data_var in data_vars:
                     coords = [_ for _ in cur_ds[data_var].coords]
                     # print(data_var, coords)
+                    for coords in coords:
+                        if coord not in ds_whole:
+                            logger.info(f"Adding {coord} to {data_var}")
+                            logger.debug(f"cur_ds[coord] {cur_ds[coord]}")
+                            ds_whole[coords] = cur_ds[coords]
                     ds_whole[data_var] = (coords, np.full([len(ds_whole[_]) for _ in coords], np.nan))
 
         # 3. iterate over all subgrids and merge them into the whole grid
