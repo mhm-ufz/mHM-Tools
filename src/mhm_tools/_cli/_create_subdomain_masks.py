@@ -23,7 +23,7 @@ def add_args(parser):
         required=True,
         help=("Path to the input files"),
     )
-    
+
     # optional arguments
     parser.add_argument(
         "-o",

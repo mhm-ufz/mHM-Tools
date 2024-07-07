@@ -1,14 +1,14 @@
 """Create the mHM restart file."""
 
 import logging
+import re
+import shutil
 from pathlib import Path
 from subprocess import PIPE, Popen, TimeoutExpired
 
 import numpy as np
 import xarray as xr
 from joblib import Parallel, delayed
-import re
-import shutil
 
 from mhm_tools.common.constants import LOG_LEVELS
 
@@ -132,7 +132,7 @@ class MorphFiles:
         return file_list
 
     def get_files_as_dict(self):
-        """ 
+        """
         Return a dictionary of all files in the object's attributes.
 
         Returns
@@ -250,7 +250,7 @@ class Grid:
 
         def set_restart_file(self, restart_file):
             self.restart_file = restart_file
-        
+
         def set_namelist_file(self, namelist_file):
             self.namelist_file = namelist_file
 
@@ -309,7 +309,8 @@ class MHMRestartFile:
     This class provides methods to split the grid (if necessary), write the grid namelist,
     call the mpr executable, merge the restart files (if applicable), and delete temporary files (if specified).
 
-    Parameters:
+    Parameters
+    ----------
         input_file_path (Path): The path to the input file.
         nml_template (Path): The path to the namelist template file.
         output_path (Path): The path to the output directory.
@@ -328,7 +329,8 @@ class MHMRestartFile:
         log_level (int, optional): The log level. Defaults to logging.DEBUG.
         mpr_packages (str, optional): The mpr packages to load. Defaults to None.
 
-    Attributes:
+    Attributes
+    ----------
         nml_template (Path): The path to the namelist template file.
         output_path (Path): The path to the output directory.
         grid (Grid): The grid object.
@@ -343,7 +345,8 @@ class MHMRestartFile:
         increment_l1 (int): The increment for splitting the grid.
         increment_l0 (int): The increment for the high-resolution grid.
 
-    Methods:
+    Methods
+    -------
         _create_namelist(replace_dict, out_file_path, overwrite=False): Create a namelist file with the given replace dictionary.
         _write_grid_namelist(grid): Write the namelist for a grid.
         _split_grid(): Split the grid into subgrids and write them to disk.
@@ -460,7 +463,9 @@ class MHMRestartFile:
         }
         logger.debug(replace_dict)
         grid.restart_file = grid.path / f"output_{grid.name}.nc"
-        grid.namelist_file = self._create_namelist(replace_dict, grid.path / f"mpr_{grid.name}.nml")
+        grid.namelist_file = self._create_namelist(
+            replace_dict, grid.path / f"mpr_{grid.name}.nml"
+        )
         logger.info(f"Wrote namelist for {grid.name} to {grid.namelist_file}")
         return grid
 
@@ -477,7 +482,7 @@ class MHMRestartFile:
         sub_grid_paths = Parallel(n_jobs=self.ncpus, backend="loky")(
             delayed(self._split_file)(name, file_path)
             for name, file_path in self.grid.morph_files.get_files_as_dict().items()
-        ) # move the parallelization into the split_file function to improve performance 
+        )  # move the parallelization into the split_file function to improve performance
         logger.debug("Creating subgrids")
         self.subgrids = [Grid(file_path=k, **v) for k, v in sub_grid_paths[0].items()]
         logger.debug("Splitting grid done")
@@ -486,7 +491,7 @@ class MHMRestartFile:
         sub_grid_paths = {}
         if file_path is None:
             logger.error(f"No file path provided for {name}")
-            return
+            return None
         logger.debug(f"Splitting {file_path}")
         with xr.open_dataset(file_path) as ds:
             for i, lon_min in enumerate(
@@ -509,7 +514,7 @@ class MHMRestartFile:
                         out_dir.mkdir(parents=True, exist_ok=True)
 
                     out_path = out_dir / f"{file_path.stem}.nc"
-                    
+
                     if out_path.is_file():
                         out_path.unlink()
 
@@ -526,7 +531,7 @@ class MHMRestartFile:
                         logger.error(f"Failed to write {out_path} with {e}")
                         logger.debug(f"{lon_min}, {lon_max}, {lat_min}, {lat_max}")
                         logger.debug(ds_cut["latitude"].values)
-                        return
+                        return None
 
                     # grid saved in llc coordinates
                     l0 = LatLon(  # this is the high resolution grid
@@ -555,7 +560,11 @@ class MHMRestartFile:
         """Call the mpr executable with the given namelist and parameter file."""
         # tmpdir = Path.cwd()
         # os.chdir(self.work_dir)
-        command = f"module load {self.mpr_packages} \n" if self.mpr_packages is not None else ""
+        command = (
+            f"module load {self.mpr_packages} \n"
+            if self.mpr_packages is not None
+            else ""
+        )
         # command = f"""module load iomkl/2020b netCDF-Fortran/4.5.3
         command += f"""{self.mpr_executable} -c {grid.namelist_file}"""
         if self.parameter_file is not None:
@@ -583,21 +592,39 @@ class MHMRestartFile:
 
         # 1. create an empty file for the whole grid
         ds_whole = xr.Dataset()
-        ds_whole['longitude'] = np.arange(self.grid.l0.lon_min,self.grid.l0.lon_max,self.grid.l0.resolution)
-        ds_whole['latitude'] = np.arange(self.grid.l0.lat_min,self.grid.l0.lat_max,self.grid.l0.resolution)
-        ds_whole['lon_out'] = np.arange(self.grid.l1.lon_min + self.grid.l1.resolution / 2, self.grid.l1.lon_max - self.grid.l1.resolution / 2,self.grid.l1.resolution)
-        ds_whole['lat_out'] = np.arange(self.grid.l1.lat_min + self.grid.l1.resolution / 2, self.grid.l1.lat_max - self.grid.l1.resolution / 2,self.grid.l1.resolution)
+        ds_whole["longitude"] = np.arange(
+            self.grid.l0.lon_min, self.grid.l0.lon_max, self.grid.l0.resolution
+        )
+        ds_whole["latitude"] = np.arange(
+            self.grid.l0.lat_min, self.grid.l0.lat_max, self.grid.l0.resolution
+        )
+        ds_whole["lon_out"] = np.arange(
+            self.grid.l1.lon_min + self.grid.l1.resolution / 2,
+            self.grid.l1.lon_max - self.grid.l1.resolution / 2,
+            self.grid.l1.resolution,
+        )
+        ds_whole["lat_out"] = np.arange(
+            self.grid.l1.lat_min + self.grid.l1.resolution / 2,
+            self.grid.l1.lat_max - self.grid.l1.resolution / 2,
+            self.grid.l1.resolution,
+        )
 
         # 2. create all coordinates in the whole grid
         # TODO: add dimensions to comments to make it more readable
         if self.grid.restart_file is None:
-            self.grid.restart_file = self.output_path / 'output_whole_grid_restart.nc'
-            logger.warning(f"No restart file for the whole grid setting it to {self.grid.restart_file}")
+            self.grid.restart_file = self.output_path / "output_whole_grid_restart.nc"
+            logger.warning(
+                f"No restart file for the whole grid setting it to {self.grid.restart_file}"
+            )
         else:
             logger.info(f"Creating whole grid with {self.grid.restart_file}")
         if self.merge_only:
-            restart_file_paths = [file for dir in self.output_path.glob('slice_*') for file in dir.glob('output_*.nc')]
-        else: 
+            restart_file_paths = [
+                file
+                for dir in self.output_path.glob("slice_*")
+                for file in dir.glob("output_*.nc")
+            ]
+        else:
             restart_file_paths = [subgrid.restart_file for subgrid in self.subgrids]
         logger.info(f"Opening {restart_file_paths[0]} als reference")
         if not restart_file_paths[0].is_file():
@@ -608,16 +635,28 @@ class MHMRestartFile:
                 if coord not in ds_whole.coords:
                     ds_whole[coord] = cur_ds[coord]
                 # init the new bounds (e.g. horizons_out_bnds)
-                data_vars = [_ for _ in cur_ds.data_vars if _ not in ds_whole.data_vars and _.endswith('_out_bnds')]
+                data_vars = [
+                    _
+                    for _ in cur_ds.data_vars
+                    if _ not in ds_whole.data_vars and _.endswith("_out_bnds")
+                ]
                 for data_var in data_vars:
-                    if 'lat' in data_var:
-                        ds_whole[data_var] = np.arange(self.grid.l1.lat_min, self.grid.l1.lat_max,self.grid.l1.resolution)
-                    elif 'lon' in data_var:
-                        ds_whole[data_var] = np.arange(self.grid.l1.lon_min, self.grid.l1.lon_max,self.grid.l1.resolution)
+                    if "lat" in data_var:
+                        ds_whole[data_var] = np.arange(
+                            self.grid.l1.lat_min,
+                            self.grid.l1.lat_max,
+                            self.grid.l1.resolution,
+                        )
+                    elif "lon" in data_var:
+                        ds_whole[data_var] = np.arange(
+                            self.grid.l1.lon_min,
+                            self.grid.l1.lon_max,
+                            self.grid.l1.resolution,
+                        )
                     else:
                         ds_whole[data_var] = cur_ds[data_var]
                 # init the new DataArrays (set to nan)
-                data_vars = [_ for _ in cur_ds.data_vars if _.startswith('L1_')]
+                data_vars = [_ for _ in cur_ds.data_vars if _.startswith("L1_")]
                 for data_var in data_vars:
                     coords = [_ for _ in cur_ds[data_var].coords]
                     # print(data_var, coords)
@@ -626,32 +665,47 @@ class MHMRestartFile:
                             logger.info(f"Adding {coord} to {data_var}")
                             logger.debug(f"cur_ds[coord] {cur_ds[coord]}")
                             ds_whole[coords] = cur_ds[coords]
-                    ds_whole[data_var] = (coords, np.full([len(ds_whole[_]) for _ in coords], np.nan))
+                    ds_whole[data_var] = (
+                        coords,
+                        np.full([len(ds_whole[_]) for _ in coords], np.nan),
+                    )
 
         # 3. iterate over all subgrids and merge them into the whole grid
         for restart_file_path in restart_file_paths:
-            ints = re.findall(r'\d+', str(restart_file_path))
+            ints = re.findall(r"\d+", str(restart_file_path))
             isel_start = int(ints[-2])
             jsel_start = int(ints[-1])
             with xr.open_dataset(restart_file_path) as cur_ds:
                 # logger.warning(f"Could not open {restart_file}")
                 # continue
                 for data_var in data_vars:
-                    index_slice = dict(lon_out=slice(isel_start * self.increment_l1, (isel_start+1) * self.increment_l1),
-                                    lat_out=slice(jsel_start * self.increment_l1, (jsel_start+1) * self.increment_l1),
-                                    )
+                    index_slice = dict(
+                        lon_out=slice(
+                            isel_start * self.increment_l1,
+                            (isel_start + 1) * self.increment_l1,
+                        ),
+                        lat_out=slice(
+                            jsel_start * self.increment_l1,
+                            (jsel_start + 1) * self.increment_l1,
+                        ),
+                    )
                     if cur_ds[data_var].shape != ds_whole[data_var][index_slice].shape:
-                        logger.warning(f"Shape mismatch for {data_var} in {restart_file_path}")
+                        logger.warning(
+                            f"Shape mismatch for {data_var} in {restart_file_path}"
+                        )
                         dims = cur_ds[data_var].dims
-                        ds_whole[data_var] = ds_whole[data_var].transpose(*dims)  
-                        if cur_ds[data_var].shape != ds_whole[data_var][index_slice].shape:
-                            logger.error(f"Shape mismatch could not be resolved for {data_var} in {restart_file_path}")
+                        ds_whole[data_var] = ds_whole[data_var].transpose(*dims)
+                        if (
+                            cur_ds[data_var].shape
+                            != ds_whole[data_var][index_slice].shape
+                        ):
+                            logger.error(
+                                f"Shape mismatch could not be resolved for {data_var} in {restart_file_path}"
+                            )
                             continue
                     ds_whole[data_var][index_slice] = cur_ds[data_var].data
         ds_whole.to_netcdf(self.grid.restart_file)
         logger.info("Merging restart files done")
-
-
 
     def _delete_temp_files(self):
         logger.info("Deleting temporary files")
@@ -691,7 +745,9 @@ class MHMRestartFile:
         """
         logger.info("Creating restart file")
         if self.split_grid:
-            logger.info(f"grid will be split and processed in parallel on {self.ncpus} cores")
+            logger.info(
+                f"grid will be split and processed in parallel on {self.ncpus} cores"
+            )
             if not self.merge_only:
                 self._split_grid()
                 subgrids = Parallel(n_jobs=self.ncpus, backend="loky")(
