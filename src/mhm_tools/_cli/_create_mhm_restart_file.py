@@ -74,6 +74,23 @@ def add_args(parser):
         ),
     )
     parser.add_argument(
+        "--no_merge",
+        dest="no_merge",
+        action="store_true",
+        required=False,
+        help=("do not merge the restart files after splitting the grid - only works with split flag -s"),
+    )
+
+    parser.add_argument(
+        "--merge_only",
+        dest="split",
+        action="store_true",
+        required=False,
+        help=(
+            "only merge the allready exisiting restart files, do not create new ones - only works with split flag -s  opposite of --no_merge"
+        ),
+    )
+    parser.add_argument(
         "-c",
         "--clean-up",
         dest="clean_up",
@@ -133,5 +150,7 @@ def run(args):
         ncpus=args.ncpus,
         log_level=args.log_level,
         mpr_packages=args.mpr_packages
+        merge=not args.no_merge,
+        merge_only=args.merge_only
     )
     restart_creator.create_restart_file()

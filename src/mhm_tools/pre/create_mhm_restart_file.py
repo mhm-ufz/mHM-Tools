@@ -370,6 +370,8 @@ class MHMRestartFile:
         clean_temp_files=False,
         log_level=logging.DEBUG,
         mpr_packages=None,
+        merge=True,
+        merge_only=False,
     ):
         logger.setLevel(
             LOG_LEVELS[log_level] if log_level in LOG_LEVELS else logging.INFO
@@ -401,6 +403,8 @@ class MHMRestartFile:
         self.subgrids = []  # list of grid objects
         self.ncpus = ncpus
         self.split_grid = split_grid
+        self.merge_grid = merge
+        self.merge_only = merge_only
         self.clean_temp_files = clean_temp_files
         self.mpr_executable = mpr_executable
         self.mpr_packages = mpr_packages
@@ -588,10 +592,14 @@ class MHMRestartFile:
         # TODO: add dimensions to comments to make it more readable
         logger.info(f"Creating whole grid with {self.grid.restart_file}")
         logger.info(f"Opening {self.subgrids[0].restart_file}")
-        if not self.subgrids[0].restart_file.is_file():
-            logger.error(f"Could not open {self.subgrids[0].restart_file}")
+        if self.merge_only:
+            restart_file_paths = [file for dir in self.output_path.glob('slice_*') for file in dir.glob('output_*.nc')]
+        else: 
+            restart_file_paths = [subgrid.restart_file for subgrid in self.subgrids]
+        if not restart_file_paths[0].is_file():
+            logger.error(f"Could not open {restart_file_paths[0]}")
             # return
-        with xr.open_dataset(self.subgrids[0].restart_file) as cur_ds:
+        with xr.open_dataset(restart_file_paths[0]) as cur_ds:
             for coord in cur_ds.coords:
                 if coord not in ds_whole.coords:
                     ds_whole[coord] = cur_ds[coord]
@@ -612,12 +620,11 @@ class MHMRestartFile:
                     ds_whole[data_var] = (coords, np.full([len(ds_whole[_]) for _ in coords], np.nan))
 
         # 3. iterate over all subgrids and merge them into the whole grid
-        for subgrid in self.subgrids:
-            restart_file = subgrid.restart_file
-            ints = re.findall(r'\d+', str(restart_file))
+        for restart_file_path in restart_file_paths:
+            ints = re.findall(r'\d+', str(restart_file_path))
             isel_start = int(ints[-2])
             jsel_start = int(ints[-1])
-            with xr.open_dataset(restart_file) as cur_ds:
+            with xr.open_dataset(restart_file_path) as cur_ds:
                 # logger.warning(f"Could not open {restart_file}")
                 # continue
                 for data_var in data_vars:
@@ -625,11 +632,11 @@ class MHMRestartFile:
                                     lat_out=slice(jsel_start * self.increment_l1, (jsel_start+1) * self.increment_l1),
                                     )
                     if cur_ds[data_var].shape != ds_whole[data_var][index_slice].shape:
-                        logger.warning(f"Shape mismatch for {data_var} in {restart_file}")
+                        logger.warning(f"Shape mismatch for {data_var} in {restart_file_path}")
                         dims = cur_ds[data_var].dims
                         ds_whole[data_var] = ds_whole[data_var].transpose(*dims)  
                         if cur_ds[data_var].shape != ds_whole[data_var][index_slice].shape:
-                            logger.error(f"Shape mismatch could not be resolved for {data_var} in {restart_file}")
+                            logger.error(f"Shape mismatch could not be resolved for {data_var} in {restart_file_path}")
                             continue
                     ds_whole[data_var][index_slice] = cur_ds[data_var].data
         ds_whole.to_netcdf(self.grid.restart_file)
@@ -676,13 +683,15 @@ class MHMRestartFile:
         logger.info("Creating restart file")
         if self.split_grid:
             logger.info(f"grid will be split and processed in parallel on {self.ncpus} cores")
-            self._split_grid()
-            subgrids = Parallel(n_jobs=self.ncpus, backend="loky")(
-                delayed(self._create_restart_for_grid)(subgrid)
-                for subgrid in self.subgrids
-            )
-            self.subgrids = subgrids
-            self._merge_restart_files()
+            if not self.merge_only:
+                self._split_grid()
+                subgrids = Parallel(n_jobs=self.ncpus, backend="loky")(
+                    delayed(self._create_restart_for_grid)(subgrid)
+                    for subgrid in self.subgrids
+                )
+                self.subgrids = subgrids
+            if self.merge_grid:
+                self._merge_restart_files()
             if self.clean_temp_files:
                 self._delete_temp_files()
         else:
