@@ -600,12 +600,12 @@ class MHMRestartFile:
         )
         ds_whole["lon_out"] = np.arange(
             self.grid.l1.lon_min + self.grid.l1.resolution / 2,
-            self.grid.l1.lon_max - self.grid.l1.resolution / 2,
+            self.grid.l1.lon_max + self.grid.l1.resolution / 2, # + since arange omits the last value
             self.grid.l1.resolution,
         )
         ds_whole["lat_out"] = np.arange(
             self.grid.l1.lat_min + self.grid.l1.resolution / 2,
-            self.grid.l1.lat_max - self.grid.l1.resolution / 2,
+            self.grid.l1.lat_max + self.grid.l1.resolution / 2, # + since arange omits the last value
             self.grid.l1.resolution,
         )
 
