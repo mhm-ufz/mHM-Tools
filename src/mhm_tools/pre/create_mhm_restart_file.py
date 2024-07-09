@@ -336,7 +336,7 @@ class MHMRestartFile:
         grid (Grid): The grid object.
         subgrids (list): The list of subgrid objects.
         ncpus (int): The number of CPUs to use for parallelization.
-        split_grid (bool): Whether to split the grid.
+        run_on_whole_domain (bool): Whether to run on whole domain or split.
         clean_temp_files (bool): Whether to clean temporary files.
         mpr_executable (str): The path to the mpr executable.
         mpr_packages (str): The mpr packages to load.
@@ -368,7 +368,8 @@ class MHMRestartFile:
         l0_resolution=None,
         l1_resolution=None,
         increment_l1=2,
-        split_grid=False,
+        run_on_whole_domain=False,
+        use_split_grids=False,
         ncpus=1,
         clean_temp_files=False,
         log_level=logging.DEBUG,
@@ -405,7 +406,8 @@ class MHMRestartFile:
         )
         self.subgrids = []  # list of grid objects
         self.ncpus = ncpus
-        self.split_grid = split_grid
+        self.run_on_whole_domain = run_on_whole_domain
+        self.use_split_grids = use_split_grids
         self.merge_grid = merge
         self.merge_only = merge_only
         self.clean_temp_files = clean_temp_files
@@ -468,6 +470,13 @@ class MHMRestartFile:
         )
         logger.info(f"Wrote namelist for {grid.name} to {grid.namelist_file}")
         return grid
+    
+    def _read_subgrids_from_files(self):
+        for subgrid_path in self.output_path.glob("slice_*"):
+            logger.debug(f"Reading subgrid {subgrid_path}")
+            grid = Grid(file_path=subgrid_path, name=subgrid_path.name, l0=self.grid.l0, l1=self.grid.l1)
+            grid.read_morph_files()
+            self.subgrids.append(grid)
 
     def _split_grid(self):  # has do addapted to different file types not just .nc
         """
@@ -744,12 +753,18 @@ class MHMRestartFile:
             Any exceptions that occur during the execution of the method.
         """
         logger.info("Creating restart file")
-        if self.split_grid:
+        if self.run_on_whole_domain:
+            logger.info("grid will be processed as a whole")
+            self._create_restart_for_grid(self.grid)
+        else:
             logger.info(
                 f"grid will be split and processed in parallel on {self.ncpus} cores"
             )
             if not self.merge_only:
-                self._split_grid()
+                if self.use_split_grids:
+                    self._read_subgrids_from_files()
+                else:
+                    self._split_grid()
                 subgrids = Parallel(n_jobs=self.ncpus, backend="loky")(
                     delayed(self._create_restart_for_grid)(subgrid)
                     for subgrid in self.subgrids
@@ -759,7 +774,5 @@ class MHMRestartFile:
                 self._merge_restart_files()
             if self.clean_temp_files:
                 self._delete_temp_files()
-        else:
-            logger.info("grid will be processed as a whole")
-            self._create_restart_for_grid(self.grid)
+            
         logger.info("Restart file created")

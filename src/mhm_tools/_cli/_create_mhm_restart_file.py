@@ -64,21 +64,27 @@ def add_args(parser):
     )
 
     parser.add_argument(
-        "-s",
-        "--split",
-        dest="split",
+        "--process_domain_as_one",
+        dest="run_on_whole_domain",
         action="store_true",
         required=False,
         help=(
-            "split the grid into subgrids based on the provided basin clusters if your grid is to large to run in one piece"
+            "do not split the grid into subgrids based on the provided basin clusters. Make sure your is not to large to run in one piece"
         ),
+    )
+    parser.add_argument(
+        "--use_split_grids",
+        dest="use_split_grids",
+        action="store_true",
+        required=False,
+        help=("ommit the split files step and run MPR on existing split grids. Make sure the files cover the correct domain area"),
     )
     parser.add_argument(
         "--no_merge",
         dest="no_merge",
         action="store_true",
         required=False,
-        help=("do not merge the restart files after splitting the grid - only works with split flag -s"),
+        help=("do not merge the restart files after splitting the grid"),
     )
 
     parser.add_argument(
@@ -87,7 +93,7 @@ def add_args(parser):
         action="store_true",
         required=False,
         help=(
-            "only merge the allready exisiting restart files, do not create new ones - only works with split flag -s  opposite of --no_merge"
+            "only merge the allready exisiting restart files, do not create new ones; opposite of --no_merge"
         ),
     )
     parser.add_argument(
@@ -116,7 +122,7 @@ def add_args(parser):
         default=None,
         help=("Packages to load using module load before running mPR"),
     )
-
+    
 def run(args):
     """Create the catchment file.
 
@@ -144,7 +150,8 @@ def run(args):
         l1_resolution=l1_resolution,
         increment_l1=args.l1_increment,
         mpr_executable=args.mpr,
-        split_grid=args.split,
+        run_on_whole_domain=args.run_on_whole_domain,
+        use_split_grids=args.use_split_grids,
         clean_temp_files=args.clean_up,
         mpr_parameter_file=args.mpr_params,
         ncpus=args.ncpus,
