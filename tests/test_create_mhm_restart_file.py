@@ -3,8 +3,9 @@ import shutil
 import unittest
 from pathlib import Path
 
-import mhm_tools as mt
 import xarray as xr
+
+import mhm_tools as mt
 from mhm_tools.pre.create_mhm_restart_file import LatLon, MPRRunner
 
 HERE = Path(__file__).parent
