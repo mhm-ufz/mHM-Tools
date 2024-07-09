@@ -3,8 +3,10 @@ import shutil
 import unittest
 from pathlib import Path
 
-import mhm_tools as mt
 import xarray as xr
+
+import mhm_tools as mt
+from mhm_tools.pre.create_mhm_restart_file import LatLon, MPRRunner
 
 HERE = Path(__file__).parent
 TMP = HERE / "tmp"
@@ -74,18 +76,28 @@ class TestCreateRestart(unittest.TestCase):
         l0_resolution = 0.002
         l1_resolution = 0.1
         increment_l1 = 20  # thats 2 degree
+        mpr_runner = MPRRunner('path_to_mpr_exe') # dummy path because it is not used in the test
         m = mt.pre.MHMRestartFile(
             input_file_path=morph,
             output_path=TMP,
             nml_template=morph / "mpr_mhm_template.nml",
-            lon_min_target_grid=lon_min_target_grid,
-            lon_max_target_grid=lon_max_target_grid,
-            lat_min_target_grid=lat_min_target_grid,
-            lat_max_target_grid=lat_max_target_grid,
-            l0_resolution=l0_resolution,
-            l1_resolution=l1_resolution,
+            l0=LatLon(
+                lon_min=lon_min_target_grid,
+                lon_max=lon_max_target_grid,
+                lat_min=lat_min_target_grid,
+                lat_max=lat_max_target_grid,
+                resolution=l0_resolution,
+            ),
+            l1=LatLon(
+                lon_min=lon_min_target_grid,
+                lon_max=lon_max_target_grid,
+                lat_min=lat_min_target_grid,
+                lat_max=lat_max_target_grid,
+                resolution=l1_resolution,
+            ),
             increment_l1=increment_l1,
             log_level=logging.ERROR,
+            mpr = mpr_runner
         )
         # test setup successful
         assert m.grid.l0.lon_min - -10 < 1e-3
@@ -138,20 +150,29 @@ class TestCreateRestart(unittest.TestCase):
         lat_max_target_grid = 10
         l0_resolution = 0.002
         l1_resolution = 0.1
-        increment_l1 = 20
-
+        increment_l1 = 20   
+        mpr_runner = MPRRunner('path_to_mpr_exe') # dummy path because it is not used in the test
         m = mt.pre.MHMRestartFile(
             input_file_path=morph,
             output_path=TMP,
             nml_template=morph / "mpr_mhm_template.nml",
-            lon_min_target_grid=lon_min_target_grid,
-            lon_max_target_grid=lon_max_target_grid,
-            lat_min_target_grid=lat_min_target_grid,
-            lat_max_target_grid=lat_max_target_grid,
-            l0_resolution=l0_resolution,
-            l1_resolution=l1_resolution,
+            l0=LatLon(
+                lon_min=lon_min_target_grid,
+                lon_max=lon_max_target_grid,
+                lat_min=lat_min_target_grid,
+                lat_max=lat_max_target_grid,
+                resolution=l0_resolution,
+            ),
+            l1=LatLon(
+                lon_min=lon_min_target_grid,
+                lon_max=lon_max_target_grid,
+                lat_min=lat_min_target_grid,
+                lat_max=lat_max_target_grid,
+                resolution=l1_resolution,
+            ),
             increment_l1=increment_l1,
             log_level=logging.ERROR,
+            mpr = mpr_runner
         )
         # test setup successful
         m._split_grid()

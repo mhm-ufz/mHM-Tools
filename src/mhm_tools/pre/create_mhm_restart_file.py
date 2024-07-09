@@ -300,6 +300,59 @@ class Grid:
         self.morph_files.read_files(self.path)
 
 
+class MPRRunner:
+    """Class for running the mPR executable."""
+
+    def __init__(self, mpr_executable, mpr_packages=None, mpr_parameter_file=None):
+        """
+        Initialize the MPRRunner object.
+
+        Args:
+            mpr_executable (str): Path to the mPR executable.
+            mpr_packages (str, optional): Packages to load before running mPR. Defaults to None.
+            mpr_parameter_file (str, optional): Path to the mPR parameter file. Defaults to None.
+        """
+        self.mpr_executable = mpr_executable
+        self.mpr_packages = mpr_packages
+        self.mpr_parameter_file = mpr_parameter_file
+
+    def run_mpr(self, grid: Grid):
+        """
+        Run the mPR executable with the given namelist and parameter file.
+
+        Args:
+            grid (Grid): The grid object containing the namelist file.
+
+        Raises
+        ------
+            RuntimeError: If mPR fails with an error.
+            TimeoutExpired: If mPR execution times out.
+        """
+        command = (
+            f"module load {self.mpr_packages} \n"
+            if self.mpr_packages is not None
+            else ""
+        )
+        command += f"""{self.mpr_executable} -c {grid.namelist_file}"""
+        if self.mpr_parameter_file is not None:
+            command += f" -p {self.mpr_parameter_file}"
+        logger.info(f"Running mPR with: {command}")
+
+        p = Popen(command, shell=True, stdout=PIPE, stderr=PIPE)
+        try:
+            data, error_data = p.communicate()
+            if error_data:
+                grid.restart_file = None
+                msg = f"MPR failed with STDERR {error_data} for {grid.name} and command {command}"
+                raise RuntimeError(msg)
+        except TimeoutExpired as err:
+            p.kill()
+            msg = (
+                f"MPR failed with TimeoutExpired for {grid.name} and command {command}"
+            )
+            raise TimeoutExpired(msg) from err
+
+
 class MHMRestartFile:
     """
     A class for creating a restart file for the MHM model.
@@ -307,49 +360,47 @@ class MHMRestartFile:
     This class provides methods to split the grid (if necessary), write the grid namelist,
     call the mpr executable, merge the restart files (if applicable), and delete temporary files (if specified).
 
-    Parameters
-    ----------
+    Args:
         input_file_path (Path): The path to the input file.
         nml_template (Path): The path to the namelist template file.
         output_path (Path): The path to the output directory.
-        mpr_executable (str, optional): The path to the mpr executable. Defaults to None.
-        mpr_parameter_file (str, optional): The path to the mpr parameter file. Defaults to None.
-        lon_min_target_grid (float, optional): The minimum longitude of the target grid. Defaults to None.
-        lon_max_target_grid (float, optional): The maximum longitude of the target grid. Defaults to None.
-        lat_min_target_grid (float, optional): The minimum latitude of the target grid. Defaults to None.
-        lat_max_target_grid (float, optional): The maximum latitude of the target grid. Defaults to None.
-        l0_resolution (float, optional): The resolution of the high-resolution grid. Defaults to None.
-        l1_resolution (float, optional): The resolution of the low-resolution grid. Defaults to None.
-        increment_l1 (int, optional): The increment for splitting the grid. Defaults to 2.
-        split_grid (bool, optional): Whether to split the grid. Defaults to False.
+        l0 (LatLon): The LatLon object representing the high resolution grid.
+        l1 (LatLon): The LatLon object representing the low resolution grid.
+        mpr (MPRRunner): The MPRRunner object for executing the mpr executable.
+        increment_l1 (int, optional): The increment for the low resolution grid. Defaults to 2.
+        run_on_whole_domain (bool, optional): Whether to run on the whole domain. Defaults to False.
+        use_split_grids (bool, optional): Whether to use split grids. Defaults to False.
         ncpus (int, optional): The number of CPUs to use for parallelization. Defaults to 1.
         clean_temp_files (bool, optional): Whether to clean temporary files. Defaults to False.
         log_level (int, optional): The log level. Defaults to logging.DEBUG.
-        mpr_packages (str, optional): The mpr packages to load. Defaults to None.
+        merge (bool, optional): Whether to merge the restart files. Defaults to True.
+        merge_only (bool, optional): Whether to only merge the restart files. Defaults to False.
 
     Attributes
     ----------
         nml_template (Path): The path to the namelist template file.
         output_path (Path): The path to the output directory.
-        grid (Grid): The grid object.
-        subgrids (list): The list of subgrid objects.
+        grid (Grid): The Grid object representing the whole grid.
+        subgrids (list): The list of Grid objects representing the subgrids.
         ncpus (int): The number of CPUs to use for parallelization.
-        run_on_whole_domain (bool): Whether to run on whole domain or split.
+        run_on_whole_domain (bool): Whether to run on the whole domain.
+        use_split_grids (bool): Whether to use split grids.
+        merge_grid (bool): Whether to merge the restart files.
+        merge_only (bool): Whether to only merge the restart files.
         clean_temp_files (bool): Whether to clean temporary files.
-        mpr_executable (str): The path to the mpr executable.
-        mpr_packages (str): The mpr packages to load.
-        parameter_file (str): The path to the mpr parameter file.
+        mpr (MPRRunner): The MPRRunner object for executing the mpr executable.
         work_dir (str): The working directory.
-        increment_l1 (int): The increment for splitting the grid.
-        increment_l0 (int): The increment for the high-resolution grid.
+        increment_l1 (int): The increment for the low resolution grid.
+        increment_l0 (int): The increment for the high resolution grid.
 
     Methods
     -------
-        _create_namelist(replace_dict, out_file_path, overwrite=False): Create a namelist file with the given replace dictionary.
-        _write_grid_namelist(grid): Write the namelist for a grid.
+        _create_namelist(replace_dict, out_file_path): Create a namelist file by replacing placeholders in the template.
+        _write_grid_namelist(grid): Write the grid namelist file.
+        _create_latlon(lon_min, lat_min): Create a LatLon object from the given lon_min and lat_min.
+        _read_subgrids_from_files(): Read the subgrids from the files on disk.
         _split_grid(): Split the grid into subgrids and write them to disk.
-        _split_file(name, file_path): Split a file into subgrids.
-        _call_mpr(namelist): Call the mpr executable with the given namelist and parameter file.
+        _split_file(name, file_path): Split a file into subgrids and write them to disk.
     """
 
     def __init__(
@@ -357,44 +408,24 @@ class MHMRestartFile:
         input_file_path: Path,
         nml_template: Path,
         output_path: Path,
-        mpr_executable=None,
-        mpr_parameter_file=None,
-        lon_min_target_grid=None,
-        lon_max_target_grid=None,
-        lat_min_target_grid=None,
-        lat_max_target_grid=None,
-        l0_resolution=None,
-        l1_resolution=None,
+        l0: LatLon,
+        l1: LatLon,
+        mpr: MPRRunner,
         increment_l1=2,
         run_on_whole_domain=False,
         use_split_grids=False,
         ncpus=1,
         clean_temp_files=False,
         log_level=logging.DEBUG,
-        mpr_packages=None,
         merge=True,
         merge_only=False,
     ):
-        logger.setLevel(
-            LOG_LEVELS.get(log_level, logging.INFO)
-        )
+        logger.setLevel(LOG_LEVELS.get(log_level, logging.INFO))
         logger.debug(f"Creating MHMRestartFile object with {locals()}")
         self.nml_template = Path(nml_template)
         self.output_path = Path(output_path)
-        grid_latlon_l0 = LatLon(
-            lat_min=lat_min_target_grid,
-            lon_min=lon_min_target_grid,
-            lat_max=lat_max_target_grid,
-            lon_max=lon_max_target_grid,
-            resolution=l0_resolution,
-        )
-        grid_latlon_l1 = LatLon(
-            lat_min=lat_min_target_grid,
-            lon_min=lon_min_target_grid,
-            lat_max=lat_max_target_grid,
-            lon_max=lon_max_target_grid,
-            resolution=l1_resolution,
-        )
+        grid_latlon_l0 = l0
+        grid_latlon_l1 = l1
         self.grid = Grid(
             file_path=Path(input_file_path),
             name="whole grid",
@@ -409,9 +440,7 @@ class MHMRestartFile:
         self.merge_grid = merge
         self.merge_only = merge_only
         self.clean_temp_files = clean_temp_files
-        self.mpr_executable = mpr_executable
-        self.mpr_packages = mpr_packages
-        self.parameter_file = mpr_parameter_file
+        self.mpr = mpr
         self.work_dir = "."
         self.increment_l1 = increment_l1
         self.increment_l0 = (
@@ -468,9 +497,9 @@ class MHMRestartFile:
         )
         logger.info(f"Wrote namelist for {grid.name} to {grid.namelist_file}")
         return grid
-    
+
     def _create_latlon(self, lon_min, lat_min):
-        """helper function creating a l0 resolution and a l1 resolution LatLon object from a given lon_min and lat_min"""
+        """Create a l0 resolution and a l1 resolution LatLon object from a given lon_min and lat_min."""
         lon_max = lon_min + self.increment_l1 * self.grid.l1.resolution
         if lon_max > self.grid.l1.lon_max:
             lon_max = self.grid.l1.lon_max
@@ -498,32 +527,29 @@ class MHMRestartFile:
     def _read_subgrids_from_files(self):
         """Read the subgrids from the files on disk."""
         for i, lon_min in enumerate(
+            np.arange(
+                self.grid.l1.lon_min,
+                self.grid.l1.lon_max,
+                self.grid.l1.resolution * self.increment_l1,
+            )
+        ):
+            for j, lat_min in enumerate(
                 np.arange(
-                    self.grid.l1.lon_min,
-                    self.grid.l1.lon_max,
+                    self.grid.l1.lat_min,
+                    self.grid.l1.lat_max,
                     self.grid.l1.resolution * self.increment_l1,
                 )
             ):
-                for j, lat_min in enumerate(
-                    np.arange(
-                        self.grid.l1.lat_min,
-                        self.grid.l1.lat_max,
-                        self.grid.l1.resolution * self.increment_l1,
-                    )
-                ):
-                    l0, l1 = self._create_latlon(lon_min, lat_min)
-                    subgrid_path = self.output_path / f"slice_{i}_{j}"
-                    if not subgrid_path.is_dir():
-                        logger.error(f"Subgrid {subgrid_path} not found")
-                        continue
-                    grid = Grid(
-                        file_path=subgrid_path,
-                        name=subgrid_path.name,
-                        l0=l0,
-                        l1=l1
-                    )
-                    grid.read_morph_files()
-                    self.subgrids.append(grid)
+                l0, l1 = self._create_latlon(lon_min, lat_min)
+                subgrid_path = self.output_path / f"slice_{i}_{j}"
+                if not subgrid_path.is_dir():
+                    logger.error(f"Subgrid {subgrid_path} not found")
+                    continue
+                grid = Grid(
+                    file_path=subgrid_path, name=subgrid_path.name, l0=l0, l1=l1
+                )
+                grid.read_morph_files()
+                self.subgrids.append(grid)
 
     def _split_grid(self):  # has do addapted to different file types not just .nc
         """
@@ -586,7 +612,9 @@ class MHMRestartFile:
                         logger.debug(f"Written {out_path}")
                     except Exception as e:
                         logger.error(f"Failed to write {out_path} with {e}")
-                        logger.debug(f"{l1.lon_min}, {l1.lon_max}, {l1.lat_min}, {l1.lat_max}")
+                        logger.debug(
+                            f"{l1.lon_min}, {l1.lon_max}, {l1.lat_min}, {l1.lat_max}"
+                        )
                         logger.debug(ds_cut["latitude"].values)
                         return None
 
@@ -597,37 +625,6 @@ class MHMRestartFile:
                     }
         logger.debug(f"Splitting {file_path} done")
         return sub_grid_paths
-
-    def _call_mpr(self, grid: Grid):
-        """Call the mpr executable with the given namelist and parameter file."""
-        # tmpdir = Path.cwd()
-        # os.chdir(self.work_dir)
-        command = (
-            f"module load {self.mpr_packages} \n"
-            if self.mpr_packages is not None
-            else ""
-        )
-        # command = f"""module load iomkl/2020b netCDF-Fortran/4.5.3
-        command += f"""{self.mpr_executable} -c {grid.namelist_file}"""
-        if self.parameter_file is not None:
-            command += f" -p {self.parameter_file}"
-        logger.info(f"Running mPR with: {command}")
-
-        p = Popen(command, shell=True, stdout=PIPE, stderr=PIPE)
-        try:
-            data, error_data = p.communicate()
-            if error_data:
-                grid.restart_file = None
-                # logger.error(f"Failed with STDERR {error_data}")
-                msg = f"MPR failed with STDERR {error_data} for {grid.name} and command {command}"
-                raise RuntimeError(msg)
-        except TimeoutExpired as err:
-            # logger.error("Timeout expired")
-            p.kill()
-            msg = "MPR failed with TimeoutExpired for {grid.name} and command {command}"
-            raise TimeoutExpired(msg) from err
-        # finally:
-        # os.chd    ir(tmpdir)
 
     def _merge_restart_files(self):
         logger.info("Merging restart files")
@@ -702,15 +699,15 @@ class MHMRestartFile:
                 # init the new DataArrays (set to nan)
                 data_vars = [_ for _ in cur_ds.data_vars if _.startswith("L1_")]
                 for data_var in data_vars:
-                    coords = list(cur_ds[data_var].coords)
-                    for coord in coords:
-                        if coord not in ds_whole:
-                            logger.info(f"Adding {coord} to {data_var}")
-                            logger.debug(f"cur_ds[coord] {cur_ds[coord]}")
-                            ds_whole[coord] = cur_ds[coord]
+                    dv_coords = list(cur_ds[data_var].coords)
+                    for dv_coord in dv_coords:
+                        if dv_coord not in ds_whole:
+                            logger.info(f"Adding {dv_coord} to {data_var}")
+                            logger.debug(f"cur_ds[coord] {cur_ds[dv_coord]}")
+                            ds_whole[dv_coord] = cur_ds[dv_coord]
                     ds_whole[data_var] = (
-                        coords,
-                        np.full([len(ds_whole[_]) for _ in coords], np.nan),
+                        dv_coords,
+                        np.full([len(ds_whole[_]) for _ in dv_coords], np.nan),
                     )
 
         # 3. iterate over all subgrids and merge them into the whole grid
@@ -722,16 +719,16 @@ class MHMRestartFile:
                 # logger.warning(f"Could not open {restart_file}")
                 # continue
                 for data_var in data_vars:
-                    index_slice = dict(
-                        lon_out=slice(
+                    index_slice = {
+                        "lon_out": slice(
                             isel_start * self.increment_l1,
                             (isel_start + 1) * self.increment_l1,
                         ),
-                        lat_out=slice(
+                        "lat_out": slice(
                             jsel_start * self.increment_l1,
                             (jsel_start + 1) * self.increment_l1,
                         ),
-                    )
+                    }
                     if cur_ds[data_var].shape != ds_whole[data_var][index_slice].shape:
                         logger.warning(
                             f"Shape mismatch for {data_var} in {restart_file_path}"
@@ -780,7 +777,7 @@ class MHMRestartFile:
             f"Processing subgrid {grid.name}, {grid.path}, {grid.l0.lon_min}, {grid.l0.lon_max}, {grid.l0.lat_min}, {grid.l0.lat_max}"
         )
         grid = self._write_grid_namelist(grid)
-        self._call_mpr(grid)
+        self.mpr.run_mpr(grid)
         return grid
 
     def create_restart_file(self):

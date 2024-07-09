@@ -5,6 +5,8 @@ A restart file contains all the static information to run mHM on a specific grid
 
 """
 
+from mhm_tools.pre.create_mhm_restart_file import LatLon, MPRRunner
+
 from ..pre import MHMRestartFile
 
 
@@ -77,7 +79,9 @@ def add_args(parser):
         dest="use_split_grids",
         action="store_true",
         required=False,
-        help=("ommit the split files step and run MPR on existing split grids. Make sure the files cover the correct domain area"),
+        help=(
+            "ommit the split files step and run MPR on existing split grids. Make sure the files cover the correct domain area"
+        ),
     )
     parser.add_argument(
         "--no_merge",
@@ -122,7 +126,8 @@ def add_args(parser):
         default=None,
         help=("Packages to load using module load before running mPR"),
     )
-    
+
+
 def run(args):
     """Create the catchment file.
 
@@ -138,26 +143,37 @@ def run(args):
     lat_max_target_grid = float(coords[3])
     l0_resolution = float(coords[4])
     l1_resolution = float(coords[5])
+
     restart_creator = MHMRestartFile(
         input_file_path=args.input_dir,
         output_path=args.output_dir,
         nml_template=args.nml_template,
-        lon_min_target_grid=lon_min_target_grid,
-        lon_max_target_grid=lon_max_target_grid,
-        lat_min_target_grid=lat_min_target_grid,
-        lat_max_target_grid=lat_max_target_grid,
-        l0_resolution=l0_resolution,
-        l1_resolution=l1_resolution,
+        l0=LatLon(
+            lon_min=lon_min_target_grid,
+            lon_max=lon_max_target_grid,
+            lat_min=lat_min_target_grid,
+            lat_max=lat_max_target_grid,
+            resolution=l0_resolution,
+        ),
+        l1=LatLon(
+            lon_min=lon_min_target_grid,
+            lon_max=lon_max_target_grid,
+            lat_min=lat_min_target_grid,
+            lat_max=lat_max_target_grid,
+            resolution=l1_resolution,
+        ),
         increment_l1=args.l1_increment,
-        mpr_executable=args.mpr,
+        mpr=MPRRunner(
+            mpr_executable=args.mpr,
+            mpr_packages=args.mpr_packages,
+            mpr_parameter_file=args.mpr_params,
+        ),
         run_on_whole_domain=args.run_on_whole_domain,
         use_split_grids=args.use_split_grids,
         clean_temp_files=args.clean_up,
-        mpr_parameter_file=args.mpr_params,
         ncpus=args.ncpus,
         log_level=args.log_level,
-        mpr_packages=args.mpr_packages,
         merge=not args.no_merge,
-        merge_only=args.merge_only
+        merge_only=args.merge_only,
     )
     restart_creator.create_restart_file()
