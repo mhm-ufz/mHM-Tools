@@ -713,6 +713,9 @@ class MHMRestartFile:
                             )
                             continue
                     ds_whole[data_var][index_slice] = cur_ds[data_var].data
+        rename_dict = {'lon_out': 'lon', 'lat_out': 'lat', 'lon_out_bnds': 'lon_bnds', 'lat_out_bnds': 'lat_bnds', 'month_of_year': 'L1_LAITimesteps', 'horizon_out': 'L1_SoilHorizons', '    horizon_out_bnds': 'L1_SoilHorizons_bnds'}
+        rename_dict = {k: v for k, v in rename_dict.items() if k in ds_whole.coords} # make sure that all keys are in the dataset
+        ds_whole = ds_whole.rename(rename_dict)
         ds_whole.to_netcdf(self.grid.restart_file)
         logger.info("Merging restart files done")
 
