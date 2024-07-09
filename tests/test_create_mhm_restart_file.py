@@ -129,6 +129,75 @@ class TestCreateRestart(unittest.TestCase):
             assert sd.l0.get_n_lon() == 1000
             assert sd.l0.get_n_lat() == 1000
 
+    def test_not_perfect_grid(self):
+        # use an increment that does not fit the grid
+        morph = Path(HERE / "files" / "test_create_restart")
+        lon_min_target_grid = -10
+        lon_max_target_grid = 3
+        lat_min_target_grid = -9
+        lat_max_target_grid = 10
+        l0_resolution = 0.002
+        l1_resolution = 0.1
+        increment_l1 = 20
+
+        m = mt.pre.MHMRestartFile(
+            input_file_path=morph,
+            output_path=TMP,
+            nml_template=morph / "mpr_mhm_template.nml",
+            lon_min_target_grid=lon_min_target_grid,
+            lon_max_target_grid=lon_max_target_grid,
+            lat_min_target_grid=lat_min_target_grid,
+            lat_max_target_grid=lat_max_target_grid,
+            l0_resolution=l0_resolution,
+            l1_resolution=l1_resolution,
+            increment_l1=increment_l1,
+            log_level=logging.ERROR,
+        )
+        # test setup successful
+        m._split_grid()
+        for sd in reversed(m.subgrids):
+            with xr.open_dataset(sd.morph_files.geology) as ds:
+                assert (
+                    abs(float(ds["longitude"].min()) - sd.l0.lon_min)
+                    - sd.l0.resolution / 2
+                    < 1e-6
+                )  # difference is half the resolution because the xarray grid provides the center of the cell
+                assert (
+                    abs(ds["longitude"].max() - sd.l0.lon_max) - sd.l0.resolution / 2
+                    < 1e-6
+                )
+                assert (
+                    abs(ds["latitude"].min() - sd.l0.lat_min) - sd.l0.resolution / 2
+                    < 1e-6
+                )
+                assert (
+                    abs(ds["latitude"].max() - sd.l0.lat_max) - sd.l0.resolution / 2
+                    < 1e-6
+                )
+
+            if (
+                "slice_6" in sd.name and "_9" not in sd.name
+            ):  # the last slice in lon direction but not in lat direction
+                assert sd.l1.get_n_lon() == 10
+                assert sd.l1.get_n_lat() == 20
+                assert sd.l0.get_n_lon() == 500
+                assert sd.l0.get_n_lat() == 1000
+            elif "slice_6" not in sd.name and "_9" in sd.name:
+                assert sd.l1.get_n_lon() == 20
+                assert sd.l1.get_n_lat() == 10
+                assert sd.l0.get_n_lon() == 1000
+                assert sd.l0.get_n_lat() == 500
+            elif "slice_6" in sd.name and "_9" in sd.name:
+                assert sd.l1.get_n_lon() == 10
+                assert sd.l1.get_n_lat() == 10
+                assert sd.l0.get_n_lon() == 500
+                assert sd.l0.get_n_lat() == 500
+            else:
+                assert sd.l1.get_n_lon() == 20
+                assert sd.l1.get_n_lat() == 20
+                assert sd.l0.get_n_lon() == 1000
+                assert sd.l0.get_n_lat() == 1000
+
     def test_write_namelists(self):
         pass
 

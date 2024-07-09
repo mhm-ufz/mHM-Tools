@@ -172,7 +172,6 @@ class LatLon:
         -------
             int: The number of latitude points.
         """
-        # print('nlat',self.lat_max, self.lat_min, self.resolution, (self.lat_max - self.lat_min) / self.resolution, int((self.lat_max - self.lat_min) / self.resolution), flush=True)
         return int(
             (self.lat_max - self.lat_min) / self.resolution + 0.5
         )  # + 0.5 to round up
@@ -185,7 +184,6 @@ class LatLon:
         -------
             int: The number of longitude points.
         """
-        # print('nlon', self.lon_max, self.lon_min, self.resolution, (self.lon_max - self.lon_min) / self.resolution, int((self.lon_max - self.lon_min) / self.resolution), flush=True)
         return int(
             (self.lon_max - self.lon_min) / self.resolution + 0.5
         )  # + 0.5 to round up
@@ -378,7 +376,7 @@ class MHMRestartFile:
         merge_only=False,
     ):
         logger.setLevel(
-            LOG_LEVELS[log_level] if log_level in LOG_LEVELS else logging.INFO
+            LOG_LEVELS.get(log_level, logging.INFO)
         )
         logger.debug(f"Creating MHMRestartFile object with {locals()}")
         self.nml_template = Path(nml_template)
@@ -471,12 +469,61 @@ class MHMRestartFile:
         logger.info(f"Wrote namelist for {grid.name} to {grid.namelist_file}")
         return grid
     
+    def _create_latlon(self, lon_min, lat_min):
+        """helper function creating a l0 resolution and a l1 resolution LatLon object from a given lon_min and lat_min"""
+        lon_max = lon_min + self.increment_l1 * self.grid.l1.resolution
+        if lon_max > self.grid.l1.lon_max:
+            lon_max = self.grid.l1.lon_max
+        lat_max = lat_min + self.increment_l1 * self.grid.l1.resolution
+        if lat_max > self.grid.l1.lat_max:
+            lat_max = self.grid.l1.lat_max
+
+        # grid saved in llc coordinates
+        l0 = LatLon(  # this is the high resolution grid
+            lon_min=lon_min,
+            lon_max=lon_max,
+            lat_min=lat_min,
+            lat_max=lat_max,
+            resolution=self.grid.l0.resolution,
+        )
+        l1 = LatLon(  # this is the low resolution grid
+            lon_min=lon_min,
+            lon_max=lon_max,
+            lat_min=lat_min,
+            lat_max=lat_max,
+            resolution=self.grid.l1.resolution,
+        )
+        return l0, l1
+
     def _read_subgrids_from_files(self):
-        for subgrid_path in self.output_path.glob("slice_*"):
-            logger.debug(f"Reading subgrid {subgrid_path}")
-            grid = Grid(file_path=subgrid_path, name=subgrid_path.name, l0=self.grid.l0, l1=self.grid.l1)
-            grid.read_morph_files()
-            self.subgrids.append(grid)
+        """Read the subgrids from the files on disk."""
+        for i, lon_min in enumerate(
+                np.arange(
+                    self.grid.l1.lon_min,
+                    self.grid.l1.lon_max,
+                    self.grid.l1.resolution * self.increment_l1,
+                )
+            ):
+                for j, lat_min in enumerate(
+                    np.arange(
+                        self.grid.l1.lat_min,
+                        self.grid.l1.lat_max,
+                        self.grid.l1.resolution * self.increment_l1,
+                    )
+                ):
+                    l0, l1 = self._create_latlon(lon_min, lat_min)
+                    subgrid_path = self.output_path / f"slice_{i}_{j}"
+                    if not subgrid_path.is_dir():
+                        logger.error(f"Subgrid {subgrid_path} not found")
+                        continue
+                    grid = Grid(
+                        file_path=subgrid_path,
+                        name=subgrid_path.name,
+                        l0=l0,
+                        l1=l1
+                    )
+                    grid.read_morph_files()
+                    self.subgrids.append(grid)
 
     def _split_grid(self):  # has do addapted to different file types not just .nc
         """
@@ -491,6 +538,7 @@ class MHMRestartFile:
         sub_grid_paths = Parallel(n_jobs=self.ncpus, backend="loky")(
             delayed(self._split_file)(name, file_path)
             for name, file_path in self.grid.morph_files.get_files_as_dict().items()
+            if file_path is not None and file_path
         )  # move the parallelization into the split_file function to improve performance
         logger.debug("Creating subgrids")
         self.subgrids = [Grid(file_path=k, **v) for k, v in sub_grid_paths[0].items()]
@@ -498,7 +546,7 @@ class MHMRestartFile:
 
     def _split_file(self, name, file_path):
         sub_grid_paths = {}
-        if file_path is None:
+        if not file_path or file_path is None:
             logger.error(f"No file path provided for {name}")
             return None
         logger.debug(f"Splitting {file_path}")
@@ -527,36 +575,21 @@ class MHMRestartFile:
                     if out_path.is_file():
                         out_path.unlink()
 
-                    lon_max = lon_min + self.increment_l1 * self.grid.l1.resolution
-                    lat_max = lat_min + self.increment_l1 * self.grid.l1.resolution
+                    l0, l1 = self._create_latlon(lon_min, lat_min)
+
                     ds_cut = ds.sel(
-                        longitude=slice(lon_min, lon_max),
-                        latitude=slice(lat_max, lat_min),
+                        longitude=slice(l1.lon_min, l1.lon_max),
+                        latitude=slice(l1.lat_max, l1.lat_min),
                     )
                     try:
                         ds_cut.to_netcdf(out_path, "w")
                         logger.debug(f"Written {out_path}")
                     except Exception as e:
                         logger.error(f"Failed to write {out_path} with {e}")
-                        logger.debug(f"{lon_min}, {lon_max}, {lat_min}, {lat_max}")
+                        logger.debug(f"{l1.lon_min}, {l1.lon_max}, {l1.lat_min}, {l1.lat_max}")
                         logger.debug(ds_cut["latitude"].values)
                         return None
 
-                    # grid saved in llc coordinates
-                    l0 = LatLon(  # this is the high resolution grid
-                        lon_min=lon_min,
-                        lon_max=lon_max,
-                        lat_min=lat_min,
-                        lat_max=lat_max,
-                        resolution=self.grid.l0.resolution,
-                    )
-                    l1 = LatLon(  # this is the low resolution grid
-                        lon_min=lon_min,
-                        lon_max=lon_max,
-                        lat_min=lat_min,
-                        lat_max=lat_max,
-                        resolution=self.grid.l1.resolution,
-                    )
                     sub_grid_paths[out_dir] = {
                         "l0": l0,
                         "l1": l1,
@@ -588,11 +621,11 @@ class MHMRestartFile:
                 # logger.error(f"Failed with STDERR {error_data}")
                 msg = f"MPR failed with STDERR {error_data} for {grid.name} and command {command}"
                 raise RuntimeError(msg)
-        except TimeoutExpired:
+        except TimeoutExpired as err:
             # logger.error("Timeout expired")
             p.kill()
             msg = "MPR failed with TimeoutExpired for {grid.name} and command {command}"
-            raise TimeoutExpired("MPR timeout expired")
+            raise TimeoutExpired(msg) from err
         # finally:
         # os.chd    ir(tmpdir)
 
@@ -609,12 +642,14 @@ class MHMRestartFile:
         )
         ds_whole["lon_out"] = np.arange(
             self.grid.l1.lon_min + self.grid.l1.resolution / 2,
-            self.grid.l1.lon_max + self.grid.l1.resolution / 2, # + since arange omits the last value
+            self.grid.l1.lon_max
+            + self.grid.l1.resolution / 2,  # + since arange omits the last value
             self.grid.l1.resolution,
         )
         ds_whole["lat_out"] = np.arange(
             self.grid.l1.lat_min + self.grid.l1.resolution / 2,
-            self.grid.l1.lat_max + self.grid.l1.resolution / 2, # + since arange omits the last value
+            self.grid.l1.lat_max
+            + self.grid.l1.resolution / 2,  # + since arange omits the last value
             self.grid.l1.resolution,
         )
 
@@ -667,8 +702,7 @@ class MHMRestartFile:
                 # init the new DataArrays (set to nan)
                 data_vars = [_ for _ in cur_ds.data_vars if _.startswith("L1_")]
                 for data_var in data_vars:
-                    coords = [_ for _ in cur_ds[data_var].coords]
-                    # print(data_var, coords)
+                    coords = list(cur_ds[data_var].coords)
                     for coord in coords:
                         if coord not in ds_whole:
                             logger.info(f"Adding {coord} to {data_var}")
@@ -713,8 +747,18 @@ class MHMRestartFile:
                             )
                             continue
                     ds_whole[data_var][index_slice] = cur_ds[data_var].data
-        rename_dict = {'lon_out': 'lon', 'lat_out': 'lat', 'lon_out_bnds': 'lon_bnds', 'lat_out_bnds': 'lat_bnds', 'month_of_year': 'L1_LAITimesteps', 'horizon_out': 'L1_SoilHorizons', '    horizon_out_bnds': 'L1_SoilHorizons_bnds'}
-        rename_dict = {k: v for k, v in rename_dict.items() if k in ds_whole.coords} # make sure that all keys are in the dataset
+        rename_dict = {
+            "lon_out": "lon",
+            "lat_out": "lat",
+            "lon_out_bnds": "lon_bnds",
+            "lat_out_bnds": "lat_bnds",
+            "month_of_year": "L1_LAITimesteps",
+            "horizon_out": "L1_SoilHorizons",
+            "    horizon_out_bnds": "L1_SoilHorizons_bnds",
+        }
+        rename_dict = {
+            k: v for k, v in rename_dict.items() if k in ds_whole.coords
+        }  # make sure that all keys are in the dataset
         ds_whole = ds_whole.rename(rename_dict)
         ds_whole.to_netcdf(self.grid.restart_file)
         logger.info("Merging restart files done")
@@ -777,5 +821,5 @@ class MHMRestartFile:
                 self._merge_restart_files()
             if self.clean_temp_files:
                 self._delete_temp_files()
-            
+
         logger.info("Restart file created")
