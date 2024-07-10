@@ -246,12 +246,6 @@ class Grid:
         ) and latlon_file is not None:
             self.read_latlon(latlon_file)
 
-        def set_restart_file(self, restart_file):
-            self.restart_file = restart_file
-
-        def set_namelist_file(self, namelist_file):
-            self.namelist_file = namelist_file
-
     def read_latlon(self, latlon_file: Path):
         """
         Read the latlon file and sets the lower-left (l0) and upper-right (l1) corners of the grid as well as the resolution.
@@ -463,21 +457,23 @@ class MHMRestartFile:
         return out_file_path
 
     def _write_grid_namelist(self, grid: Grid):
+        logger.debug(f"Writing namelist for {grid.name}")
+        logger.debug(f"lon_min: {grid.l0.lon_min}, lon_max: {grid.l0.lon_max}")
         replace_dict = {
             "${slicei_j}": grid.name,
             "${output_file}": grid.path / f"output_{grid.name}.nc",
             "${lon_high_start}": f"{grid.l0.lon_min + grid.l0.resolution / 2:.3f}",  # changes to center of cell coordinates
             "${lon_high_res}": f"{grid.l0.resolution:.3f}",
-            "${lon_high_n}": f"{grid.l0.get_n_lon()}",
+            "${lon_high_n}": f"{grid.l0.get_n_lon()-1}", # -1 because the number of cells is one less than the number of points
             "${lat_high_start}": f"{grid.l0.lat_min + grid.l0.resolution / 2:.3f}",  # changes to center of cell coordinates
             "${lat_high_res}": f"{grid.l0.resolution:.3f}",
-            "${lat_high_n}": f"{grid.l0.get_n_lat()}",
-            "${lon_low_start}": f"{grid.l1.lon_min + grid.l1.resolution / 2:.2f}",  # changes to center of cell coordinates
+            "${lat_high_n}": f"{grid.l0.get_n_lat()-1}",
+            "${lon_low_start}": f"{grid.l1.lon_min + grid.l1.resolution / 2:.3f}",  # changes to center of cell coordinates
             "${lon_low_res}": f"{grid.l1.resolution:.2f}",
-            "${lon_low_n}": f"{grid.l1.get_n_lon()}",
-            "${lat_low_start}": f"{grid.l1.lat_min + grid.l1.resolution / 2:.2f}",  # changes to center of cell coordinates
+            "${lon_low_n}": f"{grid.l1.get_n_lon()-1}",
+            "${lat_low_start}": f"{grid.l1.lat_min + grid.l1.resolution / 2:.3f}",  # changes to center of cell coordinates
             "${lat_low_res}": f"{grid.l1.resolution:.2f}",
-            "${lat_low_n}": f"{grid.l1.get_n_lat()}",
+            "${lat_low_n}": f"{grid.l1.get_n_lat()-1}",
             "${bulk_density}": grid.morph_files.bulk_density,
             "${sand_content}": grid.morph_files.sand_content,
             "${clay_content}": grid.morph_files.clay_content,
@@ -809,6 +805,7 @@ class MHMRestartFile:
                     self._read_subgrids_from_files()
                 else:
                     self._split_grid()
+                logger.info(f"Creating namelists and running MPR.")
                 subgrids = Parallel(n_jobs=self.ncpus, backend="loky")(
                     delayed(self._create_restart_for_grid)(subgrid)
                     for subgrid in self.subgrids
