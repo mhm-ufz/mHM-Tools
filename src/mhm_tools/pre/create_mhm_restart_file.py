@@ -747,7 +747,8 @@ class MHMRestartFile:
             "lat_out_bnds": "lat_bnds",
             "month_of_year": "L1_LAITimesteps",
             "horizon_out": "L1_SoilHorizons",
-            "    horizon_out_bnds": "L1_SoilHorizons_bnds",
+            "horizon_out_bnds": "L1_SoilHorizons_bnds",
+            "month_of_year_bnds": "L1_LAITimesteps_bnds",
         }
         rename_dict = {
             k: v for k, v in rename_dict.items() if k in ds_whole.coords
