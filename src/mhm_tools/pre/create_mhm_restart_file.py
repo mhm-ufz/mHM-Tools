@@ -727,6 +727,10 @@ class MHMRestartFile:
             with xr.open_dataset(restart_file_path) as cur_ds:
                 # logger.warning(f"Could not open {restart_file}")
                 # continue
+                logger.debug(f"Opening {restart_file_path}")
+                logger.debug(f"lat_out: {cur_ds['lat_out'].data[0]:.3f}, {cur_ds['lat_out'].data[-1]:.3f}")
+                logger.debug(f"L1_latitude: {cur_ds['L1_latitude'].data[0]:.3f}, {cur_ds['L1_latitude'].data[-1]:.3f}")
+
                 for data_var in data_vars:
                     index_slice = {
                         "lon_out": slice(
