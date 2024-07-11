@@ -677,6 +677,7 @@ class MHMRestartFile:
                     for _ in cur_ds.data_vars
                     if _ not in ds_whole.data_vars and _.endswith("_out_bnds")
                 ]
+                logger.debug(f"Data vars bounds: {data_vars}")
                 for data_var in data_vars:
                     if "lat" in data_var:
                         ds_whole[data_var] = np.arange(
@@ -694,6 +695,7 @@ class MHMRestartFile:
                         ds_whole[data_var] = cur_ds[data_var]
                 # init the new DataArrays (set to nan)
                 data_vars = [_ for _ in cur_ds.data_vars if _.startswith("L1_")]
+                logger.debug(f"Data vars L1: {data_vars}")
                 for data_var in data_vars:
                     dv_coords = list(cur_ds[data_var].coords)
                     for dv_coord in dv_coords:
