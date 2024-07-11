@@ -645,7 +645,7 @@ class MHMRestartFile:
             + self.grid.l1.resolution / 2,  # + since arange omits the last value
             self.grid.l1.resolution,
         )
-
+        logger.debug(f"ds_whole: {ds_whole}")
         # 2. create all coordinates in the whole grid
         # TODO: add dimensions to comments to make it more readable
         if self.grid.restart_file is None:
@@ -739,7 +739,7 @@ class MHMRestartFile:
                                 f"Shape mismatch could not be resolved for {data_var} in {restart_file_path}"
                             )
                             logger.debug(f"shape read in ds: {cur_ds[data_var].shape}; shape in ds_whole: {ds_whole[data_var][index_slice].shape}")
-                            logger.debug(f"index_slice: lon={ds_whole[index_slice]['lon_out'].data[0]}, {ds_whole[index_slice]['lon_out'].data[-1]}; lat={ds_whole[index_slice]['lat_out'].data[0]}, {ds_whole[index_slice]['lat_out'].data[-1]}")
+                            logger.debug(f"index_slice: lon={ds_whole[index_slice]['lon_out'].data[0]:.3f}, {ds_whole[index_slice]['lon_out'].data[-1]:.3f}; lat={ds_whole[index_slice]['lat_out'].data[0]:.3f}, {ds_whole[index_slice]['lat_out'].data[-1]:.3f}")
                             logger.debug(f"extend read in ds: lon={cur_ds['lon_out'].data[0]}, {cur_ds['lon_out'].data[-1]}; lat={cur_ds['lat_out'].data[0]}, {cur_ds['lat_out'].data[-1]}")
                             continue
                     ds_whole[data_var][index_slice] = cur_ds[data_var].data
