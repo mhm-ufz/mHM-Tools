@@ -694,10 +694,6 @@ class MHMRestartFile:
                         ds_whole[data_var] = cur_ds[data_var]
                 # init the new DataArrays (set to nan)
                 data_vars = [_ for _ in cur_ds.data_vars if _.startswith("L1_")]
-                if 'L1_latitude' not in data_vars:
-                    data_vars.append('L1_latitude')
-                if 'L1_longitude' not in data_vars:
-                    data_vars.append('L1_longitude')
                 for data_var in data_vars:
                     dv_coords = list(cur_ds[data_var].coords)
                     for dv_coord in dv_coords:
@@ -705,21 +701,21 @@ class MHMRestartFile:
                             logger.info(f"Adding {dv_coord} to {data_var}")
                             logger.debug(f"cur_ds[coord] {cur_ds[dv_coord]}")
                             ds_whole[dv_coord] = cur_ds[dv_coord]
-                    if 'latitude' in data_var:
-                        ds_whole[data_var] = (
-                            dv_coords,
-                            [np.full(len(ds_whole['longitude']), l) for l in ds_whole['lat_out']]
-                        )
-                    elif 'longitude' in data_var:
-                        ds_whole[data_var] = (
-                            dv_coords,
-                            [np.full(len(ds_whole['latitude']), l) for l in ds_whole['lon_out']]
-                        )
-                    else:
-                        ds_whole[data_var] = (
-                            dv_coords,
-                            np.full([len(ds_whole[_]) for _ in dv_coords], np.nan),
-                        )
+                    # if 'latitude' in data_var:
+                    #     ds_whole[data_var] = (
+                    #         dv_coords,
+                    #         [np.full(len(ds_whole['lon_out']), l) for l in ds_whole['lat_out']]
+                    #     )
+                    # elif 'longitude' in data_var:
+                    #     ds_whole[data_var] = (
+                    #         dv_coords,
+                    #         [np.full(len(ds_whole['lat_out']), l) for l in ds_whole['lon_out']]
+                    #     )
+                    # else:
+                    ds_whole[data_var] = (
+                        dv_coords,
+                        np.full([len(ds_whole[_]) for _ in dv_coords], np.nan),
+                    )
 
         # 3. iterate over all subgrids and merge them into the whole grid
         for restart_file_path in restart_file_paths:
