@@ -738,6 +738,9 @@ class MHMRestartFile:
                             logger.error(
                                 f"Shape mismatch could not be resolved for {data_var} in {restart_file_path}"
                             )
+                            logger.debug(f"shape read in ds: {cur_ds[data_var].shape}; shape in ds_whole: {ds_whole[data_var][index_slice].shape}")
+                            logger.debug(f"index_slice: {index_slice}")
+                            logger.debug(f"extend read in ds: lon={cur_ds['lon_out'].data[0]}, {cur_ds['lon_out'].data[-1]}; lat={cur_ds['lat_out'].data[0]}, {cur_ds['lat_out'].data[-1]}")
                             continue
                     ds_whole[data_var][index_slice] = cur_ds[data_var].data
         rename_dict = {
