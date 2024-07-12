@@ -729,8 +729,13 @@ class MHMRestartFile:
                 # continue
                 logger.debug(f"Opening {restart_file_path}")
                 logger.debug(f"lat_out: {cur_ds['lat_out'].data[0]:.3f}, {cur_ds['lat_out'].data[-1]:.3f}")
-                logger.debug(f"L1_latitude: {cur_ds['L1_latitude'].data[0]:.3f}, {cur_ds['L1_latitude'].data[-1]:.3f}")
-
+                if 'L1_latitude' in cur_ds:
+                    L1_lat0 = cur_ds['L1_latitude'].data[0,0]
+                    L1_lat1 = cur_ds['L1_latitude'].data[-1,0]
+                    logger.debug(f'L1_latitude: {cur_ds["L1_latitude"].data[0,0]:.3f}, {cur_ds["L1_latitude"].data[-1,0]:.3f}')
+                    if L1_lat0 > L1_lat1 and cur_ds['latitude'].data[0] < cur_ds['latitude'].data[-1]:
+                        cur_ds['L1_latitude'] = [l for l in reversed(cur_ds['L1_latitude'].data[:])]
+                        logger.debug(f'L1_latitude reversed: {cur_ds["L1_latitude"].data[0,0]:.3f}, {cur_ds["L1_latitude"].data[-1,0]:.3f}')
                 for data_var in data_vars:
                     index_slice = {
                         "lon_out": slice(
