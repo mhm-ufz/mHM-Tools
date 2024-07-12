@@ -765,6 +765,10 @@ class MHMRestartFile:
                             logger.debug(f"extend read in ds: lon={cur_ds['lon_out'].data[0]}, {cur_ds['lon_out'].data[-1]}; lat={cur_ds['lat_out'].data[0]}, {cur_ds['lat_out'].data[-1]}")
                             continue
                     ds_whole[data_var][index_slice] = cur_ds[data_var].data
+        logger.info("Merging restart files done")
+        logger.info(f"Writing restart file to {self.grid.restart_file}")
+        ds_whole.to_netcdf(self.grid.restart_file)
+        logger.info(f"Renaming coordinates and data variables")
         rename_dict = {
             "lon_out": "lon",
             "lat_out": "lat",
@@ -774,13 +778,33 @@ class MHMRestartFile:
             "horizon_out": "L1_SoilHorizons",
             "horizon_out_bnds": "L1_SoilHorizons_bnds",
             "month_of_year_bnds": "L1_LAITimesteps_bnds",
+            "L1_PermWiltPoint": "L1_wiltingPoint",
+            "L1_SealedThresh": "L1_sealedThresh",
+            "L1_UnsatThresh": "L1_unsatThresh",
+            "L1_TempThresh": "L1_tempThresh",
+            "L1_SoilMoistureExponent": "L1_soilMoistExp",
+            "L1_SatSoilMoisture": "L1_soilMoistSat",
+            "L1_FieldCap": "L1_soilMoistFC",
+            "L1_Kperco": "L1_kPerco",
+            "L1_SlowFlow": "L1_kSlowFlow",
+            "L1_FastFlow": "L1_kFastFlow",
+            "L1_Max_CanopyIntercept": "L1_maxInter",
+            "L1_KarstLoss": "L1_karstLoss",
+            "L1_DegDayInc": "L1_degDayInc",
+            "L1_DegDayNoPre": "L1_degDayNoPre",
+            "L1_DegDayMax": "L1_degDayMax",
+            "L1_Alpha": "L1_alpha",
+            "L1_SealedFraction": "L1_fSealed"
         }
         rename_dict = {
             k: v for k, v in rename_dict.items() if k in ds_whole.coords
         }  # make sure that all keys are in the dataset
         ds_whole = ds_whole.rename(rename_dict)
+        self.grid.restart_file = self.grid.restart_file.parent / f"{self.grid.restart_file.stem}_renamed{self.grid.restart_file.suffix}"
+        logger.info(f"Writing renamed restart file to {self.grid.restart_file}")
         ds_whole.to_netcdf(self.grid.restart_file)
-        logger.info("Merging restart files done")
+        
+        
 
     def _delete_temp_files(self):
         logger.info("Deleting temporary files")
@@ -841,5 +865,4 @@ class MHMRestartFile:
                 self._merge_restart_files()
             if self.clean_temp_files:
                 self._delete_temp_files()
-
-        logger.info("Restart file created")
+        logger.info("Script finished successfully.")
