@@ -622,6 +622,25 @@ class MHMRestartFile:
         logger.debug(f"Splitting {file_path} done")
         return sub_grid_paths
 
+    def _order_dims(self, dims):
+        """Order the dimensions of the data variable."""
+        weight_dims = {
+            "land_cover_period": 0,
+            "land_cover_period_out": 0,
+            "month_of_year": 1,
+            "horizons": 2,
+            "horizon_all": 2,
+            "horizon_out": 2,
+            "horizon_till": 2,
+            "horizon_notill": 2,
+            "longitude": 3,
+            "lon_out": 3,
+            "latitude": 4,
+            "lat_out": 4,
+        }
+        return sorted(dims, key=lambda x: weight_dims.get(x, 5))
+
+
     def _merge_restart_files(self):
         logger.info("Merging restart files")
 
@@ -648,6 +667,9 @@ class MHMRestartFile:
         logger.debug(f"ds_whole: {ds_whole}")
         # 2. create all coordinates in the whole grid
         # TODO: add dimensions to comments to make it more readable
+
+        dim_order = ["land_cover", ""]
+
         if self.grid.restart_file is None:
             self.grid.restart_file = self.output_path / "output_whole_grid_restart.nc"
             logger.warning(
@@ -756,15 +778,14 @@ class MHMRestartFile:
                             (jsel_start + 1) * self.increment_l1,
                         ),
                     }
-                    if cur_ds[data_var].shape != ds_whole[data_var][index_slice].shape:
-                        logger.warning(
-                            f"Shape mismatch for {data_var} in {restart_file_path}"
-                        )
+                    if cur_ds[data_var].shape != ds_whole[data_var][index_slice].shape or cur_ds[data_var].dims != ds_whole[data_var][index_slice].dims:
                         dims = cur_ds[data_var].dims
-                        ds_whole[data_var] = ds_whole[data_var].transpose(*dims)
+                        ordered_dims = self._order_dims(dims)
+                        cur_ds[data_var] = cur_ds[data_var].transpose(*ordered_dims)
+                        ds_whole[data_var] = ds_whole[data_var].transpose(*ordered_dims)
                         if (
                             cur_ds[data_var].shape
-                            != ds_whole[data_var][index_slice].shape
+                            != ds_whole[data_var][index_slice].shape or cur_ds[data_var].dims != ds_whole[data_var][index_slice].dims
                         ):
                             logger.error(
                                 f"Shape mismatch could not be resolved for {data_var} in {restart_file_path}"
@@ -778,13 +799,19 @@ class MHMRestartFile:
         logger.info(f"Writing restart file to {self.grid.restart_file}")
         ds_whole.to_netcdf(self.grid.restart_file)
         logger.info(f"Renaming coordinates and data variables")
+        
+        # rename_dict = {
+        #     k: v for k, v in rename_dict.items() if k in ds_whole.coords
+        # }  # make sure that all keys are in the dataset
         rename_dict = {
             "lon_out": "lon",
             "lat_out": "lat",
             "lon_out_bnds": "lon_bnds",
             "lat_out_bnds": "lat_bnds",
             "month_of_year": "L1_LAITimesteps",
+            "horizons": "L1_SoilHorizons",
             "horizon_out": "L1_SoilHorizons",
+            "horizon_all": "L1_SoilHorizons",
             "horizon_out_bnds": "L1_SoilHorizons_bnds",
             "month_of_year_bnds": "L1_LAITimesteps_bnds",
             "L1_PermWiltPoint": "L1_wiltingPoint",
@@ -805,12 +832,12 @@ class MHMRestartFile:
             "L1_Alpha": "L1_alpha",
             "L1_SealedFraction": "L1_fSealed"
         }
-        # rename_dict = {
-        #     k: v for k, v in rename_dict.items() if k in ds_whole.coords
-        # }  # make sure that all keys are in the dataset
         logger.debug(f"Cooordinates: {ds_whole.coords}")
         for k, v in rename_dict.items():
             if k in ds_whole.coords:
+                logger.debug(f"Renaming {k} to {v}")
+                ds_whole = ds_whole.rename({k: v})
+            elif k in ds_whole.data_vars:
                 logger.debug(f"Renaming {k} to {v}")
                 ds_whole = ds_whole.rename({k: v})
             else:
