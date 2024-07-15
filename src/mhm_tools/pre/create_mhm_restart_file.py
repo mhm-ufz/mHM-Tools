@@ -730,21 +730,21 @@ class MHMRestartFile:
                 logger.debug(f"Opening {restart_file_path}")
                 logger.debug(f"lat_out: {cur_ds['lat_out'].data[0]:.3f}, {cur_ds['lat_out'].data[-1]:.3f}")
 
-                # reverse_data_vars = ['L1_latitude', 'L1_fAsp', 'L1_Max_Canopy_Intercept']
                 # reverse the data vars if the latitude is decreasing
-                for r_data_var in data_vars:
+                reverse_data_vars = ['L1_latitude', 'L1_fAsp', 'L1_Max_Canopy_Intercept']
+                for r_data_var in reverse_data_vars:
                     if r_data_var in cur_ds:
-                        len_shape = len(cur_ds[r_data_var].data.shape)
-                        index_lon = cur_ds[r_data_var].dims.index('lon_out')
+                        # len_shape = len(cur_ds[r_data_var].data.shape)
+                        # index_lon = cur_ds[r_data_var].dims.index('lon_out')
                         index_lat = cur_ds[r_data_var].dims.index('lat_out')
-                        zero_slice = [0] * len_shape
-                        one_slice = zero_slice.copy()
-                        one_slice[index_lon] = -1
-                        lat0_r = cur_ds[r_data_var].data[tuple(zero_slice)]
-                        lat1_r = cur_ds[r_data_var].data[tuple(one_slice)]
-                        if lat0_r > lat1_r and cur_ds['latitude'].data[0] < cur_ds['latitude'].data[-1]:
-                            cur_ds[r_data_var].data = np.flip(cur_ds[r_data_var].data, axis=index_lat)
-                            logger.debug(f"{r_data_var} reversed latitudes")
+                        # first_lat = [0] * len_shape
+                        # last_lat = first_lat.copy()
+                        # last_lat[index_lat] = -1
+                        # lat0_r = cur_ds[r_data_var].data[tuple(first_lat)]
+                        # lat1_r = cur_ds[r_data_var].data[tuple(last_lat)]
+                        # if lat0_r > lat1_r and cur_ds['latitude'].data[0] < cur_ds['latitude'].data[-1]:
+                        cur_ds[r_data_var].data = np.flip(cur_ds[r_data_var].data, axis=index_lat)
+                        logger.debug(f"{r_data_var} reversed latitudes")
                 for data_var in data_vars:
                     index_slice = {
                         "lon_out": slice(
