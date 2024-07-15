@@ -729,13 +729,17 @@ class MHMRestartFile:
                 # continue
                 logger.debug(f"Opening {restart_file_path}")
                 logger.debug(f"lat_out: {cur_ds['lat_out'].data[0]:.3f}, {cur_ds['lat_out'].data[-1]:.3f}")
-                if 'L1_latitude' in cur_ds:
-                    L1_lat0 = cur_ds['L1_latitude'].data[0,0]
-                    L1_lat1 = cur_ds['L1_latitude'].data[-1,0]
-                    logger.debug(f'L1_latitude: {cur_ds["L1_latitude"].data[0,0]:.3f}, {cur_ds["L1_latitude"].data[-1,0]:.3f}')
-                    if L1_lat0 > L1_lat1 and cur_ds['latitude'].data[0] < cur_ds['latitude'].data[-1]:
-                        cur_ds['L1_latitude'].data = [l for l in reversed(cur_ds['L1_latitude'].data[:])]
-                        logger.debug(f'L1_latitude reversed: {cur_ds["L1_latitude"].data[0,0]:.3f}, {cur_ds["L1_latitude"].data[-1,0]:.3f}')
+
+                # reverse_data_vars = ['L1_latitude', 'L1_fAsp', 'L1_Max_Canopy_Intercept']
+                # reverse the data vars if the latitude is decreasing
+                for r_data_var in data_vars:
+                    if r_data_var in cur_ds:
+                        lat0_r = cur_ds[r_data_var].data[0,0]
+                        lat1_r = cur_ds[r_data_var].data[-1,0]
+                        # logger.debug(f'{r_data_var}: {cur_ds[r_data_var].data[0,0]:.3f}, {cur_ds[r_data_var].data[-1,0]:.3f}')
+                        if lat0_r > lat1_r and cur_ds['latitude'].data[0] < cur_ds['latitude'].data[-1]:
+                            cur_ds[r_data_var].data = [l for l in reversed(cur_ds[r_data_var].data[:])]
+                            logger.debug(f"{r_data_var} reversed: {cur_ds[r_data_var].data[0,0]:.3f}, {cur_ds[r_data_var].data[-1,0]:.3f}")
                 for data_var in data_vars:
                     index_slice = {
                         "lon_out": slice(
@@ -788,7 +792,7 @@ class MHMRestartFile:
             "L1_Kperco": "L1_kPerco",
             "L1_SlowFlow": "L1_kSlowFlow",
             "L1_FastFlow": "L1_kFastFlow",
-            "L1_Max_CanopyIntercept": "L1_maxInter",
+            "L1_Max_Canopy_Intercept": "L1_maxInter",
             "L1_KarstLoss": "L1_karstLoss",
             "L1_DegDayInc": "L1_degDayInc",
             "L1_DegDayNoPre": "L1_degDayNoPre",
@@ -796,9 +800,16 @@ class MHMRestartFile:
             "L1_Alpha": "L1_alpha",
             "L1_SealedFraction": "L1_fSealed"
         }
-        rename_dict = {
-            k: v for k, v in rename_dict.items() if k in ds_whole.coords
-        }  # make sure that all keys are in the dataset
+        # rename_dict = {
+        #     k: v for k, v in rename_dict.items() if k in ds_whole.coords
+        # }  # make sure that all keys are in the dataset
+        logger.debug(f"Cooordinates: {ds_whole.coords}")
+        for k, v in rename_dict.items():
+            if k in ds_whole.coords:
+                logger.debug(f"Renaming {k} to {v}")
+                ds_whole = ds_whole.rename({k: v})
+            else:
+                logger.debug(f"Could not find {k} in coords")
         ds_whole = ds_whole.rename(rename_dict)
         self.grid.restart_file = self.grid.restart_file.parent / f"{self.grid.restart_file.stem}_renamed{self.grid.restart_file.suffix}"
         logger.info(f"Writing renamed restart file to {self.grid.restart_file}")
