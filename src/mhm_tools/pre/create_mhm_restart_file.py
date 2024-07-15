@@ -744,7 +744,7 @@ class MHMRestartFile:
                         lat1_r = cur_ds[r_data_var].data[tuple(one_slice)]
                         if lat0_r > lat1_r and cur_ds['latitude'].data[0] < cur_ds['latitude'].data[-1]:
                             cur_ds[r_data_var].data = np.flip(cur_ds[r_data_var].data, axis=index_lat)
-                            logger.debug(f"{r_data_var} reversed: {cur_ds[r_data_var].data[0,0]:.3f}, {cur_ds[r_data_var].data[-1,0]:.3f}")
+                            logger.debug(f"{r_data_var} reversed latitudes")
                 for data_var in data_vars:
                     index_slice = {
                         "lon_out": slice(
