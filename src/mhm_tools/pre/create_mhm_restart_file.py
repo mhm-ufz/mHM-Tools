@@ -815,7 +815,6 @@ class MHMRestartFile:
                 ds_whole = ds_whole.rename({k: v})
             else:
                 logger.debug(f"Could not find {k} in coords")
-        ds_whole = ds_whole.rename(rename_dict)
         self.grid.restart_file = self.grid.restart_file.parent / f"{self.grid.restart_file.stem}_renamed{self.grid.restart_file.suffix}"
         logger.info(f"Writing renamed restart file to {self.grid.restart_file}")
         ds_whole.to_netcdf(self.grid.restart_file)
