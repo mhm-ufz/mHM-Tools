@@ -633,10 +633,10 @@ class MHMRestartFile:
             "horizon_out": 2,
             "horizon_till": 2,
             "horizon_notill": 2,
-            "longitude": 3,
-            "lon_out": 3,
-            "latitude": 4,
-            "lat_out": 4,
+            "latitude": 3,
+            "lat_out": 3,
+            "longitude": 4,
+            "lon_out": 4,
         }
         return sorted(dims, key=lambda x: weight_dims.get(x, 5))
 
