@@ -750,7 +750,7 @@ class MHMRestartFile:
                 # logger.warning(f"Could not open {restart_file}")
                 # continue
                 logger.debug(f"Opening {restart_file_path}")
-                logger.debug(f"lat_out: {cur_ds['lat_out'].data[0]:.3f}, {cur_ds['lat_out'].data[-1]:.3f}")
+                # logger.debug(f"lat_out: {cur_ds['lat_out'].data[0]:.3f}, {cur_ds['lat_out'].data[-1]:.3f}")
 
                 # reverse the data vars if the latitude is decreasing
                 reverse_data_vars = ['L1_latitude', 'L1_fAsp', 'L1_Max_Canopy_Intercept']
@@ -778,14 +778,12 @@ class MHMRestartFile:
                             (jsel_start + 1) * self.increment_l1,
                         ),
                     }
-                    if cur_ds[data_var].shape != ds_whole[data_var][index_slice].shape or cur_ds[data_var].dims != ds_whole[data_var][index_slice].dims:
+                    if cur_ds[data_var].shape != ds_whole[data_var][index_slice].shape:
                         dims = cur_ds[data_var].dims
-                        ordered_dims = self._order_dims(dims)
-                        cur_ds[data_var] = cur_ds[data_var].transpose(*ordered_dims)
-                        ds_whole[data_var] = ds_whole[data_var].transpose(*ordered_dims)
+                        ds_whole[data_var] = ds_whole[data_var].transpose(*dims)
                         if (
                             cur_ds[data_var].shape
-                            != ds_whole[data_var][index_slice].shape or cur_ds[data_var].dims != ds_whole[data_var][index_slice].dims
+                            != ds_whole[data_var][index_slice].shape
                         ):
                             logger.error(
                                 f"Shape mismatch could not be resolved for {data_var} in {restart_file_path}"
@@ -833,15 +831,20 @@ class MHMRestartFile:
             "L1_SealedFraction": "L1_fSealed"
         }
         logger.debug(f"Cooordinates: {ds_whole.coords}")
-        for k, v in rename_dict.items():
-            if k in ds_whole.coords:
-                logger.debug(f"Renaming {k} to {v}")
-                ds_whole = ds_whole.rename({k: v})
-            elif k in ds_whole.data_vars:
-                logger.debug(f"Renaming {k} to {v}")
-                ds_whole = ds_whole.rename({k: v})
-            else:
-                logger.debug(f"Could not find {k} in coords")
+        for data_var in ds_whole.data_vars:
+            # reorder the dimensions
+            data_var_dims = self._order_dims(ds_whole[data_var].dims)
+            ds_whole[data_var] = ds_whole[data_var].transpose(*data_var_dims)
+            # rename the data variables
+            if data_var in rename_dict:
+                logger.debug(f"Renaming {data_var} to {rename_dict[data_var]}")
+                ds_whole = ds_whole.rename({data_var: rename_dict[data_var]})
+        # rename the coordinates
+        for coord in ds_whole.coords:
+            if coord in rename_dict:
+                logger.debug(f"Renaming {coord} to {rename_dict[coord]}")
+                ds_whole = ds_whole.rename({coord: rename_dict[coord]})
+                
         self.grid.restart_file = self.grid.restart_file.parent / f"{self.grid.restart_file.stem}_renamed{self.grid.restart_file.suffix}"
         logger.info(f"Writing renamed restart file to {self.grid.restart_file}")
         ds_whole.to_netcdf(self.grid.restart_file)
