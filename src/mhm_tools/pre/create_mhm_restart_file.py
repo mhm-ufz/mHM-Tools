@@ -700,7 +700,7 @@ class MHMRestartFile:
                     dv_coords = list(cur_ds[data_var].coords)
                     for dv_coord in dv_coords:
                         if dv_coord not in ds_whole:
-                            logger.info(f"Adding {dv_coord} to {data_var}")
+                            logger.info(f"Adding {dv_coord} to coordinates")
                             logger.debug(f"cur_ds[coord] {cur_ds[dv_coord]}")
                             ds_whole[dv_coord] = cur_ds[dv_coord]
                     # if 'latitude' in data_var:
@@ -734,15 +734,16 @@ class MHMRestartFile:
                 # reverse the data vars if the latitude is decreasing
                 for r_data_var in data_vars:
                     if r_data_var in cur_ds:
-                        if len(cur_ds[r_data_var].data.shape ) == 2:
-                            lat0_r = cur_ds[r_data_var].data[0,0]
-                            lat1_r = cur_ds[r_data_var].data[-1,0]
-                        else: 
-                            logger.debug(f"Shape of {r_data_var} is not 2D but {cur_ds[r_data_var].data.shape}")
-                            continue
-                        # logger.debug(f'{r_data_var}: {cur_ds[r_data_var].data[0,0]:.3f}, {cur_ds[r_data_var].data[-1,0]:.3f}')
+                        len_shape = len(cur_ds[r_data_var].data.shape)
+                        index_lon = cur_ds[r_data_var].dims.index('lon_out')
+                        index_lat = cur_ds[r_data_var].dims.index('lat_out')
+                        zero_slice = [0] * len_shape
+                        one_slice = zero_slice.copy()
+                        one_slice[index_lon] = -1
+                        lat0_r = cur_ds[r_data_var].data[tuple(zero_slice)]
+                        lat1_r = cur_ds[r_data_var].data[tuple(one_slice)]
                         if lat0_r > lat1_r and cur_ds['latitude'].data[0] < cur_ds['latitude'].data[-1]:
-                            cur_ds[r_data_var].data = [l for l in reversed(cur_ds[r_data_var].data[:])]
+                            cur_ds[r_data_var].data = np.flip(cur_ds[r_data_var].data, axis=index_lat)
                             logger.debug(f"{r_data_var} reversed: {cur_ds[r_data_var].data[0,0]:.3f}, {cur_ds[r_data_var].data[-1,0]:.3f}")
                 for data_var in data_vars:
                     index_slice = {
