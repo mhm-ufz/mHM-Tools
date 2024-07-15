@@ -801,6 +801,10 @@ class MHMRestartFile:
         # rename_dict = {
         #     k: v for k, v in rename_dict.items() if k in ds_whole.coords
         # }  # make sure that all keys are in the dataset
+        if "horizon_out" in ds_whole.coords:
+            ds_whole.assign_coords(horizons=ds_whole["horizon_out"])
+        if "horizon_all" in ds_whole.coords:
+            ds_whole.assign_coords(horizons=ds_whole["horizon_all"])
         rename_dict = {
             "lon_out": "lon",
             "lat_out": "lat",
@@ -808,8 +812,6 @@ class MHMRestartFile:
             "lat_out_bnds": "lat_bnds",
             "month_of_year": "L1_LAITimesteps",
             "horizons": "L1_SoilHorizons",
-            "horizon_out": "L1_SoilHorizons",
-            "horizon_all": "L1_SoilHorizons",
             "horizon_out_bnds": "L1_SoilHorizons_bnds",
             "month_of_year_bnds": "L1_LAITimesteps_bnds",
             "L1_PermWiltPoint": "L1_wiltingPoint",
