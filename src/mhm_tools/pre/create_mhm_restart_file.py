@@ -734,8 +734,12 @@ class MHMRestartFile:
                 # reverse the data vars if the latitude is decreasing
                 for r_data_var in data_vars:
                     if r_data_var in cur_ds:
-                        lat0_r = cur_ds[r_data_var].data[0,0]
-                        lat1_r = cur_ds[r_data_var].data[-1,0]
+                        if len(cur_ds[r_data_var].data.shape ) == 2:
+                            lat0_r = cur_ds[r_data_var].data[0,0]
+                            lat1_r = cur_ds[r_data_var].data[-1,0]
+                        else: 
+                            logger.debug(f"Shape of {r_data_var} is not 2D but {cur_ds[r_data_var].data.shape}")
+                            continue
                         # logger.debug(f'{r_data_var}: {cur_ds[r_data_var].data[0,0]:.3f}, {cur_ds[r_data_var].data[-1,0]:.3f}')
                         if lat0_r > lat1_r and cur_ds['latitude'].data[0] < cur_ds['latitude'].data[-1]:
                             cur_ds[r_data_var].data = [l for l in reversed(cur_ds[r_data_var].data[:])]
