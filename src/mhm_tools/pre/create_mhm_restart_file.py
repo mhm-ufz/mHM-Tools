@@ -850,12 +850,15 @@ class MHMRestartFile:
             # reorder the dimensions
             data_var_dims = self._order_dims(ds_whole[data_var].dims)
             ds_whole[data_var] = ds_whole[data_var].transpose(*data_var_dims)
-       
+        logger.debug(f"sat_soil_moist: {ds_whole.L1_SatSoilMoisture}")
         # rename the coordinates
         for coord in ds_whole.coords:
             if coord in rename_dict:
                 logger.debug(f"Renaming {coord} to {rename_dict[coord]}")
                 ds_whole = ds_whole.rename({coord: rename_dict[coord]})
+                if ds_whole[coord].attrs['bounds'] in rename_dict:
+                    ds_whole[coord].attrs['bounds'] = rename_dict[ds_whole[coord].attrs['bounds']]
+        logger.debug(f"sat_soil_moist: {ds_whole.L1_SatSoilMoisture}")
         # rename the data variables
         for data_var in ds_whole.data_vars:
             if data_var in rename_dict:
@@ -866,7 +869,7 @@ class MHMRestartFile:
                     if coord in rename_dict:
                         logger.debug(f"Renaming {coord} to {rename_dict[coord]}")
                         ds_whole[data_var] = ds_whole[data_var].rename({coord: rename_dict[coord]})
-                
+        logger.debug(f"sat_soil_moist: {ds_whole.L1_SatSoilMoisture}")
         self.grid.restart_file = self.grid.restart_file.parent / f"{self.grid.restart_file.stem}_renamed{self.grid.restart_file.suffix}"
         logger.info(f"Writing renamed restart file to {self.grid.restart_file}")
         ds_whole.to_netcdf(self.grid.restart_file)
