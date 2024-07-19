@@ -797,7 +797,11 @@ class MHMRestartFile:
         logger.info(f"Writing restart file to {self.grid.restart_file}")
         if 'month_of_year_bnds' not in ds_whole.coords:
             logger.info(f"Adding month_of_year_bnds")
-            ds_whole['month_of_year_bnds'] = [[int(m), int(m)+1] for m in ds_whole['month_of_year']]
+            month_of_year_bnds = [[int(m), int(m)+1] for m in ds_whole['month_of_year']]
+            ds_whole['month_of_year_bnds'] =  (
+                        ['month_of_year', 'bnds'],
+                        month_of_year_bnds
+                    )
         ds_whole.to_netcdf(self.grid.restart_file)
         logger.info(f"Renaming coordinates and data variables")
         
