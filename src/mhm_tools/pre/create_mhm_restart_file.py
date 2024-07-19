@@ -806,6 +806,8 @@ class MHMRestartFile:
         
         # remove unnecessary coordinates
         ds_whole = ds_whole.drop_dims('land_cover_period')
+        if 'land_cover_period' in ds_whole.coords:
+            ds_whole = ds_whole.drop_vars('land_cover_period')
 
         # rename_dict = {
         #     k: v for k, v in rename_dict.items() if k in ds_whole.coords
