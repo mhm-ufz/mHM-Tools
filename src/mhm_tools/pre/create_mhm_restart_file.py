@@ -625,7 +625,6 @@ class MHMRestartFile:
     def _order_dims(self, dims):
         """Order the dimensions of the data variable."""
         weight_dims = {
-            "land_cover_period": 0,
             "land_cover_period_out": 0,
             "month_of_year": 1,
             "horizons": 2,
@@ -849,15 +848,21 @@ class MHMRestartFile:
             # reorder the dimensions
             data_var_dims = self._order_dims(ds_whole[data_var].dims)
             ds_whole[data_var] = ds_whole[data_var].transpose(*data_var_dims)
-            # rename the data variables
-            if data_var in rename_dict:
-                logger.debug(f"Renaming {data_var} to {rename_dict[data_var]}")
-                ds_whole = ds_whole.rename({data_var: rename_dict[data_var]})
+       
         # rename the coordinates
         for coord in ds_whole.coords:
             if coord in rename_dict:
                 logger.debug(f"Renaming {coord} to {rename_dict[coord]}")
                 ds_whole = ds_whole.rename({coord: rename_dict[coord]})
+        # rename the data variables
+        for data_var in ds_whole.data_vars:
+            if data_var in rename_dict:
+                logger.debug(f"Renaming {data_var} to {rename_dict[data_var]}")
+                ds_whole = ds_whole.rename({data_var: rename_dict[data_var]})
+                for coord in ds_whole[data_var].coords:
+                    if coord in rename_dict:
+                        logger.debug(f"Renaming {coord} to {rename_dict[coord]}")
+                        ds_whole[data_var] = ds_whole[data_var].rename({coord: rename_dict[coord]})
                 
         self.grid.restart_file = self.grid.restart_file.parent / f"{self.grid.restart_file.stem}_renamed{self.grid.restart_file.suffix}"
         logger.info(f"Writing renamed restart file to {self.grid.restart_file}")
