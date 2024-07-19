@@ -633,10 +633,10 @@ class MHMRestartFile:
             "horizon_out": 2,
             "horizon_till": 2,
             "horizon_notill": 2,
-            "latitude": 3,
-            "lat_out": 3,
-            "longitude": 4,
-            "lon_out": 4,
+            "latitude": 4,
+            "lat_out": 4,
+            "longitude": 3,
+            "lon_out": 3,
         }
         return sorted(dims, key=lambda x: weight_dims.get(x, 5))
 
@@ -795,6 +795,9 @@ class MHMRestartFile:
                     ds_whole[data_var][index_slice] = cur_ds[data_var].data
         logger.info("Merging restart files done")
         logger.info(f"Writing restart file to {self.grid.restart_file}")
+        if 'month_of_year_bnds' not in ds_whole.coords:
+            logger.info(f"Adding month_of_year_bnds")
+            ds_whole['month_of_year_bnds'] = [[int(m), int(m)+1] for m in ds_whole['month_of_year']]
         ds_whole.to_netcdf(self.grid.restart_file)
         logger.info(f"Renaming coordinates and data variables")
         
