@@ -805,6 +805,9 @@ class MHMRestartFile:
         ds_whole.to_netcdf(self.grid.restart_file)
         logger.info(f"Renaming coordinates and data variables")
         
+        # remove unnecessary coordinates
+        ds_whole.drop_dims('land_cover_period')
+
         # rename_dict = {
         #     k: v for k, v in rename_dict.items() if k in ds_whole.coords
         # }  # make sure that all keys are in the dataset
@@ -821,6 +824,8 @@ class MHMRestartFile:
             "horizons": "L1_SoilHorizons",
             "horizon_out_bnds": "L1_SoilHorizons_bnds",
             "month_of_year_bnds": "L1_LAITimesteps_bnds",
+            "land_cover_period_out": "L1_LandCoverPeriods",
+            "land_cover_period_out_bnds": "L1_LandCoverPeriods_bnds",
             "L1_PermWiltPoint": "L1_wiltingPoint",
             "L1_SealedThresh": "L1_sealedThresh",
             "L1_UnsatThresh": "L1_unsatThresh",
