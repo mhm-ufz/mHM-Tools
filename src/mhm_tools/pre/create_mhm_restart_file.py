@@ -805,7 +805,7 @@ class MHMRestartFile:
         logger.info(f"Renaming coordinates and data variables")
         
         # remove unnecessary coordinates
-        ds_whole.drop_dims('land_cover_period')
+        ds_whole = ds_whole.drop_dims('land_cover_period')
 
         # rename_dict = {
         #     k: v for k, v in rename_dict.items() if k in ds_whole.coords
@@ -857,9 +857,10 @@ class MHMRestartFile:
         # rename the data variables
         for data_var in ds_whole.data_vars:
             if data_var in rename_dict:
-                logger.debug(f"Renaming {data_var} to {rename_dict[data_var]}")
-                ds_whole = ds_whole.rename({data_var: rename_dict[data_var]})
-                for coord in ds_whole[data_var].coords:
+                new_data_var = rename_dict[data_var]
+                logger.debug(f"Renaming {data_var} to {new_data_var}")
+                ds_whole = ds_whole.rename({data_var: new_data_var})
+                for coord in ds_whole[new_data_var].coords:
                     if coord in rename_dict:
                         logger.debug(f"Renaming {coord} to {rename_dict[coord]}")
                         ds_whole[data_var] = ds_whole[data_var].rename({coord: rename_dict[coord]})
