@@ -857,7 +857,7 @@ class MHMRestartFile:
                 new_coord = rename_dict[coord]
                 logger.debug(f"Renaming {coord} to {new_coord}")
                 ds_whole = ds_whole.rename({coord: new_coord})
-                if ds_whole[new_coord].attrs['bounds'] in rename_dict:
+                if 'bounds' in ds_whole[new_coord].attrs and ds_whole[new_coord].attrs['bounds'] in rename_dict:
                     ds_whole[new_coord].attrs['bounds'] = rename_dict[ds_whole[new_coord].attrs['bounds']]
         logger.debug(f"sat_soil_moist: {ds_whole.L1_SatSoilMoisture}")
         # rename the data variables
