@@ -845,6 +845,7 @@ class MHMRestartFile:
             "L1_Alpha": "L1_alpha",
             "L1_SealedFraction": "L1_fSealed"
         }
+        fill_value = -9999
         logger.debug(f"Cooordinates: {ds_whole.coords}")
         for data_var in ds_whole.data_vars:
             # reorder the dimensions
@@ -856,7 +857,7 @@ class MHMRestartFile:
         for coord in ds_whole.coords:
             logger.debug(f"{coord}")
             # make sure that _FillValue and missing_value are bot set to -9999 and not conflicting
-            ds_whole[coord].attrs["_FillValue"] = -9999
+            ds_whole[coord].attrs["_FillValue"] = fill_value
             if 'missing_value' in ds_whole[coord].attrs:
                 del ds_whole[coord].attrs["missing_value"]
             if coord in rename_dict:
@@ -870,10 +871,10 @@ class MHMRestartFile:
         for data_var in ds_whole.data_vars:
             # make sure that _FillValue and missing_value are bot set to -9999 and not conflicting
             logger.debug(f"{data_var}")
-            ds_whole[data_var].attrs["_FillValue"] = -9999
+            ds_whole[data_var].attrs["_FillValue"] = fill_value
             # ds_whole[data_var].attrs["missing_value"] = -9999
             if 'missing_value' in ds_whole[data_var].attrs:
-                del ds_whole[data_var].attrs["[missing_value]"]
+                del ds_whole[data_var].attrs["missing_value"]
             # renaming
             if data_var in rename_dict:
                 new_data_var = rename_dict[data_var]
