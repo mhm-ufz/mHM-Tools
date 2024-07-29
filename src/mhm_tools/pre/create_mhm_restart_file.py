@@ -853,11 +853,17 @@ class MHMRestartFile:
 
             # make sure that _FillValue and missing_value are bot set to -9999 and not conflicting
             ds_whole[data_var].attrs["_FillValue"] = -9999
-            ds_whole[data_var].attrs["missing_value"] = -9999
+            # ds_whole[data_var].attrs["missing_value"] = -9999
+            if 'missing_value' in ds_whole[data_var].attrs:
+                del ds_whole[data_var].attrs["missing_value"]
 
         logger.debug(f"sat_soil_moist: {ds_whole.L1_SatSoilMoisture}")
         # rename the coordinates
         for coord in ds_whole.coords:
+            # make sure that _FillValue and missing_value are bot set to -9999 and not conflicting
+            ds_whole[coord].attrs["_FillValue"] = -9999
+            if 'missing_value' in ds_whole[coord].attrs:
+                del ds_whole[coord].attrs["missing_value"]
             if coord in rename_dict:
                 new_coord = rename_dict[coord]
                 logger.debug(f"Renaming {coord} to {new_coord}")
