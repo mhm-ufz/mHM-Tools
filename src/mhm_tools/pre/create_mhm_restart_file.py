@@ -850,32 +850,34 @@ class MHMRestartFile:
             # reorder the dimensions
             data_var_dims = self._order_dims(ds_whole[data_var].dims)
             ds_whole[data_var] = ds_whole[data_var].transpose(*data_var_dims)
-
-            # make sure that _FillValue and missing_value are bot set to -9999 and not conflicting
-            ds_whole[data_var].attrs["_FillValue"] = -9999
-            # ds_whole[data_var].attrs["missing_value"] = -9999
-            if 'missing_value' in ds_whole[data_var].attrs:
-                del ds_whole[data_var].attrs["missing_value"]
-
+            
         logger.debug(f"sat_soil_moist: {ds_whole.L1_SatSoilMoisture}")
         # rename the coordinates
         for coord in ds_whole.coords:
+            logger.debug(f"{coord}")
             # make sure that _FillValue and missing_value are bot set to -9999 and not conflicting
             ds_whole[coord].attrs["_FillValue"] = -9999
             if 'missing_value' in ds_whole[coord].attrs:
                 del ds_whole[coord].attrs["missing_value"]
             if coord in rename_dict:
                 new_coord = rename_dict[coord]
-                logger.debug(f"Renaming {coord} to {new_coord}")
+                logger.debug(f" renaming to {new_coord}")
                 ds_whole = ds_whole.rename({coord: new_coord})
                 if 'bounds' in ds_whole[new_coord].attrs and ds_whole[new_coord].attrs['bounds'] in rename_dict:
                     ds_whole[new_coord].attrs['bounds'] = rename_dict[ds_whole[new_coord].attrs['bounds']]
         logger.debug(f"sat_soil_moist: {ds_whole.L1_SatSoilMoisture}")
         # rename the data variables
         for data_var in ds_whole.data_vars:
+            # make sure that _FillValue and missing_value are bot set to -9999 and not conflicting
+            logger.debug(f"{data_var}")
+            ds_whole[data_var].attrs["_FillValue"] = -9999
+            # ds_whole[data_var].attrs["missing_value"] = -9999
+            if 'missing_value' in ds_whole[data_var].attrs:
+                del ds_whole[data_var].attrs["[missing_value]"]
+            # renaming
             if data_var in rename_dict:
                 new_data_var = rename_dict[data_var]
-                logger.debug(f"Renaming {data_var} to {new_data_var}")
+                logger.debug(f" renaming to {new_data_var}")
                 ds_whole = ds_whole.rename({data_var: new_data_var})
                 for coord in ds_whole[new_data_var].coords:
                     if coord in rename_dict:
