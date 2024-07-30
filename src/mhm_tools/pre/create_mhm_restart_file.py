@@ -1049,8 +1049,9 @@ class MHMRestartFile:
                 }
             )
             .squeeze("horizon_all", drop=True)
-            .drop("horizon_all_bnds")
         )
+        if "horizon_all_bnds" in ds.coords:
+            ds = ds.drop("horizon_all_bnds")
         mask = np.stack(
             [np.isnan(ds["L1_maxInter"].data)[0, :, :] & ds_mask["land_mask"].data]
             * ds["L1_maxInter"].shape[0],
