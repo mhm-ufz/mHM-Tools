@@ -464,7 +464,7 @@ class MHMRestartFile:
             "${output_file}": grid.path / f"output_{grid.name}.nc",
             "${lon_high_start}": f"{grid.l0.lon_min + grid.l0.resolution / 2:.3f}",  # changes to center of cell coordinates
             "${lon_high_res}": f"{grid.l0.resolution:.3f}",
-            "${lon_high_n}": f"{grid.l0.get_n_lon()}", 
+            "${lon_high_n}": f"{grid.l0.get_n_lon()}",
             "${lat_high_start}": f"{grid.l0.lat_min + grid.l0.resolution / 2:.3f}",  # changes to center of cell coordinates
             "${lat_high_res}": f"{grid.l0.resolution:.3f}",
             "${lat_high_n}": f"{grid.l0.get_n_lat()}",
@@ -639,7 +639,6 @@ class MHMRestartFile:
         }
         return sorted(dims, key=lambda x: weight_dims.get(x, 5))
 
-
     def _merge_restart_files(self):
         logger.info("Merging restart files")
 
@@ -666,8 +665,6 @@ class MHMRestartFile:
         logger.debug(f"ds_whole: {ds_whole}")
         # 2. create all coordinates in the whole grid
         # TODO: add dimensions to comments to make it more readable
-
-        dim_order = ["land_cover", ""]
 
         if self.grid.restart_file is None:
             self.grid.restart_file = self.output_path / "output_whole_grid_restart.nc"
@@ -752,19 +749,25 @@ class MHMRestartFile:
                 # logger.debug(f"lat_out: {cur_ds['lat_out'].data[0]:.3f}, {cur_ds['lat_out'].data[-1]:.3f}")
 
                 # reverse the data vars if the latitude is decreasing
-                reverse_data_vars = ['L1_latitude', 'L1_fAsp', 'L1_Max_Canopy_Intercept']
+                reverse_data_vars = [
+                    "L1_latitude",
+                    "L1_fAsp",
+                    "L1_Max_Canopy_Intercept",
+                ]
                 for r_data_var in reverse_data_vars:
                     if r_data_var in cur_ds:
                         # len_shape = len(cur_ds[r_data_var].data.shape)
                         # index_lon = cur_ds[r_data_var].dims.index('lon_out')
-                        index_lat = cur_ds[r_data_var].dims.index('lat_out')
+                        index_lat = cur_ds[r_data_var].dims.index("lat_out")
                         # first_lat = [0] * len_shape
                         # last_lat = first_lat.copy()
                         # last_lat[index_lat] = -1
                         # lat0_r = cur_ds[r_data_var].data[tuple(first_lat)]
                         # lat1_r = cur_ds[r_data_var].data[tuple(last_lat)]
                         # if lat0_r > lat1_r and cur_ds['latitude'].data[0] < cur_ds['latitude'].data[-1]:
-                        cur_ds[r_data_var].data = np.flip(cur_ds[r_data_var].data, axis=index_lat)
+                        cur_ds[r_data_var].data = np.flip(
+                            cur_ds[r_data_var].data, axis=index_lat
+                        )
                         logger.debug(f"{r_data_var} reversed latitudes")
                 for data_var in data_vars:
                     index_slice = {
@@ -787,95 +790,360 @@ class MHMRestartFile:
                             logger.error(
                                 f"Shape mismatch could not be resolved for {data_var} in {restart_file_path}"
                             )
-                            logger.debug(f"shape read in ds: {cur_ds[data_var].shape}; shape in ds_whole: {ds_whole[data_var][index_slice].shape}")
-                            logger.debug(f"index_slice: lon={ds_whole[index_slice]['lon_out'].data[0]:.3f}, {ds_whole[index_slice]['lon_out'].data[-1]:.3f}; lat={ds_whole[index_slice]['lat_out'].data[0]:.3f}, {ds_whole[index_slice]['lat_out'].data[-1]:.3f}")
-                            logger.debug(f"extend read in ds: lon={cur_ds['lon_out'].data[0]}, {cur_ds['lon_out'].data[-1]}; lat={cur_ds['lat_out'].data[0]}, {cur_ds['lat_out'].data[-1]}")
+                            logger.debug(
+                                f"shape read in ds: {cur_ds[data_var].shape}; shape in ds_whole: {ds_whole[data_var][index_slice].shape}"
+                            )
+                            logger.debug(
+                                f"index_slice: lon={ds_whole[index_slice]['lon_out'].data[0]:.3f}, {ds_whole[index_slice]['lon_out'].data[-1]:.3f}; lat={ds_whole[index_slice]['lat_out'].data[0]:.3f}, {ds_whole[index_slice]['lat_out'].data[-1]:.3f}"
+                            )
+                            logger.debug(
+                                f"extend read in ds: lon={cur_ds['lon_out'].data[0]}, {cur_ds['lon_out'].data[-1]}; lat={cur_ds['lat_out'].data[0]}, {cur_ds['lat_out'].data[-1]}"
+                            )
                             continue
                     ds_whole[data_var][index_slice] = cur_ds[data_var].data
         logger.info("Merging restart files done")
         logger.info(f"Writing restart file to {self.grid.restart_file}")
-        if 'month_of_year_bnds' not in ds_whole.coords:
-            logger.info(f"Adding month_of_year_bnds")
-            month_of_year_bnds = [[int(m), int(m)+1] for m in ds_whole['month_of_year']]
-            ds_whole['month_of_year_bnds'] =  (
-                        ['month_of_year', 'bnds'],
-                        month_of_year_bnds
-                    )
+        if "month_of_year_bnds" not in ds_whole.coords:
+            logger.info("Adding month_of_year_bnds")
+            month_of_year_bnds = [
+                [int(m), int(m) + 1] for m in ds_whole["month_of_year"]
+            ]
+            ds_whole["month_of_year_bnds"] = (
+                ["month_of_year", "bnds"],
+                month_of_year_bnds,
+            )
+        # save the intermediate file
         ds_whole.to_netcdf(self.grid.restart_file)
-        logger.info(f"Renaming coordinates and data variables")
-        
-        # remove unnecessary coordinates
-        ds_whole = ds_whole.drop_dims('land_cover_period')
-        if 'land_cover_period' in ds_whole.coords:
-            ds_whole = ds_whole.drop_vars('land_cover_period')
+        logger.info("Renaming coordinates and data variables")
 
+        self._correct_restart_file(ds_whole)
+        # # 4. change the coordinates and data variables to the correct names
+        # ds_whole['xllcorner_L1'] = self.grid.l1.lon_min
+        # ds_whole['yllcorner_L1'] = self.grid.l1.lat_min
+        # ds_whole['cellsize_L1'] = self.grid.l1.resolution
+        # ds_whole['ncols_L1'] = self.grid.l1.get_n_lat() # fits mHM notation even tho it seems wrong
+        # ds_whole['nrows_L1'] = self.grid.l1.get_n_lon() # fits mHM notation even tho it seems wrong
+        # ds_whole['nCells_L1'] = ds_whole['ncols_L1'] * ds_whole['nrows_L1']
+        # ds_whole['xllcorner_L0'] = self.grid.l0.lon_min
+        # ds_whole['yllcorner_L0'] = self.grid.l0.lat_min
+        # ds_whole['cellsize_L0'] = self.grid.l0.resolution
+        # ds_whole['ncols_L0'] = self.grid.l0.get_n_lat() # fits mHM notation even tho it seems wrong
+        # ds_whole['nrows_L0'] = self.grid.l0.get_n_lon() # fits mHM notation even tho it seems wrong
+        # ds_whole['nCells_L0'] = ds_whole['ncols_L0'] * ds_whole['nrows_L0']
+
+        # # remove unnecessary coordinates
+        # ds_whole = ds_whole.drop_dims('land_cover_period')
+        # if 'land_cover_period' in ds_whole.coords:
+        #     ds_whole = ds_whole.drop_vars('land_cover_period')
+
+        # # rename_dict = {
+        # #     k: v for k, v in rename_dict.items() if k in ds_whole.coords
+        # # }  # make sure that all keys are in the dataset
+        # if "horizon_out" in ds_whole.coords:
+        #     ds_whole.assign_coords(horizons=ds_whole["horizon_out"])
+        # if "horizon_all" in ds_whole.coords:
+        #     ds_whole.assign_coords(horizons=ds_whole["horizon_all"])
         # rename_dict = {
-        #     k: v for k, v in rename_dict.items() if k in ds_whole.coords
-        # }  # make sure that all keys are in the dataset
-        if "horizon_out" in ds_whole.coords:
-            ds_whole.assign_coords(horizons=ds_whole["horizon_out"])
-        if "horizon_all" in ds_whole.coords:
-            ds_whole.assign_coords(horizons=ds_whole["horizon_all"])
-        rename_dict = {
-            "lon_out": "lon",
-            "lat_out": "lat",
-            "lon_out_bnds": "lon_bnds",
-            "lat_out_bnds": "lat_bnds",
-            "month_of_year": "L1_LAITimesteps",
-            "horizons": "L1_SoilHorizons",
-            "horizon_out_bnds": "L1_SoilHorizons_bnds",
-            "month_of_year_bnds": "L1_LAITimesteps_bnds",
-            "land_cover_period_out": "L1_LandCoverPeriods",
-            "land_cover_period_out_bnds": "L1_LandCoverPeriods_bnds",
-            "L1_PermWiltPoint": "L1_wiltingPoint",
-            "L1_SealedThresh": "L1_sealedThresh",
-            "L1_UnsatThresh": "L1_unsatThresh",
-            "L1_TempThresh": "L1_tempThresh",
-            "L1_SoilMoistureExponent": "L1_soilMoistExp",
-            "L1_SatSoilMoisture": "L1_soilMoistSat",
-            "L1_FieldCap": "L1_soilMoistFC",
-            "L1_Kperco": "L1_kPerco",
-            "L1_SlowFlow": "L1_kSlowFlow",
-            "L1_FastFlow": "L1_kFastFlow",
-            "L1_Max_Canopy_Intercept": "L1_maxInter",
-            "L1_KarstLoss": "L1_karstLoss",
-            "L1_DegDayInc": "L1_degDayInc",
-            "L1_DegDayNoPre": "L1_degDayNoPre",
-            "L1_DegDayMax": "L1_degDayMax",
-            "L1_Alpha": "L1_alpha",
-            "L1_SealedFraction": "L1_fSealed"
+        #     "lon_out": "lon",
+        #     "lat_out": "lat",
+        #     "lon_out_bnds": "lon_bnds",
+        #     "lat_out_bnds": "lat_bnds",
+        #     "month_of_year": "L1_LAITimesteps",
+        #     "horizons": "L1_SoilHorizons",
+        #     "horizon_out_bnds": "L1_SoilHorizons_bnds",
+        #     "month_of_year_bnds": "L1_LAITimesteps_bnds",
+        #     "land_cover_period_out": "L1_LandCoverPeriods",
+        #     "land_cover_period_out_bnds": "L1_LandCoverPeriods_bnds",
+        #     "L1_PermWiltPoint": "L1_wiltingPoint",
+        #     "L1_SealedThresh": "L1_sealedThresh",
+        #     "L1_UnsatThresh": "L1_unsatThresh",
+        #     "L1_TempThresh": "L1_tempThresh",
+        #     "L1_SoilMoistureExponent": "L1_soilMoistExp",
+        #     "L1_SatSoilMoisture": "L1_soilMoistSat",
+        #     "L1_FieldCap": "L1_soilMoistFC",
+        #     "L1_Kperco": "L1_kPerco",
+        #     "L1_SlowFlow": "L1_kSlowFlow",
+        #     "L1_FastFlow": "L1_kFastFlow",
+        #     "L1_Max_Canopy_Intercept": "L1_maxInter",
+        #     "L1_KarstLoss": "L1_karstLoss",
+        #     "L1_DegDayInc": "L1_degDayInc",
+        #     "L1_DegDayNoPre": "L1_degDayNoPre",
+        #     "L1_DegDayMax": "L1_degDayMax",
+        #     "L1_Alpha": "L1_alpha",
+        #     "L1_SealedFraction": "L1_fSealed"
+        # }
+        # logger.debug(f"Cooordinates: {ds_whole.coords}")
+        # for data_var in ds_whole.data_vars:
+        #     # reorder the dimensions
+        #     data_var_dims = self._order_dims(ds_whole[data_var].dims)
+        #     ds_whole[data_var] = ds_whole[data_var].transpose(*data_var_dims)
+        # logger.debug(f"sat_soil_moist: {ds_whole.L1_SatSoilMoisture}")
+        # # rename the coordinates
+        # for coord in ds_whole.coords:
+        #     if coord in rename_dict:
+        #         new_coord = rename_dict[coord]
+        #         logger.debug(f"Renaming {coord} to {new_coord}")
+        #         ds_whole = ds_whole.rename({coord: new_coord})
+        #         if 'bounds' in ds_whole[new_coord].attrs and ds_whole[new_coord].attrs['bounds'] in rename_dict:
+        #             ds_whole[new_coord].attrs['bounds'] = rename_dict[ds_whole[new_coord].attrs['bounds']]
+        # logger.debug(f"sat_soil_moist: {ds_whole.L1_SatSoilMoisture}")
+        # # rename the data variables
+        # for data_var in ds_whole.data_vars:
+        #     if data_var in rename_dict:
+        #         new_data_var = rename_dict[data_var]
+        #         logger.debug(f"Renaming {data_var} to {new_data_var}")
+        #         ds_whole = ds_whole.rename({data_var: new_data_var})
+        #         for coord in ds_whole[new_data_var].coords:
+        #             if coord in rename_dict:
+        #                 logger.debug(f"Renaming {coord} to {rename_dict[coord]}")
+        #                 ds_whole[data_var] = ds_whole[data_var].rename({coord: rename_dict[coord]})
+        # logger.debug(f"sat_soil_moist: {ds_whole.L1_soilMoistSat}")
+        # self.grid.restart_file = self.grid.restart_file.parent / f"{self.grid.restart_file.stem}_renamed{self.grid.restart_file.suffix}"
+        # logger.info(f"Writing renamed restart file to {self.grid.restart_file}")
+        # ds_whole.to_netcdf(self.grid.restart_file)
+
+    def _correct_restart_file(self, ds):
+        ds_mask = xr.open_dataset(
+            "/data/ulysses/data/processed/static_data/land_mask.nc"
+        ).sortby("latitude")
+        ncells = int(ds_mask["land_mask"].sum())
+        ds.attrs = {
+            "xllcorner_L1": self.grid.l1.lon_min,
+            "yllcorner_L1": self.grid.l1.lat_min,
+            "nrows_L1": self.grid.l1.get_n_lon(),
+            "ncols_L1": self.grid.l1.get_n_lon(),
+            "cellsize_L1": self.grid.l1.resolution,
+            "nCells_L1": ncells,
+            "xllcorner_L0": self.grid.l0.lon_min,
+            "yllcorner_L0": self.grid.l0.lat_min,
+            "nrows_L0": self.grid.l0.get_n_lat(),
+            "ncols_L0": self.grid.l0.get_n_lon(),
+            "cellsize_L0": self.grid.l0.resolution,
+            "nCells_L0": ncells,
         }
-        logger.debug(f"Cooordinates: {ds_whole.coords}")
-        for data_var in ds_whole.data_vars:
-            # reorder the dimensions
-            data_var_dims = self._order_dims(ds_whole[data_var].dims)
-            ds_whole[data_var] = ds_whole[data_var].transpose(*data_var_dims)
-        logger.debug(f"sat_soil_moist: {ds_whole.L1_SatSoilMoisture}")
-        # rename the coordinates
-        for coord in ds_whole.coords:
-            if coord in rename_dict:
-                new_coord = rename_dict[coord]
-                logger.debug(f"Renaming {coord} to {new_coord}")
-                ds_whole = ds_whole.rename({coord: new_coord})
-                if 'bounds' in ds_whole[new_coord].attrs and ds_whole[new_coord].attrs['bounds'] in rename_dict:
-                    ds_whole[new_coord].attrs['bounds'] = rename_dict[ds_whole[new_coord].attrs['bounds']]
-        logger.debug(f"sat_soil_moist: {ds_whole.L1_SatSoilMoisture}")
-        # rename the data variables
-        for data_var in ds_whole.data_vars:
-            if data_var in rename_dict:
-                new_data_var = rename_dict[data_var]
-                logger.debug(f"Renaming {data_var} to {new_data_var}")
-                ds_whole = ds_whole.rename({data_var: new_data_var})
-                for coord in ds_whole[new_data_var].coords:
-                    if coord in rename_dict:
-                        logger.debug(f"Renaming {coord} to {rename_dict[coord]}")
-                        ds_whole[data_var] = ds_whole[data_var].rename({coord: rename_dict[coord]})
-        logger.debug(f"sat_soil_moist: {ds_whole.L1_soilMoistSat}")
-        self.grid.restart_file = self.grid.restart_file.parent / f"{self.grid.restart_file.stem}_renamed{self.grid.restart_file.suffix}"
-        logger.info(f"Writing renamed restart file to {self.grid.restart_file}")
-        ds_whole.to_netcdf(self.grid.restart_file)
-        
-        
+        ds["L1_domain_mask"] = (
+            ("lat_out", "lon_out"),
+            ds_mask["land_mask"].data.astype(int),
+        )
+        ds["L1_domain_lat"] = (
+            ("lat_out", "lon_out"),
+            np.stack([ds["lat_out"].data] * len(ds["lon_out"]), axis=1),
+        )
+        ds["L1_domain_lon"] = (
+            ("lat_out", "lon_out"),
+            np.stack([ds["lon_out"].data] * len(ds["lat_out"]), axis=0),
+        )
+        ds["L1_domain_cellarea"] = (
+            ("lat_out", "lon_out"),
+            np.full_like(
+                ds_mask["land_mask"].data, self.grid.l1.resolution**2, dtype=float
+            ),
+        )
+        ds["L0_domain_mask"] = (
+            ("lat_out", "lon_out"),
+            ds_mask["land_mask"].data.astype(int),
+        )
+        ds["L0_domain_lat"] = (
+            ("lat_out", "lon_out"),
+            np.stack([ds["lat_out"].data] * len(ds["lon_out"]), axis=1),
+        )
+        ds["L0_domain_lon"] = (
+            ("lat_out", "lon_out"),
+            np.stack([ds["lon_out"].data] * len(ds["lat_out"]), axis=0),
+        )
+        ds["L0_domain_cellarea"] = (
+            ("lat_out", "lon_out"),
+            np.full_like(
+                ds_mask["land_mask"].data, self.grid.l1.resolution**2, dtype=float
+            ),
+        )
+        ds["L1_fAsp"] = (
+            ("lat_out", "lon_out"),
+            np.ones((len(ds["lat_out"]), len(ds["lon_out"]))),
+        )
+        ds["L1_degDay"] = (
+            ("lat_out", "lon_out"),
+            np.ones((len(ds["lat_out"]), len(ds["lon_out"]))),
+        )
+
+        BNDS_VALUES = {
+            "L1_SoilHorizons_bnds": np.array([[0.0, 300], [300, 1000], [1000, 2000]]),
+            "L1_LandCoverPeriods_bnds": np.array([[1900, 2099]]),
+            "L1_LAITimesteps_bnds": np.array(list(zip(range(12), range(1, 13)))),
+            "lon_bnds": np.array(
+                list(
+                    zip(
+                        np.linspace(
+                            self.grid.l1.lon_min,
+                            self.grid.l1.lon_max - self.grid.l1.resolution,
+                            self.grid.l1.get_n_lon(),
+                        ),
+                        np.linspace(
+                            self.grid.l1.lon_min + self.grid.l1.resolution,
+                            self.grid.l1.lon_max,
+                            self.grid.l1.get_n_lon(),
+                        ),
+                    )
+                )
+            ),
+            "lat_bnds": np.array(
+                list(
+                    zip(
+                        np.linspace(
+                            self.grid.l1.lat_min,
+                            self.grid.l1.lat_max - self.grid.l1.resolution,
+                            self.grid.l1.get_n_lat(),
+                        ),
+                        np.linspace(
+                            self.grid.l1.lat_min + self.grid.l1.resolution,
+                            self.grid.l1.lat_max,
+                            self.grid.l1.get_n_lat(),
+                        ),
+                    )
+                )
+            ),
+        }
+
+        ds["horizon_out"] = (
+            ("horizon_out",),
+            BNDS_VALUES["L1_SoilHorizons_bnds"][:, 1],
+        )
+
+        for coord in ds.coords:
+            ds[coord].encoding["missing_value"] = np.nan
+        ds = (
+            ds.rename(
+                {
+                    "horizon_out": "L1_SoilHorizons",
+                    "horizon_out_bnds": "L1_SoilHorizons_bnds",
+                    "land_cover_period_out": "L1_LandCoverPeriods",
+                    "land_cover_period_out_bnds": "L1_LandCoverPeriods_bnds",
+                    "month_of_year": "L1_LAITimesteps",
+                    "month_of_year_bnds": "L1_LAITimesteps_bnds",
+                    "lat_out": "lat",
+                    "lon_out": "lon",
+                    "lat_out_bnds": "lat_bnds",
+                    "lon_out_bnds": "lon_bnds",
+                    # something to make compat with 22-couple-with_mpr-branch only
+                    "L1_SealedFraction": "L1_fSealed",
+                    "L1_Alpha": "L1_alpha",
+                    "L1_DegDayInc": "L1_degDayInc",
+                    "L1_DegDayNoPre": "L1_degDayNoPre",
+                    "L1_DegDayMax": "L1_degDayMax",
+                    "L1_KarstLoss": "L1_karstLoss",
+                    "L1_Max_Canopy_Intercept": "L1_maxInter",
+                    "L1_FastFlow": "L1_kFastFlow",
+                    "L1_Kperco": "L1_kPerco",
+                    "L1_SlowFlow": "L1_kSlowFlow",
+                    "L1_SoilMoistureExponent": "L1_soilMoistExp",
+                    "L1_FieldCap": "L1_soilMoistFC",
+                    "L1_PermWiltPoint": "L1_wiltingPoint",
+                    "L1_SatSoilMoisture": "L1_soilMoistSat",
+                    "L1_Jarvis_Threshold": "L1_jarvis_thresh_c1",
+                    "L1_TempThresh": "L1_tempThresh",
+                    "L1_UnsatThreshold": "L1_unsatThresh",
+                    "L1_SealedThresh": "L1_sealedThresh",
+                    # "L1_PET_LAI_correction_factor": "L1_petLAIcorFactor",
+                    # "L1_Aerodyn_resist": "L1_aeroResist",
+                    # "L1_Bulk_Surface_Resist": "L1_surfResist",
+                }
+            )
+            .squeeze("horizon_all", drop=True)
+            .drop("horizon_all_bnds")
+        )
+        mask = np.stack(
+            [np.isnan(ds["L1_maxInter"].data)[0, :, :] & ds_mask["land_mask"].data]
+            * ds["L1_maxInter"].shape[0],
+            axis=0,
+        )
+        ds["L1_maxInter"] = xr.where(mask, 0, ds["L1_maxInter"])
+
+        BNDS_DIMS = {
+            "L1_SoilHorizons_bnds": ("L1_SoilHorizons", "bnds"),
+            "L1_LandCoverPeriods_bnds": ("L1_LandCoverPeriods", "bnds"),
+            "L1_LAITimesteps_bnds": ("L1_LAITimesteps", "bnds"),
+            "lat_bnds": ("lat", "bnds"),
+            "lon_bnds": ("lon", "bnds"),
+        }
+
+        # apply the final mask on parameters
+        for data_var in ds.data_vars:
+            if data_var in BNDS_DIMS:
+                ds[data_var] = (BNDS_DIMS[data_var], BNDS_VALUES[data_var])
+                logger.info(data_var, ds[data_var])
+                continue
+            if not ("lat" in ds[data_var].dims and "lon" in ds[data_var].dims):
+                continue
+            # those grids need to be defined in its entirety
+            if data_var.endswith(("_lon", "_lat", "_cellarea")):
+                continue
+            slicer = []
+            for dim in ds[data_var].dims:
+                if dim == "lat":
+                    slicer.append(...)
+                elif dim != "lon":
+                    slicer.append(None)
+            ds[data_var] = ds[data_var].where(
+                np.broadcast_to(
+                    ds_mask["land_mask"].data[tuple(slicer)], ds[data_var].shape
+                )
+            )
+            if "L1_SoilHorizons" in ds[data_var].dims:
+                ds[data_var] = ds[data_var].transpose(
+                    "L1_LandCoverPeriods", "L1_SoilHorizons", "lat", "lon"
+                )
+
+        COORD_ATTRS = {
+            "L1_SoilHorizons": {
+                "bounds": "L1_SoilHorizons_bnds",
+                "units": "mm",
+                "positive": "down",
+                "long_name": "depth",
+                "standard_name": "depth",
+                "axis": "Z",
+            },
+            "L1_LandCoverPeriods": {
+                "bounds": "L1_LandCoverPeriods_bnds",
+                "units": "years",
+                "long_name": "time period",
+                "standard_name": "time period",
+                "axis": "T",
+            },
+            "L1_LAITimesteps": {
+                "bounds": "L1_LAITimesteps_bnds",
+                "units": "month of year",
+                "long_name": "time: means within months",
+                "standard_name": "month of year",
+                "axis": "T",
+            },
+            "lat": {
+                "bounds": "lat_bnds",
+                "units": "degrees_north",
+                "long_name": "latitude",
+                "standard_name": "latitude",
+                "axis": "Y",
+            },
+            "lon": {
+                "bounds": "lon_bnds",
+                "units": "degrees_east",
+                "long_name": "longitude",
+                "standard_name": "longitude",
+                "axis": "X",
+            },
+        }
+
+        GLOBAL_ATTRS = {
+            "institution": "Helmholtz-Centre for Environmental Research - UFZ, Leipzig, Germany",
+            "creator": "Robert Schweppe",
+            "contact": "stephan.thober@ufz.de",
+        }
+
+        for coord_name, attrs in COORD_ATTRS.items():
+            ds[coord_name].attrs.update(attrs)
+        ds.attrs.update(GLOBAL_ATTRS)
+
+        ds.sortby("lat", ascending=False).to_netcdf(self.grid.restart_file)
+        # ds.to_netcdf(out_path)
 
     def _delete_temp_files(self):
         logger.info("Deleting temporary files")
@@ -926,7 +1194,7 @@ class MHMRestartFile:
                     self._read_subgrids_from_files()
                 else:
                     self._split_grid()
-                logger.info(f"Creating namelists and running MPR.")
+                logger.info("Creating namelists and running MPR.")
                 subgrids = Parallel(n_jobs=self.ncpus, backend="loky")(
                     delayed(self._create_restart_for_grid)(subgrid)
                     for subgrid in self.subgrids
