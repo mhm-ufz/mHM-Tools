@@ -904,7 +904,7 @@ class MHMRestartFile:
 
     def _correct_restart_file(self, ds):
         ds_mask = xr.open_dataset(
-            "/data/ulysses/data/processed/static_data/land_mask.nc"
+            "/data/cats/data/static/processed_input/land_mask_remapped_03min.nc"
         ).sortby("latitude")
         ncells = int(ds_mask["land_mask"].sum())
         ds.attrs = {
