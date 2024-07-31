@@ -1071,7 +1071,7 @@ class MHMRestartFile:
         for data_var in ds.data_vars:
             if data_var in BNDS_DIMS:
                 ds[data_var] = (BNDS_DIMS[data_var], BNDS_VALUES[data_var])
-                logger.info(data_var, ds[data_var])
+                # logger.info(data_var, ds[data_var])
                 continue
             if not ("lat" in ds[data_var].dims and "lon" in ds[data_var].dims):
                 continue
