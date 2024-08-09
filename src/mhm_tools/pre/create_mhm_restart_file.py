@@ -1141,9 +1141,10 @@ class MHMRestartFile:
 
         for coord_name, attrs in COORD_ATTRS.items():
             ds[coord_name].attrs.update(attrs)
-        ds.attrs.update(GLOBAL_ATTRS)
+        ds = ds.attrs.update(GLOBAL_ATTRS)
 
-        ds.sortby("lat", ascending=False).to_netcdf(self.grid.restart_file)
+        ds = ds.sortby("lat", ascending=False)
+        ds.to_netcdf(self.grid.restart_file)
         # ds.to_netcdf(out_path)
 
     def _delete_temp_files(self):
