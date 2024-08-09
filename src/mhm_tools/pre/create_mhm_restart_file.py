@@ -1141,9 +1141,12 @@ class MHMRestartFile:
 
         for coord_name, attrs in COORD_ATTRS.items():
             ds[coord_name].attrs.update(attrs)
-        ds = ds.attrs.update(GLOBAL_ATTRS)
+        ds.attrs.update(GLOBAL_ATTRS)
 
         ds = ds.sortby("lat", ascending=False)
+
+        self.grid.restart_file = self.grid.restart_file.parent / f"{self.grid.restart_file.stem}_renamed{self.grid.restart_file.suffix}"
+        logger.info(f"Writing renamed restart file to {self.grid.restart_file}")
         ds.to_netcdf(self.grid.restart_file)
         # ds.to_netcdf(out_path)
 
