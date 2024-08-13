@@ -163,6 +163,7 @@ class LatLon:
         self.lat_max = lat_max
         self.lon_max = lon_max
         self.resolution = resolution
+        self.mask = None
 
     def get_n_lat(self):
         """
@@ -573,6 +574,9 @@ class MHMRestartFile:
             return None
         logger.debug(f"Splitting {file_path}")
         with xr.open_dataset(file_path) as ds:
+            if self.grid.l0.mask is not None:
+                ds = ds.where(self.grid.l0.mask != np.nan)
+                logger.info(f"Applied mask to {file_path}")
             for i, lon_min in enumerate(
                 np.arange(
                     self.grid.l1.lon_min,

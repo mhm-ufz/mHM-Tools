@@ -35,18 +35,89 @@ def add_args(parser):
         "-n", "--nml_template", required=True, help=("nml_template file for mPR")
     )
 
-    required_args.add_argument(
-        "--coords",
-        required=True,
-        help=(
-            "coordinates in the form of 'lon_min,lon_max,lat_min,lat_max,resolution_l0,resolution_l1'"
-        ),
-    )
+
 
     required_args.add_argument(
         "--mpr",
         required=True,
         help=("path to the mPR executable"),
+    )
+
+    required_args.add_argument(
+        "--l1_resolution",
+        required=True,
+        help=(
+            """resolution of the mHM target grid in degrees"""
+        ),
+    )
+
+    parser.add_argument(
+        "--coords",
+        required=False,
+        default=None,
+        help=(
+            """coordinates in the form of 'lon_min,lon_max,lat_min,lat_max,resolution_l0'
+            required unless --mask is provided"""
+        ),
+    )
+    parser.add_argument(
+        "--lon_min",
+        required=False,
+        default=None,
+        help=(
+            """minimum longitude of the target grid
+            required unless --mask is provided"""
+        ),
+    )
+
+    parser.add_argument(
+        "--lon_max",
+        required=False,
+        default=None,
+        help=(
+            """maximum longitude of the target grid
+            required unless --mask is provided"""
+        ),
+    )
+
+    parser.add_argument(
+        "--lat_min",
+        required=False,
+        default=None,
+        help=(
+            """minimum latitude of the target grid
+            required unless --mask is provided"""
+        ),
+    )
+    
+    parser.add_argument(
+        "--lat_max",
+        required=False,
+        default=None,
+        help=(
+            """maximum latitude of the target grid
+            required unless --mask is provided"""
+        ),
+    )
+
+    parser.add_argument(
+        "--l0_resolution",
+        required=False,
+        default=None,
+        help=(
+            """resolution of the morphological input data grid in degrees
+            required unless --mask is provided"""
+        ),
+    )
+
+    parser.add_argument(
+        "--mask",
+        required=False,
+        default=None,
+        help=(
+            """path to the mask file, a .nc file with a variable 'mask' containing the grid mask at l0 resolution
+            required unless --coords is provided"""
+        ),
     )
 
     parser.add_argument(
@@ -127,6 +198,29 @@ def add_args(parser):
         help=("Packages to load using module load before running mPR"),
     )
 
+def get_coords_from_mask(mask):
+    """Get the coordinates from a mask file.
+
+    Parameters
+    ----------
+    mask : str
+        path to the mask file
+
+    Returns
+    -------
+    tuple
+        tuple containing the coordinates
+    """
+    import xarray as xr
+
+    mask = xr.open_dataset(mask)
+    lon_min_target_grid = mask.lon.values[0]
+    lon_max_target_grid = mask.lon.values[-1]
+    lat_min_target_grid = mask.lat.values[0]
+    lat_max_target_grid = mask.lat.values[-1]
+    l0_resolution = mask.lon.values[1] - mask.lon.values[0]
+    mask = mask.mask.values
+    return lon_min_target_grid, lon_max_target_grid, lat_min_target_grid, lat_max_target_grid, l0_resolution, mask
 
 def run(args):
     """Create the catchment file.
@@ -136,30 +230,43 @@ def run(args):
     args : argparse.Namespace
         parsed command line arguments
     """
-    coords = args.coords.split(",")
-    lon_min_target_grid = float(coords[0])
-    lon_max_target_grid = float(coords[1])
-    lat_min_target_grid = float(coords[2])
-    lat_max_target_grid = float(coords[3])
-    l0_resolution = float(coords[4])
-    l1_resolution = float(coords[5])
-
+    l1_resolution = float(args.l1_resolution)
+    if args.coords is not None:
+        coords = args.coords.split(",")
+        lon_min_target_grid = float(coords[0])
+        lon_max_target_grid = float(coords[1])
+        lat_min_target_grid = float(coords[2])
+        lat_max_target_grid = float(coords[3])
+        l0_resolution = float(coords[4])
+        l1_resolution = l1_resolution
+    else:
+        lon_min_target_grid = args.lon_min
+        lon_max_target_grid = args.lon_max
+        lat_min_target_grid = args.lat_min
+        lat_max_target_grid = args.lat_max
+        l0_resolution = args.l0_resolution
+    if mask is not None:
+        mask = args.mask
+        lon_min_target_grid, lon_max_target_grid, lat_min_target_grid, lat_max_target_grid, l0_resolution, mask = get_coords_from_mask(mask)
+    elif lon_min_target_grid is None or lon_max_target_grid is None or lat_min_target_grid is None or lat_max_target_grid is None or l0_resolution is None:
+            raise ValueError("Either all coordinat bounds and resolutions or --mask must be provided")
     restart_creator = MHMRestartFile(
         input_file_path=args.input_dir,
         output_path=args.output_dir,
         nml_template=args.nml_template,
         l0=LatLon(
-            lon_min=lon_min_target_grid,
-            lon_max=lon_max_target_grid,
-            lat_min=lat_min_target_grid,
-            lat_max=lat_max_target_grid,
-            resolution=l0_resolution,
+            lon_min=float(lon_min_target_grid),
+            lon_max=float(lon_max_target_grid),
+            lat_min=float(lat_min_target_grid),
+            lat_max=float(lat_max_target_grid),
+            resolution=float(l0_resolution),
+            mask=mask
         ),
         l1=LatLon(
-            lon_min=lon_min_target_grid,
-            lon_max=lon_max_target_grid,
-            lat_min=lat_min_target_grid,
-            lat_max=lat_max_target_grid,
+            lon_min=float(lon_min_target_grid),
+            lon_max=float(lon_max_target_grid),
+            lat_min=float(lat_min_target_grid),
+            lat_max=float(lat_max_target_grid),
             resolution=l1_resolution,
         ),
         increment_l1=args.l1_increment,
