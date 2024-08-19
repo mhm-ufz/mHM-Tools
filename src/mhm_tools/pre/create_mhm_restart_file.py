@@ -795,6 +795,12 @@ class MHMRestartFile:
         logger.info("Renaming coordinates and data variables")
 
         return ds_whole
+    
+    def _drop_unnecessary_dims(self, ds, *args):
+        for arg in args:
+            if arg in ds.coords:
+                ds = ds.drop(arg)
+        return ds
 
     def _correct_restart_file(self, ds):
         ds_mask = xr.open_dataset(
@@ -941,10 +947,9 @@ class MHMRestartFile:
                 # "L1_Bulk_Surface_Resist": "L1_surfResist",
             }
         ).squeeze("horizon_all", drop=True)
-        if "horizon_all_bnds" in ds.coords:
-            ds = ds.drop("horizon_all_bnds")
-        if "land_cover_period" in ds.coords:
-            ds = ds.drop("land_cover_period")
+        
+        ds = self._drop_unnecessary_dims(ds, "horizon_all_bnds", "land_cover_period", "longitude", "latitude")
+
         mask = np.stack(
             [np.isnan(ds["L1_maxInter"].data)[0, :, :] & ds_mask["land_mask"].data]
             * ds["L1_maxInter"].shape[0],
