@@ -647,12 +647,12 @@ class MHMRestartFile:
 
         # 1. create an empty file for the whole grid
         ds_whole = xr.Dataset()
-        ds_whole["longitude"] = np.arange(
-            self.grid.l0.lon_min, self.grid.l0.lon_max, self.grid.l0.resolution
-        )
-        ds_whole["latitude"] = np.arange(
-            self.grid.l0.lat_min, self.grid.l0.lat_max, self.grid.l0.resolution
-        )
+        # ds_whole["longitude"] = np.arange(
+        #     self.grid.l0.lon_min, self.grid.l0.lon_max, self.grid.l0.resolution
+        # )
+        # ds_whole["latitude"] = np.arange(
+        #     self.grid.l0.lat_min, self.grid.l0.lat_max, self.grid.l0.resolution
+        # )
         ds_whole["lon_out"] = np.arange(
             self.grid.l1.lon_min + self.grid.l1.resolution / 2,
             self.grid.l1.lon_max
@@ -943,6 +943,8 @@ class MHMRestartFile:
         ).squeeze("horizon_all", drop=True)
         if "horizon_all_bnds" in ds.coords:
             ds = ds.drop("horizon_all_bnds")
+        if "land_cover_period" in ds.coords:
+            ds = ds.drop("land_cover_period")
         mask = np.stack(
             [np.isnan(ds["L1_maxInter"].data)[0, :, :] & ds_mask["land_mask"].data]
             * ds["L1_maxInter"].shape[0],
