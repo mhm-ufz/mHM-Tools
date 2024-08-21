@@ -803,12 +803,12 @@ class MHMRestartFile:
         return ds
 
     def _correct_restart_file(self, ds):
-        # ds_mask = xr.open_dataset(
-        #     "/data/cats/data/static/processed_input/land_mask_remapped_03min.nc"
-        # ).sortby("latitude")
         ds_mask = xr.open_dataset(
-            "/work/luedke/land_mask_0p1.nc"
+            "/data/cats/data/static/processed_input/land_mask_remapped_03min.nc"
         ).sortby("latitude")
+        # ds_mask = xr.open_dataset(
+        #     "/work/luedke/land_mask_0p1.nc"
+        # ).sortby("latitude")
         ncells = int(ds_mask["land_mask"].sum())
         ds.attrs = {
             "xllcorner_L1": self.grid.l1.lon_min,
@@ -906,6 +906,8 @@ class MHMRestartFile:
                 )
             ),
         }
+
+        logger.debug(f"BNDS_VALUES: {BNDS_VALUES}")
 
         ds["horizon_out"] = (
             ("horizon_out",),
