@@ -817,8 +817,8 @@ class MHMRestartFile:
             "ncols_L1": self.grid.l1.get_n_lat(),
             "cellsize_L1": self.grid.l1.resolution,
             "nCells_L1": ncells,
-            "xllcorner_L0": self.grid.l1.lon_min,
-            "yllcorner_L0": self.grid.l1.lat_min,
+            "xllcorner_L0": self.grid.l1.lon_min if self.grid.l1.lon_min != int(self.grid.l1.lon_min) else int(self.grid.l1.lon_min), 
+            "yllcorner_L0": self.grid.l1.lat_min if self.grid.l1.lat_min != int(self.grid.l1.lat_min) else int(self.grid.l1.lat_min),
             "nrows_L0": self.grid.l1.get_n_lon(),
             "ncols_L0": self.grid.l1.get_n_lat(),
             "cellsize_L0": self.grid.l1.resolution,
@@ -969,6 +969,9 @@ class MHMRestartFile:
             "lat_bnds": ("lat", "bnds"),
             "lon_bnds": ("lon", "bnds"),
         }
+
+        ds['lat_bnds'] = (BNDS_DIMS['lat_bnds'], BNDS_VALUES['lat_bnds'])
+        ds['lon_bnds'] = (BNDS_DIMS['lon_bnds'], BNDS_VALUES['lon_bnds'])
 
         # apply the final mask on parameters
         for data_var in ds.data_vars:
