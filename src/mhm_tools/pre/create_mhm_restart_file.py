@@ -991,6 +991,7 @@ class MHMRestartFile:
                     slicer.append(...)
                 elif dim != "lon":
                     slicer.append(None)
+            logger.debug(f"Masking {data_var}")
             ds[data_var] = ds[data_var].where(
                 np.broadcast_to(
                     ds_mask["land_mask"].data[tuple(slicer)], ds[data_var].shape
@@ -1066,7 +1067,7 @@ class MHMRestartFile:
             for file_path in subgrid.morph_files.get_files_as_list():
                 if isinstance(file_path, list):
                     for f in file_path:
-                        # f.unlink() # only deletes the file not the dir and not the namelist_file
+                        # f.unlink() # ofnly deletes the file not the dir and not the namelist_file
                         shutil.rmtree(f.parent)
                 else:
                     file_path.unlink()
