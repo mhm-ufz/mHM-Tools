@@ -5,7 +5,7 @@ A restart file contains all the static information to run mHM on a specific grid
 
 """
 
-from mhm_tools.pre.create_mhm_restart_file import LatLon, MPRRunner
+from mhm_tools.pre.create_mhm_restart_file import LatLon, MPRRunner, Grid
 
 from ..pre import MHMRestartFile
 
@@ -126,6 +126,11 @@ def add_args(parser):
         default=None,
         help=("Packages to load using module load before running mPR"),
     )
+    parser.add_argument(
+        "--land_mask_file",
+        default=None,
+        help=("Land mask file to use for l1 resolution"),
+    )
 
 
 def run(args):
@@ -144,24 +149,38 @@ def run(args):
     l0_resolution = float(coords[4])
     l1_resolution = float(coords[5])
 
-    restart_creator = MHMRestartFile(
-        input_file_path=args.input_dir,
-        output_path=args.output_dir,
-        nml_template=args.nml_template,
-        l0=LatLon(
+    if args.land_mask_file is None and args.no_merge is not None:
+        raise ValueError(
+            "You need to provide a land mask file at L1 resolution if you want to merge the restart files"
+        )
+
+    l0=LatLon(
             lon_min=lon_min_target_grid,
             lon_max=lon_max_target_grid,
             lat_min=lat_min_target_grid,
             lat_max=lat_max_target_grid,
             resolution=l0_resolution,
-        ),
-        l1=LatLon(
-            lon_min=lon_min_target_grid,
-            lon_max=lon_max_target_grid,
-            lat_min=lat_min_target_grid,
-            lat_max=lat_max_target_grid,
-            resolution=l1_resolution,
-        ),
+        )
+    l1=LatLon(
+        lon_min=lon_min_target_grid,
+        lon_max=lon_max_target_grid,
+        lat_min=lat_min_target_grid,
+        lat_max=lat_max_target_grid,
+        resolution=l1_resolution,
+    )
+
+    grid = Grid(
+            file_path=args.input_dir,
+            name="whole grid",
+            latlon_file=None,
+            l0=l0,
+            l1=l1,
+            land_mask_file=args.land_mask_file,
+        )
+    restart_creator = MHMRestartFile(
+        grid=grid,
+        output_path=args.output_dir,
+        nml_template=args.nml_template,
         increment_l1=args.l1_increment,
         mpr=MPRRunner(
             mpr_executable=args.mpr,

@@ -229,6 +229,7 @@ class Grid:
         latlon_file=None,
         l0: LatLon = None,
         l1: LatLon = None,
+        land_mask_file=None,
     ):
         file_path = Path(file_path)
         self.morph_files = MorphFiles(filepath=file_path)
@@ -238,6 +239,8 @@ class Grid:
         self.l1 = l1
         self.restart_file = None
         self.namelist_file = None
+        self.land_mask_file = land_mask_file
+
         if (
             self.l0 is None
             or not self.l0.is_fully_defined()
@@ -402,34 +405,24 @@ class MHMRestartFile:
 
     def __init__(
         self,
-        input_file_path: Path,
+        grid: Grid,
         nml_template: Path,
         output_path: Path,
-        l0: LatLon,
-        l1: LatLon,
         mpr: MPRRunner,
         increment_l1=2,
+        ncpus=1,
+        log_level=logging.DEBUG,
         run_on_whole_domain=False,
         use_split_grids=False,
-        ncpus=1,
-        clean_temp_files=False,
-        log_level=logging.DEBUG,
         merge=True,
         merge_only=False,
+        clean_temp_files=False,
     ):
         logger.setLevel(LOG_LEVELS.get(log_level, logging.INFO))
         logger.debug(f"Creating MHMRestartFile object with {locals()}")
         self.nml_template = Path(nml_template)
         self.output_path = Path(output_path)
-        grid_latlon_l0 = l0
-        grid_latlon_l1 = l1
-        self.grid = Grid(
-            file_path=Path(input_file_path),
-            name="whole grid",
-            latlon_file=None,
-            l0=grid_latlon_l0,
-            l1=grid_latlon_l1,
-        )
+        self.grid = grid
         self.subgrids = []  # list of grid objects
         self.ncpus = ncpus
         self.run_on_whole_domain = run_on_whole_domain
@@ -804,7 +797,7 @@ class MHMRestartFile:
 
     def _correct_restart_file(self, ds):
         ds_mask = xr.open_dataset(
-            "/data/cats/data/static/processed_input/land_mask_remapped_03min.nc"
+            self.grid.land_mask_file
         ).sortby("latitude")
         # ds_mask = xr.open_dataset(
         #     "/work/luedke/land_mask_0p1.nc"
