@@ -811,17 +811,17 @@ class MHMRestartFile:
         # ).sortby("latitude")
         ncells = int(ds_mask["land_mask"].sum())
         ds.attrs = {
-            "xllcorner_L1": self.grid.l1.lon_min,
-            "yllcorner_L1": self.grid.l1.lat_min,
+            "xllcorner_L1": self.grid.l1.lon_min if self.grid.l1.lon_min != int(self.grid.l1.lon_min) else int(self.grid.l1.lon_min),
+            "yllcorner_L1": self.grid.l1.lat_min if self.grid.l1.lat_min != int(self.grid.l1.lat_min) else int(self.grid.l1.lat_min),
             "nrows_L1": self.grid.l1.get_n_lon(),
             "ncols_L1": self.grid.l1.get_n_lat(),
             "cellsize_L1": self.grid.l1.resolution,
             "nCells_L1": ncells,
-            "xllcorner_L0": self.grid.l0.lon_min,
-            "yllcorner_L0": self.grid.l0.lat_min,
-            "nrows_L0": self.grid.l0.get_n_lon(),
-            "ncols_L0": self.grid.l0.get_n_lat(),
-            "cellsize_L0": self.grid.l0.resolution,
+            "xllcorner_L0": self.grid.l1.lon_min,
+            "yllcorner_L0": self.grid.l1.lat_min,
+            "nrows_L0": self.grid.l1.get_n_lon(),
+            "ncols_L0": self.grid.l1.get_n_lat(),
+            "cellsize_L0": self.grid.l1.resolution,
             "nCells_L0": ncells,
         }
         ds["L1_domain_mask"] = (
@@ -974,6 +974,7 @@ class MHMRestartFile:
         for data_var in ds.data_vars:
             if data_var in BNDS_DIMS:
                 ds[data_var] = (BNDS_DIMS[data_var], BNDS_VALUES[data_var])
+                logger.debug(f"Setting {data_var} to {(BNDS_DIMS[data_var], BNDS_VALUES[data_var])}")
                 # logger.info(data_var, ds[data_var])
                 continue
             if not ("lat" in ds[data_var].dims and "lon" in ds[data_var].dims):
