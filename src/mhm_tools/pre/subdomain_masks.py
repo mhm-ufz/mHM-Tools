@@ -57,8 +57,6 @@ class CreateSubdomainMasks:
 
     Parameters
     ----------
-    input_dir : str
-        The directory path where the input files are located.
     output_dir : str
         The directory path where the output files will be saved.
     output_file_name : str
@@ -230,13 +228,12 @@ class CreateSubdomainMasks:
 
 
 def create_subdomain_masks(
-    input_dir, output_dir, output_file_name, basin_id_file, basin_clusters, land_mask
+    output_dir, output_file_name, basin_id_file, basin_clusters, land_mask
 ):
     """
     Create subdomain masks based on the provided input parameters.
 
     Args:
-        input_dir (str): The directory containing the input files.
         output_dir (str): The directory where the output files will be saved.
         output_file_name (str): The name of the output file.
         basin_id_file (str): The file containing the basin IDs.
@@ -248,7 +245,6 @@ def create_subdomain_masks(
         None
     """
     csm = CreateSubdomainMasks(
-        input_dir=input_dir,
         output_dir=output_dir,
         output_file_name=output_file_name,
         basin_id_file=basin_id_file,
