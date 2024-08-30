@@ -79,32 +79,27 @@ class CreateSubdomainMasks:
 
     def __init__(
         self,
-        input_dir,
         output_dir,
         output_file_name,
         basin_id_file,
         basin_clusters,
         land_mask,
     ):
-        # set paths (e.g. on Eve HPC)
-        self.base_path = Path(input_dir)
-        if not self.base_path.is_dir():
-            msg = "input path must be a directory"
-            raise ValueError(msg)
-
         # unique basins ids, need to be in variable 'basin'
-        self.ref_file = self.base_path / basin_id_file
+        self.ref_file = basin_id_file
 
         # clustered basins ids, need to be in variable 'mask', can be any resolution
-        self.pgb_file = self.base_path / basin_clusters
+        self.pgb_file = basin_clusters
 
         # land mask and grid of target resolution, need to be in integer variable 'land_mask'
-        self.land_file = self.base_path / land_mask
+        self.land_file = land_mask
 
-        if Path(output_dir).is_absolute():
-            out_dir_path = Path(output_dir) / output_file_name
+        self.output_dir = Path(output_dir)
+
+        if self.is_absolute():
+            out_dir_path = self.output_dir / output_file_name
         else:
-            out_dir_path = self.base_path / output_dir
+            out_dir_path = output_dir
         if not out_dir_path.is_dir():
             out_dir_path.mkdir(parents=True)
         self.out_file_name = str(out_dir_path / Path(output_file_name).stem)
@@ -157,7 +152,7 @@ class CreateSubdomainMasks:
             if coord in ds_ref_file:
                 ds_ref_file = ds_ref_file.drop(coord)
 
-        file_basins_remapped = self.base_path / "unique_basin_ids_03min_agg54classes.nc"
+        file_basins_remapped = self.output_dir / "unique_basin_ids_03min_agg54classes.nc"
         if not file_basins_remapped.is_file():
             # map the 53 subbasins from PGB reference onto target grid
             logger.info(
