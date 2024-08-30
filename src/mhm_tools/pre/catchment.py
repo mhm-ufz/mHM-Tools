@@ -171,6 +171,8 @@ class Catchment:
 
     def write(self, out_path, single_file=True, format="nc", cellsize=None):
         data_vars = {}
+        if not pl.Path(out_path).is_dir():
+            pl.Path(out_path).mkdir(parents=True, exist_ok=True)
         for var_name in self.VARIABLES.keys():
             data = getattr(self, var_name)
             if data is None:
