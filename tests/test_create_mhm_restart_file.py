@@ -6,7 +6,7 @@ from pathlib import Path
 import xarray as xr
 
 import mhm_tools as mt
-from mhm_tools.pre.create_mhm_restart_file import LatLon, MPRRunner
+from mhm_tools.pre.create_mhm_restart_file import Grid, LatLon, MPRRunner
 
 HERE = Path(__file__).parent
 TMP = HERE / "tmp"
@@ -69,6 +69,7 @@ class TestCreateRestart(unittest.TestCase):
 
     def test_split_grid(self):
         morph = Path(HERE / "files" / "test_create_restart")
+        land_mask_file = morph / "land_mask_remapped_03min.nc"
         lon_min_target_grid = -10
         lon_max_target_grid = 10
         lat_min_target_grid = -10
@@ -79,27 +80,41 @@ class TestCreateRestart(unittest.TestCase):
         mpr_runner = MPRRunner(
             "path_to_mpr_exe"
         )  # dummy path because it is not used in the test
+        l0=LatLon(
+            lon_min=lon_min_target_grid,
+            lon_max=lon_max_target_grid,
+            lat_min=lat_min_target_grid,
+            lat_max=lat_max_target_grid,
+            resolution=l0_resolution,
+        )
+        l1=LatLon(
+            lon_min=lon_min_target_grid,
+            lon_max=lon_max_target_grid,
+            lat_min=lat_min_target_grid,
+            lat_max=lat_max_target_grid,
+            resolution=l1_resolution,
+        )
+        grid = Grid(
+            file_path=morph,
+            name="whole grid",
+            latlon_file=None,
+            l0=l0,
+            l1=l1,
+            land_mask_file=land_mask_file,
+        )
         m = mt.pre.MHMRestartFile(
-            input_file_path=morph,
+            grid=grid,
             output_path=TMP,
             nml_template=morph / "mpr_mhm_template.nml",
-            l0=LatLon(
-                lon_min=lon_min_target_grid,
-                lon_max=lon_max_target_grid,
-                lat_min=lat_min_target_grid,
-                lat_max=lat_max_target_grid,
-                resolution=l0_resolution,
-            ),
-            l1=LatLon(
-                lon_min=lon_min_target_grid,
-                lon_max=lon_max_target_grid,
-                lat_min=lat_min_target_grid,
-                lat_max=lat_max_target_grid,
-                resolution=l1_resolution,
-            ),
             increment_l1=increment_l1,
-            log_level=logging.ERROR,
             mpr=mpr_runner,
+            run_on_whole_domain=False,
+            use_split_grids=False,
+            clean_temp_files=True,
+            ncpus=1,
+            log_level=logging.ERROR,
+            merge=True,
+            merge_only=False,
         )
         # test setup successful
         assert m.grid.l0.lon_min - -10 < 1e-3
@@ -146,6 +161,7 @@ class TestCreateRestart(unittest.TestCase):
     def test_not_perfect_grid(self):
         # use an increment that does not fit the grid
         morph = Path(HERE / "files" / "test_create_restart")
+        land_mask_file = morph / "land_mask_remapped_03min.nc"
         lon_min_target_grid = -10
         lon_max_target_grid = 3
         lat_min_target_grid = -9
@@ -156,27 +172,41 @@ class TestCreateRestart(unittest.TestCase):
         mpr_runner = MPRRunner(
             "path_to_mpr_exe"
         )  # dummy path because it is not used in the test
+        l0=LatLon(
+            lon_min=lon_min_target_grid,
+            lon_max=lon_max_target_grid,
+            lat_min=lat_min_target_grid,
+            lat_max=lat_max_target_grid,
+            resolution=l0_resolution,
+        )
+        l1=LatLon(
+            lon_min=lon_min_target_grid,
+            lon_max=lon_max_target_grid,
+            lat_min=lat_min_target_grid,
+            lat_max=lat_max_target_grid,
+            resolution=l1_resolution,
+        )
+        grid = Grid(
+            file_path=morph,
+            name="whole grid",
+            latlon_file=None,
+            l0=l0,
+            l1=l1,
+            land_mask_file=land_mask_file,
+        )
         m = mt.pre.MHMRestartFile(
-            input_file_path=morph,
+            grid=grid,
             output_path=TMP,
             nml_template=morph / "mpr_mhm_template.nml",
-            l0=LatLon(
-                lon_min=lon_min_target_grid,
-                lon_max=lon_max_target_grid,
-                lat_min=lat_min_target_grid,
-                lat_max=lat_max_target_grid,
-                resolution=l0_resolution,
-            ),
-            l1=LatLon(
-                lon_min=lon_min_target_grid,
-                lon_max=lon_max_target_grid,
-                lat_min=lat_min_target_grid,
-                lat_max=lat_max_target_grid,
-                resolution=l1_resolution,
-            ),
             increment_l1=increment_l1,
-            log_level=logging.ERROR,
             mpr=mpr_runner,
+            run_on_whole_domain=False,
+            use_split_grids=False,
+            clean_temp_files=True,
+            ncpus=1,
+            log_level=logging.ERROR,
+            merge=True,
+            merge_only=False,
         )
         # test setup successful
         m._split_grid()
