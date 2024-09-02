@@ -1,4 +1,3 @@
-import logging
 import shutil
 import unittest
 from pathlib import Path
@@ -112,7 +111,7 @@ class TestCreateRestart(unittest.TestCase):
             use_split_grids=False,
             clean_temp_files=True,
             ncpus=1,
-            log_level=logging.ERROR,
+            log_level='error',
             merge=True,
             merge_only=False,
         )
@@ -204,7 +203,7 @@ class TestCreateRestart(unittest.TestCase):
             use_split_grids=False,
             clean_temp_files=True,
             ncpus=1,
-            log_level=logging.ERROR,
+            log_level='error',
             merge=True,
             merge_only=False,
         )

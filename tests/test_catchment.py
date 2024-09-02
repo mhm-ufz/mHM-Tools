@@ -31,7 +31,7 @@ class TestCatchment(unittest.TestCase):
         self.latlon = True
 
     def test_initialization(self):
-        c = catchment.process_catchment(
+        c = catchment.Catchment(
             self.ds,
             self.var_name,
             var="dem",
@@ -44,7 +44,7 @@ class TestCatchment(unittest.TestCase):
         self.assertEqual(c.ds, self.ds)
 
     def test_modify_data(self):
-        c = catchment.process_catchment(
+        c = catchment.Catchment(
             self.ds,
             self.var_name,
             var="dem",
@@ -58,7 +58,7 @@ class TestCatchment(unittest.TestCase):
         self.assertEqual(modified_data.shape, self.ds[self.var_name].shape)
 
     def test_add_fdir(self):
-        c = catchment.process_catchment(
+        c = catchment.Catchment(
             self.ds,
             "flwdir",
             var="fdir",
@@ -71,7 +71,7 @@ class TestCatchment(unittest.TestCase):
         self.assertIsNotNone(c._fdir)
 
     def test_add_dem(self):
-        c = catchment.process_catchment(
+        c = catchment.Catchment(
             self.ds,
             self.var_name,
             var="dem",
@@ -84,7 +84,7 @@ class TestCatchment(unittest.TestCase):
         self.assertIsNotNone(c.elevtn)
 
     def test_get_basins(self):
-        c = catchment.process_catchment(
+        c = catchment.Catchment(
             self.ds,
             self.var_name,
             var="dem",
@@ -101,7 +101,7 @@ class TestCatchment(unittest.TestCase):
         output_var_names = ["hydro1.nc", "hydro2.nc"]
 
         catchments = [
-            catchment.process_catchment(
+            catchment.Catchment(
                 self.ds,
                 self.var_name,
                 var="dem",
@@ -110,7 +110,7 @@ class TestCatchment(unittest.TestCase):
                 out_var_name=output_var_names[0],
                 latlon=self.latlon,
             ),
-            catchment.process_catchment(
+            catchment.Catchment(
                 self.ds,
                 self.var_name,
                 var="dem",
@@ -119,7 +119,7 @@ class TestCatchment(unittest.TestCase):
                 out_var_name=output_var_names[1],
                 latlon=self.latlon,
                 do_shift=True,
-            ),
+            )
         ]
 
         output_path = Path(HERE, "files")
