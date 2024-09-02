@@ -365,7 +365,7 @@ class MHMRestartFile:
         use_split_grids (bool, optional): Whether to use split grids. Defaults to False.
         ncpus (int, optional): The number of CPUs to use for parallelization. Defaults to 1.
         clean_temp_files (bool, optional): Whether to clean temporary files. Defaults to False.
-        log_level (int, optional): The log level. Defaults to logging.DEBUG.
+        log_level (int, optional): The log level. Defaults to 'debug'
         merge (bool, optional): Whether to merge the restart files. Defaults to True.
         merge_only (bool, optional): Whether to only merge the restart files. Defaults to False.
 
@@ -407,7 +407,7 @@ class MHMRestartFile:
         mpr: MPRRunner,
         increment_l1=2,
         ncpus=1,
-        log_level=logging.DEBUG,
+        log_level='debug',
         run_on_whole_domain=False,
         use_split_grids=False,
         merge=True,
