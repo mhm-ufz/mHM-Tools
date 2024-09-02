@@ -70,6 +70,11 @@ def add_args(parser):
         default="ldd",
         help=("ftype of input variable, use 'nextxy', 'ldd' or 'd8'"),
     )
+    parser.add_argument(
+        "--gauge_coords",
+        default=None,
+        help=("Gauge coordinates in the form of 'lon,lat'"),
+    )
 
 
 def run(args):
@@ -80,10 +85,15 @@ def run(args):
     args : argparse.Namespace
         parsed command line arguments
     """
+    if args.gauge_coords is not None:
+        gauge_coords = args.gauge_coords.split(",")
+        gauge_coords = (float(gauge_coords[0]), float(gauge_coords[1]))
     create_catchment(
         input_file=args.input_file,
         output_path=args.output_path,
         var_name=args.vn,
         var=args.var,
         ftype=args.ftp,
+        split_file=args.split_file,
+        
     )

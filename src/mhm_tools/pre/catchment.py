@@ -13,6 +13,7 @@ import pathlib as pl
 import numpy as np
 import pyflwdir
 import xarray as xr
+from mhm_tools.common.logger import logger
 
 # GLOBAL VARIABLES
 FDIR_FILLVALUE = {"d8": 247, "ldd": 255}
@@ -139,6 +140,12 @@ class Catchment:
             data = data.astype(np.uint8)
             self._fdir = pyflwdir.from_array(data=data, ftype=ftype, **kwargs)
         self.get_fdir()
+
+    def delineate_basin(self, lat, lon):
+        """
+        Deliniate the basin for a given lat and lon
+        """
+        self.basin = self._fdir.basins(xy=(lat, lon))
 
     def get_basins(self):
         """
@@ -290,22 +297,10 @@ def merge_catchment(path1, path2, out_path):
     merged.to_netcdf(out_path)
 
 
-def process_catchment(
-    ds, var_name, var, ftype, transform, latlon, out_var_name, do_shift=False
-):
-    return Catchment(
-        ds=ds,
-        var_name=var_name,
-        var=var,
-        ftype=ftype,
-        transform=transform,
-        latlon=latlon,
-        out_var_name=out_var_name,
-        do_shift=do_shift,
-    )
 
+def create_catchment(input_file, output_path, var_name, var, ftype, gauge_coords=None):
 
-def create_catchment(input_file, output_path, var_name, var, ftype):
+    logger.info(f"Creating catchment file for {var_name} using {var} and {ftype} from {input_file}")
 
     if var not in {"fdir", "dem"}:
         raise ValueError(f"Unexpected value for var={var}, must be 'fdir' or 'dem'")
@@ -314,22 +309,30 @@ def create_catchment(input_file, output_path, var_name, var, ftype):
     transform = (0.05, 0.0, -180, 0, 0.05, -90)
     latlon = True
 
-    catchments = [
-        process_catchment(ds, var_name, var, ftype, transform, latlon, "hydro1.nc"),
-        process_catchment(ds, var_name, var, ftype, transform, latlon, "hydro2.nc", do_shift=True),
-    ]
+    if gauge_coords is None:
+        catchments = [
+            Catchment(ds, var_name, var, ftype, transform, latlon, "hydro1.nc"),
+            Catchment(ds, var_name, var, ftype, transform, latlon, "hydro2.nc", do_shift=True) # create a shifted version of the catchment to avoid border effects
+        ]
 
-    for c in catchments:
-        c.get_basins()
+        for c in catchments:
+            c.get_basins()
+            c.get_facc()
+            c.get_grid_area()
+            c.get_upstream_area()
+            c.write(output_path, single_file=True)
+
+        merge_catchment(
+            pl.Path(output_path, "hydro1.nc"),
+            pl.Path(output_path, "hydro2.nc"),
+            pl.Path(output_path, "hydro_merged_03min.nc"),
+        )
+    else:
+        c = Catchment(ds, var_name, var, ftype, transform, latlon, "hydro.nc")
+        c.delineate_basin(*gauge_coords)
         c.get_facc()
         c.get_grid_area()
         c.get_upstream_area()
         c.write(output_path, single_file=True)
-
-    merge_catchment(
-        pl.Path(output_path, "hydro1.nc"),
-        pl.Path(output_path, "hydro2.nc"),
-        pl.Path(output_path, "hydro_merged_03min.nc"),
-    )
 
     print(f"\nNetCDF basins file has been stored! \nSee {output_path}/hydro_merged_03min.nc\n")
