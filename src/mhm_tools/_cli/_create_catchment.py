@@ -2,8 +2,6 @@
 TODO: add description
 """
 
-from pathlib import Path
-
 from ..pre import create_catchment
 
 

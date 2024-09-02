@@ -5,6 +5,7 @@ Authors
 -------
 - Robert Schweppe
 - Matthias Kelbling
+- Jeisson Leal
 """
 
 import pathlib as pl
@@ -58,7 +59,17 @@ class Catchment:
         },
     }
 
-    def __init__(self, file_name, var_name, var="data", do_shift=False, **kwargs):
+    def __init__(
+        self,
+        ds,
+        var_name,
+        var="data",
+        ftype=None,
+        transform=None,
+        out_var_name=None,
+        do_shift=False,
+        **kwargs,
+    ):
         self.flwdir = None
         self.basin = None
         self.upgrid = None
@@ -66,19 +77,19 @@ class Catchment:
         self.grdare = None
         self.elevtn = None
         self._fdir = None
+        self.out_var_name = out_var_name
         self.do_shift = do_shift
+        self.ds = ds
 
-        self.ds = xr.open_dataset(file_name)
+        data = self._modify_data(self.ds[var_name])
 
-        # modify the data if required - do a 180 deg longitude roll
-        data = self._modify_data(self.ds[var_name]).data
         if self.do_shift and self.is_data_global:
-            transform = list(kwargs["transform"])
+            transform = list(transform)
             transform[2] = 0
-            kwargs["transform"] = tuple(transform)
+            transform = tuple(transform)
 
         if var == "fdir":
-            self.add_fdir(data=data, **kwargs)
+            self.add_fdir(data=data.data, ftype=ftype, **kwargs)
         elif var == "dem":
             self.add_dem(data=data, **kwargs)
         else:
@@ -110,9 +121,11 @@ class Catchment:
         Inits the FlwdirRaster class from dem.
         """
         # perform checks
-        self.elevtn = self._modify_data(data).data
+        self.elevtn = data.data
         if self._fdir is None:
-            self._fdir = pyflwdir.from_dem(data=self.elevtn, **kwargs)
+            # Create a flow direction object
+            self._fdir = pyflwdir.from_dem(data=self.elevtn, nodata=np.nan, **kwargs)
+            self.get_fdir()
 
     def add_fdir(self, data, ftype, **kwargs):
         """
@@ -158,6 +171,8 @@ class Catchment:
 
     def write(self, out_path, single_file=True, format="nc", cellsize=None):
         data_vars = {}
+        if not pl.Path(out_path).is_dir():
+            pl.Path(out_path).mkdir(parents=True, exist_ok=True)
         for var_name in self.VARIABLES.keys():
             data = getattr(self, var_name)
             if data is None:
@@ -178,7 +193,7 @@ class Catchment:
                 data_var.attrs = {
                     "title": self.VARIABLES[var_name]["title"],
                     "units": self.VARIABLES[var_name]["units"],
-                    "creator": "Robert Schweppe (robert.schweppe@ufz.de)",
+                    "creator": "Department of Computational Hydrosystems",
                     "institution": "Helmholtz Centre for Environmental Research - UFZ",
                 }
                 fname = pl.Path(out_path, f"{var_name}.{format}")
@@ -231,7 +246,7 @@ class Catchment:
                 ds[coord].attrs = self.ds[coord].attrs
             ds.attrs = {
                 "title": "Hydrologic information",
-                "creator": "Robert Schweppe (robert.schweppe@ufz.de)",
+                "creator": "Department of Computational Hydrosystems",
                 "institution": "Helmholtz Centre for Environmental Research - UFZ",
             }
             for var_name in ds.data_vars:
@@ -240,9 +255,9 @@ class Catchment:
                     "standard_name": self.VARIABLES[var_name]["title"],
                     "units": self.VARIABLES[var_name]["units"],
                 }
-            # ds.to_netcdf(
+
             ds.sel(lat=slice(84, -56)).to_netcdf(
-                pl.Path(out_path),
+                pl.Path(out_path, self.out_var_name),
                 encoding={
                     var_name: {
                         "dtype": ds[var_name].dtype,
@@ -275,18 +290,46 @@ def merge_catchment(path1, path2, out_path):
     merged.to_netcdf(out_path)
 
 
-def create_catchment(input_file, output_path, var_name, var, ftype):
-    c = Catchment(
-        file_name=pl.Path(input_file),
+def process_catchment(
+    ds, var_name, var, ftype, transform, latlon, out_var_name, do_shift=False
+):
+    return Catchment(
+        ds=ds,
         var_name=var_name,
         var=var,
         ftype=ftype,
-        transform=(0.05, 0.0, -180, 0, 0.05, -90),
-        latlon=True,
-        # do_shift=True
+        transform=transform,
+        latlon=latlon,
+        out_var_name=out_var_name,
+        do_shift=do_shift,
     )
-    c.get_basins()
-    c.get_facc()
-    c.get_grid_area()
-    c.get_upstream_area()
-    c.write(output_path, single_file=True)
+
+
+def create_catchment(input_file, output_path, var_name, var, ftype):
+
+    if var not in {"fdir", "dem"}:
+        raise ValueError(f"Unexpected value for var={var}, must be 'fdir' or 'dem'")
+
+    ds = xr.open_dataset(pl.Path(input_file))
+    transform = (0.05, 0.0, -180, 0, 0.05, -90)
+    latlon = True
+
+    catchments = [
+        process_catchment(ds, var_name, var, ftype, transform, latlon, "hydro1.nc"),
+        process_catchment(ds, var_name, var, ftype, transform, latlon, "hydro2.nc", do_shift=True),
+    ]
+
+    for c in catchments:
+        c.get_basins()
+        c.get_facc()
+        c.get_grid_area()
+        c.get_upstream_area()
+        c.write(output_path, single_file=True)
+
+    merge_catchment(
+        pl.Path(output_path, "hydro1.nc"),
+        pl.Path(output_path, "hydro2.nc"),
+        pl.Path(output_path, "hydro_merged_03min.nc"),
+    )
+
+    print(f"\nNetCDF basins file has been stored! \nSee {output_path}/hydro_merged_03min.nc\n")
