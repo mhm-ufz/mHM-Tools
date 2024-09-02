@@ -1,6 +1,5 @@
 """Create the mHM restart file."""
 
-import logging
 import re
 import shutil
 from pathlib import Path
@@ -10,11 +9,7 @@ import numpy as np
 import xarray as xr
 from joblib import Parallel, delayed
 
-from mhm_tools.common.constants import LOG_LEVELS
-
-logging.basicConfig(format="%(asctime)s - %(levelname)-8s - %(message)s")
-logger = logging.getLogger(__name__)
-
+from mhm_tools.common.logger import logger, set_log_level
 
 class MorphFiles:
     """
@@ -419,7 +414,7 @@ class MHMRestartFile:
         merge_only=False,
         clean_temp_files=False,
     ):
-        logger.setLevel(LOG_LEVELS.get(log_level, logging.INFO))
+        logger = set_log_level(log_level)
         logger.debug(f"Creating MHMRestartFile object with {locals()}")
         self.nml_template = Path(nml_template)
         self.output_path = Path(output_path)
@@ -1093,6 +1088,7 @@ class MHMRestartFile:
         ------
             Any exceptions that occur during the execution of the method.
         """
+
         logger.info("Creating restart file")
         if self.run_on_whole_domain:
             logger.info("grid will be processed as a whole")
