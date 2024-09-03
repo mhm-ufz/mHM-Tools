@@ -368,9 +368,9 @@ def create_catchment(input_file, output_path, var_name, var, ftype, gauge_coords
         c.get_facc()
         c.get_grid_area()
         c.get_upstream_area()
-        logger.info("Cutting to filled area")
-        c.cut_to_filled_area()
-        # logger.info(f"Writing catchment file to {output_path}")
-        # fdir = c.flwdir
+        # logger.info("Cutting to filled area")
+        # c.cut_to_filled_area()
+        logger.info(f"Writing catchment file to {output_path}")
+        fdir = c.flwdir
 
     print(f"\nNetCDF basins file has been stored! \nSee {output_path}/hydro_merged_03min.nc\n")
