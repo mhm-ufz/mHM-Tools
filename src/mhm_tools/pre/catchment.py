@@ -78,7 +78,7 @@ class Catchment:
         self.grdare = None
         self.elevtn = None
         self._fdir = None
-        self.out_var_name = out_var_name
+        self.out_var_name = out_var_name if out_var_name is not None else var_name
         self.do_shift = do_shift
         self.ds = ds
 
@@ -264,7 +264,7 @@ class Catchment:
                 }
 
             ds.sel(lat=slice(84, -56)).to_netcdf(
-                pl.Path(out_path, self.out_var_name),
+                out_path / self.out_var_name,
                 encoding={
                     var_name: {
                         "dtype": ds[var_name].dtype,
@@ -336,6 +336,7 @@ def create_catchment(input_file, output_path, var_name, var, ftype, gauge_coords
         c.get_grid_area()
         c.get_upstream_area()
         logger.info(f"Writing catchment file to {output_path}")
+        c
         c.write(output_path, single_file=True)
 
     print(f"\nNetCDF basins file has been stored! \nSee {output_path}/hydro_merged_03min.nc\n")
