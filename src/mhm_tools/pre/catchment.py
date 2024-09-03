@@ -78,7 +78,9 @@ class Catchment:
         self.grdare = None
         self.elevtn = None
         self._fdir = None
-        self.out_var_name = out_var_name if out_var_name is not None else var_name
+        self.out_var_name = out_var_name if out_var_name is not None else f"{var_name}.nc"
+        if type(self.out_var_name) is not str:
+            self.out_var_name = f"{var_name}.nc"
         self.do_shift = do_shift
         self.ds = ds
 
