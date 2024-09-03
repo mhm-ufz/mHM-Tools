@@ -147,7 +147,10 @@ class Catchment:
         """
         Deliniate the basin for a given lat and lon
         """
-        self.basin = self._fdir.basins(xy=(lat, lon))
+        idx = (lon + 180) / 0.05
+        idy = (lat + 90) / 0.05
+        id = idy * 7200 + idx
+        self.basin = self._fdirl.basins(idx=int(id))
 
     def get_basins(self):
         """
@@ -278,7 +281,7 @@ class Catchment:
             )
     def cut_to_filled_area(self):
         import matplotlib.pyplot as plt
-        mask = self.basin == 0
+        mask = self.basin
          # Find the non-zero elements
         rows = np.any(mask, axis=1)  # Boolean array for rows with any filled cells
         cols = np.any(mask, axis=0)  # Boolean array for columns with any filled cells
@@ -291,7 +294,12 @@ class Catchment:
             data = self.VARIABLES[var_name].values
             # Slice the array to extract the filled part
             logger.info(f"Cutting {var_name} to filled area")
-            logger.info(f"Shape of data: {data.shape}")
+            print(data)
+            try:
+                logger.info(f"Shape of data: {data.shape}")
+            except:
+                data = data.data
+                logger.info(f"Shape of data: {data.shape}")
             filled_part = data[min_row:max_row+1, min_col:max_col+1]
             plt.imshow(filled_part)
             plt.savefig(f"/work/luedke/{var_name}.png")
