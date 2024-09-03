@@ -178,8 +178,9 @@ class Catchment:
 
     def write(self, out_path, single_file=True, format="nc", cellsize=None):
         data_vars = {}
-        if not pl.Path(out_path).is_dir():
-            pl.Path(out_path).mkdir(parents=True, exist_ok=True)
+        out_path = pl.Path(out_path)
+        if not out_path.is_dir():
+            out_path.mkdir(parents=True, exist_ok=True)
         for var_name in self.VARIABLES.keys():
             data = getattr(self, var_name)
             if data is None:
@@ -203,7 +204,7 @@ class Catchment:
                     "creator": "Department of Computational Hydrosystems",
                     "institution": "Helmholtz Centre for Environmental Research - UFZ",
                 }
-                fname = pl.Path(out_path, f"{var_name}.{format}")
+                fname = out_path / f"{var_name}.{format}"
                 if format == "nc":
                     data_var.to_netcdf(
                         fname,

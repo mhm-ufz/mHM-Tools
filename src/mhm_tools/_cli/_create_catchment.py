@@ -89,6 +89,8 @@ def run(args):
     if args.gauge_coords is not None:
         gauge_coords = args.gauge_coords.split(",")
         gauge_coords = (float(gauge_coords[0]), float(gauge_coords[1]))
+    else:
+        gauge_coords = None
     create_catchment(
         input_file=args.input_file,
         output_path=args.output_path,
