@@ -286,13 +286,16 @@ class Catchment:
         # Get the indices of the non-zero rows and columns
         min_row, max_row = np.where(rows)[0][[0, -1]]
         min_col, max_col = np.where(cols)[0][[0, -1]]
-
+        logger.info(f"min_row: {min_row}, max_row: {max_row}, min_col: {min_col}, max_col: {max_col}")
         for var_name in self.VARIABLES.keys():
             data = self.VARIABLES[var_name]
             # Slice the array to extract the filled part
+            logger.info(f"Cutting {var_name} to filled area")
+            logger.info(f"Shape of data: {data.shape}")
             filled_part = data[min_row:max_row+1, min_col:max_col+1]
             plt.imshow(filled_part)
             plt.savefig(f"/work/luedke/{var_name}.png")
+            plt.close()
             self.VARIABLES[var_name] = filled_part
 
 
