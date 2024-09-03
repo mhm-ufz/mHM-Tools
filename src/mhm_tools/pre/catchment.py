@@ -288,7 +288,7 @@ class Catchment:
         min_col, max_col = np.where(cols)[0][[0, -1]]
         logger.info(f"min_row: {min_row}, max_row: {max_row}, min_col: {min_col}, max_col: {max_col}")
         for var_name in self.VARIABLES.keys():
-            data = self.VARIABLES[var_name]
+            data = self.VARIABLES[var_name].values
             # Slice the array to extract the filled part
             logger.info(f"Cutting {var_name} to filled area")
             logger.info(f"Shape of data: {data.shape}")
