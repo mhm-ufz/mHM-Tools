@@ -73,6 +73,7 @@ def add_args(parser):
     parser.add_argument(
         "--gauge_coords",
         default=None,
+        type=str,
         help=("Gauge coordinates in the form of 'lon,lat'"),
     )
 
@@ -94,6 +95,5 @@ def run(args):
         var_name=args.vn,
         var=args.var,
         ftype=args.ftp,
-        split_file=args.split_file,
-        
+        gauge_coords=gauge_coords        
     )

@@ -320,8 +320,10 @@ def create_catchment(input_file, output_path, var_name, var, ftype, gauge_coords
             c.get_facc()
             c.get_grid_area()
             c.get_upstream_area()
+            logger.info(f"Writing catchment file to {output_path}")
             c.write(output_path, single_file=True)
 
+        logger.info(f"Merging catchment files")
         merge_catchment(
             pl.Path(output_path, "hydro1.nc"),
             pl.Path(output_path, "hydro2.nc"),
@@ -333,6 +335,7 @@ def create_catchment(input_file, output_path, var_name, var, ftype, gauge_coords
         c.get_facc()
         c.get_grid_area()
         c.get_upstream_area()
+        logger.info(f"Writing catchment file to {output_path}")
         c.write(output_path, single_file=True)
 
     print(f"\nNetCDF basins file has been stored! \nSee {output_path}/hydro_merged_03min.nc\n")

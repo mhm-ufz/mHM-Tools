@@ -10,7 +10,7 @@ Based on a script by
 - Matthias Kelbling
 """
 
-import logging
+from mhm_tools.common.logger import logger
 from pathlib import Path
 
 import matplotlib as mpl
@@ -18,10 +18,6 @@ import numpy as np
 import xarray as xr
 from scipy.interpolate import NearestNDInterpolator
 
-# logger
-logging.basicConfig(format="%(asctime)s - %(levelname)-8s - %(message)s")
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 # GLOBAL VARIABLES
 # Coordinate arrays for the shape of Greenland in lons, lats
@@ -105,6 +101,7 @@ class CreateSubdomainMasks:
     @staticmethod
     def read_var(fname, var_name):
         """Read a variable from a netcdf file."""
+        logger.info(f"reading variable {var_name} from {fname}")
         with xr.open_dataset(fname) as ds:
             return ds[var_name]
 
