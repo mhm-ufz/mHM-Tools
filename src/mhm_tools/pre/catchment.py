@@ -276,6 +276,25 @@ class Catchment:
                     for var_name in ds.data_vars
                 },
             )
+    def cut_to_filled_area(self):
+        import matplotlib.pyplot as plt
+        mask = self.basin == 0
+         # Find the non-zero elements
+        rows = np.any(mask, axis=1)  # Boolean array for rows with any filled cells
+        cols = np.any(mask, axis=0)  # Boolean array for columns with any filled cells
+
+        # Get the indices of the non-zero rows and columns
+        min_row, max_row = np.where(rows)[0][[0, -1]]
+        min_col, max_col = np.where(cols)[0][[0, -1]]
+
+        for var_name in self.VARIABLES.keys():
+            data = self.VARIABLES[var_name]
+            # Slice the array to extract the filled part
+            filled_part = data[min_row:max_row+1, min_col:max_col+1]
+            plt.imshow(filled_part)
+            plt.savefig(f"/work/luedke/{var_name}.png")
+            self.VARIABLES[var_name] = filled_part
+
 
 
 # use this code to merge the rolled and non-rolled file
@@ -338,8 +357,9 @@ def create_catchment(input_file, output_path, var_name, var, ftype, gauge_coords
         c.get_facc()
         c.get_grid_area()
         c.get_upstream_area()
-        logger.info(f"Writing catchment file to {output_path}")
-        c
-        c.write(output_path, single_file=True)
+        logger.info("Cutting to filled area")
+        c.cut_to_filled_area()
+        # logger.info(f"Writing catchment file to {output_path}")
+        # fdir = c.flwdir
 
     print(f"\nNetCDF basins file has been stored! \nSee {output_path}/hydro_merged_03min.nc\n")
