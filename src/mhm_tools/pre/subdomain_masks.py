@@ -90,7 +90,7 @@ class CreateSubdomainMasks:
 
         self.output_dir = Path(output_dir)
 
-        out_dir_path = self.output_dir / output_file_name
+        out_dir_path = self.output_dir
         if not out_dir_path.is_dir():
             out_dir_path.mkdir(parents=True)
         self.out_file_name = str(out_dir_path / Path(output_file_name).stem)
