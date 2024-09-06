@@ -78,6 +78,7 @@ class Catchment:
         self.grdare = None
         self.elevtn = None
         self._fdir = None
+        self.lsmask = None
         self.out_var_name = out_var_name if out_var_name is not None else f"{var_name}.nc"
         if type(self.out_var_name) is not str:
             self.out_var_name = f"{var_name}.nc"
@@ -184,6 +185,9 @@ class Catchment:
     def write(self, out_path, single_file=True, format="nc", cellsize=None):
         data_vars = {}
         out_path = pl.Path(out_path)
+        data = getattr(self, 'basin')
+        self.lsmask = np.full(data.shape, -9999)
+        self.lsmask[data != -9999 and not np.isnan(data)] = 1
         if not out_path.is_dir():
             out_path.mkdir(parents=True, exist_ok=True)
         for var_name in self.VARIABLES.keys():
@@ -363,7 +367,7 @@ def create_catchment(input_file, output_path, var_name, var, ftype, gauge_coords
         merge_catchment(
             pl.Path(output_path, "hydro1.nc"),
             pl.Path(output_path, "hydro2.nc"),
-            pl.Path(output_path, "hydro_merged_03min.nc"),
+            pl.Path(output_path, "hydro_merged.nc"),
         )
     else:
         c = Catchment(ds=ds, var_name=var_name, var=var, ftype=ftype, transform=transform, latlon=latlon, out_var_name="hydro.nc", do_shift=False)
