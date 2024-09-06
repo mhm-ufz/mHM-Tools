@@ -343,9 +343,12 @@ def create_catchment(input_file, output_path, var_name, var, ftype, gauge_coords
     latlon = True
 
     if gauge_coords is None:
+        global_catchments = Catchment(ds, var_name, var, ftype, transform, latlon, "hydro1.nc", do_shift=False)
+        # create a shifted version of the catchment to avoid border effects
+        global_catchments_shifted = Catchment(ds, var_name, var, ftype, transform, latlon, "hydro2.nc", do_shift=True)
         catchments = [
-            Catchment(ds, var_name, var, ftype, transform, latlon, "hydro1.nc"),
-            Catchment(ds, var_name, var, ftype, transform, latlon, "hydro2.nc", do_shift=True) # create a shifted version of the catchment to avoid border effects
+            global_catchments,
+            global_catchments_shifted
         ]
 
         for c in catchments:
