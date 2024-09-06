@@ -343,9 +343,9 @@ def create_catchment(input_file, output_path, var_name, var, ftype, gauge_coords
     latlon = True
 
     if gauge_coords is None:
-        global_catchments = Catchment(ds, var_name, var, ftype, transform, latlon, "hydro1.nc", do_shift=False)
+        global_catchments = Catchment(ds=ds, var_name=var_name, var=var, ftype=ftype, transform=transform, latlon=latlon, out_var_name="hydro1.nc", do_shift=False)
         # create a shifted version of the catchment to avoid border effects
-        global_catchments_shifted = Catchment(ds, var_name, var, ftype, transform, latlon, "hydro2.nc", do_shift=True)
+        global_catchments_shifted = Catchment(ds=ds, var_name=var_name, var=var, ftype=ftype, transform=transform, latlon=latlon, out_var_name="hydro2.nc", do_shift=True)
         catchments = [
             global_catchments,
             global_catchments_shifted
@@ -366,7 +366,7 @@ def create_catchment(input_file, output_path, var_name, var, ftype, gauge_coords
             pl.Path(output_path, "hydro_merged_03min.nc"),
         )
     else:
-        c = Catchment(ds, var_name, var, ftype, transform, latlon, "hydro.nc")
+        c = Catchment(ds=ds, var_name=var_name, var=var, ftype=ftype, transform=transform, latlon=latlon, out_var_name="hydro.nc", do_shift=False)
         c.delineate_basin(*gauge_coords)
         c.get_facc()
         c.get_grid_area()
