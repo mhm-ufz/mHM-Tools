@@ -199,7 +199,7 @@ class Catchment:
         for var_name in self.VARIABLES.keys():
             data = getattr(self, var_name)
             if cut_by_basin:
-                data(~self.catchment_mask) = self.VARIABLES[var_name]["_FillValue"]
+                data[~self.catchment_mask] = self.VARIABLES[var_name]["_FillValue"]
             if data is None:
                 continue
             data_var = xr.Dataset(
