@@ -188,7 +188,7 @@ class Catchment:
         if not out_path.is_dir():
             out_path.mkdir(parents=True, exist_ok=True)
         if cut_by_basin:
-            lat_slice, lon_slice = self.cut_to_filled_area(data)
+            lat_slice, lon_slice = self.cut_to_filled_area()
         else:
             lat_slice, lon_slice = slice(-56,84), slice(None)
 
