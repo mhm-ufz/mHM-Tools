@@ -222,10 +222,10 @@ class CreateSubdomainMasks:
     
     def use_land_mask(self):
         """ Reencode and mask the input files"""
-        # new_ids = self.read_var(fname=self.ref_file, var_name="basin")
         land_mask = self.read_var(fname=self.land_file, var_name="land_mask").astype(
             bool
         )
+        logger.info(f"reading {self.ref_file}")
         ds_ref_file = xr.open_dataset(self.ref_file).sel(
             lat=land_mask.lat, lon=land_mask.lon, method="nearest"
         )
@@ -233,10 +233,12 @@ class CreateSubdomainMasks:
             if coord in ds_ref_file:
                 ds_ref_file = ds_ref_file.drop(coord)
         sub_mask = ~np.isnan(land_mask)
-        fname = self.out_file_name + f".nc"
         ds_sub_ref_file = ds_ref_file.copy()
         for data_var in ds_sub_ref_file.data_vars:
+            logger.info(f"processing {data_var}")
             ds_sub_ref_file[data_var].values[~sub_mask] = np.nan
+        fname = self.out_file_name + f".nc"
+        logger.info(f"writing to {fname}")
         ds_sub_ref_file.to_netcdf(fname, encoding=REF_FILE_ENCODING)
 
 
