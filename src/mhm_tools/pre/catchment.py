@@ -295,11 +295,11 @@ class Catchment:
         logger.info(f"min_row: {min_row}, max_row: {max_row}, min_col: {min_col}, max_col: {max_col}")
             # Slice the array to extract the filled part
         data = data[min_row:max_row+1, min_col:max_col+1]
-        if len(self.lon) > len(data):
-            self.lon = self.lon[min_col:max_col+1]
-        if len(self.lat) > len(data[0]):
-            self.lat = self.lat[min_row:max_row+1]
-        elif len(self.lat) < len(data[0]) or len(self.lon) < len(data):
+        if len(self.ds.lon) > len(data):
+            self.ds.lon = self.ds.lon[min_col:max_col+1]
+        if len(self.ds.lat) > len(data[0]):
+            self.ds.lat = self.ds.lat[min_row:max_row+1]
+        elif len(self.ds.lat) < len(data[0]) or len(self.ds.lon) < len(data):
             raise ValueError("The catchment mask is larger than the data size")
         return data
 
