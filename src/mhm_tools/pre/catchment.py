@@ -147,8 +147,8 @@ class Catchment:
         """
         Deliniate the basin for a given lat and lon
         """
-        self.basin = self._fdir.basins(xy=gauge_coords)
-        print(f"Basin: {self.basin}")
+        self.basin = self._fdir.basins(xy=gauge_coords, streams=self._fdir.stream_order() >= 4)
+
 
     def get_basins(self):
         """
@@ -278,6 +278,7 @@ class Catchment:
                     for var_name in ds.data_vars
                 },
             )
+            logger.info(f"Basin Id has been written to {out_path / self.out_var_name}")
     def cut_to_filled_area(self):
         import matplotlib.pyplot as plt
         mask = self.basin
@@ -304,7 +305,6 @@ class Catchment:
             plt.savefig(f"/work/luedke/{var_name}.png")
             plt.close()
             self.VARIABLES[var_name] = filled_part
-
 
 
 # use this code to merge the rolled and non-rolled file
@@ -355,7 +355,6 @@ def create_catchment(input_file, output_path, var_name, var, ftype, gauge_coords
             c.get_facc()
             c.get_grid_area()
             c.get_upstream_area()
-            logger.info(f"Writing catchment file to {output_path}")
             c.write(output_path, single_file=True)
 
         logger.info(f"Merging catchment files")
@@ -365,12 +364,12 @@ def create_catchment(input_file, output_path, var_name, var, ftype, gauge_coords
             pl.Path(output_path, "hydro_merged.nc"),
         )
     else:
+        logger.info(f"Creating catchment for gauge coordinates {gauge_coords}")
         c = Catchment(ds=ds, var_name=var_name, var=var, ftype=ftype, transform=transform, latlon=latlon, out_var_name="hydro.nc", do_shift=False)
         c.delineate_basin(gauge_coords)
         c.get_facc()
         c.get_grid_area()
         c.get_upstream_area()
-        logger.info(f"Writing catchment file to {output_path}")
-
+        
+        c.cut_to_filled_area()
         c.write(output_path, single_file=True)
-    print(f"\nNetCDF basins file has been stored! \nSee {output_path}/hydro_merged_03min.nc\n")
