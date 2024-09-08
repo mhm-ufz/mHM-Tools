@@ -150,9 +150,10 @@ class Catchment:
         Deliniate the basin for a given lat and lon
         """
         self.basin = self._fdir.basins(xy=gauge_coords, streams=self._fdir.stream_order() >= 4)
-        if not np.any(np.isnan(self.basin)):
-            self.basin[np.where(self.basin == 0)] = np.nan
         self.catchment_mask = self.basin > 0
+        if not np.any(np.isnan(self.basin)):
+            self.basin[np.where(~self.catchment_mask)] = self.VARIABLES["basin"]["_FillValue"]
+        
 
 
     def get_basins(self):
@@ -198,7 +199,7 @@ class Catchment:
         for var_name in self.VARIABLES.keys():
             data = getattr(self, var_name)
             if cut_by_basin:
-                data = data.where(~np.isnan(self.basin))
+                data(~self.catchment_mask) = self.VARIABLES[var_name]["_FillValue"]
             if data is None:
                 continue
             data_var = xr.Dataset(
