@@ -13,7 +13,7 @@ import pathlib as pl
 import numpy as np
 import pyflwdir
 import xarray as xr
-from mhm_tools.common.logger import logger
+from mhm_tools.common.logger import logger, set_log_level
 
 # GLOBAL VARIABLES
 FDIR_FILLVALUE = {"d8": 247, "ldd": 255}
@@ -128,7 +128,8 @@ class Catchment:
         self.elevtn = data.data
         if self._fdir is None:
             # Create a flow direction object
-            self._fdir = pyflwdir.from_dem(data=self.elevtn, nodata=np.nan, **kwargs)
+            logger.debug("add_dem: kwargs: ", kwargs)
+            self._fdir = pyflwdir.from_dem(data=self.elevtn, nodata=np.nan, transform=(0.05, 0.0, -180, 0, 0.05, -90), latlon=True)
             self.get_fdir()
 
     def add_fdir(self, data, ftype, **kwargs):
@@ -295,10 +296,10 @@ class Catchment:
         # Get the indices of the non-zero rows and columns
         min_row, max_row = np.where(rows)[0][[0, -1]]
         min_col, max_col = np.where(cols)[0][[0, -1]]
-        logger.info(f"min_row: {min_row}, max_row: {max_row}, min_col: {min_col}, max_col: {max_col}")
             # Slice the array to extract the filled part
         lat_slice = slice(self.ds.lat[min_col], self.ds.lat[max_col])
         lon_slice = slice(self.ds.lon[min_row], self.ds.lon[max_row])
+        logger.info(f"lat_slice: {lat_slice}, lon_slice: {lon_slice}")
         return lat_slice, lon_slice
 
 # use this code to merge the rolled and non-rolled file
@@ -326,6 +327,7 @@ def merge_catchment(path1, path2, out_path):
 
 def create_catchment(input_file, output_path, var_name, var, ftype, gauge_coords=None):
 
+    set_log_level("DEBUG")
     logger.info(f"Creating catchment file for {var_name} using {var} and {ftype} from {input_file}")
 
     if var not in {"fdir", "dem"}:
