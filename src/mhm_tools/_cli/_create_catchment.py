@@ -3,6 +3,7 @@ TODO: add description
 """
 
 from ..pre import create_catchment
+import numpy as np
 
 
 def add_args(parser):
