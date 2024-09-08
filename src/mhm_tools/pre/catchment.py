@@ -151,7 +151,7 @@ class Catchment:
         """
         self.basin = self._fdir.basins(xy=gauge_coords, streams=self._fdir.stream_order() >= 4)
         if not np.any(np.isnan(self.basin)):
-            self.basin = self.basin.where(self.basin > 0)
+            self.basin[np.where(self.basin == 0)] = np.nan
         self.catchment_mask = self.basin > 0
 
 
