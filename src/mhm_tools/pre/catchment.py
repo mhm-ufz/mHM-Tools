@@ -179,7 +179,7 @@ class Catchment:
         data[~self._fdir.mask.reshape(data.shape)] = 0
         self.upgrid = self._fdir.accuflux(data, nodata=0)
 
-    def write(self, out_path, single_file=True, format="nc", cellsize=None):
+    def write(self, out_path, single_file=True, format="nc", cellsize=None, cut_by_basin=False):
         data_vars = {}
         out_path = pl.Path(out_path)
         data = getattr(self, 'basin')
@@ -187,6 +187,8 @@ class Catchment:
             out_path.mkdir(parents=True, exist_ok=True)
         for var_name in self.VARIABLES.keys():
             data = getattr(self, var_name)
+            if cut_by_basin:
+                data = self.cut_to_filled_area(data)
             if data is None:
                 continue
             data_var = xr.Dataset(
@@ -279,7 +281,7 @@ class Catchment:
                 },
             )
             logger.info(f"Basin Id has been written to {out_path / self.out_var_name}")
-    def cut_to_filled_area(self):
+    def cut_to_filled_area(self, data):
         import matplotlib.pyplot as plt
         mask = self.basin
          # Find the non-zero elements
@@ -290,21 +292,8 @@ class Catchment:
         min_row, max_row = np.where(rows)[0][[0, -1]]
         min_col, max_col = np.where(cols)[0][[0, -1]]
         logger.info(f"min_row: {min_row}, max_row: {max_row}, min_col: {min_col}, max_col: {max_col}")
-        for var_name in self.VARIABLES.keys():
-            data = self.VARIABLES[var_name].values
             # Slice the array to extract the filled part
-            logger.info(f"Cutting {var_name} to filled area")
-            print(data)
-            try:
-                logger.info(f"Shape of data: {data.shape}")
-            except:
-                data = data.data
-                logger.info(f"Shape of data: {data.shape}")
-            filled_part = data[min_row:max_row+1, min_col:max_col+1]
-            plt.imshow(filled_part)
-            plt.savefig(f"/work/luedke/{var_name}.png")
-            plt.close()
-            self.VARIABLES[var_name] = filled_part
+        return data[min_row:max_row+1, min_col:max_col+1]
 
 
 # use this code to merge the rolled and non-rolled file
@@ -370,6 +359,4 @@ def create_catchment(input_file, output_path, var_name, var, ftype, gauge_coords
         c.get_facc()
         c.get_grid_area()
         c.get_upstream_area()
-        
-        c.cut_to_filled_area()
-        c.write(output_path, single_file=True)
+        c.write(output_path, single_file=True, cut_by_basin=True)
