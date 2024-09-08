@@ -84,6 +84,8 @@ class Catchment:
             self.out_var_name = f"{var_name}.nc"
         self.do_shift = do_shift
         self.ds = ds
+        self.lon = ds.lon
+        self.lat = ds.lat
 
         data = self._modify_data(self.ds[var_name])
 
@@ -103,21 +105,21 @@ class Catchment:
     def is_data_global(self):
         return (
             "lon" in self.ds.coords
-            and self.ds.lon.min() < (CUTOFF_THRESHOLD * -1)
-            and self.ds.lon.max() > CUTOFF_THRESHOLD
+            and self.lon.min() < (CUTOFF_THRESHOLD * -1)
+            and self.lon.max() > CUTOFF_THRESHOLD
         )
 
     def _modify_data(self, data):
         # correct circumspanning data
         if self.do_shift and self.is_data_global:
-            tmp = data.roll(lon=int(len(self.ds.lon) / 2), roll_coords=True)
+            tmp = data.roll(lon=int(len(self.lon) / 2), roll_coords=True)
             return tmp
         return data
 
     def _revert_data(self, data):
         # correct circumspanning data
         if self.do_shift and self.is_data_global:
-            return np.roll(data, int(len(self.ds.lon) / 2), axis=1)
+            return np.roll(data, int(len(self.lon) / 2), axis=1)
         return data
 
     def add_dem(self, data, **kwargs):
@@ -196,8 +198,8 @@ class Catchment:
             data_var = xr.Dataset(
                 {var_name: (["lat", "lon"], self._revert_data(data))},
                 coords={
-                    "lon": self.ds.lon,  # [slice(3555, 3565)],
-                    "lat": self.ds.lat,  # [slice(860, 870)],
+                    "lon": self.lon,  # [slice(3555, 3565)],
+                    "lat": self.lat,  # [slice(860, 870)],
                 },
             )
             if single_file:
@@ -295,11 +297,11 @@ class Catchment:
         logger.info(f"min_row: {min_row}, max_row: {max_row}, min_col: {min_col}, max_col: {max_col}")
             # Slice the array to extract the filled part
         data = data[min_row:max_row+1, min_col:max_col+1]
-        if len(self.ds.lon) > len(data):
-            self.ds.lon = self.ds.lon[min_col:max_col+1]
-        if len(self.ds.lat) > len(data[0]):
-            self.ds.lat = self.ds.lat[min_row:max_row+1]
-        elif len(self.ds.lat) < len(data[0]) or len(self.ds.lon) < len(data):
+        if len(self.lon) > len(data):
+            self.lon = self.lon[min_col:max_col+1]
+        if len(self.lat) > len(data[0]):
+            self.lat = self.lat[min_row:max_row+1]
+        elif len(self.lat) < len(data[0]) or len(self.lon) < len(data):
             raise ValueError("The catchment mask is larger than the data size")
         return data
 
