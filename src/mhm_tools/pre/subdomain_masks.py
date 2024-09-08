@@ -211,7 +211,7 @@ class CreateSubdomainMasks:
 
             logger.info(f"processing subdomain {i}")
 
-            sub_mask = new_ids_remapped.values == basin_id
+            sub_mask = (new_ids_remapped.values == basin_id) & ~np.isnan(land_mask)
 
             fname = self.out_file_name + f"_{i:02}.nc"
             ds_sub_ref_file = ds_ref_file.copy()
@@ -219,6 +219,26 @@ class CreateSubdomainMasks:
                 ds_sub_ref_file[data_var].values[~sub_mask] = np.nan
 
             ds_sub_ref_file.to_netcdf(fname, encoding=REF_FILE_ENCODING)
+    
+    def use_land_mask(self):
+        """ Reencode and mask the input files"""
+        # new_ids = self.read_var(fname=self.ref_file, var_name="basin")
+        land_mask = self.read_var(fname=self.land_file, var_name="land_mask").astype(
+            bool
+        )
+        ds_ref_file = xr.open_dataset(self.ref_file).sel(
+            lat=land_mask.lat, lon=land_mask.lon, method="nearest"
+        )
+        for coord in ["latitude", "longitude"]:
+            if coord in ds_ref_file:
+                ds_ref_file = ds_ref_file.drop(coord)
+        sub_mask = ~np.isnan(land_mask)
+        fname = self.out_file_name + f".nc"
+        ds_sub_ref_file = ds_ref_file.copy()
+        for data_var in ds_sub_ref_file.data_vars:
+            ds_sub_ref_file[data_var].values[~sub_mask] = np.nan
+        ds_sub_ref_file.to_netcdf(fname, encoding=REF_FILE_ENCODING)
+
 
 
 def create_subdomain_masks(
@@ -245,4 +265,11 @@ def create_subdomain_masks(
         basin_clusters=basin_clusters,
         land_mask=land_mask,
     )
-    csm.create_subdomains()
+    with xr.open_dataset(basin_id_file) as ds:
+        lat = ds.lat
+        lon = ds.lon
+        # if input is not global only create a file else create all subdomains
+        if np.max(lat)-np.min(lat) < 360 and np.max(lon)-np.min(lon) < 130:
+            csm.use_land_mask()
+        else:
+            csm.create_subdomains()
