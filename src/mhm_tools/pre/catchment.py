@@ -143,14 +143,12 @@ class Catchment:
             self._fdir = pyflwdir.from_array(data=data, ftype=ftype, **kwargs)
         self.get_fdir()
 
-    def delineate_basin(self, lat, lon):
+    def delineate_basin(self, gauge_coords):
         """
         Deliniate the basin for a given lat and lon
         """
-        idx = (lon + 180) / 0.05
-        idy = (lat + 90) / 0.05
-        id = idy * 7200 + idx
-        self.basin = self._fdir.basins(idx=int(id))
+        self.basin = self._fdir.basins(xy=gauge_coords)
+        print(f"Basin: {self.basin}")
 
     def get_basins(self):
         """
@@ -368,12 +366,11 @@ def create_catchment(input_file, output_path, var_name, var, ftype, gauge_coords
         )
     else:
         c = Catchment(ds=ds, var_name=var_name, var=var, ftype=ftype, transform=transform, latlon=latlon, out_var_name="hydro.nc", do_shift=False)
-        c.delineate_basin(*gauge_coords)
+        c.delineate_basin(gauge_coords)
         c.get_facc()
         c.get_grid_area()
         c.get_upstream_area()
-        # logger.info("Cutting to filled area")
-        # c.cut_to_filled_area()
         logger.info(f"Writing catchment file to {output_path}")
+
         c.write(output_path, single_file=True)
     print(f"\nNetCDF basins file has been stored! \nSee {output_path}/hydro_merged_03min.nc\n")
