@@ -307,7 +307,7 @@ class Catchment:
         logger.debug(f"shape of lat and lon: {self.ds.lat.shape}, {self.ds.lon.values.shape}")
         logger.debug(f"lat: min: {np.min(self.ds.lat.values)}, max: {np.max(self.ds.lat.values)} - {self.ds.lat.values[min_row]}, {self.ds.lat.values[max_row]}")
         logger.debug(f"lon: min: {np.min(self.ds.lon.values)}, max: {np.max(self.ds.lon.values)} - {self.ds.lon.values[min_col]}, {self.ds.lon.values[max_col]}")
-        lat_slice = slice(self.ds.lat.values[max_row], self.ds.lat.values[min_row])
+        lat_slice = slice(self.ds.lat.values[-max_row], self.ds.lat.values[-min_row])
         lon_slice = slice(self.ds.lon.values[min_col], self.ds.lon.values[max_col])
         return lat_slice, lon_slice
 
