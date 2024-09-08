@@ -78,6 +78,7 @@ class Catchment:
         self.grdare = None
         self.elevtn = None
         self._fdir = None
+        self.catchment_mask=None
         self.out_var_name = out_var_name if out_var_name is not None else f"{var_name}.nc"
         if type(self.out_var_name) is not str:
             self.out_var_name = f"{var_name}.nc"
@@ -148,6 +149,7 @@ class Catchment:
         Deliniate the basin for a given lat and lon
         """
         self.basin = self._fdir.basins(xy=gauge_coords, streams=self._fdir.stream_order() >= 4)
+        self.catchment_mask = self.basin > 0
 
 
     def get_basins(self):
@@ -283,10 +285,9 @@ class Catchment:
             logger.info(f"Basin Id has been written to {out_path / self.out_var_name}")
     def cut_to_filled_area(self, data):
         import matplotlib.pyplot as plt
-        mask = self.basin
          # Find the non-zero elements
-        rows = np.any(mask, axis=1)  # Boolean array for rows with any filled cells
-        cols = np.any(mask, axis=0)  # Boolean array for columns with any filled cells
+        rows = np.any(self.catchment_mask, axis=1)  # Boolean array for rows with any filled cells
+        cols = np.any(self.catchment_mask, axis=0)  # Boolean array for columns with any filled cells
 
         # Get the indices of the non-zero rows and columns
         min_row, max_row = np.where(rows)[0][[0, -1]]
