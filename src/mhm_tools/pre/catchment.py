@@ -305,9 +305,10 @@ class Catchment:
         logger.debug(f"min_row: {min_row}, max_row: {max_row}, min_col: {min_col}, max_col: {max_col}")
         logger.debug(f"shape of catchment_mask: {self.catchment_mask.shape}")
         logger.debug(f"shape of lat and lon: {self.ds.lat.shape}, {self.ds.lon.shape}")
+        logger.debug(f"lat: {self.ds.lat[min_row]}, {self.ds.lat[max_row]}")
+        logger.debug(f"lon: {self.ds.lon[min_col]}, {self.ds.lon[max_col]}")
         lat_slice = slice(self.ds.lat[max_row], self.ds.lat[min_row])
         lon_slice = slice(self.ds.lon[min_col], self.ds.lon[max_col])
-        logger.info(f"lat_slice: {lat_slice}, lon_slice: {lon_slice}")
         return lat_slice, lon_slice
 
 # use this code to merge the rolled and non-rolled file

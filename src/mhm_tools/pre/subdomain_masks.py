@@ -232,11 +232,10 @@ class CreateSubdomainMasks:
         for coord in ["latitude", "longitude"]:
             if coord in ds_ref_file:
                 ds_ref_file = ds_ref_file.drop(coord)
-        sub_mask = ~np.isnan(land_mask)
         ds_sub_ref_file = ds_ref_file.copy()
         for data_var in ds_sub_ref_file.data_vars:
             logger.info(f"processing {data_var}")
-            ds_sub_ref_file[data_var].values[~sub_mask] = np.nan
+            ds_sub_ref_file[data_var].values[np.isnan(land_mask)] = np.nan
         fname = self.out_file_name + f".nc"
         logger.info(f"writing to {fname}")
         ds_sub_ref_file.to_netcdf(fname, encoding=REF_FILE_ENCODING)
