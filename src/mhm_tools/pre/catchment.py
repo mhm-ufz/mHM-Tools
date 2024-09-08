@@ -290,8 +290,8 @@ class Catchment:
     def cut_to_filled_area(self):
         import matplotlib.pyplot as plt
          # Find the non-zero elements
-        rows = np.any(self.catchment_mask, axis=1)  # Boolean array for rows with any filled cells
         cols = np.any(self.catchment_mask, axis=0)  # Boolean array for columns with any filled cells
+        rows = np.any(self.catchment_mask, axis=1)  # Boolean array for rows with any filled cells
 
         # Get the indices of the non-zero rows and columns
         min_row, max_row = np.where(rows)[0][[0, -1]]
@@ -300,8 +300,8 @@ class Catchment:
         logger.debug(f"min_row: {min_row}, max_row: {max_row}, min_col: {min_col}, max_col: {max_col}")
         logger.debug(f"shape of catchment_mask: {self.catchment_mask.shape}")
         logger.debug(f"shape of lat and lon: {self.ds.lat.shape}, {self.ds.lon.shape}")
-        lat_slice = slice(self.ds.lat[min_col], self.ds.lat[max_col])
-        lon_slice = slice(self.ds.lon[min_row], self.ds.lon[max_row])
+        lat_slice = slice(self.ds.lat[min_row], self.ds.lat[max_row])
+        lon_slice = slice(self.ds.lon[min_col], self.ds.lon[max_col])
         logger.info(f"lat_slice: {lat_slice}, lon_slice: {lon_slice}")
         return lat_slice, lon_slice
 
