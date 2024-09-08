@@ -84,8 +84,6 @@ class Catchment:
             self.out_var_name = f"{var_name}.nc"
         self.do_shift = do_shift
         self.ds = ds
-        self.lon = ds.lon
-        self.lat = ds.lat
 
         data = self._modify_data(self.ds[var_name])
 
@@ -105,21 +103,21 @@ class Catchment:
     def is_data_global(self):
         return (
             "lon" in self.ds.coords
-            and self.lon.min() < (CUTOFF_THRESHOLD * -1)
-            and self.lon.max() > CUTOFF_THRESHOLD
+            and self.ds.lon.min() < (CUTOFF_THRESHOLD * -1)
+            and self.ds.lon.max() > CUTOFF_THRESHOLD
         )
 
     def _modify_data(self, data):
         # correct circumspanning data
         if self.do_shift and self.is_data_global:
-            tmp = data.roll(lon=int(len(self.lon) / 2), roll_coords=True)
+            tmp = data.roll(lon=int(len(self.ds.lon) / 2), roll_coords=True)
             return tmp
         return data
 
     def _revert_data(self, data):
         # correct circumspanning data
         if self.do_shift and self.is_data_global:
-            return np.roll(data, int(len(self.lon) / 2), axis=1)
+            return np.roll(data, int(len(self.ds.lon) / 2), axis=1)
         return data
 
     def add_dem(self, data, **kwargs):
@@ -189,17 +187,20 @@ class Catchment:
         data = getattr(self, 'basin')
         if not out_path.is_dir():
             out_path.mkdir(parents=True, exist_ok=True)
+        if cut_by_basin:
+            lat_slice, lon_slice = self.cut_to_filled_area(data)
+        else:
+            lat_slice, lon_slice = slice(-56,84), slice(None)
+
         for var_name in self.VARIABLES.keys():
             data = getattr(self, var_name)
-            if cut_by_basin:
-                data = self.cut_to_filled_area(data)
             if data is None:
                 continue
             data_var = xr.Dataset(
                 {var_name: (["lat", "lon"], self._revert_data(data))},
                 coords={
-                    "lon": self.lon,  # [slice(3555, 3565)],
-                    "lat": self.lat,  # [slice(860, 870)],
+                    "lon": self.ds.lon,  # [slice(3555, 3565)],
+                    "lat": self.ds.lat,  # [slice(860, 870)],
                 },
             )
             if single_file:
@@ -274,7 +275,7 @@ class Catchment:
                     "units": self.VARIABLES[var_name]["units"],
                 }
 
-            ds.sel(lat=slice(84, -56)).to_netcdf(
+            ds.sel(lat=lat_slice, lon=lon_slice).to_netcdf(
                 out_path / self.out_var_name,
                 encoding={
                     var_name: {
@@ -285,7 +286,7 @@ class Catchment:
                 },
             )
             logger.info(f"Basin Id has been written to {out_path / self.out_var_name}")
-    def cut_to_filled_area(self, data):
+    def cut_to_filled_area(self):
         import matplotlib.pyplot as plt
          # Find the non-zero elements
         rows = np.any(self.catchment_mask, axis=1)  # Boolean array for rows with any filled cells
@@ -296,15 +297,9 @@ class Catchment:
         min_col, max_col = np.where(cols)[0][[0, -1]]
         logger.info(f"min_row: {min_row}, max_row: {max_row}, min_col: {min_col}, max_col: {max_col}")
             # Slice the array to extract the filled part
-        data = data[min_row:max_row+1, min_col:max_col+1]
-        if len(self.lon) > len(data):
-            self.lon = self.lon[min_col:max_col+1]
-        if len(self.lat) > len(data[0]):
-            self.lat = self.lat[min_row:max_row+1]
-        elif len(self.lat) < len(data[0]) or len(self.lon) < len(data):
-            raise ValueError("The catchment mask is larger than the data size")
-        return data
-
+        lat_slice = slice(self.ds.lat[min_col], self.ds.lat[max_col])
+        lon_slice = slice(self.ds.lon[min_row], self.ds.lon[max_row])
+        return lat_slice, lon_slice
 
 # use this code to merge the rolled and non-rolled file
 def merge_catchment(path1, path2, out_path):
