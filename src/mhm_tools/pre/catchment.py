@@ -194,7 +194,7 @@ class Catchment:
         # if cut_by_basin:
         #     lat_slice, lon_slice = self.cut_to_filled_area()
         # else:
-        lat_slice, lon_slice = slice(-56,84), slice(None)
+        lat_slice, lon_slice = slice(84,-56), slice(None)
 
         for var_name in self.VARIABLES.keys():
             data = getattr(self, var_name)
@@ -281,6 +281,8 @@ class Catchment:
                     "units": self.VARIABLES[var_name]["units"],
                 }
 
+            logger.debug(f'lat_slice: {lat_slice}, lon_slice: {lon_slice}')
+            logger.debug(f"ds: {ds}")
             ds.sel(lat=lat_slice, lon=lon_slice).to_netcdf(
                 out_path / self.out_var_name,
                 encoding={
