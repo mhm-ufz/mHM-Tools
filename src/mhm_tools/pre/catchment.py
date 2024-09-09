@@ -196,10 +196,10 @@ class Catchment:
         data = getattr(self, 'basin')
         if not out_path.is_dir():
             out_path.mkdir(parents=True, exist_ok=True)
-        # if cut_by_basin:
-        #     lat_slice, lon_slice = self.cut_to_filled_area()
-        # else:
-        lat_slice, lon_slice = slice(84,-56), slice(None)
+        if cut_by_basin:
+            lat_slice, lon_slice = self.cut_to_filled_area()
+        else:
+            lat_slice, lon_slice = slice(84,-56), slice(None)
 
         for var_name in self.VARIABLES.keys():
             data = getattr(self, var_name)
@@ -347,9 +347,15 @@ def merge_catchment(path1, path2, out_path):
 def create_catchment(input_file, output_path, var_name, var, ftype, gauge_coords=None):
 
     gauge_coords = (
-        np.array([-2.0333,33.5431,32.4333,91.88,96.6,102.1367,-60.71]),
-        np.array([8.15,-24.7444,-23.4606,29.28,33.4333,19.8917,-32.67])
+        np.array([-59.6478]),
+        np.array([-3.0633])
     )
+    
+
+    # gauge_coords = (
+    #     np.array([-2.0333,33.5431,32.4333,91.88,96.6,102.1367,-60.71]),
+    #     np.array([8.15,-24.7444,-23.4606,29.28,33.4333,19.8917,-32.67])
+    # )
     set_log_level("DEBUG")
     logger.info(f"Creating catchment file for {var_name} using {var} and {ftype} from {input_file}")
 
