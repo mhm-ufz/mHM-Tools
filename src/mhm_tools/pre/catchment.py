@@ -149,11 +149,13 @@ class Catchment:
         """
         Deliniate the basin for a given lat and lon
         """
+        logger.debug(f"Deliniating basin for gauge coordinates {gauge_coords}")
+        gauge_coords = (gauge_coords[0], gauge_coords[1] * -1)
         self.basin = self._fdir.basins(xy=gauge_coords, streams=self._fdir.stream_order() >= 4)
         self.catchment_mask = self.basin > 0
         if np.all(~self.catchment_mask):
             logger.error("No catchment found for the given coordinates")
-            gauge_coords = (gauge_coords[0], gauge_coords[1] * -1)
+            self.delineate_basin((gauge_coords[0], gauge_coords[1] * -1))
         # if not np.any(np.isnan(self.basin)):
         #     self.basin[np.where(~self.catchment_mask)] = self.VARIABLES["basin"]["_FillValue"]
         
