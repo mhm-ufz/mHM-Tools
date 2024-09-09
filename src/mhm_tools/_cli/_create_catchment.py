@@ -73,10 +73,16 @@ def add_args(parser):
         help=("ftype of input variable, use 'nextxy', 'ldd' or 'd8'"),
     )
     parser.add_argument(
-        "--gauge_coords",
+        "--gauge_lon",
         default=None,
-        type=list[float],
-        help=("Gauge coordinates in the form of 'lat,lon'"),
+        type=float,
+        help=("Longitude of the gauge"),
+    )
+    parser.add_argument(
+        "--gauge_lat",
+        default=None,
+        type=float,
+        help=("Latitude of the gauge"),
     )
     parser.add_argument(
         "--log_level",
@@ -94,10 +100,12 @@ def run(args):
     args : argparse.Namespace
         parsed command line arguments
     """
-    if args.gauge_coords is not None:
-        print(args.gauge_coords)
-        lat, lon = args.gauge_coords[0]
+    if args.gauge_lon is not None and args.gauge_lat is not None:
+        lat = args.gauge_lat
+        lon = args.gauge_lon
         gauge_coords = (np.array([lon]), np.array([lat]))
+    elif args.gauge_lon is not None or args.gauge_lat is not None:
+        raise ValueError("Both latitude and longitude must be provided.")
     else:
         gauge_coords = None
     create_catchment(
