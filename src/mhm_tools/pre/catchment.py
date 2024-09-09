@@ -129,7 +129,7 @@ class Catchment:
         if self._fdir is None:
             # Create a flow direction object
             logger.debug("add_dem: kwargs: ", kwargs)
-            self._fdir = pyflwdir.from_dem(data=self.elevtn, nodata=np.nan, transform=(0.05, 0.0, -180, 0, 0.05, -90), latlon=True)
+            self._fdir = pyflwdir.from_dem(data=self.elevtn, nodata=np.nan, latlon=True)
             self.get_fdir()
 
     def add_fdir(self, data, ftype, **kwargs):
@@ -343,7 +343,7 @@ def create_catchment(input_file, output_path, var_name, var, ftype, gauge_coords
 
     gauge_coords = (
         np.array([-2.0333,33.5431,32.4333,91.88,96.6,102.1367,-60.71]),
-        np.array([8.15,-24.7444,23.4606,29.28,33.4333,19.8917,-32.67])
+        np.array([8.15,-24.7444,-23.4606,29.28,33.4333,19.8917,-32.67])
     )
     set_log_level("DEBUG")
     logger.info(f"Creating catchment file for {var_name} using {var} and {ftype} from {input_file}")
