@@ -198,8 +198,8 @@ class Catchment:
 
         for var_name in self.VARIABLES.keys():
             data = getattr(self, var_name)
-            if cut_by_basin:
-                data[~self.catchment_mask] = self.VARIABLES[var_name]["_FillValue"]
+            # if cut_by_basin:
+            #     data[~self.catchment_mask] = self.VARIABLES[var_name]["_FillValue"]
             if data is None:
                 continue
             data_var = xr.Dataset(
@@ -309,7 +309,7 @@ class Catchment:
         logger.debug(f"lon: min: {self.ds.lon.values[0]}, max: {self.ds.lon.values[-1]} - {self.ds.lon.values[min_col]}, {self.ds.lon.values[max_col]}")
         lon_min, lon_max = np.round(self.ds.lon.values[min_col], 3), np.round(self.ds.lon.values[max_col], 3)
         lat_min, lat_max = np.round(self.ds.lat.values[-max_row], 3), np.round(self.ds.lat.values[-min_row], 3)
-        lat_slice = slice(lat_max, lat_min)
+        lat_slice = slice(lat_min, lat_max)
         lon_slice = slice(lon_min, lon_max)
         logger.debug(f"lat_slice: {lat_slice}, lon_slice: {lon_slice}")
         return lat_slice, lon_slice
