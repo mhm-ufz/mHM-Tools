@@ -343,6 +343,14 @@ def merge_catchment(path1, path2, out_path):
     merged.to_netcdf(out_path)
 
 
+def plot(c):
+    from matplotlib import pyplot as plt
+
+    basin = c.basin
+    dem = c.elevtn
+    plt.imshow(dem.values, cmap="terrain")
+    plt.imshow(basin.values, cmap="viridis", alpha=1)
+    plt.savefig("/work/luedke/test_catchment.png")
 
 def create_catchment(input_file, output_path, var_name, var, ftype, gauge_coords=None):
 
@@ -392,6 +400,7 @@ def create_catchment(input_file, output_path, var_name, var, ftype, gauge_coords
         logger.info(f"Creating catchment for gauge coordinates {gauge_coords}")
         c = Catchment(ds=ds, var_name=var_name, var=var, ftype=ftype, transform=transform, latlon=latlon, out_var_name="hydro.nc", do_shift=False)
         c.delineate_basin(gauge_coords)
+        plot(c)
         c.get_facc()
         c.get_grid_area()
         c.get_upstream_area()
