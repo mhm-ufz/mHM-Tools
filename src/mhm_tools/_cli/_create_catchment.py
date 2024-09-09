@@ -95,7 +95,8 @@ def run(args):
         parsed command line arguments
     """
     if args.gauge_coords is not None:
-        lat, lon = args.gauge_coords
+        print(args.gauge_coords)
+        lat, lon = args.gauge_coords[0]
         gauge_coords = (np.array([lon]), np.array([lat]))
     else:
         gauge_coords = None
