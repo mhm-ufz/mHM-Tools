@@ -196,10 +196,10 @@ class Catchment:
         data = getattr(self, 'basin')
         if not out_path.is_dir():
             out_path.mkdir(parents=True, exist_ok=True)
-        if cut_by_basin:
-            lat_slice, lon_slice = self.cut_to_filled_area()
-        else:
-            lat_slice, lon_slice = slice(84,-56), slice(None)
+        # if cut_by_basin:
+        #     lat_slice, lon_slice = self.cut_to_filled_area()
+        # else:
+        lat_slice, lon_slice = slice(84,-56), slice(None)
 
         for var_name in self.VARIABLES.keys():
             data = getattr(self, var_name)
