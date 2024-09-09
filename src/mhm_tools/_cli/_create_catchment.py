@@ -74,8 +74,14 @@ def add_args(parser):
     parser.add_argument(
         "--gauge_coords",
         default=None,
-        type=str,
+        type=list[str],
         help=("Gauge coordinates in the form of 'lon,lat'"),
+    )
+    parser.add_argument(
+        "--log_level",
+        default='INFO',
+        type=str,
+        help=("Logging level")
     )
 
 
@@ -98,5 +104,6 @@ def run(args):
         var_name=args.vn,
         var=args.var,
         ftype=args.ftp,
-        gauge_coords=gauge_coords        
+        gauge_coords=gauge_coords,
+        log_level=args.log_level,      
     )

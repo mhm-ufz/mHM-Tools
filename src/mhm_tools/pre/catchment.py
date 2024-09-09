@@ -299,8 +299,9 @@ class Catchment:
                 },
             )
             logger.info(f"Basin Id has been written to {out_path / self.out_var_name}")
+    
     def cut_to_filled_area(self):
-        import matplotlib.pyplot as plt
+        """ Create lat and lon slices to cut the data to the filled area. """
          # Find the non-zero elements
         cols = np.any(self.catchment_mask, axis=0)  # Boolean array for columns with any filled cells
         rows = np.any(self.catchment_mask, axis=1)  # Boolean array for rows with any filled cells
@@ -308,12 +309,13 @@ class Catchment:
         # Get the indices of the non-zero rows and columns
         min_row, max_row = np.where(rows)[0][[0, -1]]
         min_col, max_col = np.where(cols)[0][[0, -1]]
-            # Slice the array to extract the filled part
-        logger.debug(f"min_row: {min_row}, max_row: {max_row}, min_col: {min_col}, max_col: {max_col}")
-        logger.debug(f"shape of catchment_mask: {self.catchment_mask.shape}")
-        logger.debug(f"shape of lat and lon: {self.ds.lat.shape}, {self.ds.lon.values.shape}")
-        logger.debug(f"lat: min: {self.ds.lat.values[0]}, max: {self.ds.lat.values[-1]} - {self.ds.lat.values[-min_row]}, {self.ds.lat.values[-max_row]}")
-        logger.debug(f"lon: min: {self.ds.lon.values[0]}, max: {self.ds.lon.values[-1]} - {self.ds.lon.values[min_col]}, {self.ds.lon.values[max_col]}")
+        # Add a buffer of one cell
+        min_row = min_row - 1 if min_row > 0 else min_row
+        min_col = min_col - 1 if min_col > 0 else min_col
+        max_row = max_row + 1 if max_row < self.catchment_mask.shape[0] else max_row
+        max_col = max_col + 1 if max_col < self.catchment_mask.shape[1] else max_col
+        
+        # Slice the array to extract the filled part
         lon_min, lon_max = np.round(self.ds.lon.values[min_col], 3), np.round(self.ds.lon.values[max_col], 3)
         lat_min, lat_max = np.round(self.ds.lat.values[max_row], 3), np.round(self.ds.lat.values[min_row], 3)
         lat_slice = slice(lat_max, lat_min)
@@ -342,29 +344,10 @@ def merge_catchment(path1, path2, out_path):
     merged = xr.where(mask, ds2.reindex_like(ds1, method="nearest"), ds1)
     merged.to_netcdf(out_path)
 
-
-def plot(c):
-    from matplotlib import pyplot as plt
-
-    basin = c.basin
-    dem = c.elevtn
-    plt.imshow(dem, cmap="terrain")
-    plt.imshow(basin, cmap="viridis", alpha=1)
-    plt.savefig("/work/luedke/test_catchment.png")
-
-def create_catchment(input_file, output_path, var_name, var, ftype, gauge_coords=None):
-
-    gauge_coords = (
-        np.array([-59.6478]),
-        np.array([-3.0633])
-    )
+def create_catchment(input_file, output_path, var_name, var, ftype, gauge_coords=None, log_level="INFO"):
     
-
-    # gauge_coords = (
-    #     np.array([-2.0333,33.5431,32.4333,91.88,96.6,102.1367,-60.71]),
-    #     np.array([8.15,-24.7444,-23.4606,29.28,33.4333,19.8917,-32.67])
-    # )
-    set_log_level("DEBUG")
+    set_log_level(log_level)
+    
     logger.info(f"Creating catchment file for {var_name} using {var} and {ftype} from {input_file}")
 
     if var not in {"fdir", "dem"}:
@@ -400,7 +383,6 @@ def create_catchment(input_file, output_path, var_name, var, ftype, gauge_coords
         logger.info(f"Creating catchment for gauge coordinates {gauge_coords}")
         c = Catchment(ds=ds, var_name=var_name, var=var, ftype=ftype, transform=transform, latlon=latlon, out_var_name="hydro.nc", do_shift=False)
         c.delineate_basin(gauge_coords)
-        plot(c)
         c.get_facc()
         c.get_grid_area()
         c.get_upstream_area()
