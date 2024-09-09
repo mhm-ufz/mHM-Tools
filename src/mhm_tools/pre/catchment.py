@@ -348,8 +348,8 @@ def plot(c):
 
     basin = c.basin
     dem = c.elevtn
-    plt.imshow(dem.values, cmap="terrain")
-    plt.imshow(basin.values, cmap="viridis", alpha=1)
+    plt.imshow(dem, cmap="terrain")
+    plt.imshow(basin, cmap="viridis", alpha=1)
     plt.savefig("/work/luedke/test_catchment.png")
 
 def create_catchment(input_file, output_path, var_name, var, ftype, gauge_coords=None):
