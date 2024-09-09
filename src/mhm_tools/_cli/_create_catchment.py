@@ -75,7 +75,7 @@ def add_args(parser):
     parser.add_argument(
         "--gauge_coords",
         default=None,
-        type=parse_coords,
+        type=list(float),
         help=("Gauge coordinates in the form of 'lat,lon'"),
     )
     parser.add_argument(
