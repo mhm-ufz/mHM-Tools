@@ -2,6 +2,7 @@
 TODO: add description
 """
 
+from mhm_tools.common.cli_utils import parse_coords
 from ..pre import create_catchment
 import numpy as np
 
@@ -74,8 +75,8 @@ def add_args(parser):
     parser.add_argument(
         "--gauge_coords",
         default=None,
-        type=list[str],
-        help=("Gauge coordinates in the form of 'lon,lat'"),
+        type=parse_coords,
+        help=("Gauge coordinates in the form of 'lat,lon'"),
     )
     parser.add_argument(
         "--log_level",
@@ -94,10 +95,8 @@ def run(args):
         parsed command line arguments
     """
     if args.gauge_coords is not None:
-        print(args.gauge_coords)
-        gauge_coords = args.gauge_coords
-        print(gauge_coords[0], gauge_coords[1])
-        gauge_coords = (np.array([float(gauge_coords[0])]), np.array([float(gauge_coords[1])]))
+        lat, lon = args.gauge_coords
+        gauge_coords = (np.array([lon]), np.array([lat]))
     else:
         gauge_coords = None
     create_catchment(
