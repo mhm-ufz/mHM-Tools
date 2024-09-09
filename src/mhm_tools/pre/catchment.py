@@ -129,7 +129,7 @@ class Catchment:
         if self._fdir is None:
             # Create a flow direction object
             logger.debug("add_dem: kwargs: ", kwargs)
-            self._fdir = pyflwdir.from_dem(data=self.elevtn, nodata=np.nan, latlon=True)
+            self._fdir = pyflwdir.from_dem(data=self.elevtn, nodata=np.nan, transform=(0.05, 0.0, -180, 0, 0.05, -90), latlon=True)
             self.get_fdir()
 
     def add_fdir(self, data, ftype, **kwargs):
@@ -151,6 +151,9 @@ class Catchment:
         """
         self.basin = self._fdir.basins(xy=gauge_coords, streams=self._fdir.stream_order() >= 4)
         self.catchment_mask = self.basin > 0
+        if np.all(~self.catchment_mask):
+            logger.error("No catchment found for the given coordinates")
+            gauge_coords = (gauge_coords[0], gauge_coords[1] * -1)
         # if not np.any(np.isnan(self.basin)):
         #     self.basin[np.where(~self.catchment_mask)] = self.VARIABLES["basin"]["_FillValue"]
         
