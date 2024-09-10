@@ -539,6 +539,7 @@ class MHMRestartFile:
                 grid.read_morph_files()
                 self.subgrids.append(grid)
 
+
     def _split_grid(self):  # has do addapted to different file types not just .nc
         """
         Split the grid into subgrids and write them to disk.
@@ -565,9 +566,6 @@ class MHMRestartFile:
             return None
         logger.debug(f"Splitting {file_path}")
         with xr.open_dataset(file_path) as ds:
-            if self.grid.l0.mask is not None:
-                ds = ds.where(self.grid.l0.mask != np.nan)
-                logger.info(f"Applied mask to {file_path}")
             for i, lon_min in enumerate(
                 np.arange(
                     self.grid.l1.lon_min,
