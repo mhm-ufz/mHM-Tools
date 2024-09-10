@@ -38,15 +38,10 @@ class Catchment:
             "_FillValue": 0,
             "units": "-",
         },
-        "upgrid": {
+        "uparea_grid": {
             "title": "accumulated data values along the flow directions",
             "_FillValue": FACC_FILLVALUE,
-            "units": "-",
-        },
-        "uparea_grid": {
-            "title": "rectangular drainage area",
-            "_FillValue": FILLVALUE,
-            "units": "km2",
+            "units": "m2",
         },
         "grdare": {
             "title": "rectangular grid area",
@@ -59,6 +54,38 @@ class Catchment:
             "units": "m",
         },
     }
+    # VARIABLES = {
+    #     "flwdir": {
+    #         "title": f"flow direction ({OUTPUT_FTYPE.upper()})",
+    #         "_FillValue": FDIR_FILLVALUE[OUTPUT_FTYPE],
+    #         "units": "-",
+    #     },
+    #     "basin": {
+    #         "title": "basin Id",
+    #         "_FillValue": 0,
+    #         "units": "-",
+    #     },
+    #     "upgrid": {
+    #         "title": "accumulated data values along the flow directions",
+    #         "_FillValue": FACC_FILLVALUE,
+    #         "units": "-",
+    #     },
+    #     "uparea_grid": {
+    #         "title": "rectangular drainage area",
+    #         "_FillValue": FILLVALUE,
+    #         "units": "km2",
+    #     },
+    #     "grdare": {
+    #         "title": "rectangular grid area",
+    #         "_FillValue": FILLVALUE,
+    #         "units": "m2",
+    #     },
+    #     "elevtn": {
+    #         "title": "outlet pixel elevation",
+    #         "_FillValue": float(FILLVALUE),
+    #         "units": "m",
+    #     },
+    # }
 
     def __init__(
         self,
