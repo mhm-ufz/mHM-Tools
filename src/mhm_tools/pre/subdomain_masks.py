@@ -25,7 +25,7 @@ REF_FILE_ENCODING = {
     "elevtn": {"dtype": "float32", "_FillValue": -9999.0, "zlib": True, "complevel": 4},
     "basin": {"dtype": "int32", "_FillValue": -9999, "zlib": True, "complevel": 4},
     "flwdir": {"dtype": "int32", "_FillValue": -9999, "zlib": True, "complevel": 4},
-    "upgrid": {"dtype": "int32", "_FillValue": -9999, "zlib": True, "complevel": 4},
+    # "upgrid": {"dtype": "int32", "_FillValue": -9999, "zlib": True, "complevel": 4},
     "uparea_grid": {
         "dtype": "float32",
         "_FillValue": -9999.0,
