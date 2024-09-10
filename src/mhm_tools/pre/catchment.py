@@ -177,7 +177,7 @@ class Catchment:
         """
         Performs the calculation of the upstream catchment area
         """
-        self.uparea_grid = self._fdir.upstream_area(unit="km2").astype(int)
+        self.upgrid = self._fdir.upstream_area(unit="km2").astype(int)
 
     def get_grid_area(self):
         """
@@ -188,7 +188,7 @@ class Catchment:
     def get_facc(self):
         data = np.ones_like(self.flwdir).astype(np.uint32)
         data[~self._fdir.mask.reshape(data.shape)] = 0
-        self.upgrid = self._fdir.accuflux(data, nodata=0)
+        self.uparea_grid = self._fdir.accuflux(data, nodata=0)
 
     def write(self, out_path, single_file=True, format="nc", cellsize=None, cut_by_basin=False):
         data_vars = {}
@@ -370,7 +370,7 @@ def create_catchment(input_file, output_path, var_name, var, ftype, gauge_coords
             c.get_basins()
             c.get_facc()
             c.get_grid_area()
-            c.get_upstream_area()
+            # c.get_upstream_area()
             c.write(output_path, single_file=True)
 
         logger.info(f"Merging catchment files")
@@ -385,5 +385,5 @@ def create_catchment(input_file, output_path, var_name, var, ftype, gauge_coords
         c.delineate_basin(gauge_coords)
         c.get_facc()
         c.get_grid_area()
-        c.get_upstream_area()
+        # c.get_upstream_area()
         c.write(output_path, single_file=True, cut_by_basin=True)
