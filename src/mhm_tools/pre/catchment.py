@@ -409,6 +409,7 @@ def create_catchment(
     latlon = True
 
     if gauge_coords is None:
+        temp_file1 = "hydro1.nc"
         global_catchments = Catchment(
             ds=ds,
             var_name=var_name,
@@ -416,10 +417,11 @@ def create_catchment(
             ftype=ftype,
             transform=transform,
             latlon=latlon,
-            out_var_name="hydro1.nc",
+            out_var_name=temp_file1,
             do_shift=False,
         )
         # create a shifted version of the catchment to avoid border effects
+        temp_file2 = "hydro2.nc"
         global_catchments_shifted = Catchment(
             ds=ds,
             var_name=var_name,
@@ -427,7 +429,7 @@ def create_catchment(
             ftype=ftype,
             transform=transform,
             latlon=latlon,
-            out_var_name="hydro2.nc",
+            out_var_name=temp_file2,
             do_shift=True,
         )
         catchments = [global_catchments, global_catchments_shifted]
@@ -438,13 +440,18 @@ def create_catchment(
             c.get_grid_area()
             # c.get_upstream_area()
             c.write(output_path, single_file=True)
-
+        # add paths to the temp files
+        temp_file1 = pl.Path(output_path, "hydro1.nc")
+        temp_file2 = pl.Path(output_path, "hydro2.nc")
         logger.info("Merging catchment files")
         merge_catchment(
-            pl.Path(output_path, "hydro1.nc"),
-            pl.Path(output_path, "hydro2.nc"),
-            pl.Path(output_path, "hydro_merged.nc"),
+            temp_file1,
+            temp_file2,
+            pl.Path(output_path, "basin_ids.nc"),
         )
+        # remove the temporary files
+        temp_file1.unlink()
+        temp_file2.unlink()
     else:
         logger.info(f"Creating catchment for gauge coordinates {gauge_coords}")
         c = Catchment(
@@ -454,11 +461,10 @@ def create_catchment(
             ftype=ftype,
             transform=transform,
             latlon=latlon,
-            out_var_name="hydro.nc",
+            out_var_name="basin_ids.nc",
             do_shift=False,
         )
         c.delineate_basin(gauge_coords)
         c.get_facc()
         c.get_grid_area()
-        # c.get_upstream_area()
         c.write(output_path, single_file=True, cut_by_basin=True)
