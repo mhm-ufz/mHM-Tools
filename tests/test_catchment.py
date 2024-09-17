@@ -119,7 +119,7 @@ class TestCatchment(unittest.TestCase):
                 out_var_name=output_var_names[1],
                 latlon=self.latlon,
                 do_shift=True,
-            )
+            ),
         ]
 
         output_path = Path(HERE, "files")

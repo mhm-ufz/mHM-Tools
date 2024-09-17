@@ -1,4 +1,5 @@
 import logging
+
 from mhm_tools.common.constants import LOG_LEVELS
 
 logging.basicConfig(format="%(asctime)s - %(levelname)-8s - %(message)s")

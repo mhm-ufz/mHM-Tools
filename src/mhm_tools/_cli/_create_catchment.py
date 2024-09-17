@@ -2,9 +2,9 @@
 TODO: add description
 """
 
-from mhm_tools.common.cli_utils import parse_coords
-from ..pre import create_catchment
 import numpy as np
+
+from ..pre import create_catchment
 
 
 def add_args(parser):
@@ -75,14 +75,11 @@ def add_args(parser):
     parser.add_argument(
         "--gauge_coords",
         default=None,
-        help=("Gauge coordinates in the form of 'lat,lon' take care to write --gauge_coords='lat,lon'"),
+        help=(
+            "Gauge coordinates in the form of 'lat,lon' take care to write --gauge_coords='lat,lon'"
+        ),
     )
-    parser.add_argument(
-        "--log_level",
-        default='INFO',
-        type=str,
-        help=("Logging level")
-    )
+    parser.add_argument("--log_level", default="INFO", type=str, help=("Logging level"))
 
 
 def run(args):
@@ -94,7 +91,7 @@ def run(args):
         parsed command line arguments
     """
     if args.gauge_coords is not None:
-        lat, lon = map(float, args.gauge_coords.split(','))
+        lat, lon = map(float, args.gauge_coords.split(","))
         gauge_coords = (np.array([lon]), np.array([lat]))
     else:
         gauge_coords = None
@@ -105,5 +102,5 @@ def run(args):
         var=args.var,
         ftype=args.ftp,
         gauge_coords=gauge_coords,
-        log_level=args.log_level,      
+        log_level=args.log_level,
     )

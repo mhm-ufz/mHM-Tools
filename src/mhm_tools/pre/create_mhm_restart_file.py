@@ -11,6 +11,7 @@ from joblib import Parallel, delayed
 
 from mhm_tools.common.logger import logger, set_log_level
 
+
 class MorphFiles:
     """
     A class representing a collection of morphological files.
@@ -407,7 +408,7 @@ class MHMRestartFile:
         mpr: MPRRunner,
         increment_l1=2,
         ncpus=1,
-        log_level='debug',
+        log_level="debug",
         run_on_whole_domain=False,
         use_split_grids=False,
         merge=True,
@@ -489,11 +490,9 @@ class MHMRestartFile:
     def _create_latlon(self, lon_min, lat_min):
         """Create a l0 resolution and a l1 resolution LatLon object from a given lon_min and lat_min."""
         lon_max = lon_min + self.increment_l1 * self.grid.l1.resolution
-        if lon_max > self.grid.l1.lon_max:
-            lon_max = self.grid.l1.lon_max
+        lon_max = min(lon_max, self.grid.l1.lon_max)
         lat_max = lat_min + self.increment_l1 * self.grid.l1.resolution
-        if lat_max > self.grid.l1.lat_max:
-            lat_max = self.grid.l1.lat_max
+        lat_max = min(lat_max, self.grid.l1.lat_max)
 
         # grid saved in llc coordinates
         l0 = LatLon(  # this is the high resolution grid
@@ -538,7 +537,6 @@ class MHMRestartFile:
                 )
                 grid.read_morph_files()
                 self.subgrids.append(grid)
-
 
     def _split_grid(self):  # has do addapted to different file types not just .nc
         """
@@ -785,7 +783,7 @@ class MHMRestartFile:
         logger.info("Renaming coordinates and data variables")
 
         return ds_whole
-    
+
     def _drop_unnecessary_dims(self, ds, *args):
         for arg in args:
             if arg in ds.coords:
@@ -793,22 +791,36 @@ class MHMRestartFile:
         return ds
 
     def _correct_restart_file(self, ds):
-        ds_mask = xr.open_dataset(
-            self.grid.land_mask_file
-        ).sortby("latitude")
+        ds_mask = xr.open_dataset(self.grid.land_mask_file).sortby("latitude")
         # ds_mask = xr.open_dataset(
         #     "/work/luedke/land_mask_0p1.nc"
         # ).sortby("latitude")
         ncells = int(ds_mask["land_mask"].sum())
         ds.attrs = {
-            "xllcorner_L1": self.grid.l1.lon_min if self.grid.l1.lon_min != int(self.grid.l1.lon_min) else int(self.grid.l1.lon_min),
-            "yllcorner_L1": self.grid.l1.lat_min if self.grid.l1.lat_min != int(self.grid.l1.lat_min) else int(self.grid.l1.lat_min),
+            "xllcorner_L1": (
+                self.grid.l1.lon_min
+                if self.grid.l1.lon_min != int(self.grid.l1.lon_min)
+                else int(self.grid.l1.lon_min)
+            ),
+            "yllcorner_L1": (
+                self.grid.l1.lat_min
+                if self.grid.l1.lat_min != int(self.grid.l1.lat_min)
+                else int(self.grid.l1.lat_min)
+            ),
             "nrows_L1": self.grid.l1.get_n_lon(),
             "ncols_L1": self.grid.l1.get_n_lat(),
             "cellsize_L1": self.grid.l1.resolution,
             "nCells_L1": ncells,
-            "xllcorner_L0": self.grid.l1.lon_min if self.grid.l1.lon_min != int(self.grid.l1.lon_min) else int(self.grid.l1.lon_min), 
-            "yllcorner_L0": self.grid.l1.lat_min if self.grid.l1.lat_min != int(self.grid.l1.lat_min) else int(self.grid.l1.lat_min),
+            "xllcorner_L0": (
+                self.grid.l1.lon_min
+                if self.grid.l1.lon_min != int(self.grid.l1.lon_min)
+                else int(self.grid.l1.lon_min)
+            ),
+            "yllcorner_L0": (
+                self.grid.l1.lat_min
+                if self.grid.l1.lat_min != int(self.grid.l1.lat_min)
+                else int(self.grid.l1.lat_min)
+            ),
             "nrows_L0": self.grid.l1.get_n_lon(),
             "ncols_L0": self.grid.l1.get_n_lat(),
             "cellsize_L0": self.grid.l1.resolution,
@@ -942,8 +954,10 @@ class MHMRestartFile:
                 # "L1_Bulk_Surface_Resist": "L1_surfResist",
             }
         ).squeeze("horizon_all", drop=True)
-        
-        ds = self._drop_unnecessary_dims(ds, "horizon_all_bnds", "land_cover_period", "longitude", "latitude")
+
+        ds = self._drop_unnecessary_dims(
+            ds, "horizon_all_bnds", "land_cover_period", "longitude", "latitude"
+        )
 
         mask = np.stack(
             [np.isnan(ds["L1_maxInter"].data)[0, :, :] & ds_mask["land_mask"].data]
@@ -960,14 +974,16 @@ class MHMRestartFile:
             "lon_bnds": ("lon", "bnds"),
         }
 
-        ds['lat_bnds'] = (BNDS_DIMS['lat_bnds'], BNDS_VALUES['lat_bnds'])
-        ds['lon_bnds'] = (BNDS_DIMS['lon_bnds'], BNDS_VALUES['lon_bnds'])
+        ds["lat_bnds"] = (BNDS_DIMS["lat_bnds"], BNDS_VALUES["lat_bnds"])
+        ds["lon_bnds"] = (BNDS_DIMS["lon_bnds"], BNDS_VALUES["lon_bnds"])
 
         # apply the final mask on parameters
         for data_var in ds.data_vars:
             if data_var in BNDS_DIMS:
                 ds[data_var] = (BNDS_DIMS[data_var], BNDS_VALUES[data_var])
-                logger.debug(f"Setting {data_var} to {(BNDS_DIMS[data_var], BNDS_VALUES[data_var])}")
+                logger.debug(
+                    f"Setting {data_var} to {(BNDS_DIMS[data_var], BNDS_VALUES[data_var])}"
+                )
                 # logger.info(data_var, ds[data_var])
                 continue
             if not ("lat" in ds[data_var].dims and "lon" in ds[data_var].dims):
@@ -1086,7 +1102,6 @@ class MHMRestartFile:
         ------
             Any exceptions that occur during the execution of the method.
         """
-
         logger.info("Creating restart file")
         if self.run_on_whole_domain:
             logger.info("grid will be processed as a whole")

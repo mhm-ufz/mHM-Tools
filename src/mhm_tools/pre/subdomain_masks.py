@@ -10,7 +10,6 @@ Based on a script by
 - Matthias Kelbling
 """
 
-from mhm_tools.common.logger import logger
 from pathlib import Path
 
 import matplotlib as mpl
@@ -18,6 +17,7 @@ import numpy as np
 import xarray as xr
 from scipy.interpolate import NearestNDInterpolator
 
+from mhm_tools.common.logger import logger
 
 # GLOBAL VARIABLES
 # Coordinate arrays for the shape of Greenland in lons, lats
@@ -144,7 +144,9 @@ class CreateSubdomainMasks:
             if coord in ds_ref_file:
                 ds_ref_file = ds_ref_file.drop(coord)
 
-        file_basins_remapped = self.output_dir / "unique_basin_ids_03min_agg54classes.nc"
+        file_basins_remapped = (
+            self.output_dir / "unique_basin_ids_03min_agg54classes.nc"
+        )
         if not file_basins_remapped.is_file():
             # map the 53 subbasins from PGB reference onto target grid
             logger.info(
@@ -219,9 +221,9 @@ class CreateSubdomainMasks:
                 ds_sub_ref_file[data_var].values[~sub_mask] = np.nan
 
             ds_sub_ref_file.to_netcdf(fname, encoding=REF_FILE_ENCODING)
-    
+
     def use_land_mask(self):
-        """ Reencode and mask the input files"""
+        """Reencode and mask the input files"""
         land_mask = self.read_var(fname=self.land_file, var_name="land_mask").astype(
             bool
         )
@@ -236,10 +238,9 @@ class CreateSubdomainMasks:
         for data_var in ds_sub_ref_file.data_vars:
             logger.info(f"processing {data_var}")
             ds_sub_ref_file[data_var].values[np.isnan(land_mask)] = np.nan
-        fname = self.out_file_name + f".nc"
+        fname = self.out_file_name + ".nc"
         logger.info(f"writing to {fname}")
         ds_sub_ref_file.to_netcdf(fname, encoding=REF_FILE_ENCODING)
-
 
 
 def create_subdomain_masks(
@@ -270,7 +271,7 @@ def create_subdomain_masks(
         lat = ds.lat
         lon = ds.lon
         # if input is not global only create a file else create all subdomains
-        if np.max(lat)-np.min(lat) < 360 and np.max(lon)-np.min(lon) < 130:
+        if np.max(lat) - np.min(lat) < 360 and np.max(lon) - np.min(lon) < 130:
             csm.use_land_mask()
         else:
             csm.create_subdomains()

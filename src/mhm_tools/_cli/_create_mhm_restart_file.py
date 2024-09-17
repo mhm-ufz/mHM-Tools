@@ -5,7 +5,7 @@ A restart file contains all the static information to run mHM on a specific grid
 
 """
 
-from mhm_tools.pre.create_mhm_restart_file import LatLon, MPRRunner, Grid
+from mhm_tools.pre.create_mhm_restart_file import Grid, LatLon, MPRRunner
 
 from ..pre import MHMRestartFile
 
@@ -35,8 +35,6 @@ def add_args(parser):
         "-n", "--nml_template", required=True, help=("nml_template file for mPR")
     )
 
-
-
     required_args.add_argument(
         "--mpr",
         required=True,
@@ -46,9 +44,7 @@ def add_args(parser):
     required_args.add_argument(
         "--l1_resolution",
         required=True,
-        help=(
-            """resolution of the mHM target grid in degrees"""
-        ),
+        help=("""resolution of the mHM target grid in degrees"""),
     )
 
     parser.add_argument(
@@ -89,7 +85,7 @@ def add_args(parser):
             required unless --mask is provided"""
         ),
     )
-    
+
     parser.add_argument(
         "--lat_max",
         required=False,
@@ -203,6 +199,7 @@ def add_args(parser):
         help=("Land mask file to use for l1 resolution"),
     )
 
+
 def get_coords_from_mask(mask):
     """Get the coordinates from a mask file.
 
@@ -225,7 +222,15 @@ def get_coords_from_mask(mask):
     lat_max_target_grid = mask.lat.values[-1]
     l0_resolution = mask.lon.values[1] - mask.lon.values[0]
     mask = mask.mask.values
-    return lon_min_target_grid, lon_max_target_grid, lat_min_target_grid, lat_max_target_grid, l0_resolution, mask
+    return (
+        lon_min_target_grid,
+        lon_max_target_grid,
+        lat_min_target_grid,
+        lat_max_target_grid,
+        l0_resolution,
+        mask,
+    )
+
 
 def run(args):
     """Create the catchment file.
@@ -252,23 +257,38 @@ def run(args):
         l0_resolution = args.l0_resolution
     if mask is not None:
         mask = args.mask
-        lon_min_target_grid, lon_max_target_grid, lat_min_target_grid, lat_max_target_grid, l0_resolution, mask = get_coords_from_mask(mask)
-    elif lon_min_target_grid is None or lon_max_target_grid is None or lat_min_target_grid is None or lat_max_target_grid is None or l0_resolution is None:
-            raise ValueError("Either all coordinat bounds and resolutions or --mask must be provided")
+        (
+            lon_min_target_grid,
+            lon_max_target_grid,
+            lat_min_target_grid,
+            lat_max_target_grid,
+            l0_resolution,
+            mask,
+        ) = get_coords_from_mask(mask)
+    elif (
+        lon_min_target_grid is None
+        or lon_max_target_grid is None
+        or lat_min_target_grid is None
+        or lat_max_target_grid is None
+        or l0_resolution is None
+    ):
+        raise ValueError(
+            "Either all coordinat bounds and resolutions or --mask must be provided"
+        )
     if args.land_mask_file is None and args.no_merge is not None:
         raise ValueError(
             "You need to provide a land mask file at L1 resolution if you want to merge the restart files"
         )
 
-    l0=LatLon(
-            lon_min=float(lon_min_target_grid),
-            lon_max=float(lon_max_target_grid),
-            lat_min=float(lat_min_target_grid),
-            lat_max=float(lat_max_target_grid),
-            resolution=float(l0_resolution),
-            mask=mask
-        )
-    l1=LatLon(
+    l0 = LatLon(
+        lon_min=float(lon_min_target_grid),
+        lon_max=float(lon_max_target_grid),
+        lat_min=float(lat_min_target_grid),
+        lat_max=float(lat_max_target_grid),
+        resolution=float(l0_resolution),
+        mask=mask,
+    )
+    l1 = LatLon(
         lon_min=float(lon_min_target_grid),
         lon_max=float(lon_max_target_grid),
         lat_min=float(lat_min_target_grid),
@@ -277,13 +297,13 @@ def run(args):
     )
 
     grid = Grid(
-            file_path=args.input_dir,
-            name="whole grid",
-            latlon_file=None,
-            l0=l0,
-            l1=l1,
-            land_mask_file=args.land_mask_file,
-        )
+        file_path=args.input_dir,
+        name="whole grid",
+        latlon_file=None,
+        l0=l0,
+        l1=l1,
+        land_mask_file=args.land_mask_file,
+    )
     restart_creator = MHMRestartFile(
         grid=grid,
         output_path=args.output_dir,

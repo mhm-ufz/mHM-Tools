@@ -79,14 +79,14 @@ class TestCreateRestart(unittest.TestCase):
         mpr_runner = MPRRunner(
             "path_to_mpr_exe"
         )  # dummy path because it is not used in the test
-        l0=LatLon(
+        l0 = LatLon(
             lon_min=lon_min_target_grid,
             lon_max=lon_max_target_grid,
             lat_min=lat_min_target_grid,
             lat_max=lat_max_target_grid,
             resolution=l0_resolution,
         )
-        l1=LatLon(
+        l1 = LatLon(
             lon_min=lon_min_target_grid,
             lon_max=lon_max_target_grid,
             lat_min=lat_min_target_grid,
@@ -111,7 +111,7 @@ class TestCreateRestart(unittest.TestCase):
             use_split_grids=False,
             clean_temp_files=True,
             ncpus=1,
-            log_level='error',
+            log_level="error",
             merge=True,
             merge_only=False,
         )
@@ -171,14 +171,14 @@ class TestCreateRestart(unittest.TestCase):
         mpr_runner = MPRRunner(
             "path_to_mpr_exe"
         )  # dummy path because it is not used in the test
-        l0=LatLon(
+        l0 = LatLon(
             lon_min=lon_min_target_grid,
             lon_max=lon_max_target_grid,
             lat_min=lat_min_target_grid,
             lat_max=lat_max_target_grid,
             resolution=l0_resolution,
         )
-        l1=LatLon(
+        l1 = LatLon(
             lon_min=lon_min_target_grid,
             lon_max=lon_max_target_grid,
             lat_min=lat_min_target_grid,
@@ -203,7 +203,7 @@ class TestCreateRestart(unittest.TestCase):
             use_split_grids=False,
             clean_temp_files=True,
             ncpus=1,
-            log_level='error',
+            log_level="error",
             merge=True,
             merge_only=False,
         )
