@@ -223,6 +223,8 @@ def get_coords_from_mask(mask):
     lat_max_target_grid = mask.lat.values[-1]
     if lat_min_target_grid > lat_max_target_grid:
         lat_min_target_grid, lat_max_target_grid = lat_max_target_grid, lat_min_target_grid
+    if lon_min_target_grid > lon_max_target_grid:
+        lon_min_target_grid, lon_max_target_grid = lon_max_target_grid, lon_min_target_grid
     l0_resolution = mask.lon.values[1] - mask.lon.values[0]
     mask = mask.mask
     return (
