@@ -596,10 +596,11 @@ class MHMRestartFile:
                         longitude=lon_slice,
                         latitude=lat_slice,
                     )
-                    mask = self.grid.l0.mask.sel(lon=lon_slice, lat=lat_slice)
-                    for var in ds_cut.data_vars:
-                        logger.debug(f"{var} dataset: {np.shape(ds_cut[var].data)} - mask: {np.shape(mask.values)}")
-                        ds_cut[var].data[~mask.values] = np.nan
+                    # no masking at the moment since the mask is L1 resolution not L0
+                    # mask = self.grid.l0.mask.sel(lon=lon_slice, lat=lat_slice)
+                    # for var in ds_cut.data_vars:
+                    #     logger.debug(f"{var} dataset: {np.shape(ds_cut[var].data)} - mask: {np.shape(mask.values)}")
+                    #     ds_cut[var].data[~mask.values] = np.nan
                     try:
                         ds_cut.to_netcdf(out_path, "w")
                         logger.debug(f"Written {out_path}")
