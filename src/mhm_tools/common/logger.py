@@ -17,10 +17,13 @@ def set_log_level(level):
         logging level
 
     """
+    if type(level) is not str:
+        raise TypeError(f"Invalid log level type: {type(level)}")
     if level is None:
         return logger
     if level not in LOG_LEVELS:
         raise ValueError(f"Invalid log level: {level}")
+    level = level.upper()
     logger.setLevel(LOG_LEVELS[level])
     logger.info(f"Set log level to {level}")
     return logger
