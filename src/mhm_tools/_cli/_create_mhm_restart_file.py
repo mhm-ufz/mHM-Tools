@@ -5,7 +5,7 @@ A restart file contains all the static information to run mHM on a specific grid
 
 """
 
-from mhm_tools.common import logger
+from mhm_tools.common.logger import logger, set_log_level
 from mhm_tools.pre.create_mhm_restart_file import Grid, LatLon, MPRRunner
 
 from ..pre import MHMRestartFile
@@ -241,6 +241,7 @@ def run(args):
     args : argparse.Namespace
         parsed command line arguments
     """
+    set_log_level(args.log_level)
     l1_resolution = float(args.l1_resolution)
     if args.coords is not None:
         coords = args.coords.split(",")
@@ -327,7 +328,6 @@ def run(args):
         use_split_grids=args.use_split_grids,
         clean_temp_files=args.clean_up,
         ncpus=args.ncpus,
-        log_level=args.log_level,
         merge=not args.no_merge,
         merge_only=args.merge_only,
     )

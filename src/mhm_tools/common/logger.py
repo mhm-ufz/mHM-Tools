@@ -17,6 +17,8 @@ def set_log_level(level):
         logging level
 
     """
+    if level is None:
+        return logger
     if level not in LOG_LEVELS:
         raise ValueError(f"Invalid log level: {level}")
     logger.setLevel(LOG_LEVELS[level])

@@ -408,14 +408,12 @@ class MHMRestartFile:
         mpr: MPRRunner,
         increment_l1=2,
         ncpus=1,
-        log_level="debug",
         run_on_whole_domain=False,
         use_split_grids=False,
         merge=True,
         merge_only=False,
         clean_temp_files=False,
     ):
-        logger = set_log_level(log_level)
         logger.debug(f"Creating MHMRestartFile object with {locals()}")
         self.nml_template = Path(nml_template)
         self.output_path = Path(output_path)
