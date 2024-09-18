@@ -255,7 +255,7 @@ def run(args):
         lat_min_target_grid = args.lat_min
         lat_max_target_grid = args.lat_max
         l0_resolution = args.l0_resolution
-    if args.mask is not None:
+    if args.mask_file is not None:
         (
             lon_min_target_grid,
             lon_max_target_grid,
@@ -263,7 +263,7 @@ def run(args):
             lat_max_target_grid,
             l0_resolution,
             mask,
-        ) = get_coords_from_mask(args.mask)
+        ) = get_coords_from_mask(args.mask_file)
     elif (
         lon_min_target_grid is None
         or lon_max_target_grid is None
