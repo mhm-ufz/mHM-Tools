@@ -598,6 +598,7 @@ class MHMRestartFile:
                     )
                     mask = self.grid.l0.mask.sel(lon=lon_slice, lat=lat_slice)
                     for var in ds_cut.data_vars:
+                        logger.debug(f"{var} dataset: {np.shape(ds_cut[var].data)} - mask: {np.shape(mask.values)}")
                         ds_cut[var].data[~mask.values] = np.nan
                     try:
                         ds_cut.to_netcdf(out_path, "w")
