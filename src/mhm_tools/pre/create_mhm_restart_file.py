@@ -152,14 +152,14 @@ class LatLon:
     """
 
     def __init__(
-        self, lat_min=None, lon_min=None, lat_max=None, lon_max=None, resolution=None
+        self, lat_min=None, lon_min=None, lat_max=None, lon_max=None, resolution=None, mask=None
     ):
         self.lat_min = lat_min
         self.lon_min = lon_min
         self.lat_max = lat_max
         self.lon_max = lon_max
         self.resolution = resolution
-        self.mask = None
+        self.mask = mask
 
     def get_n_lat(self):
         """
