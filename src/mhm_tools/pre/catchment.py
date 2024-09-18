@@ -226,7 +226,7 @@ class Catchment:
         self.uparea_grid = self._fdir.accuflux(data, nodata=0)
 
     def write(
-        self, out_path, single_file=True, format="nc", cellsize=None, cut_by_basin=False
+        self, out_path, single_file=True, format="nc", cellsize=None, cut_by_basin=False, mask_file=None
     ):
         data_vars = {}
         out_path = pl.Path(out_path)
@@ -325,7 +325,8 @@ class Catchment:
 
             logger.debug(f"lat_slice: {lat_slice}, lon_slice: {lon_slice}")
             logger.debug(f"ds: {ds}")
-            ds.sel(lat=lat_slice, lon=lon_slice).to_netcdf(
+            ds = ds.sel(lat=lat_slice, lon=lon_slice)
+            ds.to_netcdf(
                 out_path / self.out_var_name,
                 encoding={
                     var_name: {
@@ -336,6 +337,15 @@ class Catchment:
                 },
             )
             logger.info(f"Basin Id has been written to {out_path / self.out_var_name}")
+        # use basin_id to create a mask file
+            if mask_file is not None: 
+                mask = ds.basin > 0
+                # name the variable mask
+                mask_file = pl.Path(mask_file)
+                mask = xr.Dataset({"mask": mask}, coords={"lon": ds.lon, "lat": ds.lat})
+                mask.to_netcdf(mask_file)
+                logger.info(f"Mask file has been written to {mask_file}")
+
 
     def cut_to_filled_area(self):
         """Create lat and lon slices to cut the data to the filled area."""
@@ -392,7 +402,7 @@ def merge_catchment(path1, path2, out_path):
 
 
 def create_catchment(
-    input_file, output_path, var_name, var, ftype, gauge_coords=None, log_level="INFO"
+    input_file, output_path, var_name, var, ftype, gauge_coords=None, latlon_box=None, log_level="INFO", mask_file=None
 ):
 
     set_log_level(log_level)
@@ -467,4 +477,5 @@ def create_catchment(
         c.delineate_basin(gauge_coords)
         c.get_facc()
         c.get_grid_area()
-        c.write(output_path, single_file=True, cut_by_basin=True)
+        c.write(output_path, single_file=True, cut_by_basin=True, mask_file=mask_file)
+        

@@ -53,7 +53,7 @@ def add_args(parser):
         default=None,
         help=(
             """coordinates in the form of 'lon_min,lon_max,lat_min,lat_max,resolution_l0'
-            required unless --mask is provided"""
+            required unless --mask_file is provided"""
         ),
     )
     parser.add_argument(
@@ -62,7 +62,7 @@ def add_args(parser):
         default=None,
         help=(
             """minimum longitude of the target grid
-            required unless --mask is provided"""
+            required unless --mask_file is provided"""
         ),
     )
 
@@ -72,7 +72,7 @@ def add_args(parser):
         default=None,
         help=(
             """maximum longitude of the target grid
-            required unless --mask is provided"""
+            required unless --mask_file is provided"""
         ),
     )
 
@@ -82,7 +82,7 @@ def add_args(parser):
         default=None,
         help=(
             """minimum latitude of the target grid
-            required unless --mask is provided"""
+            required unless --mask_file is provided"""
         ),
     )
 
@@ -92,7 +92,7 @@ def add_args(parser):
         default=None,
         help=(
             """maximum latitude of the target grid
-            required unless --mask is provided"""
+            required unless --mask_file is provided"""
         ),
     )
 
@@ -102,12 +102,12 @@ def add_args(parser):
         default=None,
         help=(
             """resolution of the morphological input data grid in degrees
-            required unless --mask is provided"""
+            required unless --mask_file is provided"""
         ),
     )
 
     parser.add_argument(
-        "--mask",
+        "--mask_file",
         required=False,
         default=None,
         help=(
@@ -255,8 +255,7 @@ def run(args):
         lat_min_target_grid = args.lat_min
         lat_max_target_grid = args.lat_max
         l0_resolution = args.l0_resolution
-    if mask is not None:
-        mask = args.mask
+    if args.mask is not None:
         (
             lon_min_target_grid,
             lon_max_target_grid,
@@ -264,7 +263,7 @@ def run(args):
             lat_max_target_grid,
             l0_resolution,
             mask,
-        ) = get_coords_from_mask(mask)
+        ) = get_coords_from_mask(args.mask)
     elif (
         lon_min_target_grid is None
         or lon_max_target_grid is None
@@ -273,7 +272,7 @@ def run(args):
         or l0_resolution is None
     ):
         raise ValueError(
-            "Either all coordinat bounds and resolutions or --mask must be provided"
+            "Either all coordinat bounds and resolutions or --mask_file must be provided"
         )
     if args.land_mask_file is None and args.no_merge is not None:
         raise ValueError(
