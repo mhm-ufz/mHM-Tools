@@ -248,13 +248,13 @@ def run(args):
         lat_min_target_grid = float(coords[2])
         lat_max_target_grid = float(coords[3])
         l0_resolution = float(coords[4])
-        l1_resolution = l1_resolution
     else:
         lon_min_target_grid = args.lon_min
         lon_max_target_grid = args.lon_max
         lat_min_target_grid = args.lat_min
         lat_max_target_grid = args.lat_max
         l0_resolution = args.l0_resolution
+    mask = None
     if args.mask_file is not None:
         (
             lon_min_target_grid,
