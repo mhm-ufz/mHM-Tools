@@ -5,6 +5,7 @@ A restart file contains all the static information to run mHM on a specific grid
 
 """
 
+from mhm_tools.common import logger
 from mhm_tools.pre.create_mhm_restart_file import Grid, LatLon, MPRRunner
 
 from ..pre import MHMRestartFile
@@ -221,7 +222,7 @@ def get_coords_from_mask(mask):
     lat_min_target_grid = mask.lat.values[0]
     lat_max_target_grid = mask.lat.values[-1]
     l0_resolution = mask.lon.values[1] - mask.lon.values[0]
-    mask = mask.mask.values
+    mask = mask.mask
     return (
         lon_min_target_grid,
         lon_max_target_grid,
@@ -274,6 +275,15 @@ def run(args):
         raise ValueError(
             "Either all coordinat bounds and resolutions or --mask_file must be provided"
         )
+    
+    logger.info(f"Creating restart file for grid with the following coordinates:")
+    logger.info(f"lon_min: {lon_min_target_grid}")
+    logger.info(f"lon_max: {lon_max_target_grid}")
+    logger.info(f"lat_min: {lat_min_target_grid}")
+    logger.info(f"lat_max: {lat_max_target_grid}")
+    logger.info(f"l0_resolution: {l0_resolution}")
+    logger.info(f"l1_resolution: {l1_resolution}")
+    
     if args.land_mask_file is None and args.no_merge is not None:
         raise ValueError(
             "You need to provide a land mask file at L1 resolution if you want to merge the restart files"

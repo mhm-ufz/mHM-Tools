@@ -592,11 +592,15 @@ class MHMRestartFile:
                         out_path.unlink()
 
                     l0, l1 = self._create_latlon(lon_min, lat_min)
-
+                    lon_slice = slice(l1.lon_min, l1.lon_max)
+                    lat_slice = slice(l1.lat_max, l1.lat_min)
                     ds_cut = ds.sel(
-                        longitude=slice(l1.lon_min, l1.lon_max),
-                        latitude=slice(l1.lat_max, l1.lat_min),
+                        longitude=lon_slice,
+                        latitude=lat_slice,
                     )
+                    mask = self.grid.l0.mask.sel(lon=lon_slice, lat=lat_slice)
+                    for var in ds_cut.data_vars:
+                        ds_cut[var].data[~mask.values] = np.nan
                     try:
                         ds_cut.to_netcdf(out_path, "w")
                         logger.debug(f"Written {out_path}")
@@ -1118,6 +1122,7 @@ class MHMRestartFile:
                     self._read_subgrids_from_files()
                 else:
                     self._split_grid()
+                logger.info(f'The grid has been split into {len(self.subgrids)} subgrids.')
                 logger.info("Creating namelists and running MPR.")
                 subgrids = Parallel(n_jobs=self.ncpus, backend="loky")(
                     delayed(self._create_restart_for_grid)(subgrid)
