@@ -559,8 +559,11 @@ class MHMRestartFile:
 
     def _split_file(self, name, file_path):
         sub_grid_paths = {}
-        if not file_path or file_path is None:
+        if not file_path or file_path is None or not file_path.is_file():
             logger.error(f"No file path provided for {name}")
+            return None
+        elif file_path.suffix != ".nc":
+            logger.error(f"File {file_path} is not a netCDF file")
             return None
         logger.debug(f"Splitting {file_path}")
         with xr.open_dataset(file_path) as ds:
