@@ -735,9 +735,6 @@ class MHMRestartFile:
                     "L1_latitude",
                     "L1_fAsp",
                     "L1_Max_Canopy_Intercept",
-                    "L1_SlowFlow",
-                    "L1_FastFlow",
-                    "L1_kBaseFlow"
                 ]
                 for r_data_var in reverse_data_vars:
                     if r_data_var in cur_ds:
