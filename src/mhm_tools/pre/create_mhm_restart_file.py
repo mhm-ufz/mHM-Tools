@@ -603,7 +603,7 @@ class MHMRestartFile:
                         data = ds_cut['slope'].values
                         data_flipped = np.flip(data, axis=index_lat)
                         lat_flipped = ds_cut.latitude.values[::-1]
-                        ds_cut = xr.DataArray(data_flipped, dims=ds_cut.dims, coords={'latitude': lat_flipped, 'longitude': ds_cut.longitude.values})
+                        ds_cut = xr.DataArray({'slope': data_flipped}, dims=ds_cut.dims, coords={'latitude': lat_flipped, 'longitude': ds_cut.longitude.values})
 
                     try:
                         ds_cut.to_netcdf(out_path, "w")
