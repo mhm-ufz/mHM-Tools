@@ -597,7 +597,7 @@ class MHMRestartFile:
                         longitude=lon_slice,
                         latitude=lat_slice,
                     )
-                    if "slope" in file_path.name:
+                    if "slope" in file_path.name or 'geology' in file_path.name:
                         ds_cut = ds_cut.sortby("latitude")
                     try:
                         ds_cut.to_netcdf(out_path, "w")
