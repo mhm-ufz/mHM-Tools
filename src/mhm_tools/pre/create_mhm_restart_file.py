@@ -618,10 +618,8 @@ class MHMRestartFile:
                 delayed(self._split_cell)(ds, file_path, i, lon_min, j, lat_min)
                 for (i, lon_min), (j, lat_min) in iter_product
             )
-        return sub_grid_paths[0]
-
         logger.debug(f"Splitting {file_path} done")
-        return sub_grid_paths
+        return {k: v for d in sub_grid_paths for k, v in d.items()}
 
     def _order_dims(self, dims):
         """Order the dimensions of the data variable."""
