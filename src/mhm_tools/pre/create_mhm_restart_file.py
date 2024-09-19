@@ -1,5 +1,6 @@
 """Create the mHM restart file."""
 
+import itertools
 import re
 import shutil
 from pathlib import Path
@@ -547,7 +548,7 @@ class MHMRestartFile:
         if self.increment_l0 is None:
             error_message = "Increment for splitting grids is not set"
             raise ValueError(error_message)
-        sub_grid_paths = Parallel(n_jobs=self.ncpus, backend="loky")(
+        sub_grid_paths = Parallel(n_jobs=1, backend="loky")(
             delayed(self._split_file)(name, file_path)
             for name, file_path in self.grid.morph_files.get_files_as_dict().items()
             if file_path is not None and file_path
@@ -555,9 +556,45 @@ class MHMRestartFile:
         logger.debug("Creating subgrids")
         self.subgrids = [Grid(file_path=k, **v) for k, v in sub_grid_paths[0].items()]
         logger.debug("Splitting grid done")
+    
+    def _split_cell(self, ds, file_path, i, lon_min, j, lat_min):
+        out_dir = Path(self.output_path) / f"slice_{i}_{j}"
+        if not out_dir.exists():
+            logger.debug(f"Creating {out_dir}")
+            out_dir.mkdir(parents=True, exist_ok=True)
+
+        out_path = out_dir / f"{file_path.stem}.nc"
+
+        if out_path.is_file():
+            out_path.unlink()
+
+        l0, l1 = self._create_latlon(lon_min, lat_min)
+        lon_slice = slice(l1.lon_min, l1.lon_max)
+        lat_slice = slice(l1.lat_max, l1.lat_min)
+        ds_cut = ds.sel(
+            longitude=lon_slice,
+            latitude=lat_slice,
+        )
+        if "slope" in file_path.name or 'geology' in file_path.name:
+            ds_cut = ds_cut.sortby("latitude")
+        try:
+            ds_cut.to_netcdf(out_path, "w")
+            logger.debug(f"Written {out_path}")
+        except Exception as e:
+            logger.error(f"Failed to write {out_path} with {e}")
+            logger.debug(
+                f"{l1.lon_min}, {l1.lon_max}, {l1.lat_min}, {l1.lat_max}"
+            )
+            logger.debug(ds_cut["latitude"].values)
+            return None
+        
+        return {out_dir: {
+            "l0": l0,
+            "l1": l1,
+            "name": f"slice_{i}_{j}",
+        }}
 
     def _split_file(self, name, file_path):
-        sub_grid_paths = {}
         if not file_path or file_path is None or not file_path.is_file():
             logger.error(f"No file path provided for {name}")
             return None
@@ -566,55 +603,23 @@ class MHMRestartFile:
             return None
         logger.debug(f"Splitting {file_path}")
         with xr.open_dataset(file_path) as ds:
-            for i, lon_min in enumerate(
-                np.arange(
+            lon_range = np.arange(
                     self.grid.l1.lon_min,
                     self.grid.l1.lon_max,
                     self.grid.l1.resolution * self.increment_l1,
                 )
-            ):
-                for j, lat_min in enumerate(
-                    np.arange(
-                        self.grid.l1.lat_min,
-                        self.grid.l1.lat_max,
-                        self.grid.l1.resolution * self.increment_l1,
-                    )
-                ):
-                    out_dir = Path(self.output_path) / f"slice_{i}_{j}"
-                    if not out_dir.exists():
-                        logger.debug(f"Creating {out_dir}")
-                        out_dir.mkdir(parents=True, exist_ok=True)
+            lat_range = np.arange(
+                self.grid.l1.lat_min,
+                self.grid.l1.lat_max,
+                self.grid.l1.resolution * self.increment_l1,
+            )
+            iter_product = itertools.product(enumerate(lon_range), enumerate(lat_range))
+            sub_grid_paths = Parallel(n_jobs=self.ncpus, backend="loky")(
+                delayed(self._split_cell)(ds, file_path, i, lon_min, j, lat_min)
+                for (i, lon_min), (j, lat_min) in iter_product
+            )
+        return sub_grid_paths[0]
 
-                    out_path = out_dir / f"{file_path.stem}.nc"
-
-                    if out_path.is_file():
-                        out_path.unlink()
-
-                    l0, l1 = self._create_latlon(lon_min, lat_min)
-                    lon_slice = slice(l1.lon_min, l1.lon_max)
-                    lat_slice = slice(l1.lat_max, l1.lat_min)
-                    ds_cut = ds.sel(
-                        longitude=lon_slice,
-                        latitude=lat_slice,
-                    )
-                    if "slope" in file_path.name or 'geology' in file_path.name:
-                        ds_cut = ds_cut.sortby("latitude")
-                    try:
-                        ds_cut.to_netcdf(out_path, "w")
-                        logger.debug(f"Written {out_path}")
-                    except Exception as e:
-                        logger.error(f"Failed to write {out_path} with {e}")
-                        logger.debug(
-                            f"{l1.lon_min}, {l1.lon_max}, {l1.lat_min}, {l1.lat_max}"
-                        )
-                        logger.debug(ds_cut["latitude"].values)
-                        return None
-
-                    sub_grid_paths[out_dir] = {
-                        "l0": l0,
-                        "l1": l1,
-                        "name": f"slice_{i}_{j}",
-                    }
         logger.debug(f"Splitting {file_path} done")
         return sub_grid_paths
 
