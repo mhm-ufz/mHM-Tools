@@ -599,11 +599,18 @@ class MHMRestartFile:
                     )
                     if "slope" in file_path.name:
                         # flip the latitude dimension
-                        index_lat = ds_cut['slope'].dims.index("latitude")
-                        data = ds_cut['slope'].values
-                        data_flipped = np.flip(data, axis=index_lat)
                         lat_flipped = ds_cut.latitude.values[::-1]
-                        ds_cut = xr.DataArray({'slope': data_flipped}, dims=ds_cut.dims, coords={'latitude': lat_flipped, 'longitude': ds_cut.longitude.values})
+                        flipped_data_vars = {}
+                        for data_var in ds_cut.data_vars:
+                            index_lat = ds_cut[data_var].dims.index("latitude")
+                            data_flipped = np.flip(ds_cut[data_var].values, axis=index_lat)
+                            flipped_data_vars[data_var] = (ds_cut[data_var].dims,  data_flipped)
+                        ds_cut = xr.Dataset(
+                                data_vars=flipped_data_vars,
+                                coords={'latitude': lat_flipped,
+                                        'longitude': ds_cut.longitude},
+                                attrs=ds_cut.attrs
+                            )
 
                     try:
                         ds_cut.to_netcdf(out_path, "w")
