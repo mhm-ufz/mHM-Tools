@@ -598,20 +598,7 @@ class MHMRestartFile:
                         latitude=lat_slice,
                     )
                     if "slope" in file_path.name:
-                        # flip the latitude dimension
-                        lat_flipped = ds_cut.latitude.values[::-1]
-                        flipped_data_vars = {}
-                        for data_var in ds_cut.data_vars:
-                            index_lat = ds_cut[data_var].dims.index("latitude")
-                            data_flipped = np.flip(ds_cut[data_var].values, axis=index_lat)
-                            flipped_data_vars[data_var] = (ds_cut[data_var].dims,  data_flipped)
-                        ds_cut = xr.Dataset(
-                                data_vars=flipped_data_vars,
-                                coords={'latitude': lat_flipped,
-                                        'longitude': ds_cut.longitude},
-                                attrs=ds_cut.attrs
-                            )
-
+                        ds_cut = ds_cut.sortby("latitude")
                     try:
                         ds_cut.to_netcdf(out_path, "w")
                         logger.debug(f"Written {out_path}")
@@ -809,8 +796,8 @@ class MHMRestartFile:
         return ds
 
     def _correct_restart_file(self, ds):
-        ds_mask = xr.open_dataset(self.grid.land_mask_file).sortby("latitude")
-        ds_mask = ds_mask.sel(lon=slice(self.grid.l1.lon_min, self.grid.l1.lon_max), lat=slice(self.grid.l1.lat_min, self.grid.l1.lat_max))
+        ds_mask = xr.open_dataset(self.grid.land_mask_file)
+        ds_mask = ds_mask.sel(lon=slice(self.grid.l1.lon_min, self.grid.l1.lon_max), lat=slice(self.grid.l1.lat_max, self.grid.l1.lat_min)).sortby("latitude")
         # ds_mask = xr.open_dataset(
         #     "/work/luedke/land_mask_0p1.nc"
         # ).sortby("latitude")
