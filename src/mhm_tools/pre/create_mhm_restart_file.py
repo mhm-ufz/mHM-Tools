@@ -331,7 +331,6 @@ class MPRRunner:
         if self.mpr_parameter_file is not None:
             command += f" -p {self.mpr_parameter_file}"
         logger.info(f"Running mPR with: {command}")
-
         p = Popen(command, shell=True, stdout=PIPE, stderr=PIPE)
         try:
             data, error_data = p.communicate()
@@ -527,6 +526,8 @@ class MHMRestartFile:
             ):
                 l0, l1 = self._create_latlon(lon_min, lat_min)
                 subgrid_path = self.output_path / f"slice_{i}_{j}"
+                logger.debug(f"Reading subgrid {subgrid_path}")
+                logger.debug(f"l0: {l0.lon_min}, {l0.lon_max}, {l0.lat_min}, {l0.lat_max}")
                 if not subgrid_path.is_dir():
                     logger.error(f"Subgrid {subgrid_path} not found")
                     continue
@@ -596,12 +597,14 @@ class MHMRestartFile:
                         longitude=lon_slice,
                         latitude=lat_slice,
                     )
-                    # no masking at the moment since the mask is L1 resolution not L0
-                    #if self.grid.l0.mask is not None:
-                    # mask = self.grid.l0.mask.sel(lon=lon_slice, lat=lat_slice)
-                    # for var in ds_cut.data_vars:
-                    #     logger.debug(f"{var} dataset: {np.shape(ds_cut[var].data)} - mask: {np.shape(mask.values)}")
-                    #     ds_cut[var].data[~mask.values] = np.nan
+                    if "slope" in file_path.name:
+                        # flip the latitude dimension
+                        index_lat = ds_cut['slope'].dims.index("latitude")
+                        data = ds_cut['slope'].values
+                        data_flipped = np.flip(data, axis=index_lat)
+                        lat_flipped = ds_cut.latitude.values[::-1]
+                        ds_cut = xr.DataArray(data_flipped, dims=ds_cut.dims, coords={'latitude': lat_flipped, 'longitude': ds_cut.longitude.values})
+
                     try:
                         ds_cut.to_netcdf(out_path, "w")
                         logger.debug(f"Written {out_path}")
