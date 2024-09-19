@@ -810,6 +810,7 @@ class MHMRestartFile:
 
     def _correct_restart_file(self, ds):
         ds_mask = xr.open_dataset(self.grid.land_mask_file).sortby("latitude")
+        ds_mask = ds_mask.sel(lon=slice(self.grid.l1.lon_min, self.grid.l1.lon_max), lat=slice(self.grid.l1.lat_min, self.grid.l1.lat_max))
         # ds_mask = xr.open_dataset(
         #     "/work/luedke/land_mask_0p1.nc"
         # ).sortby("latitude")
