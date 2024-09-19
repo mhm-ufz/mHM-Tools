@@ -597,6 +597,7 @@ class MHMRestartFile:
                         latitude=lat_slice,
                     )
                     # no masking at the moment since the mask is L1 resolution not L0
+                    #if self.grid.l0.mask is not None:
                     # mask = self.grid.l0.mask.sel(lon=lon_slice, lat=lat_slice)
                     # for var in ds_cut.data_vars:
                     #     logger.debug(f"{var} dataset: {np.shape(ds_cut[var].data)} - mask: {np.shape(mask.values)}")
@@ -734,6 +735,9 @@ class MHMRestartFile:
                     "L1_latitude",
                     "L1_fAsp",
                     "L1_Max_Canopy_Intercept",
+                    "L1_SlowFlow",
+                    "L1_FastFlow",
+                    "L1_kBaseFlow"
                 ]
                 for r_data_var in reverse_data_vars:
                     if r_data_var in cur_ds:
