@@ -9,11 +9,11 @@ Authors
 import logging
 from pathlib import Path
 
+import matplotlib.dates as mdates
+import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
-import matplotlib.pyplot as plt
 from matplotlib import gridspec
-import matplotlib.dates as mdates
 
 
 class Catchment:
@@ -288,7 +288,7 @@ class Hydrograph:
             var_ses[int(variable.time[i].dt.month.data) - 1].append(variable[i])
         var_ses = [np.nanmean(var_ses[i]) for i in range(12)]
         if long:
-            var_ses = [var_ses[-1]] + var_ses + [var_ses[0]]
+            var_ses = [var_ses[-1], *var_ses, var_ses[0]]
         return np.array(var_ses)
 
     @staticmethod
@@ -461,8 +461,9 @@ class Hydrograph:
         ax1.set_xlim(self.discharge_data["time"][0], self.discharge_data["time"][-1])
         ax1.spines["top"].set_visible(False)
         ax1.spines["right"].set_visible(False)
-        ax1.xaxis.set_major_formatter(mdates.ConciseDateFormatter(ax1.xaxis.get_major_locator()))
-
+        ax1.xaxis.set_major_formatter(
+            mdates.ConciseDateFormatter(ax1.xaxis.get_major_locator())
+        )
 
     def create_plot_yearly(self, fig, gs, pre):
         """
@@ -617,8 +618,12 @@ class Hydrograph:
             ax3.set_title("Seasonality", horizontalalignment="center")
         ax3.spines["top"].set_visible(False)
         ax3.spines["right"].set_visible(False)
-        season_sim = self.get_long_time_monthly_mean(self.discharge_data["sim"], long=True)
-        season_obs = self.get_long_time_monthly_mean(self.discharge_data["obs"], long=True)
+        season_sim = self.get_long_time_monthly_mean(
+            self.discharge_data["sim"], long=True
+        )
+        season_obs = self.get_long_time_monthly_mean(
+            self.discharge_data["obs"], long=True
+        )
         self.logger.debug(f"sim: {season_sim}")
         self.logger.debug(f"osb: {season_obs}")
         self.plot_on_axis(
@@ -641,7 +646,9 @@ class Hydrograph:
             ax3.legend()
 
         ax3.set_xlim(0.5, 12.5)
-        ax3.set_xticks(np.arange(1, 13),)
+        ax3.set_xticks(
+            np.arange(1, 13),
+        )
         ax3.set_ylabel(r"Q $[m^3 s^{-1}]$")
 
     def create_plot_scatter(self, fig, gs):
