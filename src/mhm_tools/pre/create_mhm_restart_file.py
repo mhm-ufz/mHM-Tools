@@ -741,8 +741,7 @@ class MHMRestartFile:
                             cur_ds[r_data_var].data, axis=index_lat
                         )
                         logger.debug(f"{r_data_var} reversed latitudes")
-                for data_var in data_vars:
-                    index_slice = {
+                index_slice = {
                         "lon_out": slice(
                             isel_start * self.increment_l1,
                             (isel_start + 1) * self.increment_l1,
@@ -752,6 +751,7 @@ class MHMRestartFile:
                             (jsel_start + 1) * self.increment_l1,
                         ),
                     }
+                for data_var in data_vars:
                     if cur_ds[data_var].shape != ds_whole[data_var][index_slice].shape:
                         dims = cur_ds[data_var].dims
                         ds_whole[data_var] = ds_whole[data_var].transpose(*dims)
