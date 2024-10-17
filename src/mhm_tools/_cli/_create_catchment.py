@@ -112,7 +112,7 @@ def run(args):
         gauge_coords = (np.array([lon]), np.array([lat]))
     elif args.lonlatbox is not None:
         lonmin, lonmax,latmin, latmax, resl0  = map(float, args.lonlatbox.split(","))
-        coordinate_slices = {'lat': (latmin, latmax), 'lon': (lonmin, lonmax)}
+        coordinate_slices = {'lat': (latmax, latmin), 'lon': (lonmin, lonmax)}
     create_catchment(
         input_file=args.input_file,
         output_path=args.output_path,
