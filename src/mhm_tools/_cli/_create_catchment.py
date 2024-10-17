@@ -104,15 +104,14 @@ def run(args):
         parsed command line arguments
     """
     gauge_coords = None
-    latlon_box = None
     if args.gauge_coords is not None:
-        if args.latlon_box is not None:
-            raise ValueError("You can't use --gauge_coords and --latlon_box at the same time.")
+        if args.lonlatbox is not None:
+            raise ValueError("You can't use --gauge_coords and --lonlatbox at the same time.")
         lat, lon = map(float, args.gauge_coords.split(","))
         gauge_coords = (np.array([lon]), np.array([lat]))
     elif args.lonlatbox is not None:
         lonmin, lonmax,latmin, latmax, resl0  = map(float, args.lonlatbox.split(","))
-        coordinate_slices = {'lat': (latmax, latmin), 'lon': (lonmin, lonmax)}
+        coordinate_slices = {'lat': slice(latmax, latmin), 'lon': slice(lonmin, lonmax)}
     create_catchment(
         input_file=args.input_file,
         output_path=args.output_path,
