@@ -402,7 +402,7 @@ def merge_catchment(path1, path2, out_path):
 
 
 def create_catchment(
-    input_file, output_path, var_name, var, ftype, gauge_coords=None, latlon_box=None, log_level="INFO", mask_file=None
+    input_file, output_path, var_name, var, ftype, gauge_coords=None, coordinate_slices=None, log_level="INFO", mask_file=None, res=0.05
 ):
 
     set_log_level(log_level)
@@ -415,10 +415,10 @@ def create_catchment(
         raise ValueError(f"Unexpected value for var={var}, must be 'fdir' or 'dem'")
 
     ds = xr.open_dataset(pl.Path(input_file))
-    transform = (0.05, 0.0, -180, 0, 0.05, -90)
+    transform = (res, 0.0, -180, 0, res, -90)
     latlon = True
 
-    if gauge_coords is None:
+    if gauge_coords is None and coordinate_slices is None:
         temp_file1 = "hydro1.nc"
         global_catchments = Catchment(
             ds=ds,
@@ -462,6 +462,23 @@ def create_catchment(
         # remove the temporary files
         temp_file1.unlink()
         temp_file2.unlink()
+    elif coordinate_slices is not None:
+        ds = ds.sel(lat=coordinate_slices['lat'], lon=coordinate_slices['lon'])
+        transform = (res, 0.0, coordinate_slices['lon'].start, 0, res, coordinate_slices['lat'].start)
+        c = Catchment(
+            ds=ds,
+            var_name=var_name,
+            var=var,
+            ftype=ftype,
+            transform=transform,
+            latlon=latlon,
+            out_var_name="basin_ids.nc",
+            do_shift=False,
+        )
+        c.get_basins()
+        c.get_facc()
+        c.get_grid_area()
+        c.write(output_path, single_file=True)
     else:
         logger.info(f"Creating catchment for gauge coordinates {gauge_coords}")
         c = Catchment(

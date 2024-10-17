@@ -49,7 +49,7 @@ def add_args(parser):
     )
 
     parser.add_argument(
-        "--coords",
+        "--lonlatbox",
         required=False,
         default=None,
         help=(
@@ -113,7 +113,7 @@ def add_args(parser):
         default=None,
         help=(
             """path to the mask file, a .nc file with a variable 'mask' containing the grid mask at l0 resolution
-            required unless --coords is provided"""
+            required unless --lonlatbox is provided"""
         ),
     )
 
@@ -247,13 +247,13 @@ def run(args):
     """
     set_log_level(args.log_level)
     l1_resolution = float(args.l1_resolution)
-    if args.coords is not None:
-        coords = args.coords.split(",")
-        lon_min_target_grid = float(coords[0])
-        lon_max_target_grid = float(coords[1])
-        lat_min_target_grid = float(coords[2])
-        lat_max_target_grid = float(coords[3])
-        l0_resolution = float(coords[4])
+    if args.lonlatbox is not None:
+        lonlatbox = args.lonlatbox.split(",")
+        lon_min_target_grid = float(lonlatbox[0])
+        lon_max_target_grid = float(lonlatbox[1])
+        lat_min_target_grid = float(lonlatbox[2])
+        lat_max_target_grid = float(lonlatbox[3])
+        l0_resolution = float(lonlatbox[4])
     else:
         lon_min_target_grid = args.lon_min
         lon_max_target_grid = args.lon_max

@@ -80,10 +80,11 @@ def add_args(parser):
         ),
     )
     parser.add_argument(
-        "--latlon_box",
+        "--lonlatbox",
+        required=False,
         default=None,
         help=(
-            "Latlon box in the form of 'latmin,latmax,lonmin,lonmax' take care to write --latlon_box='latmin,latmax,lonmin,lonmax' and that the catchment you want to create is completely within this box." 
+            """coordinates in the form of 'lon_min,lon_max,lat_min,lat_max,resolution_l0'"""
         ),
     )
     parser.add_argument(
@@ -109,9 +110,9 @@ def run(args):
             raise ValueError("You can't use --gauge_coords and --latlon_box at the same time.")
         lat, lon = map(float, args.gauge_coords.split(","))
         gauge_coords = (np.array([lon]), np.array([lat]))
-    elif args.latlon_box is not None:
-        latmin, latmax, lonmin, lonmax = map(float, args.latlon_box.split(","))
-        latlon_box = {'lat_slice': (latmin, latmax), 'lon_slice': (lonmin, lonmax)}
+    elif args.lonlatbox is not None:
+        lonmin, lonmax,latmin, latmax, resl0  = map(float, args.lonlatbox.split(","))
+        coordinate_slices = {'lat': (latmin, latmax), 'lon': (lonmin, lonmax)}
     create_catchment(
         input_file=args.input_file,
         output_path=args.output_path,
@@ -119,7 +120,7 @@ def run(args):
         var=args.var,
         ftype=args.ftp,
         gauge_coords=gauge_coords,
-        latlon_box=latlon_box,
+        coordinate_slices=coordinate_slices,
         log_level=args.log_level,
         mask_file=args.mask_file,
     )
