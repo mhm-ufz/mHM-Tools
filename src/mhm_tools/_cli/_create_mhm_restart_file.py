@@ -312,7 +312,7 @@ def run(args):
 
     grid = Grid(
         file_path=args.input_dir,
-        name="whole grid",
+        name="whole_grid",
         latlon_file=None,
         l0=l0,
         l1=l1,
