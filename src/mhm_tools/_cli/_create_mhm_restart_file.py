@@ -244,6 +244,7 @@ def run(args):
         parsed command line arguments
     """
     set_log_level(args.log_level)
+    mask=None
     l1_resolution = float(args.l1_resolution)
     if args.lonlatbox is not None:
         lonlatbox = args.lonlatbox.split(",")
