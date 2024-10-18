@@ -5,6 +5,7 @@ A restart file contains all the static information to run mHM on a specific grid
 
 """
 
+import numpy as np
 from mhm_tools.common.logger import logger, set_log_level
 from mhm_tools.pre.create_mhm_restart_file import Grid, LatLon, MPRRunner
 
@@ -228,6 +229,13 @@ def get_coords_from_mask(mask):
     lon_max_target_grid += resolution/2
     lat_min_target_grid -= resolution/2
     lat_max_target_grid += resolution/2
+
+    # round values to get rid of inprecission
+    lon_min_target_grid = np.round(lon_min_target_grid, 5)
+    lon_max_target_grid = np.round(lon_max_target_grid, 5)
+    lat_min_target_grid = np.round(lat_min_target_grid, 5)
+    lat_max_target_grid = np.round(lat_max_target_grid, 5)
+
 
     if lat_min_target_grid > lat_max_target_grid:
         lat_min_target_grid, lat_max_target_grid = lat_max_target_grid, lat_min_target_grid
