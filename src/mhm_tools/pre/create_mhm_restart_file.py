@@ -799,6 +799,8 @@ class MHMRestartFile:
     def _correct_restart_file(self, ds):
         ds_mask = xr.open_dataset(self.grid.land_mask_file)
         ds_mask = ds_mask.sel(lon=slice(self.grid.l1.lon_min, self.grid.l1.lon_max), lat=slice(self.grid.l1.lat_max, self.grid.l1.lat_min))
+        logger.debug(f'lon: ds {ds['lon_out'][0]}-{ds['lon_out'][-1]} ; grid {self.grid.l1.lon_min}-{self.grid.l1.lon_max}')
+        logger.debug(f'lat: ds {ds['lat_out'][0]}-{ds['lat_out'][-1]} ; grid {self.grid.l1.lat_min}-{self.grid.l1.lat_max}')
         try: 
             ds_mask = ds_mask.sortby("latitude")
         except Exception as e:
