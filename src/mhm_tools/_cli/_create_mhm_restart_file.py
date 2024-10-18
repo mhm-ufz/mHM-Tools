@@ -221,6 +221,14 @@ def get_coords_from_mask(mask):
     lon_max_target_grid = mask.lon.values[-1]
     lat_min_target_grid = mask.lat.values[0]
     lat_max_target_grid = mask.lat.values[-1]
+    
+    # change values from center cell to corner values
+    resolution = mask.lon.values[1] - mask.lon.values[0]
+    lon_min_target_grid -= resolution/2
+    lon_max_target_grid += resolution/2
+    lat_min_target_grid -= resolution/2
+    lat_max_target_grid += resolution/2
+
     if lat_min_target_grid > lat_max_target_grid:
         lat_min_target_grid, lat_max_target_grid = lat_max_target_grid, lat_min_target_grid
     if lon_min_target_grid > lon_max_target_grid:
