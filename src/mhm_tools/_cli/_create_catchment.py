@@ -104,6 +104,7 @@ def run(args):
         parsed command line arguments
     """
     gauge_coords = None
+    coordinate_slices = None
     if args.gauge_coords is not None:
         if args.lonlatbox is not None:
             raise ValueError("You can't use --gauge_coords and --lonlatbox at the same time.")
