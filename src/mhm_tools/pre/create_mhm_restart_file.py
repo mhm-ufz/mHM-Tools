@@ -802,6 +802,7 @@ class MHMRestartFile:
         logger.debug(f'lon: ds {ds['lon_out'].values[0]}-{ds['lon_out'].values[-1]} ; grid {self.grid.l1.lon_min}-{self.grid.l1.lon_max}')
         logger.debug(f'lat: ds {ds['lat_out'].values[0]}-{ds['lat_out'].values[-1]} ; grid {self.grid.l1.lat_min}-{self.grid.l1.lat_max}')
         logger.debug(f'mask: {np.shape(ds_mask["land_mask"].data)}')
+        logger.debug(f'mask lon: {ds_mask['lon'].data[0]} to {ds_mask['lon'].data[-1]} with length {np.shape(ds_mask['lon'].data)}')
         logger.debug(f'ds: {np.shape(ds["L1_SoilMoistureExponent"].data)}')
         try: 
             ds_mask = ds_mask.sortby("latitude")
