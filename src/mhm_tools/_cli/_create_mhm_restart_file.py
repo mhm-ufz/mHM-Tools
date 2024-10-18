@@ -225,14 +225,12 @@ def get_coords_from_mask(mask):
         lat_min_target_grid, lat_max_target_grid = lat_max_target_grid, lat_min_target_grid
     if lon_min_target_grid > lon_max_target_grid:
         lon_min_target_grid, lon_max_target_grid = lon_max_target_grid, lon_min_target_grid
-    l0_resolution = mask.lon.values[1] - mask.lon.values[0]
     mask = mask.mask
     return (
         lon_min_target_grid,
         lon_max_target_grid,
         lat_min_target_grid,
         lat_max_target_grid,
-        l0_resolution,
         mask,
     )
 
@@ -254,29 +252,28 @@ def run(args):
         lat_min_target_grid = float(lonlatbox[2])
         lat_max_target_grid = float(lonlatbox[3])
         l0_resolution = float(lonlatbox[4])
-    else:
-        lon_min_target_grid = args.lon_min
-        lon_max_target_grid = args.lon_max
-        lat_min_target_grid = args.lat_min
-        lat_max_target_grid = args.lat_max
-        l0_resolution = args.l0_resolution
-    mask = None
-    if args.mask_file is not None:
+    elif args.mask_file is not None and args.l0_resolution is not None :
         (
             lon_min_target_grid,
             lon_max_target_grid,
             lat_min_target_grid,
             lat_max_target_grid,
-            l0_resolution,
             mask,
         ) = get_coords_from_mask(args.mask_file)
-    elif (
-        lon_min_target_grid is None
-        or lon_max_target_grid is None
-        or lat_min_target_grid is None
-        or lat_max_target_grid is None
-        or l0_resolution is None
+        l0_resolution = args.l0_resolution
+    elif not (
+        args.lon_min is None
+        or args.lon_max is None
+        or args.lat_min is None
+        or args.lat_max is None
+        or args.l0_resolution is None
     ):
+        lon_min_target_grid = args.lon_min
+        lon_max_target_grid = args.lon_max
+        lat_min_target_grid = args.lat_min
+        lat_max_target_grid = args.lat_max
+        l0_resolution = args.l0_resolution
+    else:
         raise ValueError(
             "Either all coordinat bounds and resolutions or --mask_file must be provided"
         )

@@ -774,7 +774,6 @@ class MHMRestartFile:
                             continue
                     ds_whole[data_var][index_slice] = cur_ds[data_var].data
         logger.info("Merging restart files done")
-        logger.info(f"Writing restart file to {self.grid.restart_file}")
         if "month_of_year_bnds" not in ds_whole.coords:
             logger.info("Adding month_of_year_bnds")
             month_of_year_bnds = [
@@ -785,6 +784,7 @@ class MHMRestartFile:
                 month_of_year_bnds,
             )
         # save the intermediate file
+        logger.info(f"Writing restart file to {self.grid.restart_file}")
         ds_whole.to_netcdf(self.grid.restart_file)
         logger.info("Renaming coordinates and data variables")
 
