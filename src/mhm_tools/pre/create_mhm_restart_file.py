@@ -25,6 +25,7 @@ class MorphFiles:
         sand_content (Path): The path to the sand content file.
         clay_content (Path): The path to the clay content file.
         slope (Path): The path to the slope file.
+        slope_emp (Path): The path to the slope_emp file.
         lai (Path): The path to the leaf area index file.
         aspect (Path): The path to the aspect file.
         geology (Path): The path to the geology file.
@@ -38,6 +39,7 @@ class MorphFiles:
         sand_content=None,
         clay_content=None,
         slope=None,
+        slope_emp=None,
         lai=None,
         aspect=None,
         geology=None,
@@ -47,6 +49,7 @@ class MorphFiles:
         self.sand_content = sand_content
         self.clay_content = clay_content
         self.slope = slope
+        self.slope_emp = slope_emp
         self.lai = lai
         self.aspect = aspect
         self.geology = geology
@@ -78,6 +81,8 @@ class MorphFiles:
             if not overwrite and self.__dict__.get(key, None) is not None:
                 continue
             key_files = list(filepath.glob(f"*{key}*.nc"))
+            if key == 'slope': 
+                key_files = [file for file in key_files if 'emp' not in str(file.name)]
             if len(key_files) == 0:
                 if key not in member_key_synonyms:
                     continue  # should raise an error
@@ -470,6 +475,7 @@ class MHMRestartFile:
             "${sand_content}": grid.morph_files.sand_content,
             "${clay_content}": grid.morph_files.clay_content,
             "${slope}": grid.morph_files.slope,
+            "${slope_emp}": grid.morph_files.slope_emp,
             "${lai}": grid.morph_files.lai,
             "${aspect}": grid.morph_files.aspect,
             "${geology}": grid.morph_files.geology,
@@ -1100,8 +1106,8 @@ class MHMRestartFile:
         logger.info('Preparing slope_emp')
         td = TDigest(compression=n)
         if self.run_on_whole_domain:
-            if not (self.grid.path / 'slope_emp.nc').is_file():
-                with xr.open_dataset(self.grid.path / 'slope_unmasked_0.002.nc') as ds_slope:
+            if not self.grid.morph_files.slope_emp.is_file():
+                with xr.open_dataset(self.grid.morph_files.slope) as ds_slope:
                     data = ds_slope['slope']
                     flattened = data.values.flatten()
                     flattened_no_nan = flattened[~np.isnan(flattened)]
@@ -1111,23 +1117,23 @@ class MHMRestartFile:
                     ds_slope['slope'] = cdf
                     ds_slope = ds_slope.rename({'slope': 'slope_emp'})
                     ds_slope.to_netcdf(self.grid.path / 'slope_emp.nc')
+                    self.grid.morph_files.slope_emp = self.grid.path / 'slope_emp.nc'
         else:
-            subgrid_dirs = self.output_path.glob("slice_*")
-            for dir in subgrid_dirs:
-                with xr.open_dataset(dir / 'slope_unmasked_0.002.nc') as ds_slope:
+            for sgrid in self.subgrids:
+                with xr.open_dataset(sgrid.morph_files.slope) as ds_slope:
                     data = ds_slope['slope']
                     flattened = data.values.flatten()
                     flattened_no_nan = flattened[~np.isnan(flattened)]
                     td.update(flattened_no_nan)
-            for dir in subgrid_dirs:
-                with xr.open_dataset(dir / 'slope_unmasked_0.002.nc') as ds_slope:
+            for sgrid in self.subgrids:
+                with xr.open_dataset(sgrid.morph_files.slope) as ds_slope:
                     data = ds_slope['slope']
                     cdf = td.cdf(data.values)
                     cdf = xr.DataArray(cdf, dims=['latitude', 'longitude'])
-                    f['slope'] = cdf
-                    f = ds_slope.rename({'slope': 'slope_emp'})
+                    ds_slope['slope'] = cdf
+                    ds_slope = ds_slope.rename({'slope': 'slope_emp'})
                     ds_slope.to_netcdf(dir / 'slope_emp.nc')
-                    
+                    sgrid.morph_files.slope_emp = dir / 'slope_emp.nc'
 
     def _create_restart_for_grid(self, grid):
         logger.debug(
