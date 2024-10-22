@@ -5,6 +5,7 @@ import re
 import shutil
 from pathlib import Path
 from subprocess import PIPE, Popen, TimeoutExpired
+from crick import TDigest
 
 import numpy as np
 import xarray as xr
@@ -1095,6 +1096,39 @@ class MHMRestartFile:
                 else:
                     file_path.unlink()
 
+    def _prepare_slope_emp(self, n=10000):
+        logger.info('Preparing slope_emp')
+        td = TDigest(compression=n)
+        if self.run_on_whole_domain:
+            if not (self.grid.path / 'slope_emp.nc').is_file():
+                with xr.open_dataset(self.grid.path / 'slope_unmasked_0.002.nc') as ds_slope:
+                    data = ds_slope['slope']
+                    flattened = data.values.flatten()
+                    flattened_no_nan = flattened[~np.isnan(flattened)]
+                    td.update(flattened_no_nan)
+                    cdf = td.cdf(data.values)
+                    cdf = xr.DataArray(cdf, dims=['latitude', 'longitude'])
+                    ds_slope['slope'] = cdf
+                    ds_slope = ds_slope.rename({'slope': 'slope_emp'})
+                    ds_slope.to_netcdf(self.grid.path / 'slope_emp.nc')
+        else:
+            subgrid_dirs = self.output_path.glob("slice_*")
+            for dir in subgrid_dirs:
+                with xr.open_dataset(dir / 'slope_unmasked_0.002.nc') as ds_slope:
+                    data = ds_slope['slope']
+                    flattened = data.values.flatten()
+                    flattened_no_nan = flattened[~np.isnan(flattened)]
+                    td.update(flattened_no_nan)
+            for dir in subgrid_dirs:
+                with xr.open_dataset(dir / 'slope_unmasked_0.002.nc') as ds_slope:
+                    data = ds_slope['slope']
+                    cdf = td.cdf(data.values)
+                    cdf = xr.DataArray(cdf, dims=['latitude', 'longitude'])
+                    f['slope'] = cdf
+                    f = ds_slope.rename({'slope': 'slope_emp'})
+                    ds_slope.to_netcdf(dir / 'slope_emp.nc')
+                    
+
     def _create_restart_for_grid(self, grid):
         logger.debug(
             f"Processing subgrid {grid.name}, {grid.path}, {grid.l0.lon_min}, {grid.l0.lon_max}, {grid.l0.lat_min}, {grid.l0.lat_max}"
@@ -1122,6 +1156,7 @@ class MHMRestartFile:
         logger.info("Creating restart file")
         if self.run_on_whole_domain:
             logger.info("grid will be processed as a whole")
+            self._prepare_slope_emp()
             self._create_restart_for_grid(self.grid)
         else:
             logger.info(
@@ -1134,6 +1169,7 @@ class MHMRestartFile:
                     self._split_grid()
                 logger.info(f'The grid has been split into {len(self.subgrids)} subgrids.')
                 logger.info("Creating namelists and running MPR.")
+                self._prepare_slope_emp()
                 subgrids = Parallel(n_jobs=self.ncpus, backend="loky")(
                     delayed(self._create_restart_for_grid)(subgrid)
                     for subgrid in self.subgrids

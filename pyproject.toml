@@ -43,7 +43,8 @@ dependencies = [
   "pyflwdir",
   "matplotlib",
   "scipy",
-  "joblib"
+  "joblib",
+  "crick"
 ]
 
 [project.urls]
