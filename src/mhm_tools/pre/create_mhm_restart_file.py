@@ -1132,7 +1132,6 @@ class MHMRestartFile:
                     cdf = xr.DataArray(cdf, dims=['latitude', 'longitude'])
                     ds_slope['slope'] = cdf
                     ds_slope = ds_slope.rename({'slope': 'slope_emp'})
-<<<<<<< HEAD
                     ds_slope.to_netcdf(sgrid.path / 'slope_emp.nc')
                     sgrid.morph_files.slope_emp = sgrid.path / 'slope_emp.nc'
 
