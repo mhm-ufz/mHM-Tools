@@ -83,7 +83,7 @@ def get_coord_values(ds, lat=False, lon=False):
 def get_file_stats(file, input_var, factor=1, coordiante_slice=None):
     with xr.open_dataset(file, engine="netcdf4") as ds:
         if coordiante_slice is not None: 
-            ds = ds.sel({get_coord_key(ds, lat=True): coordiante_slice['lat'], get_coord_values(ds, lon=True): coordiante_slice['lon']})
+            ds = ds.sel({get_coord_key(ds, lat=True): coordiante_slice['lat'], get_coord_key(ds, lon=True): coordiante_slice['lon']})
         clim = get_clim_from_ds(ds, input_var, factor)
         std = get_std_from_ds(ds, input_var, clim, factor)
         mean = xr.DataArray(np.nanmean(ds[input_var], axis=0) * factor, coords={"lat": get_coord_values(ds, lat=True), "lon": get_coord_values(ds, lon=True)}, dims=["lat", "lon"])
@@ -195,7 +195,7 @@ def compare_input_with_ref(input_file, input_var, output_path , ref_file, ref_va
     else: 
         with xr.open_dataset(input_file, engine="netcdf4") as ds_input:
             if coordiante_slice is not None:
-                ds_input = ds_input.sel({get_coord_key(ds_input, lat=True): coordiante_slice['lat'], get_coord_values(ds_input, lon=True): coordiante_slice['lon']})
+                ds_input = ds_input.sel({get_coord_key(ds_input, lat=True): coordiante_slice['lat'], get_coord_key(ds_input, lon=True): coordiante_slice['lon']})
             if 'clim' in ds_input and 'std' in ds_input and 'mean' in ds_input:
                 input = ds_input
             else: 
@@ -206,7 +206,7 @@ def compare_input_with_ref(input_file, input_var, output_path , ref_file, ref_va
     else: 
         with xr.open_dataset(ref_file, engine="netcdf4") as ds_ref:
             if coordiante_slice is not None:
-                ds_ref = ds_ref.sel({get_coord_key(ds_ref, lat=True): coordiante_slice['lat'], get_coord_values(ds_ref, lon=True): coordiante_slice['lon']})
+                ds_ref = ds_ref.sel({get_coord_key(ds_ref, lat=True): coordiante_slice['lat'], get_coord_key(ds_ref, lon=True): coordiante_slice['lon']})
             if 'clim' in ds_ref and 'std' in ds_ref and 'mean' in ds_ref:
                 ref = ds_ref
             else: 
