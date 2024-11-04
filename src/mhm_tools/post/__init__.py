@@ -11,6 +11,8 @@ Bankfull discharge
 
 from . import bankfull
 from .bankfull import bankfull_discharge
+from .seasonality_grid_validation import seasonality_grid_validation
 
 __all__ = ["bankfull"]
 __all__ += ["bankfull_discharge"]
+__all__ += ["seasonality_validation"]
