@@ -214,9 +214,9 @@ def compare_input_with_ref(input_file, input_var, output_path , ref_file, ref_va
     rel_mean = input['mean'].values / ref['mean'].values
     rel_std = input['std'].values / ref['std'].values
     spearman = spearman_spatial(input['clim'], ref['clim'])
-    rel_mean = xr.DataArray(rel_mean, coords={"lat": input['lat'].values, "lon": input['lon'].values}, dims=["lat", "lon"])
-    rel_std = xr.DataArray(rel_std, coords={"lat": input['lat'].values, "lon": input['lon'].values}, dims=["lat", "lon"])
-    spearman = xr.DataArray(spearman, coords={"lat": input['lat'].values, "lon": input['lon'].values}, dims=["lat", "lon"])
+    rel_mean = xr.DataArray(rel_mean, coords={"lat": get_coord_values(input, lat=True), "lon": get_coord_values(input, lon=True)}, dims=["lat", "lon"])
+    rel_std = xr.DataArray(rel_std, coords={"lat": get_coord_values(input, lat=True), "lon": get_coord_values(input, lon=True)}, dims=["lat", "lon"])
+    spearman = xr.DataArray(spearman, coords={"lat": get_coord_values(input, lat=True), "lon": get_coord_values(input, lon=True)}, dims=["lat", "lon"])
     output = xr.Dataset(
             {
                 f'spearman': spearman,
@@ -225,8 +225,8 @@ def compare_input_with_ref(input_file, input_var, output_path , ref_file, ref_va
             },
             coords={
                 'month': np.arange(1,13,1),
-                'lat': input['lat'].values,
-                'lon': input['lon'].values
+                'lat': get_coord_values(input, lat=True),
+                'lon': get_coord_values(input, lon=True)
             }
         )
     file_name = 'relative_stats'
@@ -252,7 +252,7 @@ def seasonality_grid_validation(input_file, input_var, output_path, ref_file, re
     if only_plot and get_ref_file(output_path, ref_name).is_file():
         create_map_from_output(output_path=output_path, input_name=input_name, ref_name=ref_name)
     elif ref_file is None:
-        output_name = f'{input_name}_stats.nc' if input_name is not None else 'stats.nc'    
+        output_name = f'{input_name}_stats.nc' if input_name is not None else 'stats.nc'
         get_file_stats(input_file, input_var, input_factor, coordinate_slice).to_netcdf(output_path / output_name)
     else:
         compare_input_with_ref(input_file, input_var, output_path, ref_file, ref_var, input_name, ref_name, input_factor, ref_factor, coordinate_slice)
