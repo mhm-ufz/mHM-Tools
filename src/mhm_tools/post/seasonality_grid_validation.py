@@ -70,7 +70,7 @@ def get_coord_key(ds, lat=False, lon=False):
     elif lat:
         keys = ['lat', 'latitude', 'northing']
     else:
-        keys = ['lat', 'latitude', 'northing']
+        keys = ['lon', 'longitude', 'easting']
     for key in keys:
         if key in ds and len(ds[key].shape) == 1:
             return key
