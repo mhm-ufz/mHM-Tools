@@ -8,7 +8,8 @@ from scipy.stats import spearmanr
 import matplotlib.pyplot as plt
 from matplotlib.offsetbox import TextArea, AnnotationBbox
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-
+import dask.array as da
+from dask.distributed import Client
 
 def spearman_correlation(data1, data2):
     """Calculate Spearman rank correlation between two xarray DataArrays."""
@@ -34,35 +35,34 @@ def spearman_spatial(data1, data2):
     return res
 
 def climatology(data):
-    data_clim = data.groupby("time.month").mean()
-    if len(data_clim.month) < 12:
-        clim = np.full((12,*np.shape(data.values[0])), np.nan)
-        for i, month in enumerate(data_clim.month):
-            clim[month-1] = data_clim.values[i]
-        return clim
-        # pass # data.month gives the values of the months (from 1 to 12)
-    return data_clim.values
+    # Calculate monthly mean, which Dask handles lazily
+    data_clim = data.groupby("time.month").mean(dim="time", skipna=True)
+    
+    # Ensure the climatology has all 12 months, filling missing months with NaNs
+    data_clim = data_clim.reindex(month=np.arange(1, 13), fill_value=np.nan)
+    return data_clim
 
 def get_clim_from_ds(ds, input_var, factor=1):
         data = ds[input_var]*factor
-        clim = climatology(data)
-        return xr.DataArray(clim, coords={"month": range(1, 13), "lat": get_coord_values(ds, lat=True), "lon": get_coord_values(ds, lon=True)}, dims=["month", "lat", "lon"])
+        return climatology(data)
+        # return xr.DataArray(clim, coords={"month": range(1, 13), "lat": get_coord_values(ds, lat=True), "lon": get_coord_values(ds, lon=True)}, dims=["month", "lat", "lon"])
 
 def get_std_from_ds(ds, input_var, clim=None, factor=1):
-    data = ds[input_var]
-    data_reduced = data.values*factor - clim.sel(month=data["time.month"])
-    std = np.nanstd(data_reduced.values, axis=0)
-    return xr.DataArray(std, coords={"lat": get_coord_values(ds, lat=True), "lon": get_coord_values(ds, lon=True)}, dims=["lat", "lon"])
-# def get_coord_values(ds, *keys):
-#     for key in keys:
-#         if key in ds and len(ds[key].shape) == 1:
-#             return ds[key].values
-#     return None
-
-# def get_lat_values(ds):
-#     return get_coord_values(ds, 'lat', 'latitude', 'northing')
-# def get_lon_values(ds):
-#     return get_coord_values(ds, 'lon', 'longitude', 'easting')
+      # Retrieve data and apply factor
+    data = ds[input_var] * factor
+    
+    # Subtract climatology for each month
+    data_reduced = data.groupby("time.month") - clim
+    
+    # Calculate standard deviation along the time dimension in a Dask-compatible way
+    std = data_reduced.std(dim="time", skipna=True)
+    
+    # Return as DataArray with appropriate coordinates
+    return xr.DataArray(
+        std, 
+        coords={"lat": get_coord_values(ds, lat=True), "lon": get_coord_values(ds, lon=True)},
+        dims=["lat", "lon"]
+    )
 
 def get_coord_key(ds, lat=False, lon=False):
     if (lon and lat) or not (lon or lat): 
@@ -80,26 +80,42 @@ def get_coord_values(ds, lat=False, lon=False):
     key = get_coord_key(ds, lat=lat, lon=lon)
     return ds[key].values
 
-def get_file_stats(file, input_var, factor=1, coordiante_slice=None):
-    with xr.open_dataset(file, engine="netcdf4") as ds:
-        if coordiante_slice is not None: 
-            ds = ds.sel({get_coord_key(ds, lat=True): coordiante_slice['lat'], get_coord_key(ds, lon=True): coordiante_slice['lon']})
-        clim = get_clim_from_ds(ds, input_var, factor)
-        std = get_std_from_ds(ds, input_var, clim, factor)
-        mean = xr.DataArray(np.nanmean(ds[input_var], axis=0) * factor, coords={"lat": get_coord_values(ds, lat=True), "lon": get_coord_values(ds, lon=True)}, dims=["lat", "lon"])
+
+def get_file_stats(file, input_var, factor=1, coordinate_slice=None):
+    # Open the dataset with Dask, chunking along the time dimension
+    with xr.open_dataset(file, engine="netcdf4", chunks={'time': 365}) as ds:
+        # Apply coordinate slicing if needed
+        if coordinate_slice is not None:
+            lat_key = get_coord_key(ds, lat=True)
+            lon_key = get_coord_key(ds, lon=True)
+            ds = ds.sel({lat_key: coordinate_slice['lat'], lon_key: coordinate_slice['lon']})
+        
+        # Calculate climatology and standard deviation along the time dimension
+        clim = get_clim_from_ds(ds, input_var, factor)  # Ensure this function is Dask-compatible
+        std = get_std_from_ds(ds, input_var, clim, factor)  # Ensure Dask compatibility
+        
+        # Compute mean over time using Dask-compatible xarray operations
+        mean = ds[input_var].mean(dim='time', skipna=True) * factor
+
+        # Construct the output dataset with lazy evaluations
         output = xr.Dataset(
             {
-                f'clim': clim,
-                f'std': std,
-                f'mean': mean
+                'clim': clim,
+                'std': std,
+                'mean': mean
             },
             coords={
-                'month': np.arange(1,13,1),
+                'month': np.arange(1, 13, 1),
                 'lat': get_coord_values(ds, lat=True),
                 'lon': get_coord_values(ds, lon=True)
             }
         )
-        return output
+
+    # Trigger computation if needed
+    output = output.compute()  # Calculate all Dask arrays at once
+    print(output)
+    return output
+
 
 def plot_map(rel_mean, rel_std, spearman, ref_clim, input_clim, input_name, ref_name, output_path):
     fig, axes = plt.subplots(2, 2, figsize=(10.5, 4.68))
@@ -189,24 +205,24 @@ def create_map_from_output(output_path, input_name, ref_name):
         ref_clim = ds[f'{ref_name}_clim'] if f'{ref_name}_clim' in ds else ds['ref_clim']
     plot_map(rel_std=rel_std, rel_mean=rel_mean, spearman=spearman, ref_clim=ref_clim, input_clim=input_clim, input_name=input_name, ref_name=ref_name, output_path=output_path)
 
-def compare_input_with_ref(input_file, input_var, output_path , ref_file, ref_var, input_name=None, ref_name=None, input_factor=1, ref_factor=1, coordiante_slice=None):
+def compare_input_with_ref(input_file, input_var, output_path , ref_file, ref_var, input_name=None, ref_name=None, input_factor=1, ref_factor=1, coordinate_slice=None):
     if input_var is not None:
-        input = get_file_stats(input_file, input_var, input_factor)
+        input = get_file_stats(input_file, input_var, input_factor, coordinate_slice)
     else: 
         with xr.open_dataset(input_file, engine="netcdf4") as ds_input:
-            if coordiante_slice is not None:
-                ds_input = ds_input.sel({get_coord_key(ds_input, lat=True): coordiante_slice['lat'], get_coord_key(ds_input, lon=True): coordiante_slice['lon']})
+            if coordinate_slice is not None:
+                ds_input = ds_input.sel({get_coord_key(ds_input, lat=True): coordinate_slice['lat'], get_coord_key(ds_input, lon=True): coordinate_slice['lon']})
             if 'clim' in ds_input and 'std' in ds_input and 'mean' in ds_input:
                 input = ds_input
             else: 
                 raise KeyError('Wrong input file-')
     #     elif input_var is not None and input_var in ds_ref:
     if ref_var is not None:
-        ref = get_file_stats(ref_file, ref_var, ref_factor)
+        ref = get_file_stats(ref_file, ref_var, ref_factor, coordinate_slice)
     else: 
         with xr.open_dataset(ref_file, engine="netcdf4") as ds_ref:
-            if coordiante_slice is not None:
-                ds_ref = ds_ref.sel({get_coord_key(ds_ref, lat=True): coordiante_slice['lat'], get_coord_key(ds_ref, lon=True): coordiante_slice['lon']})
+            if coordinate_slice is not None:
+                ds_ref = ds_ref.sel({get_coord_key(ds_ref, lat=True): coordinate_slice['lat'], get_coord_key(ds_ref, lon=True): coordinate_slice['lon']})
             if 'clim' in ds_ref and 'std' in ds_ref and 'mean' in ds_ref:
                 ref = ds_ref
             else: 
@@ -247,7 +263,8 @@ def get_ref_file(output_path, ref_name):
     return output_path / f'{ref_name}_stats.nc' if ref_name is not None else output_path / 'stats.nc'
 
 
-def seasonality_grid_validation(input_file, input_var, output_path, ref_file, ref_var, input_name=None, ref_name=None, input_factor=1, ref_factor=1, only_plot=False, coordinate_slice=None):
+def seasonality_grid_validation(input_file, input_var, output_path, ref_file, ref_var, input_name=None, ref_name=None, input_factor=1, ref_factor=1, only_plot=False, coordinate_slice=None, n_cpus=1):
+    client = Client(n_workers=n_cpus)
     output_path = Path(output_path)
     if not output_path.is_dir():
         output_path.mkdir(parents=True)
@@ -255,6 +272,9 @@ def seasonality_grid_validation(input_file, input_var, output_path, ref_file, re
         create_map_from_output(output_path=output_path, input_name=input_name, ref_name=ref_name)
     elif ref_file is None:
         output_name = f'{input_name}_stats.nc' if input_name is not None else 'stats.nc'
-        get_file_stats(input_file, input_var, input_factor, coordinate_slice).to_netcdf(output_path / output_name)
+        output_ds = get_file_stats(input_file, input_var, input_factor, coordinate_slice)
+        print(output_path / output_name)
+        output_ds.to_netcdf(output_path / output_name)
     else:
         compare_input_with_ref(input_file, input_var, output_path, ref_file, ref_var, input_name, ref_name, input_factor, ref_factor, coordinate_slice)
+    client.close()

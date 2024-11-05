@@ -59,7 +59,7 @@ def get_coords_from_mask(mask):
         mask,
     )
 
-def get_coords(lonlatbox, mask_file, lon_min=None, lon_max=None, lat_min=None, lat_max=None, raise_exeption=True):
+def get_coords(lonlatbox, mask_file, lon_min=None, lon_max=None, lat_min=None, lat_max=None, raise_exception=True):
     mask = None
     if lonlatbox is not None:
         lonlatbox = lonlatbox.split(",")
@@ -86,7 +86,7 @@ def get_coords(lonlatbox, mask_file, lon_min=None, lon_max=None, lat_min=None, l
         lat_min_target_grid = lat_min
         lat_max_target_grid = lat_max
     else:
-        if raise_exeption:
+        if raise_exception:
             raise ValueError(
                 "Either all coordinat bounds and resolutions or --mask_file must be provided"
             )

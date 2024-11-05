@@ -44,7 +44,9 @@ dependencies = [
   "matplotlib",
   "scipy",
   "joblib",
-  "crick"
+  "crick",
+  "dask",
+  "distributed"
 ]
 
 [project.urls]
