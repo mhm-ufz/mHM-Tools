@@ -249,6 +249,8 @@ def get_ref_file(output_path, ref_name):
 
 def seasonality_grid_validation(input_file, input_var, output_path, ref_file, ref_var, input_name=None, ref_name=None, input_factor=1, ref_factor=1, only_plot=False, coordinate_slice=None):
     output_path = Path(output_path)
+    if not output_path.is_dir():
+        output_path.mkdir(parents=True)
     if only_plot and get_ref_file(output_path, ref_name).is_file():
         create_map_from_output(output_path=output_path, input_name=input_name, ref_name=ref_name)
     elif ref_file is None:
