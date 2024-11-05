@@ -54,7 +54,7 @@ def run(args):
     args : argparse.Namespace
         parsed command line arguments
     """
-    lon_min, lon_max, lat_min, lat_max, mask = get_coords(args.lonlatbox, args.mask_file, raise_exeption=False)
+    lon_min, lon_max, lat_min, lat_max, mask = get_coords(args.lonlatbox, args.mask_file, raise_exception=False)
     coordinate_slice = None
     if lon_min is not None and lon_max is not None and lat_min is not None and lat_max is not None:
         coordinate_slice = {'lat': slice(lat_max, lat_min), 'lon': slice(lon_min, lon_max)}
