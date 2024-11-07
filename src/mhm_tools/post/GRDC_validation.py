@@ -1,0 +1,91 @@
+from joblib import Parallel, delayed
+import pandas as pd
+import xarray as xr 
+import numpy as np
+
+from mhm_tools.common import logger
+from mhm_tools.post.seasonality_grid_validation import climatology, get_clim_from_ds, get_std_from_ds, spearman_correlation
+
+
+def evaluate_one_gauge(index, id, observed_data, sim_data, new_x, new_y, remove_seasonality=True):
+    logger.info(f"working on gauge number: {index}...\n")
+    observed_data_by_id = observed_data.sel(id=id)
+    if observed_data_by_id.size == 0:
+        logger.info(f"No data found for ID: {id}. Skipping...\n")
+        return
+
+    are_all_nan = observed_data_by_id.isnull().all()
+    if are_all_nan:
+        logger.info('all values are nan')
+        return
+    else:
+        logger.info(f"values found at gauge: {id}\n")
+        # This will ensure that x & y values always match lat and lon in sim dataset
+        x = np.round(new_x.sel(index=index).values, 2)
+        y = np.round(new_y.sel(index=index).values, 2) 
+        logger.info('get sim data point')
+        sim_data_by_id = sim_data.sel(lat=y - 0.1, lon=x, method="nearest")
+        logger.info(sim_data_by_id)
+
+        logger.info('get mean values')
+        mean_obs = observed_data_by_id.mean(skipna=True)
+        mean_sim = sim_data_by_id.mean(skipna=True)
+
+        logger.info('create climatologies')
+        clim_sim = climatology(sim_data_by_id)
+        logger.info('sim done')
+        clim_obs = climatology(observed_data_by_id)
+        logger.info('obs done')
+
+        logger.info('get standard deviation')
+        if remove_seasonality:
+            std_sim = get_std_from_ds(sim_data_by_id, clim=clim_sim)
+            std_obs = get_std_from_ds(observed_data_by_id, clim=clim_sim)
+        else: 
+            std_obs = observed_data_by_id.std(skipna=True)
+            std_sim = sim_data_by_id.std(skipna=True)
+
+        logger.info('calc statistics')
+        alpha = mean_sim / mean_obs
+        beta = std_sim / std_obs
+        spearman = spearman_correlation(clim_sim, clim_obs)
+        return {'id': id, 'alpha':alpha, 'beta': beta, 'spearman': spearman}
+
+
+def evaludate_grdc_data(
+    model_data_path, observed_data_path, gauge_info_path, save_path=None, n_jobs=1
+):  
+    observed_data = xr.open_dataset(observed_data_path)
+    # logger.info(observed_data.keys()) # runoff_mean_mm
+    sim_data = xr.open_dataset(model_data_path)
+    gauge_info = xr.open_dataset(gauge_info_path)
+    sim_data, observed_data = sim_data['Qrouted'], observed_data['runoff_mean_mm']
+    # getting variables needed
+    gauge_ids = gauge_info["id1"]
+    new_x = gauge_info["new_x"]
+    new_y = gauge_info["new_y"]
+    # if save_path is None:
+    #     saving_path = (
+    #         "/work/luedke/"
+    #     )
+    # else:
+    #     saving_path = save_path
+
+    # Create an empty pandas dataframes
+    model_dataframe, obs_dataframe = pd.DataFrame(), pd.DataFrame()
+
+    # Initialize an empty DataFrame
+    model_to_concat = []
+    obs_to_concat = []
+
+    # IMPORTANT: The id's in GRDC observed_data have the same index as in gauge_info
+    if n_jobs ==1:
+        results_per_id = []
+        for index, id in enumerate(gauge_ids.values[:2]):
+            results_per_id.append(evaluate_one_gauge(index, id, observed_data, sim_data, new_x, new_y))
+    else:
+        results_per_id = Parallel(n_jobs=n_jobs, backend="loky")(
+                            delayed(evaluate_one_gauge)(index, id, observed_data, sim_data, new_x, new_y)
+                            for index, id in enumerate(gauge_ids.values[:2])
+                        )
+    logger.info(pd.DataFrame(results_per_id))
