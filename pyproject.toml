@@ -46,7 +46,8 @@ dependencies = [
   "joblib",
   "crick",
   "dask",
-  "distributed"
+  "distributed",
+  "seaborn"
 ]
 
 [project.urls]
