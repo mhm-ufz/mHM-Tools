@@ -9,6 +9,12 @@ import matplotlib.pyplot as plt
 from mhm_tools.common.logger import logger, set_log_level
 from mhm_tools.post.seasonality_grid_validation import climatology, get_clim_from_ds, get_std_from_ds, spearman_correlation
 
+# make sure that the gauge location is correct basin extractor ...
+# make sample size the same length as simulation dataset, pick periods and use that for uncertainty estimate
+# how to deal with climate variablity: 
+#   - trend correction?
+#   - bootstrap years around event 
+
 
 def evaluate_one_gauge(index, id, observed_data, sim_data, new_x, new_y, remove_seasonality=True):
     logger.info(f"working on gauge number: {index}...\n")
