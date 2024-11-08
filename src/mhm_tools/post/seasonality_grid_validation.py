@@ -1,8 +1,9 @@
 
 import argparse
+import array
 from multiprocessing import Value
 from pathlib import Path
-from networkx import is_path
+from joblib import Parallel, delayed
 import xarray as xr
 import numpy as np
 from scipy.stats import spearmanr
@@ -11,6 +12,7 @@ from matplotlib.offsetbox import TextArea, AnnotationBbox
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import dask.array as da
 from dask.distributed import Client
+from mhm_tools.common.logger import logger
 
 def spearman_correlation(data1, data2):
     """Calculate Spearman rank correlation between two xarray DataArrays."""
@@ -68,12 +70,14 @@ def get_std_from_ds(ds, input_var=None, clim=None, factor=1):
     
     
     # Return as DataArray with appropriate coordinates
-    return xr.DataArray(
-        std, 
-        coords={"lat": get_coord_values(ds, lat=True), "lon": get_coord_values(ds, lon=True)},
-        dims=["lat", "lon"]
-    )
-
+    if type(std) is array and len(std.shape)==2:
+        return xr.DataArray(
+            std, 
+            coords={"lat": get_coord_values(ds, lat=True), "lon": get_coord_values(ds, lon=True)},
+            dims=["lat", "lon"]
+        )
+    else:
+        return std
 def get_coord_key(ds, lat=False, lon=False):
     if (lon and lat) or not (lon or lat): 
         raise ValueError(f"only lon or lat should be true but lon={lon} and lat={lat}")
@@ -128,10 +132,18 @@ def get_files(path):
         nc_files.extend(path.glob("*/" * depth + "*.nc"))
     return nc_files
 
-def get_stats_one_pass(input_path, input_var, factor=1, coordinate_slice=None):
+def combine_results(results):
+    total_count = sum(count for _, _, count, _, _ in results)
+    total_mean = sum(mean * count for mean, _, count, _, _ in results) / total_count
+    total_M2 = sum(M2 for _, M2, _, _, _ in results)
+    total_M2 += sum(count * (mean - total_mean) ** 2 for mean, _, count, _, _ in results)
+    monthly_sums = sum(monthly_sums for _,_,_,monthly_sums, _ in results)
+    monthly_counts = sum(monthly_counts for _,_,_, _,monthly_counts in results)
+    return total_mean, total_M2, total_count, monthly_sums, monthly_counts
+
+def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None):
     """Take a list of files with all containing data for one month and creating statisitcs while reading them one by one."""
     # Open the dataset with Dask, chunking along the time dimension
-    files = get_files(input_path)
     da = None
     with xr.open_dataset(files[0], engine="netcdf4") as ds:
             # Apply coordinate slicing if needed
@@ -142,10 +154,11 @@ def get_stats_one_pass(input_path, input_var, factor=1, coordinate_slice=None):
             da = ds[input_var]
     
     # shape = (latitude_size, longitude_size)
-    mean = da.mean(dim='time', skipna=True) * factor
-    sum_square_diff = ((da - mean)**2).sum(dim='time')
+    da = da * factor
+    mean = da.mean(dim='time', skipna=True).to_numpy()
+    sum_square_diff = ((da - mean)**2).sum(dim='time').to_numpy() #expand_dims(dim='time', axis=0)
      # Sum of squares of differences from the current mean
-    count = np.zeros(mean.shape, dtype=int)+1
+    count = da.shape[0] #xr.DataArray(np.ones(mean.shape, dtype=int).copy(), coords=mean.coords, dims=mean.dims).expand_dims(dim='time', axis=0)
     monthly_sums = xr.DataArray(
         np.zeros((12, *da.shape[1:])),  # 12 months, with lat/lon or other spatial dims
         dims=["month"] + list(da.dims[1:]),
@@ -156,51 +169,92 @@ def get_stats_one_pass(input_path, input_var, factor=1, coordinate_slice=None):
         dims=["month"] + list(da.dims[1:]),
         coords={"month": np.arange(1, 13), **{dim: da[dim] for dim in da.dims if dim != "time"}}
     )
-    for file in files[1:]: 
+    for f,file in enumerate(files[1:1]): 
         with xr.open_dataset(file, engine="netcdf4") as ds:
-                        # Apply coordinate slicing if needed
+            logger.info(f"timestep {count} in file {f+2} / {len(files)}")
             if coordinate_slice is not None:
                 lat_key = get_coord_key(ds, lat=True)
                 lon_key = get_coord_key(ds, lon=True)
                 ds = ds.sel({lat_key: coordinate_slice['lat'], lon_key: coordinate_slice['lon']})
             da = ds[input_var]
             for time_value, data_slice in da.groupby("time"):
-                print(f"Time: {time_value}")
-                print(data_slice)
-                
-                count += 1
-                delta = data_slice - mean
-                mean += delta / count
-                delta2 = data_slice - mean
-                sum_square_diff += delta * delta2
-                # climatology
-                month = data_slice["time.month"].values - 1
-                monthly_sums[month] += data_slice
-                monthly_counts[month] += ~np.isnan(data_slice).all()
-
+                try:
+                    # logger.info(mean.shape)
+                    # logger.info(data_slice.shape)
+                    data_values = data_slice.values[0]
+                    # logger.info(sum_square_diff.shape)
+                    count += 1
+                    delta = data_values - mean
+                    mean = mean + (delta / count)
+                    delta2 = data_values - mean
+                    # logger.info(delta.shape)#(1, 130, 232)
+                    # logger.info(delta2.shape)#(1, 130, 232)
+                    sum_square_diff +=  (delta * delta2)
+                    # climatology
+                    month = data_slice["time.month"].values - 1
+                    # logger.info(monthly_sums.shape, monthly_sums[month].shape,data_slice.shape==monthly_sums[month].shape)
+                    monthly_sums[month] = monthly_sums[month] + data_slice.squeeze(dim="time")
+                    monthly_counts[month] = monthly_counts[month] + ~np.isnan(data_slice.squeeze(dim="time"))
+                except Exception as e:
+                    # logger.info(data_slice.shape)# (1,130, 230)
+                    # logger.info(mean.shape) #(130, 232, 1) 
+                    # logger.info(delta.shape)#(1, 130, 232)
+                    # logger.info(delta2.shape)#(1, 130, 232)
+                    # logger.info(sum_square_diff.shape)
+                    raise e
             # Final standard deviation calculation
+    return mean, sum_square_diff, count, monthly_sums, monthly_counts
+
+def split_file_list(file_list, n_processes):
+    return [file_list[i::n_processes] for i in range(n_processes)]
+
+def get_stats_one_pass(input_path, input_var, factor=1, coordinate_slice=None, ncpus=1):
+    files = get_files(input_path)
+    file_subsets = split_file_list(files, ncpus)
+
+    subset_results = Parallel(n_jobs=ncpus, backend="loky")(
+                delayed(get_stats_one_pass_subset)(file_subset, input_var, factor, coordinate_slice)
+                for file_subset in file_subsets)
+    mean, sum_square_diff, count, monthly_sums, monthly_counts = combine_results(subset_results)
     variance = sum_square_diff / (count - 1)
     std_dev = np.sqrt(variance)
     climatology = monthly_sums / monthly_counts
     climatology = climatology.where(monthly_counts > 0)
     # Calculate climatology and standard deviation along the time dimension
     # Construct the output dataset with lazy evaluations
+    logger.info(climatology)
+    climatology = climatology.rename({get_coord_key(climatology, lat=True): "lat", get_coord_key(climatology, lon=True): "lon"})
+    with xr.open_dataset(files[0]) as ds:
+        lat = get_coord_values(ds, lat=True)
+        lon = get_coord_values(ds, lon=True)
+    std = xr.DataArray(
+            std_dev, 
+            coords={"lat": lat, "lon": lon},
+            dims=["lat", "lon"]
+        )
+    mean = xr.DataArray(
+            mean, 
+            coords={"lat": lat, "lon": lon},
+            dims=["lat", "lon"]
+        )
     output = xr.Dataset(
         {
             'clim': climatology,
-            'std': std_dev,
+            'std': std,
             'mean': mean
         },
         coords={
             'month': np.arange(1, 13, 1),
-            'lat': get_coord_values(ds, lat=True),
-            'lon': get_coord_values(ds, lon=True)
+            'lat': lat,
+            'lon': lon
         }
     )
     # Trigger computation if needed
     output = output.compute()  # Calculate all Dask arrays at once
-    print(output)
+    logger.info(output)
     return output
+
+
 
 
 def plot_map(rel_mean, rel_std, spearman, ref_clim, input_clim, input_name, ref_name, output_path):
@@ -280,7 +334,7 @@ def plot_map(rel_mean, rel_std, spearman, ref_clim, input_clim, input_name, ref_
     plt.tight_layout()
 
     plt.savefig(output_path / 'et_map.png', dpi=1000)
-    print('created et_map')
+    logger.info('created et_map')
 
 def create_map_from_output(output_path, input_name, ref_name):
     with xr.open_dataset(get_ref_file(output_path, ref_name)) as ds:
@@ -362,6 +416,7 @@ def get_ref_file(output_path, ref_name):
 def seasonality_grid_validation(input_file, input_var, output_path, ref_file, ref_var, input_name=None, ref_name=None, input_factor=1, ref_factor=1, only_plot=False, coordinate_slice=None, n_cpus=1):
     # client = Client(n_workers=n_cpus, timeout=f"{60*3}s", memory_limit='25GB')
     output_path = Path(output_path)
+    input_path = Path(input_path)
     if not output_path.is_dir():
         output_path.mkdir(parents=True)
     if only_plot and get_ref_file(output_path, ref_name).is_file():
@@ -374,8 +429,9 @@ def seasonality_grid_validation(input_file, input_var, output_path, ref_file, re
             output_ds = get_stats_one_pass(input_file, input_var, input_factor, coordinate_slice)
         else:
             raise ValueError()
-        print(output_path / output_name)
+        logger.info(output_path / output_name)
         output_ds.to_netcdf(output_path / output_name)
     else:
+        ref_path = Path(ref_path)
         compare_input_with_ref(input_file, input_var, output_path, ref_file, ref_var, input_name, ref_name, input_factor, ref_factor, coordinate_slice)
     # client.close()
