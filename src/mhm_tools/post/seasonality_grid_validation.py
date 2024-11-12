@@ -84,7 +84,7 @@ def get_coord_key(ds, lat=False, lon=False):
     elif lat:
         keys = ['lat', 'latitude', 'northing', 'y', 'new_y']
     else:
-        keys = ['lon', 'longitude', 'easting', 'x', 'new_y']
+        keys = ['lon', 'longitude', 'easting', 'x', 'new_x']
     for key in keys:
         if key in ds and len(ds[key].shape) == 1:
             return key
