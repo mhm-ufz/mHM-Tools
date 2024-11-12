@@ -413,7 +413,7 @@ def get_ref_file(output_path, ref_name):
     return output_path / f'{ref_name}_stats.nc' if ref_name is not None else output_path / 'stats.nc'
 
 
-def seasonality_grid_validation(input_file, input_var, output_path, ref_file, ref_var, input_name=None, ref_name=None, input_factor=1, ref_factor=1, only_plot=False, coordinate_slice=None, n_cpus=1):
+def seasonality_grid_validation(input_path, input_var, output_path, ref_file, ref_var, input_name=None, ref_name=None, input_factor=1, ref_factor=1, only_plot=False, coordinate_slice=None, n_cpus=1):
     # client = Client(n_workers=n_cpus, timeout=f"{60*3}s", memory_limit='25GB')
     output_path = Path(output_path)
     input_path = Path(input_path)
@@ -423,15 +423,15 @@ def seasonality_grid_validation(input_file, input_var, output_path, ref_file, re
         create_map_from_output(output_path=output_path, input_name=input_name, ref_name=ref_name)
     elif ref_file is None:
         output_name = f'{input_name}_stats.nc' if input_name is not None else 'stats.nc'
-        if input_file.is_file():
-            output_ds = get_file_stats(input_file, input_var, input_factor, coordinate_slice)
-        elif input_file.is_dir():
-            output_ds = get_stats_one_pass(input_file, input_var, input_factor, coordinate_slice)
+        if input_path.is_file():
+            output_ds = get_file_stats(input_path, input_var, input_factor, coordinate_slice)
+        elif input_path.is_dir():
+            output_ds = get_stats_one_pass(input_path, input_var, input_factor, coordinate_slice)
         else:
             raise ValueError()
         logger.info(output_path / output_name)
         output_ds.to_netcdf(output_path / output_name)
     else:
         ref_path = Path(ref_path)
-        compare_input_with_ref(input_file, input_var, output_path, ref_file, ref_var, input_name, ref_name, input_factor, ref_factor, coordinate_slice)
+        compare_input_with_ref(input_path, input_var, output_path, ref_file, ref_var, input_name, ref_name, input_factor, ref_factor, coordinate_slice)
     # client.close()
