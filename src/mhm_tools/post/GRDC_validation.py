@@ -16,7 +16,7 @@ from mhm_tools.post.seasonality_grid_validation import climatology, get_clim_fro
 #   - bootstrap years around event 
 
 
-def evaluate_one_gauge(index, id, observed_data, sim_data, new_x, new_y, remove_seasonality=True):
+def evaluate_one_gauge(index, id, observed_data, sim_data, x, y, remove_seasonality=True):
     logger.info(f"working on gauge number: {index}...\n")
     observed_data_by_id = observed_data.sel(id=id)
     if observed_data_by_id.size == 0:
@@ -30,8 +30,8 @@ def evaluate_one_gauge(index, id, observed_data, sim_data, new_x, new_y, remove_
     else:
         logger.info(f"values found at gauge: {id}\n")
         # This will ensure that x & y values always match lat and lon in sim dataset
-        x = np.round(new_x.sel(index=index).values, 2)
-        y = np.round(new_y.sel(index=index).values, 2) 
+        x = np.round(x.sel(index=index).values, 2)
+        y = np.round(y.sel(index=index).values, 2) 
         logger.info('get sim data point')
         sim_data_by_id = sim_data.sel(lat=y - 0.1, lon=x, method="nearest")
         # logger.info(sim_data_by_id)
@@ -60,7 +60,8 @@ def evaluate_one_gauge(index, id, observed_data, sim_data, new_x, new_y, remove_
 
 
 def evaludate_grdc_data(
-    model_data_path, observed_data_path, gauge_info_path, save_path=None, n_jobs=1, sim_variable='Qrouted', observed_variable='runoff_mean_mm'
+    model_data_path, observed_data_path, gauge_info_path, save_path=None, n_jobs=1, sim_variable='Qrouted', observed_variable='runoff_mean_mm',
+    coordinate_slice={'lat': slice(84, -56), 'lon': slice(-180, 180)}
 ):  
     observed_data = xr.open_dataset(observed_data_path)
     # logger.info(observed_data.keys()) # runoff_mean_mm
@@ -69,8 +70,9 @@ def evaludate_grdc_data(
     sim_data, observed_data = sim_data[sim_variable], observed_data[observed_variable]
     # getting variables needed
     gauge_ids = gauge_info["id1"]
-    new_x = gauge_info["new_x"]
-    new_y = gauge_info["new_y"]
+    gauge_info = gauge_info.sel(coordinate_slice)
+    x = gauge_info["new_x"]
+    y = gauge_info["new_y"]
    
     # Create an empty pandas dataframes
     model_dataframe, obs_dataframe = pd.DataFrame(), pd.DataFrame()
@@ -80,13 +82,14 @@ def evaludate_grdc_data(
     obs_to_concat = []
 
     # IMPORTANT: The id's in GRDC observed_data have the same index as in gauge_info
+    logger.info(f"There are len(gauge_ids.values) gauges")
     if n_jobs == 1:
         results_per_id = []
         for index, id in enumerate(gauge_ids.values[2:8]):
-            results_per_id.append(evaluate_one_gauge(index, id, observed_data, sim_data, new_x, new_y))
+            results_per_id.append(evaluate_one_gauge(index, id, observed_data, sim_data, x, y))
     else:
         results_per_id = Parallel(n_jobs=n_jobs, backend="loky")(
-                            delayed(evaluate_one_gauge)(index, id, observed_data, sim_data, new_x, new_y)
+                            delayed(evaluate_one_gauge)(index, id, observed_data, sim_data, x, y)
                             for index, id in enumerate(gauge_ids.values[:])
         
     )
