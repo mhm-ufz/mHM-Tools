@@ -58,6 +58,7 @@ def evaluate_one_gauge(index, id, observed_data, sim_data, x, y, remove_seasonal
         alpha = mean_sim / mean_obs
         beta = std_sim / std_obs
         spearman = spearman_correlation(clim_sim, clim_obs)
+        logger.info(type(id), type(alpha), type(beta), type(spearman))
         logger.info(id, alpha, beta, spearman)
         return {'id': id, 'alpha':alpha, 'beta': beta, 'spearman': spearman}
 
