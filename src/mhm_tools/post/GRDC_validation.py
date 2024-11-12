@@ -7,7 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from mhm_tools.common.logger import logger, set_log_level
-from mhm_tools.post.seasonality_grid_validation import climatology, get_clim_from_ds, get_coord_key, get_std_from_ds, spearman_correlation
+from mhm_tools.post.seasonality_grid_validation import climatology, get_clim_from_ds, get_std_from_ds, spearman_correlation
 
 # make sure that the gauge location is correct basin extractor ...
 # make sample size the same length as simulation dataset, pick periods and use that for uncertainty estimate
@@ -61,7 +61,7 @@ def evaluate_one_gauge(index, id, observed_data, sim_data, x, y, remove_seasonal
 
 def evaludate_grdc_data(
     model_data_path, observed_data_path, gauge_info_path, save_path=None, n_jobs=1, sim_variable='Qrouted', observed_variable='runoff_mean_mm',
-    coordinate_slice={'lat': slice(84, -56), 'lon': slice(-180, 180)}
+    lon_min=-180, lon_max=180, lat_min=-56, lat_max=84
 ):  
     observed_data = xr.open_dataset(observed_data_path)
     # logger.info(observed_data.keys()) # runoff_mean_mm
@@ -70,12 +70,13 @@ def evaludate_grdc_data(
     sim_data, observed_data = sim_data[sim_variable], observed_data[observed_variable]
     # getting variables needed
     gauge_ids = gauge_info["id1"]
-    lat_key = get_coord_key(gauge_info, lat=True)
-    lon_key = get_coord_key(gauge_info, lon=True)
-    gauge_info = gauge_info.sel({lat_key: coordinate_slice['lat'], lon_key: coordinate_slice['lon']})
     x = gauge_info["new_x"]
     y = gauge_info["new_y"]
-   
+    if lon_min is not None and lon_max is not None and lat_min is not None and lat_max is not None:
+        sliceing_condtion = (x>=lon_min) & (x<=lon_max) & (y>=lat_min) & (y<=lat_max)
+        x = x.where(sliceing_condtion)
+        y = y.where(sliceing_condtion)
+        gauge_ids = gauge_ids.where(sliceing_condtion)
     # Create an empty pandas dataframes
     model_dataframe, obs_dataframe = pd.DataFrame(), pd.DataFrame()
 
@@ -84,7 +85,7 @@ def evaludate_grdc_data(
     obs_to_concat = []
 
     # IMPORTANT: The id's in GRDC observed_data have the same index as in gauge_info
-    logger.info(f"There are len(gauge_ids.values) gauges")
+    logger.info(f"There are {len(gauge_ids.values)} gauges")
     if n_jobs == 1:
         results_per_id = []
         for index, id in enumerate(gauge_ids.values[2:8]):

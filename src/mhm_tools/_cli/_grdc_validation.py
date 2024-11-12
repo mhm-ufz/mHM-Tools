@@ -55,9 +55,6 @@ def add_args(parser):
     # sycronus and asyncronus
 def run(args):
     lon_min, lon_max, lat_min, lat_max, mask = get_coords(args.lonlatbox, args.mask_file, raise_exception=False)
-    coordinate_slice = None
-    if lon_min is not None and lon_max is not None and lat_min is not None and lat_max is not None:
-        coordinate_slice = {'lat': slice(lat_max, lat_min), 'lon': slice(lon_min, lon_max)}
     evaludate_grdc_data(
-        args.model_data_path, args.observed_data_path, args.gauge_info_path, save_path=None, n_jobs=int(args.ncpus), sim_variable=args.model_variable, observed_variable=args.observed_variable, coordinate_slice=coordinate_slice
+        args.model_data_path, args.observed_data_path, args.gauge_info_path, save_path=None, n_jobs=int(args.ncpus), sim_variable=args.model_variable, observed_variable=args.observed_variable, lon_min=lon_min, lon_max=lon_max, lat_min=lat_min, lat_max=lat_max
     )   
