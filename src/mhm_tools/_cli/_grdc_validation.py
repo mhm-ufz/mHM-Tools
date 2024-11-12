@@ -30,7 +30,7 @@ def add_args(parser):
     parser.add_argument(
         "--ncpus",
         required=False,
-        defaul=1,
+        default=1,
         help=(""),
     )
     # calcualte KGE and NSE or not 
