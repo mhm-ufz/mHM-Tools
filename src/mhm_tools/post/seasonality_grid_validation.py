@@ -92,7 +92,7 @@ def get_coord_key(ds, lat=False, lon=False):
         if key in ds: 
             logger.warning(f"{type(ds)} contains key: {key} but ds[key] has shape {ds[key].shape}.")
             return key
-    raise ValueError(f"None of {keys} in dataset keys {ds.keys}.")
+    raise ValueError(f"None of {keys} in dataset keys {ds.keys()}.")
 
 def get_coord_values(ds, lat=False, lon=False):
     key = get_coord_key(ds, lat=lat, lon=lon)
