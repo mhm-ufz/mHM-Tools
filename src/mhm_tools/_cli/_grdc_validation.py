@@ -37,5 +37,5 @@ def add_args(parser):
     # sycronus and asyncronus
 def run(args):
     evaludate_grdc_data(
-        args.model_data_path, args.observed_data_path, args.gauge_info_path, save_path=None, n_jobs=int(args.ncpus), sim_variable=args.model_variable, obs_variable=args.observed_variable
+        args.model_data_path, args.observed_data_path, args.gauge_info_path, save_path=None, n_jobs=int(args.ncpus), sim_variable=args.model_variable, observed_variable=args.observed_variable
     )   
