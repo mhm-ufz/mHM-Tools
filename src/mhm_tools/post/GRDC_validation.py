@@ -100,6 +100,7 @@ def evaludate_grdc_data(
         
     )
     results_df = pd.DataFrame(results_per_id)
+    results_df.to_csv('/work/luedke/grdc_results.csv')
 
     if save_path is None:
         saving_path = Path(
