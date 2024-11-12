@@ -208,7 +208,7 @@ def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None)
                     # logger.info(sum_square_diff.shape)
                     raise e
             # Final standard deviation calculation
-    logger.debug(mean.mean(), sum_square_diff.mean(), count, monthly_sums.mean(), monthly_counts.mean())
+    logger.debug(f"{mean.mean()}, {sum_square_diff.mean()}, {count}, {monthly_sums.mean()}, {monthly_counts.mean()}")
     return mean, sum_square_diff, count, monthly_sums, monthly_counts
 
 def split_file_list(file_list, n_processes):
@@ -223,7 +223,7 @@ def get_stats_one_pass(input_path, input_var, factor=1, coordinate_slice=None, n
                 for file_subset in file_subsets)
     logger.info('combining results...')
     mean, sum_square_diff, count, monthly_sums, monthly_counts = combine_results(subset_results)
-    logger.debug(mean.mean(), sum_square_diff.mean(), count, monthly_sums.mean(), monthly_counts.mean())
+    logger.debug(f"{mean.mean()}, {sum_square_diff.mean()}, {count}, {monthly_sums.mean()}, {monthly_counts.mean()}")
     variance = sum_square_diff / (count - 1)
     std_dev = np.sqrt(variance)
     climatology = monthly_sums / monthly_counts
