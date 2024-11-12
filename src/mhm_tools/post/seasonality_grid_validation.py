@@ -142,8 +142,8 @@ def combine_results(results):
     total_mean = sum(mean * count for mean, _, count, _, _ in results) / total_count
     total_M2 = sum(M2 for _, M2, _, _, _ in results)
     total_M2 += sum(count * (mean - total_mean) ** 2 for mean, _, count, _, _ in results)
-    monthly_sums = sum(monthly_sums for _,_,_,monthly_sums, _ in results)
-    monthly_counts = sum(monthly_counts for _,_,_, _,monthly_counts in results)
+    monthly_sums = sum(ms for _,_,_,ms, _ in results)
+    monthly_counts = sum(mc for _,_,_, _,mc in results)
     return total_mean, total_M2, total_count, monthly_sums, monthly_counts
 
 def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None):
@@ -208,6 +208,7 @@ def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None)
                     # logger.info(sum_square_diff.shape)
                     raise e
             # Final standard deviation calculation
+    logger.debug(mean.mean(), sum_square_diff.mean(), count, monthly_sums.mean(), monthly_counts.mean())
     return mean, sum_square_diff, count, monthly_sums, monthly_counts
 
 def split_file_list(file_list, n_processes):
@@ -216,11 +217,13 @@ def split_file_list(file_list, n_processes):
 def get_stats_one_pass(input_path, input_var, factor=1, coordinate_slice=None, ncpus=1):
     files = get_files(input_path)
     file_subsets = split_file_list(files, ncpus)
-
+    logger.info('creating statistics...')
     subset_results = Parallel(n_jobs=ncpus, backend="loky")(
                 delayed(get_stats_one_pass_subset)(file_subset, input_var, factor, coordinate_slice)
                 for file_subset in file_subsets)
+    logger.info('combining results...')
     mean, sum_square_diff, count, monthly_sums, monthly_counts = combine_results(subset_results)
+    logger.debug(mean.mean(), sum_square_diff.mean(), count, monthly_sums.mean(), monthly_counts.mean())
     variance = sum_square_diff / (count - 1)
     std_dev = np.sqrt(variance)
     climatology = monthly_sums / monthly_counts
@@ -254,7 +257,7 @@ def get_stats_one_pass(input_path, input_var, factor=1, coordinate_slice=None, n
         }
     )
     # Trigger computation if needed
-    output = output.compute()  # Calculate all Dask arrays at once
+    # output = output  # Calculate all Dask arrays at once
     logger.info(output)
     return output
 

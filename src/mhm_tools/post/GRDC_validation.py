@@ -36,6 +36,8 @@ def evaluate_one_gauge(index, id, observed_data, sim_data, x, y, remove_seasonal
         sim_data_by_id = sim_data.sel(lat=y - 0.1, lon=x, method="nearest")
         # logger.info(sim_data_by_id)
 
+
+        # replace the following with bootstrap alorythem What takes long seems to be
         logger.info('get mean values')
         mean_sim = sim_data_by_id.mean(dim='time', skipna=True)
         logger.info('sim done')
@@ -56,6 +58,7 @@ def evaluate_one_gauge(index, id, observed_data, sim_data, x, y, remove_seasonal
         alpha = mean_sim / mean_obs
         beta = std_sim / std_obs
         spearman = spearman_correlation(clim_sim, clim_obs)
+        logger.info(id, alpha, beta, spearman)
         return {'id': id, 'alpha':alpha, 'beta': beta, 'spearman': spearman}
 
 
