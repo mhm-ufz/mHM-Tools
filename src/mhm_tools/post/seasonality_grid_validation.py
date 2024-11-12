@@ -435,7 +435,7 @@ def seasonality_grid_validation(input_path, input_var, output_path, ref_file, re
         elif input_path.is_dir():
             output_ds = get_stats_one_pass(input_path, input_var, input_factor, coordinate_slice)
         else:
-            raise ValueError()
+            raise ValueError("input path does not exist")
         logger.info(output_path / output_name)
         output_ds.to_netcdf(output_path / output_name)
     else:
