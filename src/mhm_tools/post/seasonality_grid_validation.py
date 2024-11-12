@@ -82,9 +82,9 @@ def get_coord_key(ds, lat=False, lon=False):
     if (lon and lat) or not (lon or lat): 
         raise ValueError(f"only lon or lat should be true but lon={lon} and lat={lat}")
     elif lat:
-        keys = ['lat', 'latitude', 'northing', 'y', 'y_new']
+        keys = ['lat', 'latitude', 'northing', 'y', 'new_y']
     else:
-        keys = ['lon', 'longitude', 'easting', 'x', 'x_new']
+        keys = ['lon', 'longitude', 'easting', 'x', 'new_y']
     for key in keys:
         if key in ds and len(ds[key].shape) == 1:
             return key
