@@ -85,14 +85,15 @@ def get_coord_key(ds, lat=False, lon=False):
         keys = ['lat', 'latitude', 'northing', 'y', 'new_y']
     else:
         keys = ['lon', 'longitude', 'easting', 'x', 'new_x']
+    ds_dims = ds.dims if isinstance(ds, xr.DataArray) else ds.coords
     for key in keys:
-        if key in ds and len(ds[key].shape) == 1:
+        if key in ds_dims and len(ds[key].shape) == 1:
             return key
     for key in keys:
-        if key in ds: 
+        if key in ds_dims: 
             logger.warning(f"{type(ds)} contains key: {key} but ds[key] has shape {ds[key].shape}.")
             return key
-    raise ValueError(f"None of {keys} in {type(ds)} keys {ds.dims}.")
+    raise ValueError(f"None of {keys} in {type(ds).__name__} keys {ds_dims}.")
 
 def get_coord_values(ds, lat=False, lon=False):
     key = get_coord_key(ds, lat=lat, lon=lon)
