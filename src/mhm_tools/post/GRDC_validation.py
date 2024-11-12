@@ -39,9 +39,9 @@ def evaluate_one_gauge(index, id, observed_data, sim_data, x, y, remove_seasonal
 
         # replace the following with bootstrap alorythem What takes long seems to be
         logger.info('get mean values')
-        mean_sim = sim_data_by_id.mean(dim='time', skipna=True)
+        mean_sim = sim_data_by_id.mean(skipna=True)
         logger.info('sim done')
-        mean_obs = observed_data_by_id.mean(dim='time', skipna=True)
+        mean_obs = observed_data_by_id.mean(skipna=True)
         logger.info('obs done')
 
         logger.info('create climatologies')
