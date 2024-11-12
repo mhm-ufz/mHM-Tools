@@ -74,9 +74,9 @@ def evaludate_grdc_data(
     y = gauge_info["new_y"]
     if lon_min is not None and lon_max is not None and lat_min is not None and lat_max is not None:
         sliceing_condtion = (x>=lon_min) & (x<=lon_max) & (y>=lat_min) & (y<=lat_max)
-        x = x.where(sliceing_condtion)
-        y = y.where(sliceing_condtion)
-        gauge_ids = gauge_ids.where(sliceing_condtion)
+        x = x.where(sliceing_condtion, drop=True)
+        y = y.where(sliceing_condtion, drop=True)
+        gauge_ids = gauge_ids.where(sliceing_condtion, drop=True)
     # Create an empty pandas dataframes
     model_dataframe, obs_dataframe = pd.DataFrame(), pd.DataFrame()
 
