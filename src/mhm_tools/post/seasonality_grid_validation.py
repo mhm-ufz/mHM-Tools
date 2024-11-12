@@ -88,7 +88,9 @@ def get_coord_key(ds, lat=False, lon=False):
     for key in keys:
         if key in ds and len(ds[key].shape) == 1:
             return key
-    logger.debug(ds)
+        elif key in ds: 
+            logger.warning(f"{type(ds)} contains key: {key} but ds[key] has shape {ds[key].shape}.")
+            return key
     raise ValueError(f"None of {keys} in dataset.")
 
 def get_coord_values(ds, lat=False, lon=False):
