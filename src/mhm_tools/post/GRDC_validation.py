@@ -7,7 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from mhm_tools.common.logger import logger, set_log_level
-from mhm_tools.post.seasonality_grid_validation import climatology, get_clim_from_ds, get_std_from_ds, spearman_correlation
+from mhm_tools.post.seasonality_grid_validation import climatology, get_clim_from_ds, get_coord_key, get_std_from_ds, spearman_correlation
 
 # make sure that the gauge location is correct basin extractor ...
 # make sample size the same length as simulation dataset, pick periods and use that for uncertainty estimate
@@ -70,7 +70,9 @@ def evaludate_grdc_data(
     sim_data, observed_data = sim_data[sim_variable], observed_data[observed_variable]
     # getting variables needed
     gauge_ids = gauge_info["id1"]
-    gauge_info = gauge_info.sel(coordinate_slice)
+    lat_key = get_coord_key(gauge_info, lat=True)
+    lon_key = get_coord_key(gauge_info, lon=True)
+    gauge_info = gauge_info.sel({lat_key: coordinate_slice['lat'], lon_key: coordinate_slice['lon']})
     x = gauge_info["new_x"]
     y = gauge_info["new_y"]
    
