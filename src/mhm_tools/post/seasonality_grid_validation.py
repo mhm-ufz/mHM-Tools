@@ -229,9 +229,8 @@ def get_stats_one_pass(input_path, input_var, factor=1, coordinate_slice=None, n
     # Construct the output dataset with lazy evaluations
     logger.info(climatology)
     climatology = climatology.rename({get_coord_key(climatology, lat=True): "lat", get_coord_key(climatology, lon=True): "lon"})
-    with xr.open_dataset(files[0]) as ds:
-        lat = get_coord_values(ds, lat=True)
-        lon = get_coord_values(ds, lon=True)
+    lat = get_coord_values(climatology, lat=True)
+    lon = get_coord_values(climatology, lon=True)
     std = xr.DataArray(
             std_dev, 
             coords={"lat": lat, "lon": lon},
