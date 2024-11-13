@@ -198,7 +198,7 @@ def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None)
                     # climatology
                     month = data_slice["time.month"].values - 1
                     # logger.info(monthly_sums.shape, monthly_sums[month].shape,data_slice.shape==monthly_sums[month].shape)
-                    monthly_sums[month] += + data_slice.squeeze(dim="time")
+                    monthly_sums[month] += data_slice.squeeze(dim="time")
                     monthly_counts[month] += ~np.isnan(data_slice.squeeze(dim="time"))
                 except Exception as e:
                     # logger.info(data_slice.shape)# (1,130, 230)
@@ -208,7 +208,7 @@ def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None)
                     # logger.info(sum_square_diff.shape)
                     raise e
             # Final standard deviation calculation
-    logger.debug(f"{mean.mean(skipna=True)}, {sum_square_diff.mean(skipna=True)}, {count}, {monthly_sums.mean(skipna=True)}, {monthly_counts.mean(skipna=True)}")
+    logger.debug(f"{mean.mean()}, {sum_square_diff.mean()}, {count}, {monthly_sums.mean()}, {monthly_counts.mean()}")
     return mean, sum_square_diff, count, monthly_sums, monthly_counts
 
 def split_file_list(file_list, n_processes):
