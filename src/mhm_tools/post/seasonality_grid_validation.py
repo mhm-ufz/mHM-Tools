@@ -227,10 +227,10 @@ def get_stats_one_pass(input_path, input_var, factor=1, coordinate_slice=None, n
             coords={"lat": lat, "lon": lon},
             dims=["lat", "lon"]
         )
-    climatology = xr.DataArray(
-            std_dev, 
-            coords={"lat": lat, "lon": lon},
-            dims=["lat", "lon"]
+    clim = xr.DataArray(
+            climatology, 
+            coords={"month": np.arange(1,13,1), "lat": lat, "lon": lon},
+            dims=["month", "lat", "lon"]
         )
     mean = xr.DataArray(
             mean, 
@@ -239,7 +239,7 @@ def get_stats_one_pass(input_path, input_var, factor=1, coordinate_slice=None, n
         )
     output = xr.Dataset(
         {
-            'clim': climatology,
+            'clim': clim,
             'std': std,
             'mean': mean
         },
