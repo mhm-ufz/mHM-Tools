@@ -12,7 +12,7 @@ from matplotlib.offsetbox import TextArea, AnnotationBbox
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import dask.array as da
 from dask.distributed import Client
-from mhm_tools.common.logger import logger
+from mhm_tools.common.logger import logger, set_log_level
 
 def spearman_correlation(data1, data2):
     """Calculate Spearman rank correlation between two xarray DataArrays."""
@@ -414,6 +414,7 @@ def get_ref_file(output_path, ref_name):
 
 
 def seasonality_grid_validation(input_path, input_var, output_path, ref_file, ref_var, input_name=None, ref_name=None, input_factor=1, ref_factor=1, only_plot=False, coordinate_slice=None, n_cpus=1):
+    set_log_level('DEBUG')
     # client = Client(n_workers=n_cpus, timeout=f"{60*3}s", memory_limit='25GB')
     output_path = Path(output_path)
     input_path = Path(input_path)

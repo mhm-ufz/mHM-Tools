@@ -67,6 +67,7 @@ def evaludate_grdc_data(
     model_data_path, observed_data_path, gauge_info_path, save_path=None, n_jobs=1, sim_variable='Qrouted', observed_variable='runoff_mean_mm',
     lon_min=-180, lon_max=180, lat_min=-56, lat_max=84
 ):  
+    set_log_level('DEBUG')
     observed_data = xr.open_dataset(observed_data_path)
     # logger.info(observed_data.keys()) # runoff_mean_mm
     sim_data = xr.open_dataset(model_data_path)

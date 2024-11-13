@@ -5,7 +5,7 @@ from mhm_tools.common.constants import LOG_LEVELS
 logging.basicConfig(format="%(asctime)s - %(levelname)-8s - %(message)s")
 logger = logging.getLogger(__name__)
 
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 
 
 def set_log_level(level):
