@@ -164,7 +164,7 @@ def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None)
     sum_square_diff = np.zeros(da.shape[1:])
     monthly_sums = np.zeros((12, *da.shape[1:]))
     monthly_counts = np.zeros((12, *da.shape[1:]))
-    for f,file in enumerate(files[0:48]): 
+    for f,file in enumerate(files): 
         with xr.open_dataset(file, engine="netcdf4") as ds:
             logger.info(f"timestep {count} in file {f+2} / {len(files)}")
             if coordinate_slice is not None:
@@ -209,15 +209,15 @@ def get_stats_one_pass(input_path, input_var, factor=1, coordinate_slice=None, n
     std_dev = np.sqrt(variance)
     climatology = monthly_sums / monthly_counts
     # climatology = climatology.where(monthly_counts > 0)
-    climatology = climatology[monthly_sums>0]
+    climatology =  np.where(monthly_counts > 0, climatology, np.nan)
     with xr.open_dataset(files[0], engine="netcdf4") as ds:
             # Apply coordinate slicing if needed
-            if coordinate_slice is not None:
-                lat_key = get_coord_key(ds, lat=True)
-                lon_key = get_coord_key(ds, lon=True)
-                ds = ds.sel({lat_key: coordinate_slice['lat'], lon_key: coordinate_slice['lon']})
-                lat = get_coord_values(ds, lat=True)
-                lon = get_coord_values(ds, lon=True)
+        if coordinate_slice is not None:
+            lat_key = get_coord_key(ds, lat=True)
+            lon_key = get_coord_key(ds, lon=True)
+            ds = ds.sel({lat_key: coordinate_slice['lat'], lon_key: coordinate_slice['lon']})
+            lat = get_coord_values(ds, lat=True)
+            lon = get_coord_values(ds, lon=True)
     # Calculate climatology and standard deviation along the time dimension
     # Construct the output dataset with lazy evaluations
     # climatology = climatology.rename({get_coord_key(climatology, lat=True): "lat", get_coord_key(climatology, lon=True): "lon"})
