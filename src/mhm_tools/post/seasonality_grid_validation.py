@@ -176,7 +176,7 @@ def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None)
     #     dims=["month"] + list(da.dims[1:]),
     #     coords={"month": np.arange(1, 13), **{dim: da[dim] for dim in da.dims if dim != "time"}}
     # )
-    for f,file in enumerate(files[:]): 
+    for f,file in enumerate(files[1:48]): 
         with xr.open_dataset(file, engine="netcdf4") as ds:
             logger.info(f"timestep {count} in file {f+2} / {len(files)}")
             if coordinate_slice is not None:
@@ -220,7 +220,8 @@ def get_stats_one_pass(input_path, input_var, factor=1, coordinate_slice=None, n
     variance = sum_square_diff / (count - 1)
     std_dev = np.sqrt(variance)
     climatology = monthly_sums / monthly_counts
-    climatology = climatology.where(monthly_counts > 0)
+    # climatology = climatology.where(monthly_counts > 0)
+    climatology = climatology[monthly_sums>0]
     # Calculate climatology and standard deviation along the time dimension
     # Construct the output dataset with lazy evaluations
     logger.info(climatology)
