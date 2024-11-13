@@ -50,6 +50,9 @@ def evaluate_one_gauge(index, id, observed_data, sim_data, x, y, remove_seasonal
         clim_obs = climatology(observed_data_by_id)
         logger.info('obs done')
 
+        logger.info(f"sim: {sim_data_by_id.shape}")
+        logger.info(f" obs: {observed_data_by_id.shape}")
+
         logger.info('get standard deviation')
         std_obs = observed_data_by_id.std(skipna=True)
         std_sim = sim_data_by_id.std(skipna=True)
@@ -60,6 +63,7 @@ def evaluate_one_gauge(index, id, observed_data, sim_data, x, y, remove_seasonal
         spearman, spera_var = spearman_correlation(clim_sim, clim_obs)
         logger.info(f"{type(id)}, {type(alpha)}, {type(beta)}, {type(spearman)}")
         logger.info(f"{id}, {alpha}, {beta}, {spearman}")
+        logger.info(f'sim_mean = {mean_sim.values}; obs_mean = {mean_obs.values}')
         return {'id': id, 'alpha':alpha, 'beta': beta, 'spearman': spearman}
 
 
