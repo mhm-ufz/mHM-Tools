@@ -58,8 +58,8 @@ def evaluate_one_gauge(index, id, observed_data, sim_data, x, y, remove_seasonal
         std_sim = sim_data_by_id.std(skipna=True)
 
         logger.info('calc statistics')
-        alpha = (mean_sim / mean_obs).values
-        beta = (std_sim / std_obs).values
+        alpha = float((mean_sim / mean_obs).values)
+        beta = float((std_sim / std_obs).values)
         spearman, spera_var = spearman_correlation(clim_sim, clim_obs)
         logger.info(f"{type(id)}, {type(alpha)}, {type(beta)}, {type(spearman)}")
         logger.info(f"{id}, {alpha}, {beta}, {spearman}")
