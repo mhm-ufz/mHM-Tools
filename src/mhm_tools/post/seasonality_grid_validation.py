@@ -190,7 +190,7 @@ def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None)
                     # logger.info(sum_square_diff.shape)
                     count += 1
                     delta = data_values - mean
-                    mean = mean + (delta / count)
+                    mean += (delta / count)
                     delta2 = data_values - mean
                     # logger.info(delta.shape)#(1, 130, 232)
                     # logger.info(delta2.shape)#(1, 130, 232)
@@ -198,7 +198,7 @@ def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None)
                     # climatology
                     month = data_slice["time.month"].values - 1
                     # logger.info(monthly_sums.shape, monthly_sums[month].shape,data_slice.shape==monthly_sums[month].shape)
-                    monthly_sums[month] += data_slice.squeeze(dim="time")
+                    monthly_sums[month] += data_slice.fillna(0).squeeze(dim="time")
                     monthly_counts[month] += ~np.isnan(data_slice.squeeze(dim="time"))
                 except Exception as e:
                     # logger.info(data_slice.shape)# (1,130, 230)
