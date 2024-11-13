@@ -201,7 +201,6 @@ def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None)
                     monthly_counts[month] += ~np.isnan(data_slice.squeeze(dim="time").values)
                 except Exception as e:
                     raise e
-            # Final standard deviation calculation
     logger.debug(f"{np.nanmean(mean)}, {np.nanmean(sum_square_diff)}, {count}, {np.nanmean(monthly_sums)}, {np.nanmean(monthly_counts)}")
     return mean, sum_square_diff, count, monthly_sums, monthly_counts
 
