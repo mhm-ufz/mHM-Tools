@@ -164,17 +164,19 @@ def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None)
     sum_square_diff = ((da - mean)**2).sum(dim='time').to_numpy() #expand_dims(dim='time', axis=0)
      # Sum of squares of differences from the current mean
     count = da.shape[0] #xr.DataArray(np.ones(mean.shape, dtype=int).copy(), coords=mean.coords, dims=mean.dims).expand_dims(dim='time', axis=0)
-    monthly_sums = xr.DataArray(
-        np.zeros((12, *da.shape[1:])),  # 12 months, with lat/lon or other spatial dims
-        dims=["month"] + list(da.dims[1:]),
-        coords={"month": np.arange(1, 13), **{dim: da[dim] for dim in da.dims if dim != "time"}}
-    )
-    monthly_counts = xr.DataArray(
-        np.zeros((12, *da.shape[1:])),
-        dims=["month"] + list(da.dims[1:]),
-        coords={"month": np.arange(1, 13), **{dim: da[dim] for dim in da.dims if dim != "time"}}
-    )
-    for f,file in enumerate(files[1:1]): 
+    monthly_sums = np.zeros((12, *da.shape[1:]))
+    monthly_counts = np.zeros((12, *da.shape[1:]))
+    # monthly_sums = xr.DataArray(
+    #     np.zeros((12, *da.shape[1:])),  # 12 months, with lat/lon or other spatial dims
+    #     dims=["month"] + list(da.dims[1:]),
+    #     coords={"month": np.arange(1, 13), **{dim: da[dim] for dim in da.dims if dim != "time"}}
+    # )
+    # monthly_counts = xr.DataArray(
+    #     np.zeros((12, *da.shape[1:])),
+    #     dims=["month"] + list(da.dims[1:]),
+    #     coords={"month": np.arange(1, 13), **{dim: da[dim] for dim in da.dims if dim != "time"}}
+    # )
+    for f,file in enumerate(files[:]): 
         with xr.open_dataset(file, engine="netcdf4") as ds:
             logger.info(f"timestep {count} in file {f+2} / {len(files)}")
             if coordinate_slice is not None:
@@ -184,31 +186,23 @@ def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None)
             da = ds[input_var]
             for time_value, data_slice in da.groupby("time"):
                 try:
-                    # logger.info(mean.shape)
-                    # logger.info(data_slice.shape)
                     data_values = data_slice.values[0]
-                    # logger.info(sum_square_diff.shape)
                     count += 1
                     delta = data_values - mean
                     mean += (delta / count)
                     delta2 = data_values - mean
-                    # logger.info(delta.shape)#(1, 130, 232)
-                    # logger.info(delta2.shape)#(1, 130, 232)
                     sum_square_diff +=  (delta * delta2)
                     # climatology
                     month = data_slice["time.month"].values - 1
                     # logger.info(monthly_sums.shape, monthly_sums[month].shape,data_slice.shape==monthly_sums[month].shape)
-                    monthly_sums[month] += data_slice.fillna(0).squeeze(dim="time")
-                    monthly_counts[month] += ~np.isnan(data_slice.squeeze(dim="time"))
+                    # monthly_sums[month] += data_slice.fillna(0).squeeze(dim="time")
+                    # monthly_counts[month] += ~np.isnan(data_slice.squeeze(dim="time"))
+                    monthly_sums[month] += data_slice.fillna(0).squeeze(dim="time").values
+                    monthly_counts[month] += ~np.isnan(data_slice.squeeze(dim="time").values)
                 except Exception as e:
-                    # logger.info(data_slice.shape)# (1,130, 230)
-                    # logger.info(mean.shape) #(130, 232, 1) 
-                    # logger.info(delta.shape)#(1, 130, 232)
-                    # logger.info(delta2.shape)#(1, 130, 232)
-                    # logger.info(sum_square_diff.shape)
                     raise e
             # Final standard deviation calculation
-    logger.debug(f"{mean.mean()}, {sum_square_diff.mean()}, {count}, {monthly_sums.mean()}, {monthly_counts.mean()}")
+    logger.debug(f"{np.nanmean(mean)}, {np.nanmean(sum_square_diff)}, {count}, {np.nanmean(monthly_sums)}, {np.nanmean(monthly_counts)}")
     return mean, sum_square_diff, count, monthly_sums, monthly_counts
 
 def split_file_list(file_list, n_processes):
