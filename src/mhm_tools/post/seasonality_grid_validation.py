@@ -158,32 +158,20 @@ def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None)
                 ds = ds.sel({lat_key: coordinate_slice['lat'], lon_key: coordinate_slice['lon']})
             da = ds[input_var]
     
-    # shape = (latitude_size, longitude_size)
     da = da * factor
-    mean = da.mean(dim='time', skipna=True).to_numpy()
-    sum_square_diff = ((da - mean)**2).sum(dim='time').to_numpy() #expand_dims(dim='time', axis=0)
-     # Sum of squares of differences from the current mean
-    count = da.shape[0] #xr.DataArray(np.ones(mean.shape, dtype=int).copy(), coords=mean.coords, dims=mean.dims).expand_dims(dim='time', axis=0)
+    count = 0 #xr.DataArray(np.ones(mean.shape, dtype=int).copy(), coords=mean.coords, dims=mean.dims).expand_dims(dim='time', axis=0)
+    mean = np.zeros(da.shape[1:])
+    sum_square_diff = np.zeros(da.shape[1:])
     monthly_sums = np.zeros((12, *da.shape[1:]))
     monthly_counts = np.zeros((12, *da.shape[1:]))
-    # monthly_sums = xr.DataArray(
-    #     np.zeros((12, *da.shape[1:])),  # 12 months, with lat/lon or other spatial dims
-    #     dims=["month"] + list(da.dims[1:]),
-    #     coords={"month": np.arange(1, 13), **{dim: da[dim] for dim in da.dims if dim != "time"}}
-    # )
-    # monthly_counts = xr.DataArray(
-    #     np.zeros((12, *da.shape[1:])),
-    #     dims=["month"] + list(da.dims[1:]),
-    #     coords={"month": np.arange(1, 13), **{dim: da[dim] for dim in da.dims if dim != "time"}}
-    # )
-    for f,file in enumerate(files[1:48]): 
+    for f,file in enumerate(files[0:48]): 
         with xr.open_dataset(file, engine="netcdf4") as ds:
             logger.info(f"timestep {count} in file {f+2} / {len(files)}")
             if coordinate_slice is not None:
                 lat_key = get_coord_key(ds, lat=True)
                 lon_key = get_coord_key(ds, lon=True)
                 ds = ds.sel({lat_key: coordinate_slice['lat'], lon_key: coordinate_slice['lon']})
-            da = ds[input_var]
+            da = ds[input_var] * factor
             for time_value, data_slice in da.groupby("time"):
                 try:
                     data_values = data_slice.values[0]
@@ -222,13 +210,24 @@ def get_stats_one_pass(input_path, input_var, factor=1, coordinate_slice=None, n
     climatology = monthly_sums / monthly_counts
     # climatology = climatology.where(monthly_counts > 0)
     climatology = climatology[monthly_sums>0]
+    with xr.open_dataset(files[0], engine="netcdf4") as ds:
+            # Apply coordinate slicing if needed
+            if coordinate_slice is not None:
+                lat_key = get_coord_key(ds, lat=True)
+                lon_key = get_coord_key(ds, lon=True)
+                ds = ds.sel({lat_key: coordinate_slice['lat'], lon_key: coordinate_slice['lon']})
+                lat = get_coord_values(ds, lat=True)
+                lon = get_coord_values(ds, lon=True)
     # Calculate climatology and standard deviation along the time dimension
     # Construct the output dataset with lazy evaluations
-    logger.info(climatology)
-    climatology = climatology.rename({get_coord_key(climatology, lat=True): "lat", get_coord_key(climatology, lon=True): "lon"})
-    lat = get_coord_values(climatology, lat=True)
-    lon = get_coord_values(climatology, lon=True)
+    # climatology = climatology.rename({get_coord_key(climatology, lat=True): "lat", get_coord_key(climatology, lon=True): "lon"})
+    
     std = xr.DataArray(
+            std_dev, 
+            coords={"lat": lat, "lon": lon},
+            dims=["lat", "lon"]
+        )
+    climatology = xr.DataArray(
             std_dev, 
             coords={"lat": lat, "lon": lon},
             dims=["lat", "lon"]
