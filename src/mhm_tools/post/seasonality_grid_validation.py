@@ -3,6 +3,9 @@ import argparse
 import array
 from multiprocessing import Value
 from pathlib import Path
+import random
+
+from sympy import N
 from joblib import Parallel, delayed
 import xarray as xr
 import numpy as np
@@ -100,7 +103,7 @@ def get_coord_values(ds, lat=False, lon=False):
     return ds[key].values
 
 
-def get_file_stats(file, input_var, factor=1, coordinate_slice=None):
+def get_file_stats(file, input_var, factor=1, coordinate_slice=None, output_path=None):
     # Open the dataset with Dask, chunking along the time dimension
     with xr.open_dataset(file, engine="netcdf4") as ds: #, chunks={'time': 365}) as ds:
         # Apply coordinate slicing if needed
@@ -129,12 +132,22 @@ def get_file_stats(file, input_var, factor=1, coordinate_slice=None):
                 'lon': get_coord_values(ds, lon=True)
             }
         )
+    if output_path is not None: 
+        output.to_netcdf(output_path)
+    return output
 
-def get_files(path):
+def get_files(path, n_bootstrap_years):
     nc_files = []
 # Search for .nc files at each depth level
-    for depth in range(1, 4):  # Depth 1 to 3
-        nc_files.extend(path.glob("*/" * depth + "*.nc"))
+    if n_bootstrap_years is not None:
+        # needs fixed folder structure of y/m/file
+        years = [y for y in path.glob('*/') if y.is_dir()]
+        selected_years = random.choices(years, k=n_bootstrap_years)
+        for year in selected_years:
+            nc_files.extend(year.glob("*/" + "*.nc"))
+    else:
+        for depth in range(1, 4):  # Depth 1 to 3
+            nc_files.extend(path.glob("*/" * depth + "*.nc"))
     return nc_files
 
 def combine_results(results):
@@ -195,8 +208,8 @@ def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None)
 def split_file_list(file_list, n_processes):
     return [file_list[i::n_processes] for i in range(n_processes)]
 
-def get_stats_one_pass(input_path, input_var, factor=1, coordinate_slice=None, ncpus=1):
-    files = get_files(input_path)
+def get_stats_one_pass(input_path, input_var, factor=1, coordinate_slice=None, ncpus=1, n_bootstrap_years=None, bootstrap_index=None, output_path=None):
+    files = get_files(input_path, n_bootstrap_years=n_bootstrap_years)
     file_subsets = split_file_list(files, ncpus)
     logger.info('creating statistics...')
     subset_results = Parallel(n_jobs=ncpus, backend="loky")(
@@ -208,7 +221,6 @@ def get_stats_one_pass(input_path, input_var, factor=1, coordinate_slice=None, n
     variance = sum_square_diff / (count - 1)
     std_dev = np.sqrt(variance)
     climatology = monthly_sums / monthly_counts
-    # climatology = climatology.where(monthly_counts > 0)
     climatology =  np.where(monthly_counts > 0, climatology, np.nan)
     with xr.open_dataset(files[0], engine="netcdf4") as ds:
             # Apply coordinate slicing if needed
@@ -251,10 +263,12 @@ def get_stats_one_pass(input_path, input_var, factor=1, coordinate_slice=None, n
     )
     # Trigger computation if needed
     # output = output  # Calculate all Dask arrays at once
+    if output_path is not None and bootstrap_index is not None:
+        output.to_netcdf(f"{output_path.stem}_{bootstrap_index}.nc")
+    elif output_path is not None:
+        output.to_netcdf(output_path)
     logger.info(output)
     return output
-
-
 
 
 def plot_map(rel_mean, rel_std, spearman, ref_clim, input_clim, input_name, ref_name, output_path):
@@ -345,12 +359,15 @@ def create_map_from_output(output_path, input_name, ref_name):
         ref_clim = ds[f'{ref_name}_clim'] if f'{ref_name}_clim' in ds else ds['ref_clim']
     plot_map(rel_std=rel_std, rel_mean=rel_mean, spearman=spearman, ref_clim=ref_clim, input_clim=input_clim, input_name=input_name, ref_name=ref_name, output_path=output_path)
 
-def compare_input_with_ref(input_path, input_var, output_path , ref_path, ref_var, input_name=None, ref_name=None, input_factor=1, ref_factor=1, coordinate_slice=None):
+def compare_input_with_ref(input_path, input_var, output_path , ref_path, ref_var, input_name=None, ref_name=None, input_factor=1, ref_factor=1, coordinate_slice=None, n_bootstrap_years=None, bootstrap_index=None):
+    if bootstrap_index is not None: 
+        random.seed(bootstrap_index)
+    # get input statistics
     if input_var is not None:
         if input_path.is_file():
-            output_ds = get_file_stats(input_path, input_var, input_factor, coordinate_slice)
+            input = get_file_stats(input_path, input_var, input_factor, coordinate_slice)
         elif input_path.is_dir():
-            output_ds = get_stats_one_pass(input_path, input_var, input_factor, coordinate_slice)
+            input = get_stats_one_pass(ref_path, ref_var, ref_factor, coordinate_slice, n_bootstrap_years=n_bootstrap_years)
         else:
             raise ValueError()
     else: 
@@ -361,12 +378,12 @@ def compare_input_with_ref(input_path, input_var, output_path , ref_path, ref_va
                 input = ds_input
             else: 
                 raise KeyError('Wrong input file-')
-    #     elif input_var is not None and input_var in ds_ref:
+    # get output statistics
     if ref_var is not None:
         if input_path.is_file():
-            output_ds = get_file_stats(ref_path, ref_var, ref_factor, coordinate_slice)
+            ref = get_file_stats(ref_path, ref_var, ref_factor, coordinate_slice)
         elif input_path.is_dir():
-            output_ds = get_stats_one_pass(ref_path, ref_var, ref_factor, coordinate_slice)
+            ref = get_stats_one_pass(ref_path, ref_var, ref_factor, coordinate_slice, n_bootstrap_years=n_bootstrap_years)
         else:
             raise ValueError()
     else: 
@@ -377,6 +394,7 @@ def compare_input_with_ref(input_path, input_var, output_path , ref_path, ref_va
                 ref = ds_ref
             else: 
                 raise KeyError('Wrong ref file-')
+    # compare and save statistics
     rel_mean = input['mean'].values / ref['mean'].values
     rel_std = input['std'].values / ref['std'].values
     spearman = spearman_spatial(input['clim'], ref['clim'])
@@ -406,16 +424,22 @@ def compare_input_with_ref(input_path, input_var, output_path , ref_path, ref_va
         output[f'{ref_name}_clim'] = ref['clim']
     else:
         output[f'ref_clim'] = ref['clim']
-    output.to_netcdf(output_path / f'{file_name}.nc')
-    plot_map(rel_std=rel_std, rel_mean=rel_mean, spearman=spearman, ref_clim=ref['clim'], input_clim=input['clim'], input_name=input_name, ref_name=ref_name, output_path=output_path)
+    if bootstrap_index is not None:
+        file_name = output_path / f'{file_name}_{bootstrap_index}.nc'
+        output.to_netcdf(output_path / f'{file_name}_{bootstrap_index}.nc')
+        return file_name
+    else:
+        plot_map(rel_std=rel_std, rel_mean=rel_mean, spearman=spearman, ref_clim=ref['clim'], input_clim=input['clim'], input_name=input_name, ref_name=ref_name, output_path=output_path)
 
 def get_ref_file(output_path, ref_name):
     return output_path / f'{ref_name}_stats.nc' if ref_name is not None else output_path / 'stats.nc'
 
+def evaluate_boostraping_stat_files(stat_files):
+    pass 
 
-def seasonality_grid_validation(input_path, input_var, output_path, ref_file, ref_var, input_name=None, ref_name=None, input_factor=1, ref_factor=1, only_plot=False, coordinate_slice=None, n_cpus=1):
+
+def seasonality_grid_validation(input_path, input_var, output_path, ref_file, ref_var, input_name=None, ref_name=None, input_factor=1, ref_factor=1, only_plot=False, coordinate_slice=None, n_cpus=1, n_bootstrap_years=None, n_bootstrap_selections=None):
     set_log_level('DEBUG')
-    # client = Client(n_workers=n_cpus, timeout=f"{60*3}s", memory_limit='25GB')
     output_path = Path(output_path)
     input_path = Path(input_path)
     if not output_path.is_dir():
@@ -425,14 +449,18 @@ def seasonality_grid_validation(input_path, input_var, output_path, ref_file, re
     elif ref_file is None:
         output_name = f'{input_name}_stats.nc' if input_name is not None else 'stats.nc'
         if input_path.is_file():
-            output_ds = get_file_stats(input_path, input_var, input_factor, coordinate_slice)
+            output_ds = get_file_stats(input_path, input_var, input_factor, coordinate_slice, output=output_path/output_name)
+        elif n_bootstrap_years is not None and n_bootstrap_selections > 0 and input_path.is_dir():
+            stat_files = Parallel(n_cpus=n_cpus)(delayed(get_stats_one_pass)((ref_path, ref_var, ref_factor, coordinate_slice, n_bootstrap_years, s, output_path/output_name)) for s in range(n_bootstrap_selections))
         elif input_path.is_dir():
-            output_ds = get_stats_one_pass(input_path, input_var, input_factor, coordinate_slice)
+            output_ds = get_stats_one_pass(input_path, input_var, input_factor, coordinate_slice, output_path=output_path/output_name)
         else:
             raise ValueError("input path does not exist")
-        logger.info(output_path / output_name)
-        output_ds.to_netcdf(output_path / output_name)
     else:
-        ref_path = Path(ref_path)
-        compare_input_with_ref(input_path, input_var, output_path, ref_file, ref_var, input_name, ref_name, input_factor, ref_factor, coordinate_slice)
+        if n_bootstrap_years is not None and n_bootstrap_selections > 0 and input_path.is_dir() and ref_path.is_dir():
+            ref_path = Path(ref_path)
+            stat_files = Parallel(n_cpus=n_cpus)(delayed(compare_input_with_ref)((input_path, input_var, output_path, ref_file, ref_var, input_name, ref_name, input_factor, ref_factor, coordinate_slice, n_bootstrap_years, s)) for s in range(n_bootstrap_selections))
+            evaluate_boostraping_stat_files(stat_files)
+        else:
+            compare_input_with_ref(input_path, input_var, output_path, ref_file, ref_var, input_name, ref_name, input_factor, ref_factor, coordinate_slice)
     # client.close()

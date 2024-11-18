@@ -45,6 +45,22 @@ def add_args(parser):
         type=int,
         help=("Number of CPUs to use"),
     )
+    parser.add_argument(
+        "--n_boostrap_years",
+        required=False,
+        default=None,
+        type=int,
+        help=(
+            """Number of years to draw for each boostrap experiment"""
+        ),
+    )
+    parser.add_argument(
+        "--n_bootstrap_selections",
+        required=False,
+        default=None,
+        type=int,
+        help=("Number of boostrap experiments"),
+    )
 def run(args):
     """Calculate the validation.
 
@@ -57,4 +73,4 @@ def run(args):
     coordinate_slice = None
     if lon_min is not None and lon_max is not None and lat_min is not None and lat_max is not None:
         coordinate_slice = {'lat': slice(lat_max, lat_min), 'lon': slice(lon_min, lon_max)}
-    seasonality_grid_validation(args.input_path, args.input_variable, args.output_dir, args.ref_path, args.ref_variable, args.input_name, args.ref_name, float(args.input_factor), float(args.ref_factor), args.only_plot, coordinate_slice, args.ncpus)
+    seasonality_grid_validation(args.input_path, args.input_variable, args.output_dir, args.ref_path, args.ref_variable, args.input_name, args.ref_name, float(args.input_factor), float(args.ref_factor), args.only_plot, coordinate_slice, args.ncpus, args.n_boostrap_years, args.n_bootstrap_selections)
