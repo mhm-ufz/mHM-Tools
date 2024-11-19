@@ -35,7 +35,7 @@ classifiers = [
   "Topic :: Utilities",
 ]
 dependencies = [
-  "numpy==1.17.3",
+  "numpy>=1.17.3",
   "netCDF4",
   "xarray",
   "pandas<2; python_version=='3.8'",
@@ -45,7 +45,6 @@ dependencies = [
   "scipy",
   "joblib",
   "crick",
-  "dask",
   "distributed",
   "seaborn"
 ]

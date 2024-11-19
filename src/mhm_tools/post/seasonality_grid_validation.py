@@ -13,8 +13,6 @@ from scipy.stats import spearmanr
 import matplotlib.pyplot as plt
 from matplotlib.offsetbox import TextArea, AnnotationBbox
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-import dask.array as da
-from dask.distributed import Client
 from mhm_tools.common.logger import logger, set_log_level
 
 def spearman_correlation(data1, data2):
@@ -41,7 +39,6 @@ def spearman_spatial(data1, data2):
     return res
 
 def climatology(data):
-    # Calculate monthly mean, which Dask handles lazily
     data_clim = data.groupby("time.month").mean(dim="time", skipna=True)
     
     # Ensure the climatology has all 12 months, filling missing months with NaNs
@@ -68,9 +65,6 @@ def get_std_from_ds(ds, input_var=None, clim=None, factor=1):
         std = data_reduced.std(dim="time", skipna=True)
     else: 
         std = data.std(dim="time", skipna=True)
-    
-    # Calculate standard deviation along the time dimension in a Dask-compatible way
-    
     
     # Return as DataArray with appropriate coordinates
     if type(std) is array and len(std.shape)==2:
@@ -104,8 +98,7 @@ def get_coord_values(ds, lat=False, lon=False):
 
 
 def get_file_stats(file, input_var, factor=1, coordinate_slice=None, output_path=None):
-    # Open the dataset with Dask, chunking along the time dimension
-    with xr.open_dataset(file, engine="netcdf4") as ds: #, chunks={'time': 365}) as ds:
+    with xr.open_dataset(file, engine="netcdf4") as ds: 
         # Apply coordinate slicing if needed
         if coordinate_slice is not None:
             lat_key = get_coord_key(ds, lat=True)
@@ -113,10 +106,9 @@ def get_file_stats(file, input_var, factor=1, coordinate_slice=None, output_path
             ds = ds.sel({lat_key: coordinate_slice['lat'], lon_key: coordinate_slice['lon']})
         
         # Calculate climatology and standard deviation along the time dimension
-        clim = get_clim_from_ds(ds, input_var, factor)  # Ensure this function is Dask-compatible
-        std = get_std_from_ds(ds, input_var, clim, factor)  # Ensure Dask compatibility
+        clim = get_clim_from_ds(ds, input_var, factor) 
+        std = get_std_from_ds(ds, input_var, clim, factor)  
         
-        # Compute mean over time using Dask-compatible xarray operations
         mean = ds[input_var].mean(dim='time', skipna=True) * factor
 
         # Construct the output dataset with lazy evaluations
@@ -161,7 +153,6 @@ def combine_results(results):
 
 def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None):
     """Take a list of files with all containing data for one month and creating statisitcs while reading them one by one."""
-    # Open the dataset with Dask, chunking along the time dimension
     da = None
     with xr.open_dataset(files[0], engine="netcdf4") as ds:
             # Apply coordinate slicing if needed
@@ -262,7 +253,6 @@ def get_stats_one_pass(input_path, input_var, factor=1, coordinate_slice=None, n
         }
     )
     # Trigger computation if needed
-    # output = output  # Calculate all Dask arrays at once
     if output_path is not None and bootstrap_index is not None:
         output.to_netcdf(f"{output_path.stem}_{bootstrap_index}.nc")
     elif output_path is not None:
