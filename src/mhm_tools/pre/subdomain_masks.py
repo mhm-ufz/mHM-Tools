@@ -10,7 +10,6 @@ Based on a script by
 - Matthias Kelbling
 """
 
-import logging
 from pathlib import Path
 
 import matplotlib as mpl
@@ -18,10 +17,7 @@ import numpy as np
 import xarray as xr
 from scipy.interpolate import NearestNDInterpolator
 
-# logger
-logging.basicConfig(format="%(asctime)s - %(levelname)-8s - %(message)s")
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+from mhm_tools.common.logger import logger
 
 # GLOBAL VARIABLES
 # Coordinate arrays for the shape of Greenland in lons, lats
@@ -29,7 +25,7 @@ REF_FILE_ENCODING = {
     "elevtn": {"dtype": "float32", "_FillValue": -9999.0, "zlib": True, "complevel": 4},
     "basin": {"dtype": "int32", "_FillValue": -9999, "zlib": True, "complevel": 4},
     "flwdir": {"dtype": "int32", "_FillValue": -9999, "zlib": True, "complevel": 4},
-    "upgrid": {"dtype": "int32", "_FillValue": -9999, "zlib": True, "complevel": 4},
+    # "upgrid": {"dtype": "int32", "_FillValue": -9999, "zlib": True, "complevel": 4},
     "uparea_grid": {
         "dtype": "float32",
         "_FillValue": -9999.0,
@@ -57,8 +53,6 @@ class CreateSubdomainMasks:
 
     Parameters
     ----------
-    input_dir : str
-        The directory path where the input files are located.
     output_dir : str
         The directory path where the output files will be saved.
     output_file_name : str
@@ -79,32 +73,24 @@ class CreateSubdomainMasks:
 
     def __init__(
         self,
-        input_dir,
         output_dir,
         output_file_name,
         basin_id_file,
         basin_clusters,
         land_mask,
     ):
-        # set paths (e.g. on Eve HPC)
-        self.base_path = Path(input_dir)
-        if not self.base_path.is_dir():
-            msg = "input path must be a directory"
-            raise ValueError(msg)
-
         # unique basins ids, need to be in variable 'basin'
-        self.ref_file = self.base_path / basin_id_file
+        self.ref_file = basin_id_file
 
         # clustered basins ids, need to be in variable 'mask', can be any resolution
-        self.pgb_file = self.base_path / basin_clusters
+        self.pgb_file = basin_clusters
 
         # land mask and grid of target resolution, need to be in integer variable 'land_mask'
-        self.land_file = self.base_path / land_mask
+        self.land_file = land_mask
 
-        if Path(output_dir).is_absolute():
-            out_dir_path = Path(output_dir) / output_file_name
-        else:
-            out_dir_path = self.base_path / output_dir
+        self.output_dir = Path(output_dir)
+
+        out_dir_path = self.output_dir
         if not out_dir_path.is_dir():
             out_dir_path.mkdir(parents=True)
         self.out_file_name = str(out_dir_path / Path(output_file_name).stem)
@@ -112,6 +98,7 @@ class CreateSubdomainMasks:
     @staticmethod
     def read_var(fname, var_name):
         """Read a variable from a netcdf file."""
+        logger.info(f"reading variable {var_name} from {fname}")
         with xr.open_dataset(fname) as ds:
             return ds[var_name]
 
@@ -157,7 +144,9 @@ class CreateSubdomainMasks:
             if coord in ds_ref_file:
                 ds_ref_file = ds_ref_file.drop(coord)
 
-        file_basins_remapped = self.base_path / "unique_basin_ids_03min_agg54classes.nc"
+        file_basins_remapped = (
+            self.output_dir / "unique_basin_ids_03min_agg54classes.nc"
+        )
         if not file_basins_remapped.is_file():
             # map the 53 subbasins from PGB reference onto target grid
             logger.info(
@@ -224,7 +213,7 @@ class CreateSubdomainMasks:
 
             logger.info(f"processing subdomain {i}")
 
-            sub_mask = new_ids_remapped.values == basin_id
+            sub_mask = (new_ids_remapped.values == basin_id) & ~np.isnan(land_mask)
 
             fname = self.out_file_name + f"_{i:02}.nc"
             ds_sub_ref_file = ds_ref_file.copy()
@@ -233,15 +222,34 @@ class CreateSubdomainMasks:
 
             ds_sub_ref_file.to_netcdf(fname, encoding=REF_FILE_ENCODING)
 
+    def use_land_mask(self):
+        """Reencode and mask the input files"""
+        land_mask = self.read_var(fname=self.land_file, var_name="land_mask").astype(
+            bool
+        )
+        logger.info(f"reading {self.ref_file}")
+        ds_ref_file = xr.open_dataset(self.ref_file).sel(
+            lat=land_mask.lat, lon=land_mask.lon, method="nearest"
+        )
+        for coord in ["latitude", "longitude"]:
+            if coord in ds_ref_file:
+                ds_ref_file = ds_ref_file.drop(coord)
+        ds_sub_ref_file = ds_ref_file.copy()
+        for data_var in ds_sub_ref_file.data_vars:
+            logger.info(f"processing {data_var}")
+            ds_sub_ref_file[data_var].values[np.isnan(land_mask)] = np.nan
+        fname = self.out_file_name + ".nc"
+        logger.info(f"writing to {fname}")
+        ds_sub_ref_file.to_netcdf(fname, encoding=REF_FILE_ENCODING)
+
 
 def create_subdomain_masks(
-    input_dir, output_dir, output_file_name, basin_id_file, basin_clusters, land_mask
+    output_dir, output_file_name, basin_id_file, basin_clusters, land_mask
 ):
     """
     Create subdomain masks based on the provided input parameters.
 
     Args:
-        input_dir (str): The directory containing the input files.
         output_dir (str): The directory where the output files will be saved.
         output_file_name (str): The name of the output file.
         basin_id_file (str): The file containing the basin IDs.
@@ -253,11 +261,17 @@ def create_subdomain_masks(
         None
     """
     csm = CreateSubdomainMasks(
-        input_dir=input_dir,
         output_dir=output_dir,
         output_file_name=output_file_name,
         basin_id_file=basin_id_file,
         basin_clusters=basin_clusters,
         land_mask=land_mask,
     )
-    csm.create_subdomains()
+    with xr.open_dataset(basin_id_file) as ds:
+        lat = ds.lat
+        lon = ds.lon
+        # if input is not global only create a file else create all subdomains
+        if np.max(lat) - np.min(lat) < 360 and np.max(lon) - np.min(lon) < 130:
+            csm.use_land_mask()
+        else:
+            csm.create_subdomains()

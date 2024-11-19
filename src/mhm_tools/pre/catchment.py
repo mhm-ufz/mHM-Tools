@@ -14,6 +14,8 @@ import numpy as np
 import pyflwdir
 import xarray as xr
 
+from mhm_tools.common.logger import logger, set_log_level
+
 # GLOBAL VARIABLES
 FDIR_FILLVALUE = {"d8": 247, "ldd": 255}
 FACC_FILLVALUE = 0
@@ -37,15 +39,10 @@ class Catchment:
             "_FillValue": 0,
             "units": "-",
         },
-        "upgrid": {
+        "uparea_grid": {
             "title": "accumulated data values along the flow directions",
             "_FillValue": FACC_FILLVALUE,
-            "units": "-",
-        },
-        "uparea_grid": {
-            "title": "rectangular drainage area",
-            "_FillValue": FILLVALUE,
-            "units": "km2",
+            "units": "m2",
         },
         "grdare": {
             "title": "rectangular grid area",
@@ -58,6 +55,38 @@ class Catchment:
             "units": "m",
         },
     }
+    # VARIABLES = {
+    #     "flwdir": {
+    #         "title": f"flow direction ({OUTPUT_FTYPE.upper()})",
+    #         "_FillValue": FDIR_FILLVALUE[OUTPUT_FTYPE],
+    #         "units": "-",
+    #     },
+    #     "basin": {
+    #         "title": "basin Id",
+    #         "_FillValue": 0,
+    #         "units": "-",
+    #     },
+    #     "upgrid": {
+    #         "title": "accumulated data values along the flow directions",
+    #         "_FillValue": FACC_FILLVALUE,
+    #         "units": "-",
+    #     },
+    #     "uparea_grid": {
+    #         "title": "rectangular drainage area",
+    #         "_FillValue": FILLVALUE,
+    #         "units": "km2",
+    #     },
+    #     "grdare": {
+    #         "title": "rectangular grid area",
+    #         "_FillValue": FILLVALUE,
+    #         "units": "m2",
+    #     },
+    #     "elevtn": {
+    #         "title": "outlet pixel elevation",
+    #         "_FillValue": float(FILLVALUE),
+    #         "units": "m",
+    #     },
+    # }
 
     def __init__(
         self,
@@ -77,7 +106,12 @@ class Catchment:
         self.grdare = None
         self.elevtn = None
         self._fdir = None
-        self.out_var_name = out_var_name
+        self.catchment_mask = None
+        self.out_var_name = (
+            out_var_name if out_var_name is not None else f"{var_name}.nc"
+        )
+        if type(self.out_var_name) is not str:
+            self.out_var_name = f"{var_name}.nc"
         self.do_shift = do_shift
         self.ds = ds
 
@@ -124,7 +158,13 @@ class Catchment:
         self.elevtn = data.data
         if self._fdir is None:
             # Create a flow direction object
-            self._fdir = pyflwdir.from_dem(data=self.elevtn, nodata=np.nan, **kwargs)
+            logger.debug("add_dem: kwargs: ", kwargs)
+            self._fdir = pyflwdir.from_dem(
+                data=self.elevtn,
+                nodata=np.nan,
+                transform=(0.05, 0.0, -180, 0, 0.05, -90),
+                latlon=True,
+            )
             self.get_fdir()
 
     def add_fdir(self, data, ftype, **kwargs):
@@ -139,6 +179,22 @@ class Catchment:
             data = data.astype(np.uint8)
             self._fdir = pyflwdir.from_array(data=data, ftype=ftype, **kwargs)
         self.get_fdir()
+
+    def delineate_basin(self, gauge_coords):
+        """
+        Deliniate the basin for a given lat and lon
+        """
+        logger.debug(f"Deliniating basin for gauge coordinates {gauge_coords}")
+        gauge_coords = (gauge_coords[0], gauge_coords[1] * -1)
+        self.basin = self._fdir.basins(
+            xy=gauge_coords, streams=self._fdir.stream_order() >= 4
+        )
+        self.catchment_mask = self.basin > 0
+        if np.all(~self.catchment_mask):
+            logger.error("No catchment found for the given coordinates")
+            self.delineate_basin((gauge_coords[0], gauge_coords[1] * -1))
+        # if not np.any(np.isnan(self.basin)):
+        #     self.basin[np.where(~self.catchment_mask)] = self.VARIABLES["basin"]["_FillValue"]
 
     def get_basins(self):
         """
@@ -156,7 +212,7 @@ class Catchment:
         """
         Performs the calculation of the upstream catchment area
         """
-        self.uparea_grid = self._fdir.upstream_area(unit="km2").astype(int)
+        self.upgrid = self._fdir.upstream_area(unit="km2").astype(int)
 
     def get_grid_area(self):
         """
@@ -167,12 +223,25 @@ class Catchment:
     def get_facc(self):
         data = np.ones_like(self.flwdir).astype(np.uint32)
         data[~self._fdir.mask.reshape(data.shape)] = 0
-        self.upgrid = self._fdir.accuflux(data, nodata=0)
+        self.uparea_grid = self._fdir.accuflux(data, nodata=0)
 
-    def write(self, out_path, single_file=True, format="nc", cellsize=None):
+    def write(
+        self, out_path, single_file=True, format="nc", cellsize=None, cut_by_basin=False, mask_file=None
+    ):
         data_vars = {}
+        out_path = pl.Path(out_path)
+        data = self.basin
+        if not out_path.is_dir():
+            out_path.mkdir(parents=True, exist_ok=True)
+        if cut_by_basin:
+            lat_slice, lon_slice = self.cut_to_filled_area()
+        else:
+            lat_slice, lon_slice = slice(84, -56), slice(None)
+
         for var_name in self.VARIABLES.keys():
             data = getattr(self, var_name)
+            if cut_by_basin:
+                data[~self.catchment_mask] = self.VARIABLES[var_name]["_FillValue"]
             if data is None:
                 continue
             data_var = xr.Dataset(
@@ -194,7 +263,7 @@ class Catchment:
                     "creator": "Department of Computational Hydrosystems",
                     "institution": "Helmholtz Centre for Environmental Research - UFZ",
                 }
-                fname = pl.Path(out_path, f"{var_name}.{format}")
+                fname = out_path / f"{var_name}.{format}"
                 if format == "nc":
                     data_var.to_netcdf(
                         fname,
@@ -254,8 +323,11 @@ class Catchment:
                     "units": self.VARIABLES[var_name]["units"],
                 }
 
-            ds.sel(lat=slice(84, -56)).to_netcdf(
-                pl.Path(out_path, self.out_var_name),
+            logger.debug(f"lat_slice: {lat_slice}, lon_slice: {lon_slice}")
+            logger.debug(f"ds: {ds}")
+            ds = ds.sel(lat=lat_slice, lon=lon_slice)
+            ds.to_netcdf(
+                out_path / self.out_var_name,
                 encoding={
                     var_name: {
                         "dtype": ds[var_name].dtype,
@@ -264,6 +336,47 @@ class Catchment:
                     for var_name in ds.data_vars
                 },
             )
+            logger.info(f"Basin Id has been written to {out_path / self.out_var_name}")
+        # use basin_id to create a mask file
+            if mask_file is not None: 
+                mask = ds.basin > 0
+                # name the variable mask
+                mask_file = pl.Path(mask_file)
+                mask = xr.Dataset({"mask": mask}, coords={"lon": ds.lon, "lat": ds.lat})
+                mask.to_netcdf(mask_file)
+                logger.info(f"Mask file has been written to {mask_file}")
+
+
+    def cut_to_filled_area(self):
+        """Create lat and lon slices to cut the data to the filled area."""
+        # Find the non-zero elements
+        cols = np.any(
+            self.catchment_mask, axis=0
+        )  # Boolean array for columns with any filled cells
+        rows = np.any(
+            self.catchment_mask, axis=1
+        )  # Boolean array for rows with any filled cells
+
+        # Get the indices of the non-zero rows and columns
+        min_row, max_row = np.where(rows)[0][[0, -1]]
+        min_col, max_col = np.where(cols)[0][[0, -1]]
+        # Add a buffer of one cell
+        min_row = min_row - 1 if min_row > 0 else min_row
+        min_col = min_col - 1 if min_col > 0 else min_col
+        max_row = max_row + 1 if max_row < self.catchment_mask.shape[0] else max_row
+        max_col = max_col + 1 if max_col < self.catchment_mask.shape[1] else max_col
+
+        # Slice the array to extract the filled part
+        lon_min, lon_max = np.round(self.ds.lon.values[min_col], 3), np.round(
+            self.ds.lon.values[max_col], 3
+        )
+        lat_min, lat_max = np.round(self.ds.lat.values[max_row], 3), np.round(
+            self.ds.lat.values[min_row], 3
+        )
+        lat_slice = slice(lat_max, lat_min)
+        lon_slice = slice(lon_min, lon_max)
+        logger.debug(f"lat_slice: {lat_slice}, lon_slice: {lon_slice}")
+        return lat_slice, lon_slice
 
 
 # use this code to merge the rolled and non-rolled file
@@ -288,46 +401,98 @@ def merge_catchment(path1, path2, out_path):
     merged.to_netcdf(out_path)
 
 
-def process_catchment(
-    ds, var_name, var, ftype, transform, latlon, out_var_name, do_shift=False
+def create_catchment(
+    input_file, output_path, var_name, var, ftype, gauge_coords=None, coordinate_slices=None, log_level="INFO", mask_file=None, res=0.05
 ):
-    return Catchment(
-        ds=ds,
-        var_name=var_name,
-        var=var,
-        ftype=ftype,
-        transform=transform,
-        latlon=latlon,
-        out_var_name=out_var_name,
-        do_shift=do_shift,
+
+    set_log_level(log_level)
+
+    logger.info(
+        f"Creating catchment file for {var_name} using {var} and {ftype} from {input_file}"
     )
-
-
-def create_catchment(input_file, output_path, var_name, var, ftype):
 
     if var not in {"fdir", "dem"}:
         raise ValueError(f"Unexpected value for var={var}, must be 'fdir' or 'dem'")
 
     ds = xr.open_dataset(pl.Path(input_file))
-    transform = (0.05, 0.0, -180, 0, 0.05, -90)
+    transform = (res, 0.0, -180, 0, res, -90)
     latlon = True
 
-    catchments = [
-        process_catchment(ds, var_name, var, ftype, transform, latlon, "hydro1.nc"),
-        process_catchment(ds, var_name, var, ftype, transform, latlon, "hydro2.nc", do_shift=True),
-    ]
+    if gauge_coords is None and coordinate_slices is None:
+        temp_file1 = "hydro1.nc"
+        global_catchments = Catchment(
+            ds=ds,
+            var_name=var_name,
+            var=var,
+            ftype=ftype,
+            transform=transform,
+            latlon=latlon,
+            out_var_name=temp_file1,
+            do_shift=False,
+        )
+        # create a shifted version of the catchment to avoid border effects
+        temp_file2 = "hydro2.nc"
+        global_catchments_shifted = Catchment(
+            ds=ds,
+            var_name=var_name,
+            var=var,
+            ftype=ftype,
+            transform=transform,
+            latlon=latlon,
+            out_var_name=temp_file2,
+            do_shift=True,
+        )
+        catchments = [global_catchments, global_catchments_shifted]
 
-    for c in catchments:
+        for c in catchments:
+            c.get_basins()
+            c.get_facc()
+            c.get_grid_area()
+            # c.get_upstream_area()
+            c.write(output_path, single_file=True)
+        # add paths to the temp files
+        temp_file1 = pl.Path(output_path, "hydro1.nc")
+        temp_file2 = pl.Path(output_path, "hydro2.nc")
+        logger.info("Merging catchment files")
+        merge_catchment(
+            temp_file1,
+            temp_file2,
+            pl.Path(output_path, "basin_ids.nc"),
+        )
+        # remove the temporary files
+        temp_file1.unlink()
+        temp_file2.unlink()
+    elif coordinate_slices is not None:
+        ds = ds.sel(lat=coordinate_slices['lat'], lon=coordinate_slices['lon'])
+        transform = (res, 0.0, coordinate_slices['lon'].start, 0, res, coordinate_slices['lat'].start)
+        c = Catchment(
+            ds=ds,
+            var_name=var_name,
+            var=var,
+            ftype=ftype,
+            transform=transform,
+            latlon=latlon,
+            out_var_name="basin_ids.nc",
+            do_shift=False,
+        )
         c.get_basins()
         c.get_facc()
         c.get_grid_area()
-        c.get_upstream_area()
         c.write(output_path, single_file=True)
-
-    merge_catchment(
-        pl.Path(output_path, "hydro1.nc"),
-        pl.Path(output_path, "hydro2.nc"),
-        pl.Path(output_path, "hydro_merged_03min.nc"),
-    )
-
-    print(f"\nNetCDF basins file has been stored! \nSee {output_path}/hydro_merged_03min.nc\n")
+    else:
+        logger.info(f"Creating catchment for gauge coordinates {gauge_coords}")
+        c = Catchment(
+            ds=ds,
+            var_name=var_name,
+            var=var,
+            ftype=ftype,
+            transform=transform,
+            latlon=latlon,
+            out_var_name="basin_ids.nc",
+            do_shift=False,
+        )
+        c.delineate_basin(gauge_coords)
+        c.get_facc()
+        c.get_grid_area()
+        c.write(output_path, single_file=True, cut_by_basin=True, mask_file=mask_file)
+        

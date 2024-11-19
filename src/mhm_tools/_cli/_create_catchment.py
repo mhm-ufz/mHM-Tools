@@ -2,8 +2,8 @@
 TODO: add description
 """
 
-from pathlib import Path
-
+import numpy as np
+from mhm_tools.common.logger import logger, set_log_level
 from ..pre import create_catchment
 
 
@@ -72,6 +72,27 @@ def add_args(parser):
         default="ldd",
         help=("ftype of input variable, use 'nextxy', 'ldd' or 'd8'"),
     )
+    parser.add_argument(
+        "--gauge_coords",
+        default=None,
+        help=(
+            "Gauge coordinates in the form of 'lat,lon' take care to write --gauge_coords='lat,lon'"
+        ),
+    )
+    parser.add_argument(
+        "--lonlatbox",
+        required=False,
+        default=None,
+        help=(
+            """coordinates in the form of 'lon_min,lon_max,lat_min,lat_max,resolution_l0'"""
+        ),
+    )
+    parser.add_argument(
+        "--mask_file",
+        default=None,
+        help=("Path where to save the mask file"),
+    )
+    parser.add_argument("--log_level", default="INFO", type=str, help=("Logging level"))
 
 
 def run(args):
@@ -82,10 +103,26 @@ def run(args):
     args : argparse.Namespace
         parsed command line arguments
     """
+    gauge_coords = None
+    coordinate_slices = None
+    if args.gauge_coords is not None:
+        if args.lonlatbox is not None:
+            raise ValueError("You can't use --gauge_coords and --lonlatbox at the same time.")
+        lat, lon = map(float, args.gauge_coords.split(","))
+        gauge_coords = (np.array([lon]), np.array([lat]))
+        logger.info
+    elif args.lonlatbox is not None:
+        lonmin, lonmax,latmin, latmax, resl0  = map(float, args.lonlatbox.split(","))
+        coordinate_slices = {'lat': slice(latmax, latmin), 'lon': slice(lonmin, lonmax)}
+        logger.info('using lonlatbox to with extends: lat=({latmax}, {latmin}); lon=({lonmin}, {lonmax})')
     create_catchment(
         input_file=args.input_file,
         output_path=args.output_path,
         var_name=args.vn,
         var=args.var,
         ftype=args.ftp,
+        gauge_coords=gauge_coords,
+        coordinate_slices=coordinate_slices,
+        log_level=args.log_level,
+        mask_file=args.mask_file,
     )

@@ -18,49 +18,36 @@ def add_args(parser):
     """
     required_args = parser.add_argument_group("required arguments")
     required_args.add_argument(
-        "-i",
-        "--input_dir",
-        required=True,
-        help=("Path to the input files"),
-    )
-    
-    # optional arguments
-    parser.add_argument(
         "-o",
         "--output_dir",
-        default="subdomain_river_masks_3min",
         help=("specify an output directory path"),
     )
-    parser.add_argument(
+    required_args.add_argument(
         "-f",
         "--output_file_name",
-        default="river_network_subdomain",
         help=(
             "stem for the output filename, which is then numbered for the different basin clusters"
         ),
     )
-    parser.add_argument(
+    required_args.add_argument(
         "-b",
         "--basin_ids",
-        default="hydro_merged_03min.nc",
         help=(
             "file containing unique basins ids for all river basins"
             "they need to be in variable 'basin'"
         ),
     )
-    parser.add_argument(
+    required_args.add_argument(
         "-c",
         "--basin_clusters",
-        default="basin_clusters.nc",
         help=(
             "file containing clustered basins ids e.g. of the 53 subbasins from PGB reference"
             "they need to be in variable 'mask' but can have any resolution"
         ),
     )
-    parser.add_argument(
+    required_args.add_argument(
         "-l",
         "--land_mask",
-        default="land_mask_remapped_03min.nc",
         help=(
             "File containing a mask of all land surfaces"
             "grid of target resolution, need to be in integer variable 'land_mask'"
@@ -77,7 +64,6 @@ def run(args):
         parsed command line arguments
     """
     create_subdomain_masks(
-        input_dir=args.input_dir,
         output_dir=args.output_dir,
         output_file_name=args.output_file_name,
         basin_id_file=args.basin_ids,

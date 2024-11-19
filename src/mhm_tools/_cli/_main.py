@@ -3,7 +3,13 @@
 import argparse
 
 from .. import __version__
-from . import _bankfull, _create_catchment, _create_subdomain_masks, _latlon
+from . import (
+    _bankfull,
+    _create_catchment,
+    _create_mhm_restart_file,
+    _create_subdomain_masks,
+    _latlon,
+)
 
 
 class Formatter(
@@ -66,6 +72,9 @@ def _get_parser():
     add_command_from_module(subparsers, "create_catchment", _create_catchment)
     add_command_from_module(
         subparsers, "create_subdomain_masks", _create_subdomain_masks
+    )
+    add_command_from_module(
+        subparsers, "create_mhm_restart_file", _create_mhm_restart_file
     )
 
     # return the parser
