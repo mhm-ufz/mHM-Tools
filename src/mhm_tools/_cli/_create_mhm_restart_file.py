@@ -5,7 +5,6 @@ A restart file contains all the static information to run mHM on a specific grid
 
 """
 
-import numpy as np
 from mhm_tools.common.cli_utils import get_coords
 from mhm_tools.common.logger import logger, set_log_level
 from mhm_tools.pre.create_mhm_restart_file import Grid, LatLon, MPRRunner
@@ -212,29 +211,39 @@ def run(args):
         parsed command line arguments
     """
     set_log_level(args.log_level)
-    
+
     l1_resolution = float(args.l1_resolution)
 
-    if args.lonlatbox is not None: 
+    if args.lonlatbox is not None:
         l0_resolution = float(args.lonlatbox[4])
     elif args.l0_resolution is not None:
         l0_resolution = float(args.l0_resolution)
     else:
-        raise ValueError(
-            "L0 resolution was not provided."
-        )
+        raise ValueError("L0 resolution was not provided.")
 
-    lon_min_target_grid, lon_max_target_grid, lat_min_target_grid, lat_max_target_grid, mask = get_coords(args.lonlatbox, args.mask_file, args.lon_min, args.lon_max, args.lat_min, args.lat_max)
+    (
+        lon_min_target_grid,
+        lon_max_target_grid,
+        lat_min_target_grid,
+        lat_max_target_grid,
+        mask,
+    ) = get_coords(
+        args.lonlatbox,
+        args.mask_file,
+        args.lon_min,
+        args.lon_max,
+        args.lat_min,
+        args.lat_max,
+    )
 
-
-    logger.info(f"Creating restart file for grid with the following coordinates:")
+    logger.info("Creating restart file for grid with the following coordinates:")
     logger.info(f"lon_min: {lon_min_target_grid}")
     logger.info(f"lon_max: {lon_max_target_grid}")
     logger.info(f"lat_min: {lat_min_target_grid}")
     logger.info(f"lat_max: {lat_max_target_grid}")
     logger.info(f"l0_resolution: {l0_resolution}")
     logger.info(f"l1_resolution: {l1_resolution}")
-    
+
     if args.land_mask_file is None and args.no_merge is not None:
         raise ValueError(
             "You need to provide a land mask file at L1 resolution if you want to merge the restart files"

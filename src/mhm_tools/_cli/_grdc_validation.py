@@ -1,6 +1,7 @@
 from mhm_tools.common.cli_utils import get_coords
 from mhm_tools.post.GRDC_validation import evaludate_grdc_data
 
+
 def add_args(parser):
     required_args = parser.add_argument_group("required arguments")
     required_args.add_argument(
@@ -38,9 +39,7 @@ def add_args(parser):
         "--lonlatbox",
         required=False,
         default=None,
-        help=(
-            """coordinates in the form of 'lon_min,lon_max,lat_min,lat_max'"""
-        ),
+        help=("""coordinates in the form of 'lon_min,lon_max,lat_min,lat_max'"""),
     )
     parser.add_argument(
         "--mask_file",
@@ -51,10 +50,24 @@ def add_args(parser):
             required unless --lonlatbox is provided"""
         ),
     )
-    # calcualte KGE and NSE or not 
+    # calcualte KGE and NSE or not
     # sycronus and asyncronus
+
+
 def run(args):
-    lon_min, lon_max, lat_min, lat_max, mask = get_coords(args.lonlatbox, args.mask_file, raise_exception=False)
+    lon_min, lon_max, lat_min, lat_max, mask = get_coords(
+        args.lonlatbox, args.mask_file, raise_exception=False
+    )
     evaludate_grdc_data(
-        args.model_data_path, args.observed_data_path, args.gauge_info_path, save_path=None, n_jobs=int(args.ncpus), sim_variable=args.model_variable, observed_variable=args.observed_variable, lon_min=lon_min, lon_max=lon_max, lat_min=lat_min, lat_max=lat_max
-    )   
+        args.model_data_path,
+        args.observed_data_path,
+        args.gauge_info_path,
+        save_path=None,
+        n_jobs=int(args.ncpus),
+        sim_variable=args.model_variable,
+        observed_variable=args.observed_variable,
+        lon_min=lon_min,
+        lon_max=lon_max,
+        lat_min=lat_min,
+        lat_max=lat_max,
+    )

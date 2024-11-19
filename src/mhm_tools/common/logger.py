@@ -21,7 +21,9 @@ def set_log_level(level):
         return logger
     if type(level) is not str:
         # raise TypeError(f"Invalid log level type: {type(level)}")
-        logger.error(f"Invalid log level type: {type(level)} - using default log level INFO")
+        logger.error(
+            f"Invalid log level type: {type(level)} - using default log level INFO"
+        )
         level = "INFO"
     if level not in LOG_LEVELS:
         logger.error(f"Invalid log level: {level} - using default log level INFO")

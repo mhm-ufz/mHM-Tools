@@ -3,7 +3,9 @@ TODO: add description
 """
 
 import numpy as np
-from mhm_tools.common.logger import logger, set_log_level
+
+from mhm_tools.common.logger import logger
+
 from ..pre import create_catchment
 
 
@@ -107,14 +109,18 @@ def run(args):
     coordinate_slices = None
     if args.gauge_coords is not None:
         if args.lonlatbox is not None:
-            raise ValueError("You can't use --gauge_coords and --lonlatbox at the same time.")
+            raise ValueError(
+                "You can't use --gauge_coords and --lonlatbox at the same time."
+            )
         lat, lon = map(float, args.gauge_coords.split(","))
         gauge_coords = (np.array([lon]), np.array([lat]))
         logger.info
     elif args.lonlatbox is not None:
-        lonmin, lonmax,latmin, latmax, resl0  = map(float, args.lonlatbox.split(","))
-        coordinate_slices = {'lat': slice(latmax, latmin), 'lon': slice(lonmin, lonmax)}
-        logger.info('using lonlatbox to with extends: lat=({latmax}, {latmin}); lon=({lonmin}, {lonmax})')
+        lonmin, lonmax, latmin, latmax, resl0 = map(float, args.lonlatbox.split(","))
+        coordinate_slices = {"lat": slice(latmax, latmin), "lon": slice(lonmin, lonmax)}
+        logger.info(
+            "using lonlatbox to with extends: lat=({latmax}, {latmin}); lon=({lonmin}, {lonmax})"
+        )
     create_catchment(
         input_file=args.input_file,
         output_path=args.output_path,

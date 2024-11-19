@@ -8,9 +8,9 @@ from . import (
     _create_catchment,
     _create_mhm_restart_file,
     _create_subdomain_masks,
+    _grdc_validation,
     _latlon,
     _seasonality_validation,
-    _grdc_validation
 )
 
 
@@ -70,7 +70,9 @@ def _get_parser():
     # module needs two functions: add_args and run
 
     add_command_from_module(subparsers, "bankfull", _bankfull)
-    add_command_from_module(subparsers, "seasonality_validation", _seasonality_validation)
+    add_command_from_module(
+        subparsers, "seasonality_validation", _seasonality_validation
+    )
     add_command_from_module(subparsers, "grdc_validation", _grdc_validation)
     add_command_from_module(subparsers, "latlon", _latlon)
     add_command_from_module(subparsers, "create_catchment", _create_catchment)
