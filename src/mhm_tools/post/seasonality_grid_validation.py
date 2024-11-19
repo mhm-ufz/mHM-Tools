@@ -5,7 +5,6 @@ from multiprocessing import Value
 from pathlib import Path
 import random
 
-from sympy import N
 from joblib import Parallel, delayed
 import xarray as xr
 import numpy as np
@@ -453,4 +452,3 @@ def seasonality_grid_validation(input_path, input_var, output_path, ref_file, re
             evaluate_boostraping_stat_files(stat_files)
         else:
             compare_input_with_ref(input_path, input_var, output_path, ref_file, ref_var, input_name, ref_name, input_factor, ref_factor, coordinate_slice)
-    # client.close()
