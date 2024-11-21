@@ -9,6 +9,7 @@ Authors
 import time
 
 import numpy as np
+from mhm_tools.common.logger import log_arguments
 import xarray as xr
 from pyproj import Proj
 
@@ -63,7 +64,7 @@ def _create_grid(header, crs=None, dtype="f4"):
 
 #     """This function writes the latlon.nc file from given ASCII headers."""
 
-
+@log_arguments()
 def create_latlon(
     out_file,
     level0,

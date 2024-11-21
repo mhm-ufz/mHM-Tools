@@ -8,6 +8,7 @@ Authors
 """
 
 import numpy as np
+from mhm_tools.common.logger import log_arguments
 import xarray as xr
 
 from ..common import NC_ENCODE_DEFAULTS, set_netcdf_encoding
@@ -60,6 +61,7 @@ def calc_q_bkfl(q_yearly_peak, return_period):
     return q_bkfl
 
 
+@log_arguments()
 def bankfull_discharge(
     in_file, out_file, return_period=1.5, wetted_perimeter=False, var="Qrouted"
 ):

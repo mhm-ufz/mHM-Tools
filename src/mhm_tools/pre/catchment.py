@@ -14,7 +14,7 @@ import numpy as np
 import pyflwdir
 import xarray as xr
 
-from mhm_tools.common.logger import logger, set_log_level
+from mhm_tools.common.logger import log_arguments, logger, set_log_level
 
 # GLOBAL VARIABLES
 FDIR_FILLVALUE = {"d8": 247, "ldd": 255}
@@ -400,7 +400,7 @@ def merge_catchment(path1, path2, out_path):
     merged = xr.where(mask, ds2.reindex_like(ds1, method="nearest"), ds1)
     merged.to_netcdf(out_path)
 
-
+@log_arguments()
 def create_catchment(
     input_file, output_path, var_name, var, ftype, gauge_coords=None, coordinate_slices=None, log_level="INFO", mask_file=None, res=0.05
 ):
@@ -495,4 +495,3 @@ def create_catchment(
         c.get_facc()
         c.get_grid_area()
         c.write(output_path, single_file=True, cut_by_basin=True, mask_file=mask_file)
-        

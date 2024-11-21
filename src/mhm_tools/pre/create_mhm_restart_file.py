@@ -11,7 +11,7 @@ import numpy as np
 import xarray as xr
 from joblib import Parallel, delayed
 
-from mhm_tools.common.logger import logger, set_log_level
+from mhm_tools.common.logger import log_arguments, logger, set_log_level
 
 
 class MorphFiles:
@@ -1141,6 +1141,7 @@ class MHMRestartFile:
         self.mpr.run_mpr(grid)
         return grid
 
+    @log_arguments()
     def create_restart_file(self):
         """
         Create a restart file for the MHM model.

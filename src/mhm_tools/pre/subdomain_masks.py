@@ -17,7 +17,7 @@ import numpy as np
 import xarray as xr
 from scipy.interpolate import NearestNDInterpolator
 
-from mhm_tools.common.logger import logger
+from mhm_tools.common.logger import log_arguments, logger
 
 # GLOBAL VARIABLES
 # Coordinate arrays for the shape of Greenland in lons, lats
@@ -243,6 +243,7 @@ class CreateSubdomainMasks:
         ds_sub_ref_file.to_netcdf(fname, encoding=REF_FILE_ENCODING)
 
 
+@log_arguments()
 def create_subdomain_masks(
     output_dir, output_file_name, basin_id_file, basin_clusters, land_mask
 ):
