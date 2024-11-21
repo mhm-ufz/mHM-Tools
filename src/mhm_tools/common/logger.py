@@ -49,9 +49,10 @@ def log_arguments():
             non_none_args = {k: v for k, v in bound_args.arguments.items() if v is not None}
 
             # Log the arguments
-            logger.info(f"Function '{func.__name__}' called with the following arguments:")
+            msg = f"Function '{func.__name__}' called with the following arguments: \n"
             for arg, value in non_none_args.items():
-                logger.info(f"  {arg}: {value}")
+                msg += f"  {arg}: {value} \n"
+            logger.info(msg)
 
             # Call the original function
             return func(*args, **kwargs)
