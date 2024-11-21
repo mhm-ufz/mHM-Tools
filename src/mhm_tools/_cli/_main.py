@@ -2,6 +2,8 @@
 
 import argparse
 
+from mhm_tools.common.logger import set_log_level
+
 from .. import __version__
 from . import (
     _bankfull,
@@ -77,6 +79,16 @@ def _get_parser():
         subparsers, "create_mhm_restart_file", _create_mhm_restart_file
     )
 
+    # add logging 
+    parent_parser.add_argument(
+        "--log_level",
+        type=str, 
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        default="INFO",
+        help="Set the logging level"
+    )
+
+
     # return the parser
     return parent_parser
 
@@ -95,4 +107,5 @@ def main(argv=None):
         result of the called sub-argument routine
     """
     args = _get_parser().parse_args(argv)
+    set_log_level(args.log_level)
     return args.func(args)
