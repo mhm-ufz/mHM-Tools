@@ -6,7 +6,7 @@ A restart file contains all the static information to run mHM on a specific grid
 """
 
 import numpy as np
-from mhm_tools.common.logger import logger, set_log_level
+from mhm_tools.common.logger import logger
 from mhm_tools.pre.create_mhm_restart_file import Grid, LatLon, MPRRunner
 
 from ..pre import MHMRestartFile
@@ -177,13 +177,6 @@ def add_args(parser):
         required=False,
         help=("delete the temporary files created during the process"),
     )
-
-    parser.add_argument(
-        "--log_level",
-        default="INFO",
-        help=("Set the logging level"),
-    )
-
     parser.add_argument(
         "--ncpus",
         default=1,
@@ -258,7 +251,6 @@ def run(args):
     args : argparse.Namespace
         parsed command line arguments
     """
-    set_log_level(args.log_level)
     mask=None
     l1_resolution = float(args.l1_resolution)
     if args.lonlatbox is not None:

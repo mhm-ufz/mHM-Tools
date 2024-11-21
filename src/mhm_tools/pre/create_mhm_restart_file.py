@@ -11,7 +11,7 @@ import numpy as np
 import xarray as xr
 from joblib import Parallel, delayed
 
-from mhm_tools.common.logger import log_arguments, logger, set_log_level
+from mhm_tools.common.logger import log_arguments, logger
 
 
 class MorphFiles:
@@ -372,7 +372,6 @@ class MHMRestartFile:
         use_split_grids (bool, optional): Whether to use split grids. Defaults to False.
         ncpus (int, optional): The number of CPUs to use for parallelization. Defaults to 1.
         clean_temp_files (bool, optional): Whether to clean temporary files. Defaults to False.
-        log_level (int, optional): The log level. Defaults to 'debug'
         merge (bool, optional): Whether to merge the restart files. Defaults to True.
         merge_only (bool, optional): Whether to only merge the restart files. Defaults to False.
 

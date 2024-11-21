@@ -2,6 +2,7 @@ import shutil
 import unittest
 from pathlib import Path
 
+from mhm_tools.common.logger import set_log_level
 import xarray as xr
 
 import mhm_tools as mt
@@ -15,6 +16,7 @@ TMP.mkdir(parents=True, exist_ok=True)
 class TestCreateRestart(unittest.TestCase):
     def setUp(self):
         # setup read_morph_files test
+        set_log_level('ERROR')
         self.morph_dir = TMP / "morph"
         self.morph_dir.mkdir(parents=True, exist_ok=True)
         # create empty files in morph directory
@@ -111,7 +113,6 @@ class TestCreateRestart(unittest.TestCase):
             use_split_grids=False,
             clean_temp_files=True,
             ncpus=1,
-            log_level="error",
             merge=True,
             merge_only=False,
         )
@@ -203,7 +204,6 @@ class TestCreateRestart(unittest.TestCase):
             use_split_grids=False,
             clean_temp_files=True,
             ncpus=1,
-            log_level="error",
             merge=True,
             merge_only=False,
         )

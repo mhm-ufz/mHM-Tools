@@ -14,7 +14,7 @@ import numpy as np
 import pyflwdir
 import xarray as xr
 
-from mhm_tools.common.logger import log_arguments, logger, set_log_level
+from mhm_tools.common.logger import log_arguments, logger
 
 # GLOBAL VARIABLES
 FDIR_FILLVALUE = {"d8": 247, "ldd": 255}
@@ -402,10 +402,8 @@ def merge_catchment(path1, path2, out_path):
 
 @log_arguments()
 def create_catchment(
-    input_file, output_path, var_name, var, ftype, gauge_coords=None, coordinate_slices=None, log_level="INFO", mask_file=None, res=0.05
+    input_file, output_path, var_name, var, ftype, gauge_coords=None, coordinate_slices=None, mask_file=None, res=0.05
 ):
-
-    set_log_level(log_level)
 
     logger.info(
         f"Creating catchment file for {var_name} using {var} and {ftype} from {input_file}"

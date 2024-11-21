@@ -3,7 +3,7 @@ TODO: add description
 """
 
 import numpy as np
-from mhm_tools.common.logger import logger, set_log_level
+from mhm_tools.common.logger import logger
 from ..pre import create_catchment
 
 
@@ -92,7 +92,6 @@ def add_args(parser):
         default=None,
         help=("Path where to save the mask file"),
     )
-    parser.add_argument("--log_level", default="INFO", type=str, help=("Logging level"))
 
 
 def run(args):
@@ -123,6 +122,5 @@ def run(args):
         ftype=args.ftp,
         gauge_coords=gauge_coords,
         coordinate_slices=coordinate_slices,
-        log_level=args.log_level,
         mask_file=args.mask_file,
     )
