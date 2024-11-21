@@ -1,3 +1,5 @@
+from functools import wraps
+import inspect
 import logging
 
 from mhm_tools.common.constants import LOG_LEVELS
@@ -31,3 +33,28 @@ def set_log_level(level):
     logger.setLevel(LOG_LEVELS[level])
     logger.info(f"Set log level to {level}")
     return logger
+
+
+def log_arguments():
+    """Log all non-None arguments passed to a function."""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # Get the signature of the function
+            signature = inspect.signature(func)
+            bound_args = signature.bind(*args, **kwargs)
+            bound_args.apply_defaults()
+
+            # Extract arguments and filter out None values
+            non_none_args = {k: v for k, v in bound_args.arguments.items() if v is not None}
+
+            # Log the arguments
+            logger.info(f"Function '{func.__name__}' called with the following arguments:")
+            for arg, value in non_none_args.items():
+                logger.info(f"  {arg}: {value}")
+
+            # Call the original function
+            return func(*args, **kwargs)
+        return wrapper
+    return decorator
+
