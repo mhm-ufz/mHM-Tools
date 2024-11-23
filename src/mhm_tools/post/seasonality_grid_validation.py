@@ -8,7 +8,8 @@ import xarray as xr
 from joblib import Parallel, delayed
 from matplotlib.offsetbox import AnnotationBbox, TextArea
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-from mhm_tools.common.logger import logger, set_log_level
+from mhm_tools.common.logger import log_arguments, logger
+from scipy.stats import spearmanr
 
 def spearman_correlation(data1, data2):
     """Calculate Spearman rank correlation between two xarray DataArrays."""
@@ -174,27 +175,25 @@ def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None)
     """Take a list of files with all containing data for one month and creating statisitcs while reading them one by one."""
     da = None
     with xr.open_dataset(files[0], engine="netcdf4") as ds:
-            # Apply coordinate slicing if needed
-            if coordinate_slice is not None:
-                lat_key = get_coord_key(ds, lat=True)
-                lon_key = get_coord_key(ds, lon=True)
-                ds = ds.sel({lat_key: coordinate_slice['lat'], lon_key: coordinate_slice['lon']})
-            da = ds[input_var]
-    
-    da = da * factor
+        # Apply coordinate slicing if needed
+        if coordinate_slice is not None:
+            lat_key = get_coord_key(ds, lat=True)
+            lon_key = get_coord_key(ds, lon=True)
+            ds = ds.sel({lat_key: coordinate_slice['lat'], lon_key: coordinate_slice['lon']})
+        da = ds[input_var]
     count = 0 #xr.DataArray(np.ones(mean.shape, dtype=int).copy(), coords=mean.coords, dims=mean.dims).expand_dims(dim='time', axis=0)
     mean = np.zeros(da.shape[1:])
     sum_square_diff = np.zeros(da.shape[1:])
     monthly_sums = np.zeros((12, *da.shape[1:]))
     monthly_counts = np.zeros((12, *da.shape[1:]))
-    for f,file in enumerate(files): 
+    for f, file in enumerate(files): 
         with xr.open_dataset(file, engine="netcdf4") as ds:
             logger.info(f"timestep {count} in file {f+1} / {len(files)}")
             if coordinate_slice is not None:
                 lat_key = get_coord_key(ds, lat=True)
                 lon_key = get_coord_key(ds, lon=True)
                 ds = ds.sel({lat_key: coordinate_slice['lat'], lon_key: coordinate_slice['lon']})
-            da = ds[input_var] * factor
+            da = ds[input_var]
             for time_value, data_slice in da.groupby("time"):
                 try:
                     data_values = data_slice.values[0]*factor
@@ -204,11 +203,8 @@ def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None)
                     delta2 = data_values - mean
                     sum_square_diff += delta * delta2
                     # climatology
-                    month = data_slice["time.month"].values - 1
-                    # logger.info(monthly_sums.shape, monthly_sums[month].shape,data_slice.shape==monthly_sums[month].shape)
-                    # monthly_sums[month] += data_slice.fillna(0).squeeze(dim="time")
-                    # monthly_counts[month] += ~np.isnan(data_slice.squeeze(dim="time"))
-                    monthly_sums[month] += data_slice.fillna(0).squeeze(dim="time").values
+                    month = int(data_slice["time.month"].values[0] - 1)
+                    monthly_sums[month] += data_slice.fillna(0).squeeze(dim="time").values * factor
                     monthly_counts[month] += ~np.isnan(data_slice.squeeze(dim="time").values)
                 except Exception as e:
                     raise e
@@ -384,7 +380,7 @@ def plot_map(
 
 
 def create_map_from_output(output_path, input_name, ref_name):
-    with xr.open_dataset(get_ref_file(output_path, ref_name)) as ds:
+    with xr.open_dataset(get_rel_stat_file(output_path, ref_name)) as ds:
         rel_std = ds['rel_std']
         rel_mean = ds['rel_mean']
         spearman = ds['spearman']
@@ -392,41 +388,35 @@ def create_map_from_output(output_path, input_name, ref_name):
         ref_clim = ds[f'{ref_name}_clim'] if f'{ref_name}_clim' in ds else ds['ref_clim']
     plot_map(rel_std=rel_std, rel_mean=rel_mean, spearman=spearman, ref_clim=ref_clim, input_clim=input_clim, input_name=input_name, ref_name=ref_name, output_path=output_path)
 
-def compare_input_with_ref(input_path, input_var, output_path , ref_path, ref_var, input_name=None, ref_name=None, input_factor=1, ref_factor=1, coordinate_slice=None, n_bootstrap_years=None, bootstrap_index=None):
-    if bootstrap_index is not None: 
-        random.seed(bootstrap_index)
-    # get input statistics
-    if input_var is not None:
-        if input_path.is_file():
-            input = get_file_stats(input_path, input_var, input_factor, coordinate_slice)
-        elif input_path.is_dir():
-            input = get_stats_one_pass(ref_path, ref_var, ref_factor, coordinate_slice, n_bootstrap_years=n_bootstrap_years)
+def get_stats(path, var, factor, coordinate_slice, n_bootstrap_years, ncpus, output_file):
+    if var is not None:
+        if path.is_file():
+            stats_ds = get_file_stats(path, var, factor, coordinate_slice, output_path=output_file)
+        elif path.is_dir():
+            stats_ds = get_stats_one_pass(path, var, factor, coordinate_slice, n_bootstrap_years=n_bootstrap_years, ncpus=ncpus, output_path=output_file)
         else:
             raise ValueError()
     else: 
-        with xr.open_dataset(input_path, engine="netcdf4") as ds_input:
+        with xr.open_dataset(path, engine="netcdf4") as ds_input:
             if coordinate_slice is not None:
                 ds_input = ds_input.sel({get_coord_key(ds_input, lat=True): coordinate_slice['lat'], get_coord_key(ds_input, lon=True): coordinate_slice['lon']})
             if 'clim' in ds_input and 'std' in ds_input and 'mean' in ds_input:
-                input = ds_input
+                stats_ds = ds_input
             else: 
-                raise KeyError('Wrong input file-')
+                raise KeyError('Wrong statisitcs file. If you want to create new statistics you have to provide a var.')
+    return stats_ds
+
+def compare_input_with_ref(input_path, input_var, output_path , ref_path, ref_var, input_name=None, ref_name=None, input_factor=1, ref_factor=1, coordinate_slice=None, n_bootstrap_years=None, bootstrap_index=None, ncpus=1):
+    if bootstrap_index is not None: 
+        random.seed(bootstrap_index)
+    # get input statistics
+    input_stats_file = None # output_path / f"{input_name}_stats.nc" if input_name is not None else "input_stats.nc"
+    ref_stats_file = None #output_path / f"{ref_name}_stats.nc" if ref_name is not None else "ref_stats.nc"
+    # TODO: Add index to file names
+    input = get_stats(path=input_path, var=input_var, factor=input_factor, coordinate_slice=coordinate_slice, n_bootstrap_years=n_bootstrap_years, ncpus=ncpus, output_file=input_stats_file)
     # get output statistics
-    if ref_var is not None:
-        if input_path.is_file():
-            ref = get_file_stats(ref_path, ref_var, ref_factor, coordinate_slice)
-        elif input_path.is_dir():
-            ref = get_stats_one_pass(ref_path, ref_var, ref_factor, coordinate_slice, n_bootstrap_years=n_bootstrap_years)
-        else:
-            raise ValueError()
-    else: 
-        with xr.open_dataset(ref_path, engine="netcdf4") as ds_ref:
-            if coordinate_slice is not None:
-                ds_ref = ds_ref.sel({get_coord_key(ds_ref, lat=True): coordinate_slice['lat'], get_coord_key(ds_ref, lon=True): coordinate_slice['lon']})
-            if 'clim' in ds_ref and 'std' in ds_ref and 'mean' in ds_ref:
-                ref = ds_ref
-            else: 
-                raise KeyError('Wrong ref file-')
+
+    ref = get_stats(path=ref_path, var=ref_var, factor=ref_factor, coordinate_slice=coordinate_slice, n_bootstrap_years=n_bootstrap_years, ncpus=ncpus, output_file=ref_stats_file)
     # compare and save statistics
     rel_mean = input['mean'].values / ref['mean'].values
     rel_std = input['std'].values / ref['std'].values
@@ -434,6 +424,8 @@ def compare_input_with_ref(input_path, input_var, output_path , ref_path, ref_va
     rel_mean = xr.DataArray(rel_mean, coords={"lat": get_coord_values(input, lat=True), "lon": get_coord_values(input, lon=True)}, dims=["lat", "lon"])
     rel_std = xr.DataArray(rel_std, coords={"lat": get_coord_values(input, lat=True), "lon": get_coord_values(input, lon=True)}, dims=["lat", "lon"])
     spearman = xr.DataArray(spearman, coords={"lat": get_coord_values(input, lat=True), "lon": get_coord_values(input, lon=True)}, dims=["lat", "lon"])
+    input_clim = xr.DataArray(input['clim'].values, coords={"month":np.arange(1,13,1), "lat": get_coord_values(input, lat=True), "lon": get_coord_values(input, lon=True)}, dims=["month", "lat", "lon"])
+    ref_clim = xr.DataArray(ref['clim'].values, coords={"month":np.arange(1,13,1), "lat": get_coord_values(input, lat=True), "lon": get_coord_values(input, lon=True)}, dims=["month", "lat", "lon"])
     output = xr.Dataset(
         {"spearman": spearman, "rel_std": rel_std, "rel_mean": rel_mean},
         coords={
@@ -445,51 +437,101 @@ def compare_input_with_ref(input_path, input_var, output_path , ref_path, ref_va
     file_name = "relative_stats"
     if input_name is not None:
         file_name += f'_{input_name}'
-        output[f'{input_name}_clim'] = input['clim']
+        output[f'{input_name}_clim'] = input_clim
     else:
-        output[f'input_clim'] = input['clim']
+        output[f'input_clim'] = input_clim
     if ref_name is not None:
         file_name += f'_{ref_name}'
-        output[f'{ref_name}_clim'] = ref['clim']
+        output[f'{ref_name}_clim'] = ref_clim
     else:
-        output[f'ref_clim'] = ref['clim']
+        output[f'ref_clim'] = ref_clim
     if bootstrap_index is not None:
         file_name = output_path / f'{file_name}_{bootstrap_index}.nc'
-        output.to_netcdf(output_path / f'{file_name}_{bootstrap_index}.nc')
+        output.to_netcdf(file_name)
         return file_name
-    else:
+    else: 
+        output.to_netcdf(output_path / f"{file_name}.nc")
         plot_map(rel_std=rel_std, rel_mean=rel_mean, spearman=spearman, ref_clim=ref['clim'], input_clim=input['clim'], input_name=input_name, ref_name=ref_name, output_path=output_path)
 
-def get_ref_file(output_path, ref_name):
-    return output_path / f'{ref_name}_stats.nc' if ref_name is not None else output_path / 'stats.nc'
+def get_rel_stat_file(output_path, input_name, ref_name):
+    file_name = 'relative_stats'
+    if input_name is not None:
+        file_name += f'_{input_name}'
+    if ref_name is not None:
+        file_name += f'_{ref_name}'
+    return output_path / f"{file_name}.nc"
+    
+def evaluate_boostraping_stat_files(stat_files, input_name, ref_name):
+    """Evaluate bootstrapped statistics and compute median across bootstrap iterations."""
+    # Open the first file to initialize dimensions and weights
+    with xr.open_dataset(stat_files[0]) as first_file:
+        shape = first_file["rel_mean"].shape
+        n_bootstrap = len(stat_files)
 
-def evaluate_boostraping_stat_files(stat_files):
-    pass 
+        # Determine keys for climatology fields
+        input_clim_key = f"{input_name}_clim" if f"{input_name}_clim" in first_file else "input_clim"
+        ref_clim_key = f"{ref_name}_clim" if f"{ref_name}_clim" in first_file else "ref_clim"
+
+        # Preallocate arrays for all variables
+        mean = np.empty((n_bootstrap, *shape))
+        std = np.empty((n_bootstrap, *shape))
+        spearman = np.empty((n_bootstrap, *shape))
+        input_clim = np.empty((n_bootstrap, 12, *shape))  # Month x lat x lon
+        ref_clim = np.empty((n_bootstrap, 12, *shape))    # Month x lat x lon
+
+    # Fill the preallocated arrays with bootstrap data
+    for i, file in enumerate(stat_files):
+        with xr.open_dataset(file) as ds:
+            mean[i] = ds["rel_mean"].values
+            std[i] = ds["rel_std"].values
+            spearman[i] = ds["spearman"].values
+            input_clim[i] = ds[input_clim_key].values
+            ref_clim[i] = ds[ref_clim_key].values
+
+    # Convert the arrays into xarray DataArrays
+    mean_da = xr.DataArray(mean, dims=["bootstrap", "lat", "lon"])
+    std_da = xr.DataArray(std, dims=["bootstrap", "lat", "lon"])
+    spearman_da = xr.DataArray(spearman, dims=["bootstrap", "lat", "lon"])
+    input_clim_da = xr.DataArray(input_clim, dims=["bootstrap", "month", "lat", "lon"])
+    ref_clim_da = xr.DataArray(ref_clim, dims=["bootstrap", "month", "lat", "lon"])
+
+    # Combine results into an xarray Dataset
+    return {
+            "rel_mean": mean_da.median(dim="bootstrap"),
+            "rel_std": std_da.median(dim="bootstrap"),
+            "spearman": spearman_da.median(dim="bootstrap"),
+            "input_clim": input_clim_da.median(dim="bootstrap"),
+            "ref_clim": ref_clim_da.median(dim="bootstrap"),
+        }
 
 
-def seasonality_grid_validation(input_path, input_var, output_path, ref_file, ref_var, input_name=None, ref_name=None, input_factor=1, ref_factor=1, only_plot=False, coordinate_slice=None, n_cpus=1, n_bootstrap_years=None, n_bootstrap_selections=None):
-    set_log_level('DEBUG')
+@log_arguments()
+def seasonality_grid_validation(input_path, input_var, output_path, ref_path, ref_var, input_name=None, ref_name=None, input_factor=1, ref_factor=1, only_plot=False, coordinate_slice=None, n_cpus=1, n_bootstrap_years=None, n_bootstrap_selections=None):
     output_path = Path(output_path)
     input_path = Path(input_path)
     ref_path = Path(ref_path) if ref_path is not None else None
     if not output_path.is_dir():
         output_path.mkdir(parents=True)
-    if only_plot and get_ref_file(output_path, ref_name).is_file():
+    if only_plot and get_rel_stat_file(output_path, input_name, ref_name).is_file():
         create_map_from_output(output_path=output_path, input_name=input_name, ref_name=ref_name)
-    elif ref_file is None:
+    elif ref_path is None:
         output_name = f'{input_name}_stats.nc' if input_name is not None else 'stats.nc'
         if input_path.is_file():
-            output_ds = get_file_stats(input_path, input_var, input_factor, coordinate_slice, output=output_path/output_name)
+            get_file_stats(input_path, input_var, input_factor, coordinate_slice, output=output_path/output_name)
         elif n_bootstrap_years is not None and n_bootstrap_selections > 0 and input_path.is_dir():
-            stat_files = Parallel(n_cpus=n_cpus)(delayed(get_stats_one_pass)((ref_path, ref_var, ref_factor, coordinate_slice, n_bootstrap_years, s, output_path/output_name)) for s in range(n_bootstrap_selections))
+            stat_files = Parallel(n_jobs=n_cpus)(delayed(get_stats_one_pass)(ref_path, ref_var, ref_factor, coordinate_slice, n_bootstrap_years, s, output_path/output_name) for s in range(n_bootstrap_selections))
         elif input_path.is_dir():
-            output_ds = get_stats_one_pass(input_path, input_var, input_factor, coordinate_slice, output_path=output_path/output_name)
+            get_stats_one_pass(input_path, input_var, input_factor, coordinate_slice, output_path=output_path/output_name)
         else:
             raise ValueError("input path does not exist")
     else:
         if n_bootstrap_years is not None and n_bootstrap_selections > 0 and input_path.is_dir() and ref_path.is_dir():
-            ref_path = Path(ref_path)
-            stat_files = Parallel(n_cpus=n_cpus)(delayed(compare_input_with_ref)((input_path, input_var, output_path, ref_file, ref_var, input_name, ref_name, input_factor, ref_factor, coordinate_slice, n_bootstrap_years, s)) for s in range(n_bootstrap_selections))
-            evaluate_boostraping_stat_files(stat_files)
+            if only_plot:
+                stat_files = list(output_path.glob(f'relative_stats_{input_name}_{ref_name}_*'))
+            else:
+                ref_path = Path(ref_path)
+                stat_files = Parallel(n_jobs=n_cpus)(delayed(compare_input_with_ref)(input_path, input_var, output_path, ref_path, ref_var, input_name, ref_name, input_factor, ref_factor, coordinate_slice, n_bootstrap_years, s) for s in range(n_bootstrap_selections))
+            results = evaluate_boostraping_stat_files(stat_files, input_name=input_name, ref_name=ref_name)
+            plot_map(**results, output_path=output_path, input_name=input_name, ref_name=ref_name)
         else:
-            compare_input_with_ref(input_path, input_var, output_path, ref_file, ref_var, input_name, ref_name, input_factor, ref_factor, coordinate_slice)
+            compare_input_with_ref(input_path, input_var, output_path, ref_path, ref_var, input_name, ref_name, input_factor, ref_factor, coordinate_slice, ncpus=n_cpus)
