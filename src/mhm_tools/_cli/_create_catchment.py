@@ -129,6 +129,5 @@ def run(args):
         ftype=args.ftp,
         gauge_coords=gauge_coords,
         coordinate_slices=coordinate_slices,
-        log_level=args.log_level,
         mask_file=args.mask_file,
     )

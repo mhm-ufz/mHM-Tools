@@ -8,7 +8,7 @@ import xarray as xr
 from joblib import Parallel, delayed
 from matplotlib.offsetbox import AnnotationBbox, TextArea
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-from mhm_tools.common.logger import log_arguments, logger
+from mhm_tools.common.logger import logger
 from scipy.stats import spearmanr
 
 def spearman_correlation(data1, data2):
@@ -517,7 +517,6 @@ def get_dataset_from_path(path):
             combine="by_coords"  # Ensures files are combined based on shared coordinates
         )
 
-
 def direct_comparison(input_path, ref_path, input_var, ref_var, input_name, ref_name, input_factor, ref_factor, coordinate_slice, output_path):
     if ref_path is None:
         raise ValueError('ref_path must be given for direct comparison.')
@@ -577,7 +576,6 @@ def direct_comparison(input_path, ref_path, input_var, ref_var, input_name, ref_
     plot_map(rel_mean, rel_std, spearman, ref_clim, input_clim, input_name, ref_name, output_path)
 
 
-@log_arguments()
 def seasonality_grid_validation(input_path, input_var, output_path, ref_path, ref_var, input_name=None, ref_name=None, input_factor=1, ref_factor=1, only_plot=False, coordinate_slice=None, n_cpus=1, n_bootstrap_years=None, n_bootstrap_selections=None, direct_comp=True):
     output_path = Path(output_path)
     input_path = Path(input_path)

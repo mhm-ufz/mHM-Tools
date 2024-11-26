@@ -14,7 +14,7 @@ import numpy as np
 import pyflwdir
 import xarray as xr
 
-from mhm_tools.common.logger import logger, set_log_level
+from mhm_tools.common.logger import logger
 
 # GLOBAL VARIABLES
 FDIR_FILLVALUE = {"d8": 247, "ldd": 255}
@@ -418,8 +418,6 @@ def create_catchment(
     mask_file=None,
     res=0.05,
 ):
-
-    set_log_level(log_level)
 
     logger.info(
         f"Creating catchment file for {var_name} using {var} and {ftype} from {input_file}"
