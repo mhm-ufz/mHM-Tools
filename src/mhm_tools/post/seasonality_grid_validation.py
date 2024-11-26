@@ -144,7 +144,7 @@ def get_file_stats(file, input_var, factor=1, coordinate_slice=None, output_path
     return output
 
 
-def get_files(path, n_bootstrap_years):
+def get_files(path, n_bootstrap_years=None):
     nc_files = []
     # Search for .nc files at each depth level
     if n_bootstrap_years is not None:
@@ -188,7 +188,7 @@ def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None)
     monthly_counts = np.zeros((12, *da.shape[1:]))
     for f, file in enumerate(files): 
         with xr.open_dataset(file, engine="netcdf4") as ds:
-            logger.info(f"timestep {count} in file {f+1} / {len(files)}")
+            logger.info(f"timestep {count} in file {f+1} / {len(files)} from {file}")
             if coordinate_slice is not None:
                 lat_key = get_coord_key(ds, lat=True)
                 lon_key = get_coord_key(ds, lon=True)
@@ -197,6 +197,7 @@ def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None)
             for time_value, data_slice in da.groupby("time"):
                 try:
                     data_values = data_slice.values[0]*factor
+                    logger.debug(f"{count} - {np.shape(data_values)}")
                     count += 1
                     delta = data_values - mean
                     mean += delta / count
@@ -504,12 +505,86 @@ def evaluate_boostraping_stat_files(stat_files, input_name, ref_name):
             "ref_clim": ref_clim_da.median(dim="bootstrap"),
         }
 
+def get_dataset_from_path(path):
+    if path.is_file() and path.suffix == 'nc':
+        return xr.open_dataset(path)
+    elif path.is_dir():
+        file_list = get_files(path)
+        logger.debug(file_list)
+        logger.debug('combining files by coords ...')
+        return xr.open_mfdataset(
+            file_list,
+            combine="by_coords"  # Ensures files are combined based on shared coordinates
+        )
+
+
+def direct_comparison(input_path, ref_path, input_var, ref_var, input_name, ref_name, input_factor, ref_factor, coordinate_slice, output_path):
+    if ref_path is None:
+        raise ValueError('ref_path must be given for direct comparison.')
+    logger.info("Start direct comparison.")
+    input = get_dataset_from_path(input_path)
+    ref = get_dataset_from_path(ref_path)
+    logger.info('crop the data spatially') 
+    input = input.sel({get_coord_key(input, lat=True): coordinate_slice["lat"], get_coord_key(input, lon=True): coordinate_slice["lon"]})
+    ref = ref.sel({get_coord_key(ref, lat=True): coordinate_slice["lat"], get_coord_key(ref, lon=True): coordinate_slice["lon"]})
+    logger.info('crop to overlapping time')
+    start_time = max(input.time.min(), ref.time.min())
+    end_time = min(input.time.max(), ref.time.max())
+    logger.info(f'start_time {start_time}; end_time {end_time}')
+    input = input.sel(time=slice(start_time, end_time))
+    ref = ref.sel(time=slice(start_time, end_time))
+
+    logger.info('regridd to the lower temporal resolution using average')
+    if len(ref.time) < len(input.time):
+        low_res_time = ref.time
+        input = (input.groupby_bins("time", bins=low_res_time).mean(dim="time")
+        )
+    elif len(input.time) > len(ref.time):
+        low_res_time = input.time
+        ref = (ref.groupby_bins("time", bins=low_res_time).mean(dim="time")
+        )
+    
+    logger.info('calculate climatologies')
+    input_clim = get_clim_from_ds(input, input_var, input_factor)
+    ref_clim = get_clim_from_ds(ref, ref_var, ref_factor)
+
+    logger.info('calculate relative standard deviation')
+    # with clim given here the seasonality is removed from the data 
+    input_std = get_std_from_ds(input, input_var, input_clim, input_factor)
+    ref_std = get_std_from_ds(ref, ref_var, ref_clim, ref_factor)
+    rel_std = (input_std / ref_std).values
+
+    input = input[input_var] * input_factor
+    ref = ref[ref_var] * ref_factor
+
+    logger.info("calculate rel mean")
+    rel_mean = input.mean(dim='time', skipna=True).values / ref.mean(dim='time', skipna=True).values
+    logger.info("calculate spearman spatial ")
+    spearman = spearman_spatial(input, ref).values
+
+    rel_mean = xr.DataArray(rel_mean, coords={"lat": get_coord_values(input, lat=True), "lon": get_coord_values(input, lon=True)}, dims=["lat", "lon"])
+    rel_std = xr.DataArray(rel_std, coords={"lat": get_coord_values(input, lat=True), "lon": get_coord_values(input, lon=True)}, dims=["lat", "lon"])
+    spearman = xr.DataArray(spearman, coords={"lat": get_coord_values(input, lat=True), "lon": get_coord_values(input, lon=True)}, dims=["lat", "lon"])
+    output = xr.Dataset(
+        {"spearman": spearman, "rel_std": rel_std, "rel_mean": rel_mean},
+        coords={
+            "lat": get_coord_values(input, lat=True),
+            "lon": get_coord_values(input, lon=True),
+        },
+    )
+    logger.info(f"Save the results to {output_path/ f"{input_name}_{ref_name}_direct_comp.nc"}")
+    output.to_netcdf(output_path/ f"{input_name}_{ref_name}_direct_comp.nc")
+    plot_map(rel_mean, rel_std, spearman, ref_clim, input_clim, input_name, ref_name, output_path)
+
 
 @log_arguments()
-def seasonality_grid_validation(input_path, input_var, output_path, ref_path, ref_var, input_name=None, ref_name=None, input_factor=1, ref_factor=1, only_plot=False, coordinate_slice=None, n_cpus=1, n_bootstrap_years=None, n_bootstrap_selections=None):
+def seasonality_grid_validation(input_path, input_var, output_path, ref_path, ref_var, input_name=None, ref_name=None, input_factor=1, ref_factor=1, only_plot=False, coordinate_slice=None, n_cpus=1, n_bootstrap_years=None, n_bootstrap_selections=None, direct_comp=True):
     output_path = Path(output_path)
     input_path = Path(input_path)
     ref_path = Path(ref_path) if ref_path is not None else None
+    if direct_comp:
+        direct_comparison(input_path, ref_path, input_var, ref_var, input_name, ref_name, input_factor, ref_factor, coordinate_slice, output_path)
+
     if not output_path.is_dir():
         output_path.mkdir(parents=True)
     if only_plot and get_rel_stat_file(output_path, input_name, ref_name).is_file():
