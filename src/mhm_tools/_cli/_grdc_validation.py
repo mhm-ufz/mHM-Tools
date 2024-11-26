@@ -50,6 +50,28 @@ def add_args(parser):
             required unless --lonlatbox is provided"""
         ),
     )
+    parser.add_argument(
+        "--n_boostrap_years",
+        required=False,
+        default=None,
+        type=int,
+        help=("""Number of years to draw for each boostrap experiment"""),
+    )
+    parser.add_argument(
+        "--n_bootstrap_selections",
+        required=False,
+        default=None,
+        type=int,
+        help=("Number of boostrap experiments"),
+    )
+    parser.add_argument(
+        "--direct_comparison",
+        required=False,
+        default=False,
+        type=bool,
+        help=("Use no statistics but compare timeseries directly. Needs ref_path."),
+    )
+    parser.add_argument("--output_dir", help="Path for the output dir.", required=True)
     # calcualte KGE and NSE or not
     # sycronus and asyncronus
 
@@ -62,7 +84,7 @@ def run(args):
         args.model_data_path,
         args.observed_data_path,
         args.gauge_info_path,
-        save_path=None,
+        save_path=args.output_dir,
         n_jobs=int(args.ncpus),
         sim_variable=args.model_variable,
         observed_variable=args.observed_variable,
@@ -70,4 +92,7 @@ def run(args):
         lon_max=lon_max,
         lat_min=lat_min,
         lat_max=lat_max,
+        n_boostrap_selections=args.n_bootstrap_selections,
+        n_bootstrap_years=args.n_boostrap_years,
+        direct_comparison=args.direct_comparison
     )
