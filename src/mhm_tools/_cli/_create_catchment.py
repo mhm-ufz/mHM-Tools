@@ -114,12 +114,14 @@ def run(args):
             )
         lat, lon = map(float, args.gauge_coords.split(","))
         gauge_coords = (np.array([lon]), np.array([lat]))
-        logger.info
+        logger.info(
+            f"using gauge coordinates {gauge_coords}"
+        )
     elif args.lonlatbox is not None:
         lonmin, lonmax, latmin, latmax, resl0 = map(float, args.lonlatbox.split(","))
         coordinate_slices = {"lat": slice(latmax, latmin), "lon": slice(lonmin, lonmax)}
         logger.info(
-            "using lonlatbox to with extends: lat=({latmax}, {latmin}); lon=({lonmin}, {lonmax})"
+            f"using lonlatbox with extends: lat=({latmax}, {latmin}); lon=({lonmin}, {lonmax})"
         )
     create_catchment(
         input_file=args.input_file,
@@ -129,5 +131,6 @@ def run(args):
         ftype=args.ftp,
         gauge_coords=gauge_coords,
         coordinate_slices=coordinate_slices,
+        log_level=args.log_level,
         mask_file=args.mask_file,
     )

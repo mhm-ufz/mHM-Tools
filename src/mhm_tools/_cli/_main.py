@@ -85,15 +85,6 @@ def _get_parser():
         subparsers, "create_mhm_restart_file", _create_mhm_restart_file
     )
 
-        # add logging 
-    parent_parser.add_argument(
-        "--log_level",
-        type=str, 
-        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
-        default="INFO",
-        help="Set the logging level"
-    )
-
     # return the parser
     return parent_parser
 
