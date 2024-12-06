@@ -40,6 +40,7 @@ def add_args(parser):
     required_args.add_argument(
         "-c",
         "--basin_clusters",
+        default=None,
         help=(
             "file containing clustered basins ids e.g. of the 53 subbasins from PGB reference"
             "they need to be in variable 'mask' but can have any resolution"
