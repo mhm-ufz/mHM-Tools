@@ -14,7 +14,6 @@ import pathlib as pl
 import numpy as np
 import pyflwdir
 import xarray as xr
-from affine import Affine
 
 from mhm_tools.common.logger import logger
 
