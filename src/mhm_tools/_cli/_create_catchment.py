@@ -4,7 +4,7 @@ TODO: add description
 
 import numpy as np
 
-from mhm_tools.common.logger import logger
+from mhm_tools.common.logger import logger, set_log_level
 
 from ..pre import create_catchment
 
@@ -123,6 +123,7 @@ def run(args):
         logger.info(
             f"using lonlatbox with extends: lat=({latmax}, {latmin}); lon=({lonmin}, {lonmax})"
         )
+    set_log_level(args.log_level)
     create_catchment(
         input_file=args.input_file,
         output_path=args.output_path,
@@ -131,6 +132,5 @@ def run(args):
         ftype=args.ftp,
         gauge_coords=gauge_coords,
         coordinate_slices=coordinate_slices,
-        log_level=args.log_level,
         mask_file=args.mask_file,
     )

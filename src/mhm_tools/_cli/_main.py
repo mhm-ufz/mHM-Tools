@@ -2,8 +2,6 @@
 
 import argparse
 
-from mhm_tools.common.logger import set_log_level
-
 from .. import __version__
 from . import (
     _bankfull,
@@ -103,5 +101,4 @@ def main(argv=None):
         result of the called sub-argument routine
     """
     args = _get_parser().parse_args(argv)
-    set_log_level(args.log_level)
     return args.func(args)
