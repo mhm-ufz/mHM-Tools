@@ -41,7 +41,12 @@ def spearman_spatial(data1, data2):
 
 def climatology(data):
     """Calculate the climatology from a xarray DataArray."""
-    data_clim = data.groupby("time.month").mean(dim="time", skipna=True)
+    if "time" in data.dims and data["time"].size > 0:
+        data_clim = data.groupby("time.month").mean(dim="time", skipna=True)
+    else:
+        raise ValueError("Input data for climatology calculation has no valid time dimension.")
+
+    # data_clim = data.groupby("time.month").mean(dim="time", skipna=True)
 
     # Ensure the climatology has all 12 months, filling missing months with NaNs
     data_clim = data_clim.reindex(month=np.arange(1, 13), fill_value=np.nan)
