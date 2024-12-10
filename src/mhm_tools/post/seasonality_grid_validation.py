@@ -423,6 +423,8 @@ def compare_input_with_ref(input_path, input_var, output_path , ref_path, ref_va
     # get output statistics
 
     ref = get_stats(path=ref_path, var=ref_var, factor=ref_factor, coordinate_slice=coordinate_slice, n_bootstrap_years=n_bootstrap_years, ncpus=ncpus, output_file=ref_stats_file)
+
+    input, ref = regridd_to_higher_spatial_resolution(input, ref)
     # compare and save statistics
     rel_mean = input['mean'].values / ref['mean'].values
     rel_std = input['std'].values / ref['std'].values
@@ -521,6 +523,47 @@ def get_dataset_from_path(path):
             file_list,
             combine="by_coords"  # Ensures files are combined based on shared coordinates
         )
+def regridd_to_higher_spatial_resolution(ds1, ds2):
+    """
+    Regrids the coarser dataset to the resolution of the finer dataset using nearest-neighbor method.
+    
+    Parameters:
+        ds1 (xarray.Dataset): First dataset.
+        ds2 (xarray.Dataset): Second dataset.
+            - Both should have latitude ('lat') and longitude ('lon') as coordinates.
+    
+    Returns:
+        xarray.Dataset: Regridded version of the coarser dataset to match the resolution of the finer dataset.
+        xarray.Dataset: The finer dataset (unchanged).
+    """
+    # Determine which dataset is coarser
+    lat_res_1 = abs(ds1['lat'][1] - ds1['lat'][0]).item()
+    lon_res_1 = abs(ds1['lon'][1] - ds1['lon'][0]).item()
+    lat_res_2 = abs(ds2['lat'][1] - ds2['lat'][0]).item()
+    lon_res_2 = abs(ds2['lon'][1] - ds2['lon'][0]).item()
+    
+    # Identify the finer and coarser datasets
+    if (lat_res_1 * lon_res_1) == (lat_res_2 * lon_res_2):
+        return ds1, ds2
+    if (lat_res_1 * lon_res_1) > (lat_res_2 * lon_res_2):
+        coarse_ds, fine_ds = ds1, ds2
+    else:
+        coarse_ds, fine_ds = ds2, ds1
+
+    # Perform nearest-neighbor regridding
+    regridded_ds = coarse_ds.interp(
+        lat=fine_ds['lat'],
+        lon=fine_ds['lon'],
+        method='nearest'
+    )
+
+    # Return regridded dataset and finer dataset
+    logger.info(f'Regridded the two datasets to the resolution lat: {coarse_ds["lat"][1]-coarse_ds["lat"][0]}, lon: {fine_ds["lon"][1]-fine_ds["lon"][0]}')
+    if coarse_ds is ds1:
+        return regridded_ds, ds2
+    else:
+        return ds1, regridded_ds
+
 
 def direct_comparison(input_path, ref_path, input_var, ref_var, input_name, ref_name, input_factor, ref_factor, coordinate_slice, output_path):
     if ref_path is None:
