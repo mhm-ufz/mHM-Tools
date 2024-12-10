@@ -95,9 +95,9 @@ def add_args(parser):
     )
     parser.add_argument(
         "--direct_comparison",
+        action="store_true",
+        dest="direct_comparison",
         required=False,
-        default=False,
-        type=bool,
         help=("Use no statistics but compare timeseries directly. Needs ref_path."),
     )
 

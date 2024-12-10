@@ -66,15 +66,15 @@ def add_args(parser):
     )
     parser.add_argument(
         "--direct_comparison",
+        action="store_true",
+        dest="direct_comparison",
         required=False,
-        default=False,
-        type=bool,
         help=("Use no statistics but compare timeseries directly. Needs ref_path."),
     )
-    parser.add_argument("--output_dir", help="Path for the output dir.", required=True)
-    # calcualte KGE and NSE or not
-    # sycronus and asyncronus
-
+    parser.add_argument(
+        "--output_dir",
+        help="Path for the output dir.",
+        required=True)
 
 def run(args):
     lon_min, lon_max, lat_min, lat_max, mask = get_coords(
