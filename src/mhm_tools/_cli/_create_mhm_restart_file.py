@@ -215,7 +215,7 @@ def run(args):
     l1_resolution = float(args.l1_resolution)
 
     if args.lonlatbox is not None:
-        l0_resolution = float(args.lonlatbox[4])
+        l0_resolution = float(args.lonlatbox.split(",")[4])
     elif args.l0_resolution is not None:
         l0_resolution = float(args.l0_resolution)
     else:
