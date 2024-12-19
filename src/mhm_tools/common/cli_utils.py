@@ -1,4 +1,5 @@
 import argparse
+from venv import logger
 
 import numpy as np
 
@@ -30,10 +31,12 @@ def get_coords_from_mask(mask):
     import xarray as xr
 
     mask = xr.open_dataset(mask)
-    lon_min_target_grid = mask.lon.values[0]
-    lon_max_target_grid = mask.lon.values[-1]
-    lat_min_target_grid = mask.lat.values[0]
-    lat_max_target_grid = mask.lat.values[-1]
+    lon = mask.lon
+    lat = mask.lat
+    lon_min_target_grid = lon.min()
+    lon_max_target_grid = lon.max()
+    lat_min_target_grid = lat.min()
+    lat_max_target_grid = lat.max()
 
     # change values from center cell to corner values
     resolution = mask.lon.values[1] - mask.lon.values[0]
@@ -47,6 +50,8 @@ def get_coords_from_mask(mask):
     lon_max_target_grid = np.round(lon_max_target_grid, 6)
     lat_min_target_grid = np.round(lat_min_target_grid, 6)
     lat_max_target_grid = np.round(lat_max_target_grid, 6)
+
+    logger.debug(f'Read coord from mask file: lat ({lat_min_target_grid} to {lat_max_target_grid}) {(lon_max_target_grid-lat_min_target_grid)/resolution} cells and lon ({lon_min_target_grid} to {lon_max_target_grid}) {(lon_max_target_grid-lat_min_target_grid)/resolution} cells')
 
     if lat_min_target_grid > lat_max_target_grid:
         lat_min_target_grid, lat_max_target_grid = (
