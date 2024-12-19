@@ -89,11 +89,18 @@ def add_args(parser):
             """coordinates in the form of 'lon_min,lon_max,lat_min,lat_max,resolution_l0'"""
         ),
     )
+    required_args.add_argument(
+        "--l1_resolution",
+        required=False,
+        default=None,
+        help=("""Resolution of the mHM target grid in degrees. If given the grid will be upscaled to this resolution."""),
+    )
     parser.add_argument(
         "--mask_file",
         default=None,
         help=("Path where to save the mask file"),
     )
+    parser.add_argument("--frame", default=0, type=int, help=("Creates a frame of nonflow cells around the domain to enable non global domains in ulysses mrm which connects the eastern and western boundaries."))
     parser.add_argument("--log_level", default="INFO", type=str, help=("Logging level"))
 
 
@@ -133,4 +140,6 @@ def run(args):
         gauge_coords=gauge_coords,
         coordinate_slices=coordinate_slices,
         mask_file=args.mask_file,
+        target_resolution=args.l1_resolution,
+        frame=args.frame
     )
