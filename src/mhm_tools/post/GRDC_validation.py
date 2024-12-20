@@ -9,7 +9,7 @@ import xarray as xr
 from joblib import Parallel, delayed
 import seaborn as sns
 
-from mhm_tools.common.logger import log_arguments, logger
+from mhm_tools.common.logger import logger
 from mhm_tools.post.seasonality_grid_validation import climatology, get_coord_key, spearman_correlation
 
 # make sure that the gauge location is correct basin extractor ...
@@ -333,7 +333,6 @@ def add_month_column(df):
         raise KeyError("The 'time' column is missing from the DataFrame.")
     return df
 
-@log_arguments()
 def evaludate_grdc_data(
     model_data_path,
     observed_data_path,
