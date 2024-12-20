@@ -1095,7 +1095,7 @@ class MHMRestartFile:
 
         self.grid.restart_file = (
             self.grid.restart_file.parent
-            / f"{self.grid.restart_001{self.grid.restart_file.suffix}"
+            / f"mHM_restart_001{self.grid.restart_file.suffix}"
         )
         logger.info(f"Writing renamed restart file to {self.grid.restart_file}")
         ds.to_netcdf(self.grid.restart_file)
