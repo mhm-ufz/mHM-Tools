@@ -17,8 +17,6 @@ import xarray as xr
 
 from mhm_tools.common.logger import logger
 
-from mhm_tools.common.logger import logger
-
 # GLOBAL VARIABLES
 FDIR_FILLVALUE = {"d8": 247, "ldd": 255}
 FACC_FILLVALUE = 0
@@ -307,7 +305,7 @@ class Catchment:
                 data[~self.catchment_mask] = self.VARIABLES[var_name]["_FillValue"]
             if data is None:
                 continue
-            res = self.res
+            res = self.target_resolution
             lon = self.ds.lon
             lat = self.ds.lat
             lon = np.arange(lon.min() + res/2, lon.max()+res/2, res)
