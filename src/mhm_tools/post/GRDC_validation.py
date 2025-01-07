@@ -2,6 +2,7 @@ import random
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+from mhm_tools.common.xarray_utils import get_coord_key
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -10,7 +11,7 @@ from joblib import Parallel, delayed
 import seaborn as sns
 
 from mhm_tools.common.logger import logger
-from mhm_tools.post.seasonality_grid_validation import climatology, get_coord_key, spearman_correlation
+from mhm_tools.post.seasonality_grid_validation import climatology, spearman_correlation
 
 # make sure that the gauge location is correct basin extractor ...
 # make sample size the same length as simulation dataset, pick periods and use that for uncertainty estimate

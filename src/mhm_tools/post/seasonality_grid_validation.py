@@ -3,6 +3,7 @@ import random
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+from mhm_tools.common.xarray_utils import get_coord_key
 import numpy as np
 import xarray as xr
 from joblib import Parallel, delayed
