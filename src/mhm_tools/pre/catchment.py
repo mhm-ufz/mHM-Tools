@@ -576,7 +576,7 @@ def create_catchment(
     coordinate_slices=None,
     mask_file=None,
     target_resolution=None,
-    frame = 0
+    frame = 1
 ):
 
     logger.info(
