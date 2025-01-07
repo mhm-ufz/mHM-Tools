@@ -169,7 +169,7 @@ class Catchment:
         Inits the FlwdirRaster class from dem.
         """
         # perform checks
-        self.input_ds = fill_nan_with_neighbors(self.input_ds)
+        # self.input_ds = fill_nan_with_neighbors(self.input_ds)
         self.elevtn = self.input_ds.data
         if self._fdir is None:
             # Create a flow direction object
