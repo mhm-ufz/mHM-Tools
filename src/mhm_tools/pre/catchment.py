@@ -20,6 +20,7 @@ from mhm_tools.common.logger import logger
 
 # GLOBAL VARIABLES
 FDIR_FILLVALUE = {"d8": 247, "ldd": 255}
+FDIR_SINKVALUE = {"d8": 0, "ldd": 5}
 FACC_FILLVALUE = 0
 FILLVALUE = -9999
 # use d8 for basinex, ldd for mRM version in Ulysses
@@ -215,7 +216,6 @@ class Catchment:
 
     def upscale(self, var):
         """Upscale flow direction to taget_resolution if that is int multipe of data resolution."""
-        # TODO: make sure that upscaling creates a grid identical with the grid created from a global setup (-179.75, ... 179.75) in the case of 0p05 upscale resolution
         input_res = round(abs(self.ds.lon.data[1]-self.ds.lon.data[0]), 6)
         if int(self.target_resolution / input_res + 0.5) - (self.target_resolution / input_res) < 1e6:
             factor = int(self.target_resolution / input_res + 0.5)
@@ -275,17 +275,17 @@ class Catchment:
         self.uparea_grid = self._fdir.accuflux(data, nodata=0)
 
     @staticmethod
-    def create_frame(ds, frame=0):
+    def create_frame(ds, frame=0, frame_value=0):
         """If a frame is used this frame is set to no data values as a frame"""
         logger.info(f'Creating a frame of {frame} cells around the domain.')
         if frame > 0:
             for var in ds.data_vars:
                 data = ds.variables[var].data[:]
                 # set bounds to -9999.
-                data[:frame, :] = 0.
-                data[-frame:, :] = 0
-                data[:, :frame] = 0
-                data[:, -frame:] = 0
+                data[:frame, :] = frame_value
+                data[-frame:, :] = frame_value
+                data[:, :frame] = frame_value
+                data[:, -frame:] = frame_value
                 ds.variables[var].data[:] = data
         return ds
     
@@ -440,9 +440,9 @@ class Catchment:
             logger.debug(f"lat_slice: {lat_slice}, lon_slice: {lon_slice}")
             logger.debug(f"ds: {ds}")
             mask = ds.basin > 0
-            ds = self.create_frame(ds, frame)
+            ds = self.create_frame(ds, frame, FDIR_SINKVALUE[self.ftype])
             # For the flow dir map fill masked cells adjecent to filled cells with sink instead of missing value
-            fdir_filled = self.fill_adjacent_missing_with_sink(ds['flwdir'], FDIR_FILLVALUE[self.ftype])
+            fdir_filled = self.fill_adjacent_missing_with_sink(ds['flwdir'], FDIR_SINKVALUE[self.ftype])
             ds['flwdir'].data[:] = fdir_filled.data[:]
             ds.to_netcdf(
                 out_path / self.out_var_name,
@@ -538,33 +538,6 @@ def get_transformation_matrix_nc(ds, var_name):
        np.float64(0.0), np.float64(-lat_res), np.float64(y_max+lat_res/2))
 
 
-def fill_nan_with_neighbors(data_array):
-    """
-    Fill NaN values in an xarray DataArray only if all 8 surrounding values are non-NaN.
-    """
-    def fill_nan(values):
-        center = values[len(values) // 2]  # Center of the 3x3 neighborhood
-        if np.isnan(center) and np.all(np.isfinite(values)):  # Center is NaN and all neighbors are non-NaN
-            return np.nanmean(values)  # Replace with the mean of neighbors
-        return center  # Keep the original value otherwise
-
-    # Apply the filter over a 3x3 sliding window
-    filled_values = generic_filter(
-        data_array.values,
-        function=fill_nan,
-        size=3,  # 3x3 window
-        mode="constant",  # Treat edges as NaN
-        cval=np.nan  # Fill edges with NaN
-    )
-
-    # Return a new DataArray with the filled values, preserving metadata
-    return xr.DataArray(
-        filled_values,
-        dims=data_array.dims,
-        coords=data_array.coords,
-        attrs=data_array.attrs,
-    )
-
 
 def create_catchment(
     input_file,
@@ -639,15 +612,8 @@ def create_catchment(
         temp_file1.unlink()
         temp_file2.unlink()
     elif coordinate_slices is not None:
-        # if target_resolution:
-        #     select_to_fit_taget_grid(target_resolution, ds, coordinate_slices)
-        # else:
-        res0 = abs(ds['lat'][1]-ds['lat'][0])
-        logger.info(ds['lat'].values)
-        ds = ds.sel(lat=slice(coordinate_slices["lat"].start, coordinate_slices["lat"].stop) , lon=coordinate_slices["lon"])
-        logger.info(coordinate_slices)
-        logger.info(ds['lat'].values)
-        logger.info(ds['lon'].values)
+        ds = ds.sel(lat=coordinate_slices["lat"], lon=coordinate_slices["lon"])
+        logger.info(transform)
         c = Catchment(
             ds=ds,
             var_name=var_name,
@@ -679,4 +645,4 @@ def create_catchment(
         c.delineate_basin(gauge_coords)
         c.get_facc()
         c.get_grid_area()
-        c.write(output_path, single_file=True, cut_by_basin=True, mask_file=mask_file, frame=frame, buffer=frame+1)
+        c.write(output_path, single_file=True, cut_by_basin=True, mask_file=mask_file, frame=frame, buffer=frame)
