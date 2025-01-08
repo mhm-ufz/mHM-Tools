@@ -7,7 +7,7 @@ from mhm_tools.common.xarray_utils import get_coord_key
 import numpy as np
 import xarray as xr
 from joblib import Parallel, delayed
-from matplotlib.offsetbox import AnnotationBbox, TextArea
+from matplotlib.colors import BoundaryNorm
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from mhm_tools.common.logger import logger
 from scipy.stats import spearmanr
@@ -203,7 +203,7 @@ def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None)
             for time_value, data_slice in da.groupby("time"):
                 try:
                     data_values = data_slice.values[0]*factor
-                    logger.debug(f"{count} - {np.shape(data_values)}")
+                    # logger.debug(f"{count} - {np.shape(data_values)}")
                     count += 1
                     delta = data_values - mean
                     mean += delta / count
@@ -275,6 +275,20 @@ def get_stats_one_pass(input_path, input_var, factor=1, coordinate_slice=None, n
     return output
 
 
+def plot_single_map(ax, values, diff_to_mean=None, vmin=0, vmax=1,cmap=plt.cm.coolwarm):
+    n_bins = 10
+    if diff_to_mean is not None: 
+        vmin = 1 - diff_to_mean
+        vmax = 1 + diff_to_mean
+    bounds = np.linspace(vmin, vmax, n_bins + 1)
+    cmap = cmap
+    norm = BoundaryNorm(bounds, cmap.N)
+    
+    im = ax.imshow(
+        values, cmap=cmap, norm=norm
+    )
+    return im, bounds
+
 def plot_map(
     rel_mean, rel_std, spearman, ref_clim, input_clim, input_name, ref_name, output_path
 ):
@@ -284,34 +298,25 @@ def plot_map(
 
     # Set common colormap and normalization limits for mean_et and mean_aet
     mean_diff_1 = max(np.abs(1 - np.nanmin(rel_mean)), np.abs(1 - np.nanmax(rel_mean)))
-    im0 = axes[0, 0].imshow(
-        rel_mean, vmin=1 - mean_diff_1, vmax=1 + mean_diff_1, cmap="coolwarm"
-    )
-    axes[0, 0].set_title(f"Relative temporal Mean - {np.nanmean(rel_mean):.2f}")
-
+    im0, bounds0 = plot_single_map(axes[0,0], rel_mean, mean_diff_1)
+    axes[0, 0].set_title(f"Relative temporal Mean (median={np.nanmedian(rel_mean):.2f})")
+    print(bounds0)
     std_diff_1 = max(np.abs(1 - np.nanmin(rel_std)), np.abs(1 - np.nanmax(rel_std)))
-    im1 = axes[0, 1].imshow(
-        rel_std, vmin=1 - std_diff_1, vmax=1 + std_diff_1, cmap="coolwarm"
-    )
-    axes[0, 1].set_title("Relative temporal Standarddeviation")
+    im1, bounds1 = plot_single_map(axes[0,1], rel_std, std_diff_1)
+    print(bounds1)
+    axes[0, 1].set_title(f"Relative temporal Standarddeviation (median={np.nanmedian(rel_std):.2f})")
 
     im2 = axes[1, 0].imshow(
-        spearman, vmin=np.nanmin(spearman), vmax=1, cmap="viridis_r"
+        spearman, vmin=np.nanmin(spearman), vmax=1
     )
-    axes[1, 0].set_title(f"Spearman Correlation - {np.nanmean(spearman):.2f}")
-    ab = AnnotationBbox(
-        TextArea(f"{np.nanmean(rel_std):.2f}"),
-        (2000, 2000),
-        xybox=(1000, 1000),
-        xycoords="data",
-        boxcoords="offset points",
-    )
+    im2, bounds2 = plot_single_map(axes[1,0], spearman, vmin=np.nanmin(spearman), vmax=1, cmap=plt.cm.viridis_r)
+    print(bounds2)
+    
+    axes[1, 0].set_title(f"Spearman Correlation (median={np.nanmedian(spearman):.2f})")
 
     # Plot for the seasonality
     months = np.arange(1, 13, 1)
-    bar_width = 0.4
-    # im3 = axes[1,1].errorbar(months, np.nanmean(input_clim, axis=(1,2)), label=input_name, color='#79A3E6', fmt='o', alpha=0.8, markersize=3)
-    # im3 = axes[1,1].errorbar(months, np.nanmean(ref_clim, axis=(1,2)), label=ref_name, color='#008176', fmt='s', alpha=0.8, markersize=3)
+    bar_width = 0.4 
     axes[1, 1].bar(
         months - bar_width / 2,
         np.nanmean(ref_clim, axis=(1, 2)),
@@ -360,15 +365,15 @@ def plot_map(
 
     divider0 = make_axes_locatable(axes[0, 0])
     cax = divider0.append_axes("right", size="5%", pad=0.1)
-    fig.colorbar(im0, cax=cax, label="")
+    fig.colorbar(im0, cax=cax, label="", boundaries=bounds0)
 
     divider1 = make_axes_locatable(axes[0, 1])
     cax2 = divider1.append_axes("right", size="5%", pad=0.1)
-    fig.colorbar(im1, cax=cax2, label="")
+    fig.colorbar(im1, cax=cax2, label="", boundaries=bounds1)
 
     divider2 = make_axes_locatable(axes[1, 0])
     cax = divider2.append_axes("right", size="5%", pad=0.1)
-    fig.colorbar(im2, cax=cax, label="")
+    fig.colorbar(im2, cax=cax, label="", boundaries=bounds2)
 
     for ax in axes.flat:
         for spine in ax.spines.values():
@@ -382,7 +387,7 @@ def plot_map(
             spine.set_linewidth(0.25)
     plt.tight_layout()
 
-    plt.savefig(output_path / "et_map.png", dpi=1000)
+    plt.savefig(output_path / "et_map.png", dpi=800)
     logger.info("created et_map")
 
 
