@@ -19,7 +19,7 @@ from mhm_tools.post.seasonality_grid_validation import climatology, spearman_cor
 #   - trend correction?
 #   - bootstrap years around event
 
-
+# currently unused
 def calculate_statistics(sim_data_by_id, obs_data_by_id):
     # replace the following with bootstrap alorythem What takes long seems to be
     logger.info("get mean values")
@@ -50,7 +50,7 @@ def calculate_statistics(sim_data_by_id, obs_data_by_id):
     logger.info(f"sim_mean = {mean_sim.values}; obs_mean = {mean_obs.values}")
     return {"id": id, "alpha": alpha, "beta": beta, "spearman": spearman}
 
-
+# currently unused
 def bootstrap_years(sim_data_by_id, obs_data_by_id, n_selections, n_years):
     total_years_sim = list(set(sim_data_by_id.time.dt.year.values))
     total_years_obs = list(set(sim_data_by_id.time.dt.year.values))
@@ -70,7 +70,7 @@ def bootstrap_years(sim_data_by_id, obs_data_by_id, n_selections, n_years):
         results.append(res)
     return results
 
-
+# currently unused
 def evaluate_one_gauge(index, id, observed_data, sim_data, x, y, n_years, n_selections):
     logger.info(f"working on gauge number: {index}...\n")
     obs_data_by_id = observed_data.sel(id=id)
@@ -105,57 +105,48 @@ def flatten_list(nested_list):
             flat_list.append(item)
     return flat_list
 
-def get_grdc_for_one_gauge(id, observed_data_by_id):
+def gen_list_of_result_dicts(data, id, datatype='', facc=None):
+    # Check if all values in the array are NaN
+    discharge = data.values
+    are_all_nan = np.all(np.isnan(discharge))
+    time = data.time.values
+    year = data.time.dt.year.values
+
+    if not are_all_nan:
+        logger.info(f" values found at gauge number: {id}...\n")
+        res = []
+        for t, val, yr in zip(time, discharge, year):
+            res_dict = {'time': t, 'id': int(id), 'Q': val, 'year': yr}
+            if facc is not None: 
+                res_dict['facc'] = facc
+            res.append(res_dict)
+        return res
+    logger.warning('All datapoints for {datatype} at gauge {id} are missing.')
+
+def get_grdc_for_one_gauge(id, observed_data_by_id, facc=None):
     # id, index = id.values, index=id['index'].values
     id = id
     if observed_data_by_id.size == 0:
         logger.info(f"No data found for ID: {id}. Skipping...\n")
         return
     observed_data_by_id = observed_data_by_id.where(~np.isnan(observed_data_by_id), drop=True)
-    # Check if all values in the array are NaN
-    np_observed = np.array(observed_data_by_id.values)
-    are_all_nan = np.all(np.isnan(np_observed))
-    time = observed_data_by_id.time.values
-    year = observed_data_by_id.time.dt.year.values
+    return gen_list_of_result_dicts(observed_data_by_id, id=id, datatype='observation', facc=facc)
 
-    if not are_all_nan:
-        logger.info(f"observation values found at gauge number: {id}...\n")
-        res = []
-        for t, val, yr in zip(time, np_observed, year):
-            res.append({'time': t, 'id': id, 'Q': val, 'year': yr})
-        return res
-        # return {'time': observed_data_by_id.time, int(id): np_observed, 'year': observed_data_by_id.time.dt.year}
-
-def get_sim_data_for_one_gauge(id, index, sim_data, yarr, xarr, resolution):
-    id = id.values
-    # index = index=id['index'].values
-    # logger.info(f"values found at gauge number: {index}...\n")
+def get_sim_data_for_one_gauge(id, index, sim_data, yarr, xarr, resolution, facc=None):
+    id = id
     if xarr[index] is None and yarr[index] is None:
         return
     # This will ensure that x & y values always match lat and lon in mRM dataset
     try:    
         x = np.round(xarr[index],3)
         y = np.round(yarr[index],3)
-        # x = np.round(xarr.sel(index=index).values, 2)
-        # y = np.round(yarr.sel(index=index).values, 2)
     except KeyError as e: 
         logger.error(f'index {index} not found')
         return
     mrm_data_by_id = sim_data.sel(lat=y - resolution, lon=x, method="nearest")
     mrm_data_by_id = mrm_data_by_id.where(~np.isnan(mrm_data_by_id), drop=True)
 
-    # Compute to get the NumPy array
-    # np_model = np.array(mrm_data_by_id.values)
-    # return {'time': mrm_data_by_id.time, int(id): np_model, 'year': mrm_data_by_id.time.dt.year}
-    np_model = mrm_data_by_id.values
-    time = mrm_data_by_id.time.values
-    year = mrm_data_by_id.time.dt.year.values
-
-    # Append results to the list as dictionaries
-    res = []
-    for t, val, yr in zip(time, np_model, year):
-        res.append({'time': t, 'id': id, 'Q': val, 'year': yr})
-    return res
+    return gen_list_of_result_dicts(mrm_data_by_id, id=id, datatype='simulation', facc=facc)
 
 def get_gauge_coords(ds, facc, lonlat=None, xy=None,  cell_diff=1, max_cell_diff = 3, diff_percent=10):
     """
@@ -269,7 +260,7 @@ def Q_data_to_CSV(
             y = y.where(slicing_condition, drop=True)
             facc = facc.where(slicing_condition, drop=True)
             gauge_ids = gauge_ids.where(slicing_condition, drop=True)
-    logger.info(f"There are {len(gauge_ids.values)} gauges {gauge_ids[0]['index']}")
+    logger.info(f"There are {len(gauge_ids.values)} gauges")
     # logger.info(f'xarr {x}')
     # logger.info(f'yarr {y}')
     
@@ -279,8 +270,8 @@ def Q_data_to_CSV(
         observed_data = observed_data.sel()
         observed_data = observed_data[observed_variable]
         obs = Parallel(n_jobs=n_jobs, backend="loky")(
-                delayed(get_grdc_for_one_gauge)(id=id, observed_data_by_id=observed_data.sel(id=id))
-                for id in gauge_ids
+                delayed(get_grdc_for_one_gauge)(id=id, observed_data_by_id=observed_data.sel(id=id), facc=facc_i)
+                for id, facc_i in zip(gauge_ids.values, facc.values)
             )
         obs = flatten_list(obs)
         obs_dataframe = pd.DataFrame(obs)
@@ -294,19 +285,19 @@ def Q_data_to_CSV(
                     delayed(get_gauge_coords)(ds, facc=facc_i, lonlat=[x_i, y_i], cell_diff=1, max_cell_diff=3, diff_percent=10)
                     for x_i, y_i, facc_i in zip(x.values,y.values,facc.values)
             )
-            x_new, y_new = [], []
+            x_new, y_new, facc_new = [], [], []
             for xn,yn,fan in out: 
                 x_new.append(xn)
                 y_new.append(yn)
+                facc_new.append(fan)
         logger.info('creating sim dataframe')
         sim_data = xr.open_dataset(model_data_path)
         if slicing_condition is not None:
             sim_data = sim_data.sel({get_coord_key(sim_data, lat=True): slice(lat_max, lat_min), get_coord_key(sim_data, lon=True): slice(lon_min, lon_max)})
         sim_data= sim_data[sim_variable]
-        logger.info(gauge_ids)
         sim = Parallel(n_jobs=n_jobs, backend="loky")(
-                delayed(get_sim_data_for_one_gauge)(id=id, index=i, sim_data=sim_data, yarr=y_new, xarr=x_new, resolution=resolution)
-                for i, id in enumerate(gauge_ids)
+                delayed(get_sim_data_for_one_gauge)(id=id, index=i, sim_data=sim_data, yarr=y_new, xarr=x_new, resolution=resolution, facc=facc_i)
+                for i, (id, facc_i) in enumerate(zip(gauge_ids.values, facc_new))
             )
         sim = flatten_list(sim)
         sim_dataframe = pd.DataFrame(sim)
@@ -321,6 +312,7 @@ def calc_clim_from_pandas(df):
     # Rename the index for clarity (optional)
     climatologies.index.name = 'month'
     climatologies.reset_index(inplace=True)
+
     return climatologies
 
 def add_month_column(df):
@@ -362,46 +354,45 @@ def evaludate_grdc_data(
         results = []
         total_years_sim = model_df['year'].unique()
         total_years_obs = observed_df['year'].unique()
+        # for index in range(n_boostrap_selections):
         for index in range(n_boostrap_selections):
+            logger.info(f"index: {index}")
             years_sim = random.choices(total_years_sim, k=n_bootstrap_years)
             years_obs = random.choices(total_years_obs, k=n_bootstrap_years)
             logger.debug(f"years_sim: {years_sim}")
             logger.debug(f"years_obs: {years_obs}")
             sim_df_sel = pd.concat([model_df[model_df['year'] == year] for year in years_sim])
             obs_df_sel = pd.concat([observed_df[observed_df['year'] == year] for year in years_obs])
-            logger.info(index)
-            logger.info(sim_df_sel.head())
-            logger.info(obs_df_sel.head())
             
             obs_df_sel = add_month_column(obs_df_sel)
             sim_df_sel = add_month_column(sim_df_sel)
-            logger.info(type(sim_df_sel))
             ids_sim = [int(id) for id in sim_df_sel['id'].unique()]
             ids_obs = [int(id) for id in obs_df_sel['id'].unique()]
-            logger.debug(f"OBS: {ids_obs}")
-            logger.debug(f"SIM: {ids_sim}")
+            logger.debug(f"OBS ids: {ids_obs}")
+            logger.debug(f"SIM ids: {ids_sim}")
             for id in ids_sim:
                 if id not in ids_obs:
                     continue
-                sim_id = sim_df_sel[sim_df_sel['id']==id]
-                obs_id = obs_df_sel[obs_df_sel['id']==id]
-                clim_sim = calc_clim_from_pandas(sim_id)
-                clim_obs = calc_clim_from_pandas(obs_id)
-                alpha = sim_id['Q'].mean(skipna=True) / obs_id['Q'].mean(skipna=True)
-                beta = sim_id['Q'].std(skipna=True) / obs_id['Q'].std(skipna=True)
-                logger.debug(f'Clim Shapes sim: {clim_sim['Q']}; obs: {clim_obs['Q']}')
-                gamma = spearman_correlation(clim_sim['Q'], clim_obs['Q'])[0]
-                logger.info(f'alpha: {alpha}, beta: {beta}, gamma: {gamma}')
-                results.append({
-                    "index": index,
-                    "id": id,
-                    "alpha": alpha,
-                    "beta": beta,
-                    "gamma": gamma,
-                })
+                try:
+                    sim_id = sim_df_sel[sim_df_sel['id']==id]
+                    obs_id = obs_df_sel[obs_df_sel['id']==id]
+                    clim_sim = calc_clim_from_pandas(sim_id)
+                    clim_obs = calc_clim_from_pandas(obs_id)
+                    alpha = sim_id['Q'].mean(skipna=True) / obs_id['Q'].mean(skipna=True)
+                    beta = sim_id['Q'].std(skipna=True) / obs_id['Q'].std(skipna=True)
+                    gamma = spearman_correlation(clim_sim['Q'], clim_obs['Q'])[0]
+                    logger.debug(f'results for index {index} and gauge {id}: alpha={alpha:.3f}, beta={beta:.3f}, gamma={gamma:.3f}')
+                    results.append({
+                        "index": index,
+                        "id": id,
+                        "alpha": alpha,
+                        "beta": beta,
+                        "gamma": gamma,
+                    })
+                except Exception as e: 
+                    logger.error(f'Error for index {index} and id {id} with error {e}')
     results_df = pd.DataFrame(results)
     results_df.to_csv(save_path / 'results.csv')
-    logger.info(results_df.head())
     sns.kdeplot(
         data=results_df,     # The DataFrame with results
         x="alpha",           # The x-axis is the alpha value
