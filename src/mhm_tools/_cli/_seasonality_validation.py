@@ -1,3 +1,7 @@
+"""
+Validation of spatially distributed data based on their climatology.
+"""
+
 from mhm_tools.common.cli_utils import get_coords
 from mhm_tools.post.seasonality_grid_validation import seasonality_grid_validation
 

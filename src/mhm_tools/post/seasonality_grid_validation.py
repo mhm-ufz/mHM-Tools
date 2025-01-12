@@ -583,6 +583,8 @@ def direct_comparison(input_path, ref_path, input_var, ref_var, input_name, ref_
     logger.info('crop to overlapping time')
     start_time = max(input.time.min(), ref.time.min())
     end_time = min(input.time.max(), ref.time.max())
+    if start_time>=end_time:
+        raise ValueError('The timeframes of the two datasets are not overlapping.')
     logger.info(f'start_time {start_time}; end_time {end_time}')
     input = input.sel(time=slice(start_time, end_time))
     ref = ref.sel(time=slice(start_time, end_time))
@@ -596,7 +598,6 @@ def direct_comparison(input_path, ref_path, input_var, ref_var, input_name, ref_
         low_res_time = input.time
         ref = (ref.groupby_bins("time", bins=low_res_time).mean(dim="time")
         )
-    
     logger.info('calculate climatologies')
     input_clim = get_clim_from_ds(input, input_var, input_factor)
     ref_clim = get_clim_from_ds(ref, ref_var, ref_factor)
@@ -625,7 +626,7 @@ def direct_comparison(input_path, ref_path, input_var, ref_var, input_name, ref_
             "lon": get_coord_values(input, lon=True),
         },
     )
-    logger.info(f"Save the results to {output_path/ f"{input_name}_{ref_name}_direct_comp.nc"}")
+    logger.info(f"Save the results to {output_path/ f'{input_name}_{ref_name}_direct_comp.nc'}")
     output.to_netcdf(output_path/ f"{input_name}_{ref_name}_direct_comp.nc")
     plot_map(rel_mean, rel_std, spearman, ref_clim, input_clim, input_name, ref_name, output_path)
 

@@ -268,8 +268,12 @@ class CreateSubdomainMasks:
                 # )
                 # Replace values where ds_sub_ref_file[data_var] is NaN and land_mask is not NaN with 0
 
-                # First condition: Set to 0 where data_var is NaN and land_mask is not NaN
-                data_var_values[np.isnan(data_var_values) & ~np.isnan(land_mask_values)] = 0
+                if 0 in data_var_values:
+                    sink_value = 0
+                else:
+                    sink_value = 5
+                # First condition: Set to sink_value where data_var is NaN and land_mask is not NaN
+                data_var_values[np.isnan(data_var_values) & ~np.isnan(land_mask_values)] = sink_value
 
                 # Second condition: Replace all values where land_mask is NaN with NaN unless they are sink values (0)
                 data_var_values[np.isnan(land_mask_values) & (data_var_values != 0)] = np.nan

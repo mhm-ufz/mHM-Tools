@@ -442,8 +442,8 @@ class Catchment:
             mask = ds.basin > 0
             ds = self.create_frame(ds, frame, FDIR_SINKVALUE[self.ftype])
             # For the flow dir map fill masked cells adjecent to filled cells with sink instead of missing value
-            fdir_filled = self.fill_adjacent_missing_with_sink(ds['flwdir'], FDIR_SINKVALUE[self.ftype])
-            ds['flwdir'].data[:] = fdir_filled.data[:]
+            # fdir_filled = self.fill_adjacent_missing_with_sink(ds['flwdir'], FDIR_SINKVALUE[self.ftype])
+            # ds['flwdir'].data[:] = fdir_filled.data[:]
             ds.to_netcdf(
                 out_path / self.out_var_name,
                 encoding={
