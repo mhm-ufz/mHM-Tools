@@ -11,22 +11,29 @@ def configure_mhm_tools_logger(log_level=None, count_verbose=0, count_quiet=0, l
     # logging.basicConfig(format="%(asctime)s - %(levelname)-8s - %(message)s")
     logger = logging.getLogger('mhm_tools')
     general_level = get_lowest_level(log_level=log_level, log_file_level=log_file_level, count_verbose=count_verbose, count_quiet=count_quiet)
-    set_log_level(logger, general_level, count_verbose, count_quiet)
+    error_msg_gnrl = set_log_level(logger, general_level, count_verbose, count_quiet)
+    error_msg_fh, error_msg_ch = None, None
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     if not no_colsole_logging:
         ch = logging.StreamHandler()
         ch.setFormatter(formatter)
-        set_log_level(ch, log_level, count_verbose, count_quiet)
+        error_msg_ch = set_log_level(ch, log_level, count_verbose, count_quiet)
         logger.addHandler(ch)
     if log_file:
         fh = logging.FileHandler(log_file)
         fh.setFormatter(formatter)
         if log_file_level is not None:
-            set_log_level(fh, log_file_level, count_verbose, count_quiet)
+            error_msg_fh = set_log_level(fh, log_file_level, count_verbose, count_quiet)
         else:
-            set_log_level(fh, log_level, count_verbose, count_quiet)
+            error_msg_fh = set_log_level(fh, log_level, count_verbose, count_quiet)
         logger.addHandler(fh)
-
+    if error_msg_gnrl is not None:
+        logger.error(f"Logger: {error_msg_gnrl}")
+    if error_msg_ch is not None:
+        logger.error(f"StreamHandler: {error_msg_ch}")
+    if error_msg_fh is not None:
+        logger.error(f"FileHandler: {error_msg_fh}")
+    
 def get_lowest_level(log_level, log_file_level, count_verbose, count_quiet):
     if log_level is not None:
         llevel = LOG_LEVELS[log_level.upper()]
@@ -49,23 +56,20 @@ def set_log_level(handler, level=None, count_verbose=0, count_quiet=0):
         quietness
 
     """
+    error_msg = None
     if level is None:
         level = LOG_LEVELS['INFO'] -  10 * count_verbose + 10 * count_quiet
-        handler.setLevel(level)
-    elif type(level) is int: 
-        handler.setLevel(level)
-    else:
+    elif type(level) is not int: 
         if type(level) is not str:
-            # raise TypeError(f"Invalid log level type: {type(level)}")
-            handler.error(f"Invalid log level type: {type(level)} - using default log level INFO")
+            error_msg = f"Invalid log level type: {type(level)} - using default log level INFO"
             level = "INFO"
         level = level.upper()
         if level not in LOG_LEVELS:
-            handler.error(f"Invalid log level: {level} - using default log level INFO")
+            error_msg = f"Invalid log level: {level} - using default log level INFO"
             level = "INFO"
-            # raise ValueError(f"Invalid log level: {level}")
-        level = level.upper()
-        handler.setLevel(LOG_LEVELS[level])
+        level = LOG_LEVELS[level.upper()]
+    handler.setLevel(level)
+    return error_msg
 
 
 def log_arguments():
@@ -77,7 +81,6 @@ def log_arguments():
             signature = inspect.signature(func)
             bound_args = signature.bind(*args, **kwargs)
             bound_args.apply_defaults()
-            logger = logging.getLogger(inspect.getmodule(func).__name__)
             # Extract arguments and filter out None values
             non_none_args = {k: v for k, v in bound_args.arguments.items() if v is not None}
 
@@ -85,7 +88,7 @@ def log_arguments():
             msg = f"Function '{func.__name__}' called with the following arguments: \n"
             for arg, value in non_none_args.items():
                 msg += f"  {arg}: {value} \n"
-            logger.debug(msg)
+            logging.getLogger(inspect.getmodule(func)).debug(msg)
 
             # Call the original function
             return func(*args, **kwargs)
