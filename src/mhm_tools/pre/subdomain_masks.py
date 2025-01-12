@@ -18,7 +18,7 @@ import xarray as xr
 from scipy.interpolate import NearestNDInterpolator
 
 import logging
-from mhm_tools.common.logger import log_arguments
+from mhm_tools.common.logger import ErrorLogger, log_arguments
 
 logger = logging.getLogger(__name__)
 
@@ -138,7 +138,8 @@ class CreateSubdomainMasks:
         logger.info('Global domain selected. Creating subdomains...')
         if self.pgb_file is None:
             msg = "Basin cluser file not provided even tho the input is global."
-            raise ValueError(msg)
+            with ErrorLogger(logger):
+                raise ValueError(msg)
         new_ids = self.read_var(fname=self.ref_file, var_name="basin")
         orig_ids = self.read_var(fname=self.pgb_file, var_name="mask")
         land_mask = self.read_var(fname=self.land_file, var_name="land_mask").astype(

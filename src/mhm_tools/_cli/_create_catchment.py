@@ -2,6 +2,7 @@
 TODO: add description
 """
 
+from mhm_tools.common.logger import ErrorLogger
 import numpy as np
 from ..pre import create_catchment
 import logging
@@ -104,11 +105,13 @@ def run(args):
     args : argparse.Namespace
         parsed command line arguments
     """
+    
     gauge_coords = None
     coordinate_slices = None
     if args.gauge_coords is not None:
         if args.lonlatbox is not None:
-            raise ValueError("You can't use --gauge_coords and --lonlatbox at the same time.")
+            with ErrorLogger(logger):
+                raise ValueError("You can't use --gauge_coords and --lonlatbox at the same time.")
         lat, lon = map(float, args.gauge_coords.split(","))
         gauge_coords = (np.array([lon]), np.array([lat]))
         logger.info

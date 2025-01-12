@@ -12,7 +12,7 @@ import xarray as xr
 from joblib import Parallel, delayed
 
 import logging
-from mhm_tools.common.logger import log_arguments
+from mhm_tools.common.logger import ErrorLogger, log_arguments
 
 logger = logging.getLogger(__name__)
 
@@ -347,13 +347,15 @@ class MPRRunner:
             if error_data:
                 grid.restart_file = None
                 msg = f"MPR failed with STDERR {error_data} for {grid.name} and command {command}"
-                raise RuntimeError(msg)
+                with ErrorLogger(logger):
+                    raise RuntimeError(msg)
         except TimeoutExpired as err:
             p.kill()
             msg = (
                 f"MPR failed with TimeoutExpired for {grid.name} and command {command}"
             )
-            raise TimeoutExpired(msg) from err
+            with ErrorLogger(logger):
+                raise TimeoutExpired(msg) from err
 
 
 class MHMRestartFile:
@@ -556,7 +558,8 @@ class MHMRestartFile:
         logger.info("Splitting grid")
         if self.increment_l0 is None:
             error_message = "Increment for splitting grids is not set"
-            raise ValueError(error_message)
+            with ErrorLogger(logger):
+                raise ValueError(error_message)
         for name, file_path in self.grid.morph_files.get_files_as_dict().items():
             if file_path is not None and file_path:
                 sub_grid_paths = self._split_file(name, file_path)

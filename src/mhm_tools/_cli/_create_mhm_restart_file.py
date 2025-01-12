@@ -5,6 +5,7 @@ A restart file contains all the static information to run mHM on a specific grid
 
 """
 
+from mhm_tools.common.logger import ErrorLogger
 import numpy as np
 from mhm_tools.pre.create_mhm_restart_file import Grid, LatLon, MPRRunner
 
@@ -285,9 +286,10 @@ def run(args):
         lat_max_target_grid = args.lat_max
         l0_resolution = args.l0_resolution
     else:
-        raise ValueError(
-            "Either all coordinat bounds and resolutions or --mask_file must be provided"
-        )
+        with ErrorLogger(logger):
+            raise ValueError(
+                "Either all coordinat bounds and resolutions or --mask_file must be provided"
+            )
     
     logger.info(f"Creating restart file for grid with the following coordinates:")
     logger.info(f"lon_min: {lon_min_target_grid}")
@@ -298,9 +300,10 @@ def run(args):
     logger.info(f"l1_resolution: {l1_resolution}")
     
     if args.land_mask_file is None and args.no_merge is not None:
-        raise ValueError(
-            "You need to provide a land mask file at L1 resolution if you want to merge the restart files"
-        )
+        with ErrorLogger(logger):
+            raise ValueError(
+                "You need to provide a land mask file at L1 resolution if you want to merge the restart files"
+            )
 
     l0 = LatLon(
         lon_min=float(lon_min_target_grid),

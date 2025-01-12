@@ -12,6 +12,11 @@ determined from Level-0.
 import ast
 from pathlib import Path
 
+import logging
+from mhm_tools.common.logger import ErrorLogger, log_arguments
+
+logger = logging.getLogger(__name__)
+
 from ..pre import create_latlon
 
 
@@ -126,7 +131,7 @@ def add_args(parser):
         help="The path of the output NetCDF file containing the latlon information.",
     )
 
-
+@log_arguments()
 def run(args):
     """Create the latlon file.
 
@@ -164,6 +169,7 @@ def _eval(string, name):
             f"latlon: '{name}' is not an existing file "
             f"and could not be interpreted otherwise: '{string}'"
         )
-        raise ValueError(msg) from err
+        with ErrorLogger(logger):
+            raise ValueError(msg) from err
     else:
         return py_obj

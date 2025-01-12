@@ -16,7 +16,7 @@ import pyflwdir
 import xarray as xr
 
 import logging
-from mhm_tools.common.logger import log_arguments
+from mhm_tools.common.logger import ErrorLogger, log_arguments
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +101,8 @@ class Catchment:
         elif var == "dem":
             self.add_dem(data=data, **kwargs)
         else:
-            raise NotImplementedError
+            with ErrorLogger(logger):
+                raise NotImplementedError
 
     @property
     def is_data_global(self):
@@ -284,9 +285,10 @@ class Catchment:
                             vals = data_var[var_name].values
                         np.savetxt(file_object, vals, delimiter=" ", fmt="%s")
                 else:
-                    raise Exception(
-                        f'Format "{format}" unknown, use one of ["nc", "asc"]'
-                    )
+                    with ErrorLogger(logger):
+                        raise Exception(
+                            f'Format "{format}" unknown, use one of ["nc", "asc"]'
+                        )
         if single_file:
             ds = xr.merge(data_vars.values())
             # set some attributes
@@ -418,7 +420,8 @@ def create_catchment(
     )
 
     if var not in {"fdir", "dem"}:
-        raise ValueError(f"Unexpected value for var={var}, must be 'fdir' or 'dem'")
+        with ErrorLogger(logger):
+            raise ValueError(f"Unexpected value for var={var}, must be 'fdir' or 'dem'")
     ds = xr.open_dataset(pl.Path(input_file))
     
     # transform
