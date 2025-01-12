@@ -17,7 +17,10 @@ import numpy as np
 import xarray as xr
 from scipy.interpolate import NearestNDInterpolator
 
-from mhm_tools.common.logger import log_arguments, logger
+import logging
+from mhm_tools.common.logger import log_arguments
+
+logger = logging.getLogger(__name__)
 
 # GLOBAL VARIABLES
 # Coordinate arrays for the shape of Greenland in lons, lats

@@ -3,8 +3,10 @@ TODO: add description
 """
 
 import numpy as np
-from mhm_tools.common.logger import logger
 from ..pre import create_catchment
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def add_args(parser):

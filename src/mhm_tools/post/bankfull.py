@@ -8,10 +8,13 @@ Authors
 """
 
 import numpy as np
-from mhm_tools.common.logger import log_arguments
 import xarray as xr
 
 from ..common import NC_ENCODE_DEFAULTS, set_netcdf_encoding
+import logging
+from mhm_tools.common.logger import log_arguments
+
+logger = logging.getLogger(__name__)
 
 
 def find_nearest_idx(array, value):

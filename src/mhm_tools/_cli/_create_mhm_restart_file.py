@@ -6,10 +6,13 @@ A restart file contains all the static information to run mHM on a specific grid
 """
 
 import numpy as np
-from mhm_tools.common.logger import logger
 from mhm_tools.pre.create_mhm_restart_file import Grid, LatLon, MPRRunner
 
 from ..pre import MHMRestartFile
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 
 def add_args(parser):

@@ -11,7 +11,10 @@ import numpy as np
 import xarray as xr
 from joblib import Parallel, delayed
 
-from mhm_tools.common.logger import log_arguments, logger
+import logging
+from mhm_tools.common.logger import log_arguments
+
+logger = logging.getLogger(__name__)
 
 
 class MorphFiles:

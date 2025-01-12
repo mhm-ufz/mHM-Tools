@@ -14,7 +14,11 @@ import numpy as np
 import pyflwdir
 import xarray as xr
 
-from mhm_tools.common.logger import log_arguments, logger
+import logging
+from mhm_tools.common.logger import log_arguments
+
+logger = logging.getLogger(__name__)
+
 
 # GLOBAL VARIABLES
 FDIR_FILLVALUE = {"d8": 247, "ldd": 255}
