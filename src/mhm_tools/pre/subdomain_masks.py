@@ -135,6 +135,10 @@ class CreateSubdomainMasks:
         None
 
         """
+        logger.info('Global domain selected. Creating subdomains...')
+        if self.pgb_file is None:
+            msg = "Basin cluser file not provided even tho the input is global."
+            raise ValueError(msg)
         new_ids = self.read_var(fname=self.ref_file, var_name="basin")
         orig_ids = self.read_var(fname=self.pgb_file, var_name="mask")
         land_mask = self.read_var(fname=self.land_file, var_name="land_mask").astype(
@@ -224,27 +228,39 @@ class CreateSubdomainMasks:
                 ds_sub_ref_file[data_var].values[~sub_mask] = np.nan
 
             ds_sub_ref_file.to_netcdf(fname, encoding=REF_FILE_ENCODING)
+            logger.info(f'Wrote to {fname}')
 
-    def use_land_mask(self):
+    def use_land_mask(self, lat, lon):
         """Reencode and mask the input files"""
-        land_mask = self.read_var(fname=self.land_file, var_name="land_mask").astype(
-            bool
-        )
-        logger.info(f"reading {self.ref_file}")
+        logger.info('Non global file selected. Only reencoding and masking the input.')
+
+        logger.debug(f"lat={slice(lat[0], lat[-1])}")
+        logger.debug(f"lon={slice(lon[0], lon[-1])}")
+        # Read and slice the land mask
+        land_mask = self.read_var(fname=self.land_file, var_name="land_mask").astype(bool)
+        land_mask = land_mask.sel(lat=slice(lat[0], lat[-1]), lon=slice(lon[0], lon[-1]))
+
+        # Read and slice the reference file based on the land mask coordinates
+        logger.info(f"Reading {self.ref_file}")
         ds_ref_file = xr.open_dataset(self.ref_file).sel(
             lat=land_mask.lat, lon=land_mask.lon, method="nearest"
         )
-        for coord in ["latitude", "longitude"]:
-            if coord in ds_ref_file:
-                ds_ref_file = ds_ref_file.drop(coord)
+        # Drop any redundant coordinates
+        ds_ref_file = ds_ref_file.drop_vars(["latitude", "longitude"], errors='ignore')
+
+        # Apply the land mask to all variables in the dataset
+        logger.info("Applying land mask to the dataset")
+        logger.debug(f"land_mask {land_mask}")
+        logger.debug(f"ds_ref {ds_ref_file}")
         ds_sub_ref_file = ds_ref_file.copy()
         for data_var in ds_sub_ref_file.data_vars:
             logger.info(f"processing {data_var}")
             ds_sub_ref_file[data_var].values[np.isnan(land_mask)] = np.nan
-        fname = self.out_file_name + ".nc"
-        logger.info(f"writing to {fname}")
-        ds_sub_ref_file.to_netcdf(fname, encoding=REF_FILE_ENCODING)
 
+        # Write the output to a netCDF file
+        fname = self.out_file_name + ".nc"
+        logger.info(f"Writing to {fname}")
+        ds_sub_ref_file.to_netcdf(fname, encoding=REF_FILE_ENCODING)
 
 @log_arguments()
 def create_subdomain_masks(
@@ -275,7 +291,7 @@ def create_subdomain_masks(
         lat = ds.lat
         lon = ds.lon
         # if input is not global only create a file else create all subdomains
-        if np.max(lat) - np.min(lat) < 360 and np.max(lon) - np.min(lon) < 130:
-            csm.use_land_mask()
+        if (np.max(lat) - np.min(lat) != 360 and (np.max(lon) - np.min(lon) < 130 or np.max(lon) - np.min(lon) > 180)) or basin_clusters is None:
+            csm.use_land_mask(lat, lon)
         else:
             csm.create_subdomains()

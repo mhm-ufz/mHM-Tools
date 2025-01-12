@@ -6,6 +6,7 @@ Authors
 - Robert Schweppe
 - Matthias Kelbling
 - Jeisson Leal
+- Simon Lüdke
 """
 
 import pathlib as pl
@@ -59,38 +60,6 @@ class Catchment:
             "units": "m",
         },
     }
-    # VARIABLES = {
-    #     "flwdir": {
-    #         "title": f"flow direction ({OUTPUT_FTYPE.upper()})",
-    #         "_FillValue": FDIR_FILLVALUE[OUTPUT_FTYPE],
-    #         "units": "-",
-    #     },
-    #     "basin": {
-    #         "title": "basin Id",
-    #         "_FillValue": 0,
-    #         "units": "-",
-    #     },
-    #     "upgrid": {
-    #         "title": "accumulated data values along the flow directions",
-    #         "_FillValue": FACC_FILLVALUE,
-    #         "units": "-",
-    #     },
-    #     "uparea_grid": {
-    #         "title": "rectangular drainage area",
-    #         "_FillValue": FILLVALUE,
-    #         "units": "km2",
-    #     },
-    #     "grdare": {
-    #         "title": "rectangular grid area",
-    #         "_FillValue": FILLVALUE,
-    #         "units": "m2",
-    #     },
-    #     "elevtn": {
-    #         "title": "outlet pixel elevation",
-    #         "_FillValue": float(FILLVALUE),
-    #         "units": "m",
-    #     },
-    # }
 
     def __init__(
         self,
@@ -118,13 +87,14 @@ class Catchment:
             self.out_var_name = f"{var_name}.nc"
         self.do_shift = do_shift
         self.ds = ds
+        self.transform = transform
 
         data = self._modify_data(self.ds[var_name])
 
         if self.do_shift and self.is_data_global:
-            transform = list(transform)
+            transform = list(self.transform)
             transform[2] = 0
-            transform = tuple(transform)
+            self.transform = tuple(transform)
 
         if var == "fdir":
             self.add_fdir(data=data.data, ftype=ftype, **kwargs)
@@ -162,11 +132,11 @@ class Catchment:
         self.elevtn = data.data
         if self._fdir is None:
             # Create a flow direction object
-            logger.debug("add_dem: kwargs: ", kwargs)
+            logger.info("add_dem: kwargs: ", kwargs)
             self._fdir = pyflwdir.from_dem(
                 data=self.elevtn,
                 nodata=np.nan,
-                transform=(0.05, 0.0, -180, 0, 0.05, -90),
+                transform=self.transform, #(0.05, 0.0, -180, 0, 0.05, -90),
                 latlon=True,
             )
             self.get_fdir()
@@ -184,21 +154,22 @@ class Catchment:
             self._fdir = pyflwdir.from_array(data=data, ftype=ftype, **kwargs)
         self.get_fdir()
 
-    def delineate_basin(self, gauge_coords):
+    def delineate_basin(self, gauge_coords, stream_order=4):
         """
         Deliniate the basin for a given lat and lon
         """
-        logger.debug(f"Deliniating basin for gauge coordinates {gauge_coords}")
-        gauge_coords = (gauge_coords[0], gauge_coords[1] * -1)
+        logger.info(f"Deliniating basin for gauge coordinates {gauge_coords}")
+        gauge_coords = (gauge_coords[0], gauge_coords[1]) # * -1)
         self.basin = self._fdir.basins(
-            xy=gauge_coords, streams=self._fdir.stream_order() >= 4
+            xy=gauge_coords, streams=self._fdir.stream_order() >= stream_order
         )
         self.catchment_mask = self.basin > 0
         if np.all(~self.catchment_mask):
+            if stream_order>1:
+                return self.delineate_basin((gauge_coords[0], gauge_coords[1]), stream_order=stream_order-1)
             logger.error("No catchment found for the given coordinates")
-            self.delineate_basin((gauge_coords[0], gauge_coords[1] * -1))
-        # if not np.any(np.isnan(self.basin)):
-        #     self.basin[np.where(~self.catchment_mask)] = self.VARIABLES["basin"]["_FillValue"]
+        if not np.any(np.isnan(self.basin)):
+            self.basin[np.where(~self.catchment_mask)] = self.VARIABLES["basin"]["_FillValue"]
 
     def get_basins(self):
         """
@@ -230,7 +201,13 @@ class Catchment:
         self.uparea_grid = self._fdir.accuflux(data, nodata=0)
 
     def write(
-        self, out_path, single_file=True, format="nc", cellsize=None, cut_by_basin=False, mask_file=None
+        self,
+        out_path,
+        single_file=True,
+        format="nc",
+        cellsize=None,
+        cut_by_basin=False,
+        mask_file=None,
     ):
         data_vars = {}
         out_path = pl.Path(out_path)
@@ -327,8 +304,8 @@ class Catchment:
                     "units": self.VARIABLES[var_name]["units"],
                 }
 
-            logger.debug(f"lat_slice: {lat_slice}, lon_slice: {lon_slice}")
-            logger.debug(f"ds: {ds}")
+            logger.info(f"lat_slice: {lat_slice}, lon_slice: {lon_slice}")
+            logger.info(f"ds: {ds}")
             ds = ds.sel(lat=lat_slice, lon=lon_slice)
             ds.to_netcdf(
                 out_path / self.out_var_name,
@@ -341,15 +318,14 @@ class Catchment:
                 },
             )
             logger.info(f"Basin Id has been written to {out_path / self.out_var_name}")
-        # use basin_id to create a mask file
-            if mask_file is not None: 
+            # use basin_id to create a mask file
+            if mask_file is not None:
                 mask = ds.basin > 0
                 # name the variable mask
                 mask_file = pl.Path(mask_file)
                 mask = xr.Dataset({"mask": mask}, coords={"lon": ds.lon, "lat": ds.lat})
                 mask.to_netcdf(mask_file)
                 logger.info(f"Mask file has been written to {mask_file}")
-
 
     def cut_to_filled_area(self):
         """Create lat and lon slices to cut the data to the filled area."""
@@ -379,7 +355,7 @@ class Catchment:
         )
         lat_slice = slice(lat_max, lat_min)
         lon_slice = slice(lon_min, lon_max)
-        logger.debug(f"lat_slice: {lat_slice}, lon_slice: {lon_slice}")
+        logger.info(f"lat_slice: {lat_slice}, lon_slice: {lon_slice}")
         return lat_slice, lon_slice
 
 
@@ -404,9 +380,37 @@ def merge_catchment(path1, path2, out_path):
     merged = xr.where(mask, ds2.reindex_like(ds1, method="nearest"), ds1)
     merged.to_netcdf(out_path)
 
+
+def get_transformation_matrix_nc(ds, var_name):
+    da = ds[var_name]
+
+    # Get attributes for geotransformation
+    lat = da.coords['lat'].values  # Assuming 'lat' and 'lon' are dimensions
+    lon = da.coords['lon'].values
+    logger.info(f"lat: {lat[0]} | {lat[-1]}")
+    logger.info(f"lon: {lon[0]} | {lon[-1]}")
+
+    # Assuming uniform spacing, calculate resolution
+    lat_res = abs(lat[1] - lat[0]) if len(lat) > 1 else 0.0
+    lon_res = abs(lon[1] - lon[0]) if len(lon) > 1 else 0.0
+    lon_res, lat_res = np.round(lon_res, decimals=5), np.round(lat_res, decimals=5)
+    logger.info(f'lat_res {lat_res}; lon_res {lon_res}')
+
+    # Get the corner coordinate of the dataset
+    x_min, y_max = np.round(lon.min(), decimals=5), np.round(lat.max(), decimals=5)
+    return (np.float64(lon_res), np.float64(0.0), np.float64(x_min-lon_res/2),
+       np.float64(0.0), np.float64(-lat_res), np.float64(y_max+lat_res/2))
+
 @log_arguments()
 def create_catchment(
-    input_file, output_path, var_name, var, ftype, gauge_coords=None, coordinate_slices=None, mask_file=None, res=0.05
+    input_file,
+    output_path,
+    var_name,
+    var,
+    ftype,
+    gauge_coords=None,
+    coordinate_slices=None,
+    mask_file=None,
 ):
 
     logger.info(
@@ -415,9 +419,12 @@ def create_catchment(
 
     if var not in {"fdir", "dem"}:
         raise ValueError(f"Unexpected value for var={var}, must be 'fdir' or 'dem'")
-
     ds = xr.open_dataset(pl.Path(input_file))
-    transform = (res, 0.0, -180, 0, res, -90)
+    
+    # transform
+    transform = get_transformation_matrix_nc(ds, var_name)
+
+    logger.info(transform)
     latlon = True
 
     if gauge_coords is None and coordinate_slices is None:
@@ -465,8 +472,8 @@ def create_catchment(
         temp_file1.unlink()
         temp_file2.unlink()
     elif coordinate_slices is not None:
-        ds = ds.sel(lat=coordinate_slices['lat'], lon=coordinate_slices['lon'])
-        transform = (res, 0.0, coordinate_slices['lon'].start, 0, res, coordinate_slices['lat'].start)
+        ds = ds.sel(lat=coordinate_slices["lat"], lon=coordinate_slices["lon"])
+        logger.info(transform)
         c = Catchment(
             ds=ds,
             var_name=var_name,
