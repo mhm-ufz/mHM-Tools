@@ -2,7 +2,7 @@
 
 import argparse
 
-from mhm_tools.common.logger import set_log_level
+from mhm_tools.common.logger import configure_mhm_tools_logger
 
 from .. import __version__
 from . import (
@@ -119,5 +119,5 @@ def main(argv=None):
         result of the called sub-argument routine
     """
     args = _get_parser().parse_args(argv)
-    set_log_level(args.log_level)
+    configure_mhm_tools_logger(log_level=args.log_level, count_verbose=args.verbose, count_quiet=args.quiet, log_file=args.log_file, log_file_level=args.log_file_level, no_colsole_logging=args.no_console_output)
     return args.func(args)
