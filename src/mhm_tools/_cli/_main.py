@@ -80,14 +80,26 @@ def _get_parser():
     )
 
     # add logging 
+    # option 1 explicit log levels by name
     parent_parser.add_argument(
         "--log_level",
         type=str, 
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
-        default="INFO",
-        help="Set the logging level"
+        default=None,
+        help="Set the log level explicitly."
     )
-
+    # option 2 regulation verbosity by -v and -q flags default is INFO
+    parent_parser.add_argument('--verbose', '-v', action='count', default=0, help="Increase verbosity")
+    parent_parser.add_argument('--quiet', '-q', action='count', default=0, help="Reduce verbosity can be repeted e.g. -qq")
+    # handle file and terminal output
+    parent_parser.add_argument('--log_file', type=str, default=None, help="Generate a log file.")
+    parent_parser.add_argument('--log_file_level',  type=str, 
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        default=None,
+        help="Set log level for the log file. Defaults to console log level."
+    )
+    parent_parser.add_argument('--no_console_output', action="store_true", help="Prohibit console output.")
+    
 
     # return the parser
     return parent_parser
