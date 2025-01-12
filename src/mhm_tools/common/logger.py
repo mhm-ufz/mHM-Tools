@@ -77,7 +77,7 @@ def log_arguments():
             signature = inspect.signature(func)
             bound_args = signature.bind(*args, **kwargs)
             bound_args.apply_defaults()
-
+            logger = logging.getLogger(inspect.getmodule(func).__name__)
             # Extract arguments and filter out None values
             non_none_args = {k: v for k, v in bound_args.arguments.items() if v is not None}
 
@@ -85,7 +85,7 @@ def log_arguments():
             msg = f"Function '{func.__name__}' called with the following arguments: \n"
             for arg, value in non_none_args.items():
                 msg += f"  {arg}: {value} \n"
-            logger.info(msg)
+            logger.debug(msg)
 
             # Call the original function
             return func(*args, **kwargs)
