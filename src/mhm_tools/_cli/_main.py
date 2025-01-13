@@ -10,6 +10,7 @@ from . import (
     _create_catchment,
     _create_mhm_restart_file,
     _create_subdomain_masks,
+    _crop_mhm_setup,
     _latlon,
 )
 
@@ -72,6 +73,7 @@ def _get_parser():
     add_command_from_module(subparsers, "bankfull", _bankfull)
     add_command_from_module(subparsers, "latlon", _latlon)
     add_command_from_module(subparsers, "create_catchment", _create_catchment)
+    add_command_from_module(subparsers, "crop_mhm_setup", _crop_mhm_setup)
     add_command_from_module(
         subparsers, "create_subdomain_masks", _create_subdomain_masks
     )
