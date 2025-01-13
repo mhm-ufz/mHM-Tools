@@ -2,10 +2,13 @@
 TODO: add description
 """
 
-from mhm_tools.common.logger import ErrorLogger
-import numpy as np
-from ..pre import create_catchment
 import logging
+
+import numpy as np
+
+from mhm_tools.common.logger import ErrorLogger
+
+from ..pre import create_catchment
 
 logger = logging.getLogger(__name__)
 
@@ -105,20 +108,24 @@ def run(args):
     args : argparse.Namespace
         parsed command line arguments
     """
-    
+
     gauge_coords = None
     coordinate_slices = None
     if args.gauge_coords is not None:
         if args.lonlatbox is not None:
             with ErrorLogger(logger):
-                raise ValueError("You can't use --gauge_coords and --lonlatbox at the same time.")
+                raise ValueError(
+                    "You can't use --gauge_coords and --lonlatbox at the same time."
+                )
         lat, lon = map(float, args.gauge_coords.split(","))
         gauge_coords = (np.array([lon]), np.array([lat]))
         logger.info
     elif args.lonlatbox is not None:
-        lonmin, lonmax,latmin, latmax, resl0  = map(float, args.lonlatbox.split(","))
-        coordinate_slices = {'lat': slice(latmax, latmin), 'lon': slice(lonmin, lonmax)}
-        logger.info('using lonlatbox to with extends: lat=({latmax}, {latmin}); lon=({lonmin}, {lonmax})')
+        lonmin, lonmax, latmin, latmax, resl0 = map(float, args.lonlatbox.split(","))
+        coordinate_slices = {"lat": slice(latmax, latmin), "lon": slice(lonmin, lonmax)}
+        logger.info(
+            "using lonlatbox to with extends: lat=({latmax}, {latmin}); lon=({lonmin}, {lonmax})"
+        )
     create_catchment(
         input_file=args.input_file,
         output_path=args.output_path,

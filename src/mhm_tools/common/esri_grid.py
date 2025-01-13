@@ -1,14 +1,14 @@
 """Common ESRI ASCII grid routines."""
 
+import logging
 import warnings
 from pathlib import Path
 
 import numpy as np
 
-from .constants import ESRI_REQ, ESRI_TYPES, NO_DATA
-
-import logging
 from mhm_tools.common.logger import ErrorLogger
+
+from .constants import ESRI_REQ, ESRI_TYPES, NO_DATA
 
 logger = logging.getLogger(__name__)
 

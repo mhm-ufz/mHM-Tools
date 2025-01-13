@@ -9,13 +9,13 @@ Authors
 - Simon Lüdke
 """
 
+import logging
 import pathlib as pl
 
 import numpy as np
 import pyflwdir
 import xarray as xr
 
-import logging
 from mhm_tools.common.logger import ErrorLogger, log_arguments
 
 logger = logging.getLogger(__name__)
@@ -137,7 +137,7 @@ class Catchment:
             self._fdir = pyflwdir.from_dem(
                 data=self.elevtn,
                 nodata=np.nan,
-                transform=self.transform, #(0.05, 0.0, -180, 0, 0.05, -90),
+                transform=self.transform,  # (0.05, 0.0, -180, 0, 0.05, -90),
                 latlon=True,
             )
             self.get_fdir()
@@ -160,17 +160,21 @@ class Catchment:
         Deliniate the basin for a given lat and lon
         """
         logger.info(f"Deliniating basin for gauge coordinates {gauge_coords}")
-        gauge_coords = (gauge_coords[0], gauge_coords[1]) # * -1)
+        gauge_coords = (gauge_coords[0], gauge_coords[1])  # * -1)
         self.basin = self._fdir.basins(
             xy=gauge_coords, streams=self._fdir.stream_order() >= stream_order
         )
         self.catchment_mask = self.basin > 0
         if np.all(~self.catchment_mask):
-            if stream_order>1:
-                return self.delineate_basin((gauge_coords[0], gauge_coords[1]), stream_order=stream_order-1)
+            if stream_order > 1:
+                return self.delineate_basin(
+                    (gauge_coords[0], gauge_coords[1]), stream_order=stream_order - 1
+                )
             logger.error("No catchment found for the given coordinates")
         if not np.any(np.isnan(self.basin)):
-            self.basin[np.where(~self.catchment_mask)] = self.VARIABLES["basin"]["_FillValue"]
+            self.basin[np.where(~self.catchment_mask)] = self.VARIABLES["basin"][
+                "_FillValue"
+            ]
 
     def get_basins(self):
         """
@@ -387,8 +391,8 @@ def get_transformation_matrix_nc(ds, var_name):
     da = ds[var_name]
 
     # Get attributes for geotransformation
-    lat = da.coords['lat'].values  # Assuming 'lat' and 'lon' are dimensions
-    lon = da.coords['lon'].values
+    lat = da.coords["lat"].values  # Assuming 'lat' and 'lon' are dimensions
+    lon = da.coords["lon"].values
     logger.info(f"lat: {lat[0]} | {lat[-1]}")
     logger.info(f"lon: {lon[0]} | {lon[-1]}")
 
@@ -396,12 +400,19 @@ def get_transformation_matrix_nc(ds, var_name):
     lat_res = abs(lat[1] - lat[0]) if len(lat) > 1 else 0.0
     lon_res = abs(lon[1] - lon[0]) if len(lon) > 1 else 0.0
     lon_res, lat_res = np.round(lon_res, decimals=5), np.round(lat_res, decimals=5)
-    logger.info(f'lat_res {lat_res}; lon_res {lon_res}')
+    logger.info(f"lat_res {lat_res}; lon_res {lon_res}")
 
     # Get the corner coordinate of the dataset
     x_min, y_max = np.round(lon.min(), decimals=5), np.round(lat.max(), decimals=5)
-    return (np.float64(lon_res), np.float64(0.0), np.float64(x_min-lon_res/2),
-       np.float64(0.0), np.float64(-lat_res), np.float64(y_max+lat_res/2))
+    return (
+        np.float64(lon_res),
+        np.float64(0.0),
+        np.float64(x_min - lon_res / 2),
+        np.float64(0.0),
+        np.float64(-lat_res),
+        np.float64(y_max + lat_res / 2),
+    )
+
 
 @log_arguments()
 def create_catchment(
@@ -423,7 +434,7 @@ def create_catchment(
         with ErrorLogger(logger):
             raise ValueError(f"Unexpected value for var={var}, must be 'fdir' or 'dem'")
     ds = xr.open_dataset(pl.Path(input_file))
-    
+
     # transform
     transform = get_transformation_matrix_nc(ds, var_name)
 

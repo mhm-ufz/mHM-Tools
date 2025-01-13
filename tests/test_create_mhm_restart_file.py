@@ -2,10 +2,10 @@ import shutil
 import unittest
 from pathlib import Path
 
-from mhm_tools.common.logger import set_log_level
 import xarray as xr
 
 import mhm_tools as mt
+from mhm_tools.common.logger import set_log_level
 from mhm_tools.pre.create_mhm_restart_file import Grid, LatLon, MPRRunner
 
 HERE = Path(__file__).parent
@@ -16,7 +16,7 @@ TMP.mkdir(parents=True, exist_ok=True)
 class TestCreateRestart(unittest.TestCase):
     def setUp(self):
         # setup read_morph_files test
-        set_log_level('ERROR')
+        set_log_level("ERROR")
         self.morph_dir = TMP / "morph"
         self.morph_dir.mkdir(parents=True, exist_ok=True)
         # create empty files in morph directory

@@ -7,12 +7,14 @@ Authors
 - Sebastian Müller
 """
 
+import logging
+
 import numpy as np
 import xarray as xr
 
-from ..common import NC_ENCODE_DEFAULTS, set_netcdf_encoding
-import logging
 from mhm_tools.common.logger import log_arguments
+
+from ..common import NC_ENCODE_DEFAULTS, set_netcdf_encoding
 
 logger = logging.getLogger(__name__)
 

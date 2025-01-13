@@ -6,12 +6,13 @@ Authors
 - Sebastian Müller
 """
 
+import logging
 import time
 
 import numpy as np
 import xarray as xr
 from pyproj import Proj
-import logging
+
 from mhm_tools.common.logger import log_arguments
 
 logger = logging.getLogger(__name__)
@@ -66,6 +67,7 @@ def _create_grid(header, crs=None, dtype="f4"):
 
 
 #     """This function writes the latlon.nc file from given ASCII headers."""
+
 
 @log_arguments()
 def create_latlon(

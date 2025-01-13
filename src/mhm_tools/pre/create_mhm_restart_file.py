@@ -1,17 +1,17 @@
 """Create the mHM restart file."""
 
 import itertools
+import logging
 import re
 import shutil
 from pathlib import Path
 from subprocess import PIPE, Popen, TimeoutExpired
-from crick import TDigest
 
 import numpy as np
 import xarray as xr
+from crick import TDigest
 from joblib import Parallel, delayed
 
-import logging
 from mhm_tools.common.logger import ErrorLogger, log_arguments
 
 logger = logging.getLogger(__name__)
@@ -84,8 +84,8 @@ class MorphFiles:
             if not overwrite and self.__dict__.get(key, None) is not None:
                 continue
             key_files = list(filepath.glob(f"*{key}*.nc"))
-            if key == 'slope': 
-                key_files = [file for file in key_files if 'emp' not in str(file.name)]
+            if key == "slope":
+                key_files = [file for file in key_files if "emp" not in str(file.name)]
             if len(key_files) == 0:
                 if key not in member_key_synonyms:
                     continue  # should raise an error
@@ -162,7 +162,13 @@ class LatLon:
     """
 
     def __init__(
-        self, lat_min=None, lon_min=None, lat_max=None, lon_max=None, resolution=None, mask=None
+        self,
+        lat_min=None,
+        lon_min=None,
+        lat_max=None,
+        lon_max=None,
+        resolution=None,
+        mask=None,
     ):
         self.lat_min = lat_min
         self.lon_min = lon_min
@@ -539,7 +545,9 @@ class MHMRestartFile:
                 l0, l1 = self._create_latlon(lon_min, lat_min)
                 subgrid_path = self.output_path / f"slice_{i}_{j}"
                 logger.debug(f"Reading subgrid {subgrid_path}")
-                logger.debug(f"l0: {l0.lon_min}, {l0.lon_max}, {l0.lat_min}, {l0.lat_max}")
+                logger.debug(
+                    f"l0: {l0.lon_min}, {l0.lon_max}, {l0.lat_min}, {l0.lat_max}"
+                )
                 if not subgrid_path.is_dir():
                     logger.error(f"Subgrid {subgrid_path} not found")
                     continue
@@ -566,7 +574,7 @@ class MHMRestartFile:
         logger.debug("Creating subgrids")
         self.subgrids = [Grid(file_path=k, **v) for k, v in sub_grid_paths.items()]
         logger.debug("Splitting grid done")
-    
+
     def _split_cell(self, ds, file_path, i, lon_min, j, lat_min):
         out_dir = Path(self.output_path) / f"slice_{i}_{j}"
         if not out_dir.exists():
@@ -585,23 +593,23 @@ class MHMRestartFile:
             longitude=lon_slice,
             latitude=lat_slice,
         )
-        if "slope" in file_path.name or 'geology' in file_path.name:
+        if "slope" in file_path.name or "geology" in file_path.name:
             ds_cut = ds_cut.sortby("latitude")
         try:
             ds_cut.to_netcdf(out_path, "w")
             logger.debug(f"Written {out_path}")
         except Exception as e:
             logger.error(f"Failed to write {out_path} with {e}")
-            logger.debug(
-                f"{l1.lon_min}, {l1.lon_max}, {l1.lat_min}, {l1.lat_max}"
-            )
+            logger.debug(f"{l1.lon_min}, {l1.lon_max}, {l1.lat_min}, {l1.lat_max}")
             logger.debug(ds_cut["latitude"].values)
             return None
-        return {out_dir: {
-            "l0": l0,
-            "l1": l1,
-            "name": f"slice_{i}_{j}",
-        }}
+        return {
+            out_dir: {
+                "l0": l0,
+                "l1": l1,
+                "name": f"slice_{i}_{j}",
+            }
+        }
 
     def _split_file(self, name, file_path):
         if not file_path or file_path is None or not file_path.is_file():
@@ -613,10 +621,10 @@ class MHMRestartFile:
         logger.debug(f"Splitting {file_path}")
         with xr.open_dataset(file_path) as ds:
             lon_range = np.arange(
-                    self.grid.l1.lon_min,
-                    self.grid.l1.lon_max,
-                    self.grid.l1.resolution * self.increment_l1,
-                )
+                self.grid.l1.lon_min,
+                self.grid.l1.lon_max,
+                self.grid.l1.resolution * self.increment_l1,
+            )
             lat_range = np.arange(
                 self.grid.l1.lat_min,
                 self.grid.l1.lat_max,
@@ -753,15 +761,15 @@ class MHMRestartFile:
                         )
                         logger.debug(f"{r_data_var} reversed latitudes")
                 index_slice = {
-                        "lon_out": slice(
-                            isel_start * self.increment_l1,
-                            (isel_start + 1) * self.increment_l1,
-                        ),
-                        "lat_out": slice(
-                            jsel_start * self.increment_l1,
-                            (jsel_start + 1) * self.increment_l1,
-                        ),
-                    }
+                    "lon_out": slice(
+                        isel_start * self.increment_l1,
+                        (isel_start + 1) * self.increment_l1,
+                    ),
+                    "lat_out": slice(
+                        jsel_start * self.increment_l1,
+                        (jsel_start + 1) * self.increment_l1,
+                    ),
+                }
                 for data_var in data_vars:
                     if cur_ds[data_var].shape != ds_whole[data_var][index_slice].shape:
                         dims = cur_ds[data_var].dims
@@ -809,13 +817,22 @@ class MHMRestartFile:
 
     def _correct_restart_file(self, ds):
         ds_mask = xr.open_dataset(self.grid.land_mask_file)
-        ds_mask = ds_mask.sel(lon=slice(self.grid.l1.lon_min, self.grid.l1.lon_max), lat=slice(self.grid.l1.lat_max, self.grid.l1.lat_min))
-        logger.debug(f'lon: ds {ds['lon_out'].values[0]}-{ds['lon_out'].values[-1]} ; grid {self.grid.l1.lon_min}-{self.grid.l1.lon_max}')
-        logger.debug(f'lat: ds {ds['lat_out'].values[0]}-{ds['lat_out'].values[-1]} ; grid {self.grid.l1.lat_min}-{self.grid.l1.lat_max}')
-        logger.debug(f'mask: {np.shape(ds_mask["land_mask"].data)}')
-        logger.debug(f'mask lon: {ds_mask['lon'].data[0]} to {ds_mask['lon'].data[-1]} with length {np.shape(ds_mask['lon'].data)}')
-        logger.debug(f'ds: {np.shape(ds["L1_SoilMoistureExponent"].data)}')
-        try: 
+        ds_mask = ds_mask.sel(
+            lon=slice(self.grid.l1.lon_min, self.grid.l1.lon_max),
+            lat=slice(self.grid.l1.lat_max, self.grid.l1.lat_min),
+        )
+        logger.debug(
+            f"lon: ds {ds['lon_out'].values[0]}-{ds['lon_out'].values[-1]} ; grid {self.grid.l1.lon_min}-{self.grid.l1.lon_max}"
+        )
+        logger.debug(
+            f"lat: ds {ds['lat_out'].values[0]}-{ds['lat_out'].values[-1]} ; grid {self.grid.l1.lat_min}-{self.grid.l1.lat_max}"
+        )
+        logger.debug(f"mask: {np.shape(ds_mask['land_mask'].data)}")
+        logger.debug(
+            f"mask lon: {ds_mask['lon'].data[0]} to {ds_mask['lon'].data[-1]} with length {np.shape(ds_mask['lon'].data)}"
+        )
+        logger.debug(f"ds: {np.shape(ds['L1_SoilMoistureExponent'].data)}")
+        try:
             ds_mask = ds_mask.sortby("latitude")
         except Exception as e:
             logger.error(f"Could not sort by latitude {e}")
@@ -1087,9 +1104,7 @@ class MHMRestartFile:
 
         ds = ds.sortby("lat", ascending=False)
 
-        self.grid.restart_file = (
-            self.output_path.parent / "mHM_restart.nc"
-        )
+        self.grid.restart_file = self.output_path.parent / "mHM_restart.nc"
         logger.info(f"Writing renamed restart file to {self.grid.restart_file}")
         ds.to_netcdf(self.grid.restart_file)
 
@@ -1106,37 +1121,37 @@ class MHMRestartFile:
                     file_path.unlink()
 
     def _prepare_slope_emp(self, n=1000000):
-        logger.info('Preparing slope_emp')
+        logger.info("Preparing slope_emp")
         td = TDigest(compression=n)
         if self.run_on_whole_domain:
             if not self.grid.morph_files.slope_emp.is_file():
                 with xr.open_dataset(self.grid.morph_files.slope) as ds_slope:
-                    data = ds_slope['slope']
+                    data = ds_slope["slope"]
                     flattened = data.values.flatten()
                     flattened_no_nan = flattened[~np.isnan(flattened)]
                     td.update(flattened_no_nan)
                     cdf = td.cdf(data.values)
-                    cdf = xr.DataArray(cdf, dims=['latitude', 'longitude'])
-                    ds_slope['slope'] = cdf
-                    ds_slope = ds_slope.rename({'slope': 'slope_emp'})
-                    ds_slope.to_netcdf(self.grid.path / 'slope_emp.nc')
-                    self.grid.morph_files.slope_emp = self.grid.path / 'slope_emp.nc'
+                    cdf = xr.DataArray(cdf, dims=["latitude", "longitude"])
+                    ds_slope["slope"] = cdf
+                    ds_slope = ds_slope.rename({"slope": "slope_emp"})
+                    ds_slope.to_netcdf(self.grid.path / "slope_emp.nc")
+                    self.grid.morph_files.slope_emp = self.grid.path / "slope_emp.nc"
         else:
             for sgrid in self.subgrids:
                 with xr.open_dataset(sgrid.morph_files.slope) as ds_slope:
-                    data = ds_slope['slope']
+                    data = ds_slope["slope"]
                     flattened = data.values.flatten()
                     flattened_no_nan = flattened[~np.isnan(flattened)]
                     td.update(flattened_no_nan)
             for sgrid in self.subgrids:
                 with xr.open_dataset(sgrid.morph_files.slope) as ds_slope:
-                    data = ds_slope['slope']
+                    data = ds_slope["slope"]
                     cdf = td.cdf(data.values)
-                    cdf = xr.DataArray(cdf, dims=['latitude', 'longitude'])
-                    ds_slope['slope'] = cdf
-                    ds_slope = ds_slope.rename({'slope': 'slope_emp'})
-                    ds_slope.to_netcdf(sgrid.path / 'slope_emp.nc')
-                    sgrid.morph_files.slope_emp = sgrid.path / 'slope_emp.nc'
+                    cdf = xr.DataArray(cdf, dims=["latitude", "longitude"])
+                    ds_slope["slope"] = cdf
+                    ds_slope = ds_slope.rename({"slope": "slope_emp"})
+                    ds_slope.to_netcdf(sgrid.path / "slope_emp.nc")
+                    sgrid.morph_files.slope_emp = sgrid.path / "slope_emp.nc"
 
     def _create_restart_for_grid(self, grid):
         logger.debug(
@@ -1177,7 +1192,9 @@ class MHMRestartFile:
                     self._read_subgrids_from_files()
                 else:
                     self._split_grid()
-                logger.info(f'The grid has been split into {len(self.subgrids)} subgrids.')
+                logger.info(
+                    f"The grid has been split into {len(self.subgrids)} subgrids."
+                )
                 logger.info("Creating namelists and running MPR.")
                 self._prepare_slope_emp()
                 subgrids = Parallel(n_jobs=self.ncpus, backend="loky")(

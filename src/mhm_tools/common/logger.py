@@ -1,19 +1,33 @@
-from contextlib import AbstractContextManager
-from functools import wraps
 import inspect
 import logging
+from contextlib import AbstractContextManager
+from functools import wraps
 
 from mhm_tools.common.constants import LOG_LEVELS
 
 
-def configure_mhm_tools_logger(log_level=None, count_verbose=0, count_quiet=0, log_file=None, log_file_level=None, no_colsole_logging=False):
+def configure_mhm_tools_logger(
+    log_level=None,
+    count_verbose=0,
+    count_quiet=0,
+    log_file=None,
+    log_file_level=None,
+    no_colsole_logging=False,
+):
     """Configure the parser setting formating as well as Stream and Filehandler."""
     # logging.basicConfig(format="%(asctime)s - %(levelname)-8s - %(message)s")
-    logger = logging.getLogger('mhm_tools')
-    general_level = get_lowest_level(log_level=log_level, log_file_level=log_file_level, count_verbose=count_verbose, count_quiet=count_quiet)
+    logger = logging.getLogger("mhm_tools")
+    general_level = get_lowest_level(
+        log_level=log_level,
+        log_file_level=log_file_level,
+        count_verbose=count_verbose,
+        count_quiet=count_quiet,
+    )
     error_msg_gnrl = set_log_level(logger, general_level, count_verbose, count_quiet)
     error_msg_fh, error_msg_ch = None, None
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    formatter = logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    )
     if not no_colsole_logging:
         ch = logging.StreamHandler()
         ch.setFormatter(formatter)
@@ -33,15 +47,17 @@ def configure_mhm_tools_logger(log_level=None, count_verbose=0, count_quiet=0, l
         logger.error(f"StreamHandler: {error_msg_ch}")
     if error_msg_fh is not None:
         logger.error(f"FileHandler: {error_msg_fh}")
-    
+
+
 def get_lowest_level(log_level, log_file_level, count_verbose, count_quiet):
     if log_level is not None:
         llevel = LOG_LEVELS[log_level.upper()]
-    else: 
-        llevel = LOG_LEVELS['INFO'] -  10 * count_verbose + 10 * count_quiet
-    
+    else:
+        llevel = LOG_LEVELS["INFO"] - 10 * count_verbose + 10 * count_quiet
+
     lflevel = LOG_LEVELS[log_file_level.upper()] if log_file_level is not None else 60
     return min(llevel, lflevel)
+
 
 def set_log_level(handler, level=None, count_verbose=0, count_quiet=0):
     """Set the logging level.
@@ -51,17 +67,19 @@ def set_log_level(handler, level=None, count_verbose=0, count_quiet=0):
     level : str
         logging level
     count_verbose : int
-        verbosity 
+        verbosity
     count_quiet : int
         quietness
 
     """
     error_msg = None
     if level is None:
-        level = LOG_LEVELS['INFO'] -  10 * count_verbose + 10 * count_quiet
-    elif type(level) is not int: 
+        level = LOG_LEVELS["INFO"] - 10 * count_verbose + 10 * count_quiet
+    elif type(level) is not int:
         if type(level) is not str:
-            error_msg = f"Invalid log level type: {type(level)} - using default log level INFO"
+            error_msg = (
+                f"Invalid log level type: {type(level)} - using default log level INFO"
+            )
             level = "INFO"
         level = level.upper()
         if level not in LOG_LEVELS:
@@ -74,6 +92,7 @@ def set_log_level(handler, level=None, count_verbose=0, count_quiet=0):
 
 def log_arguments():
     """Log all non-None arguments passed to a function."""
+
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -82,7 +101,9 @@ def log_arguments():
             bound_args = signature.bind(*args, **kwargs)
             bound_args.apply_defaults()
             # Extract arguments and filter out None values
-            non_none_args = {k: v for k, v in bound_args.arguments.items() if v is not None}
+            non_none_args = {
+                k: v for k, v in bound_args.arguments.items() if v is not None
+            }
 
             # Log the arguments
             msg = f"Function '{func.__name__}' called with the following arguments: \n"
@@ -92,7 +113,9 @@ def log_arguments():
 
             # Call the original function
             return func(*args, **kwargs)
+
         return wrapper
+
     return decorator
 
 
@@ -115,5 +138,3 @@ class ErrorLogger(AbstractContextManager):
     def __exit__(self, exc_type, exc_value, traceback):
         if exc_value is not None and self.do_log:
             logging.getLogger(self.logger).exception(exc_value)
-
-

@@ -10,9 +10,9 @@ determined from Level-0.
 """
 
 import ast
+import logging
 from pathlib import Path
 
-import logging
 from mhm_tools.common.logger import ErrorLogger, log_arguments
 
 logger = logging.getLogger(__name__)
@@ -130,6 +130,7 @@ def add_args(parser):
         default="latlon.nc",
         help="The path of the output NetCDF file containing the latlon information.",
     )
+
 
 @log_arguments()
 def run(args):

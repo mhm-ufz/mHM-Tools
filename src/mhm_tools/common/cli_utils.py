@@ -1,6 +1,6 @@
 import argparse
-
 import logging
+
 from mhm_tools.common.logger import ErrorLogger
 
 logger = logging.getLogger(__name__)
