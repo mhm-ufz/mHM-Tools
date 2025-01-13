@@ -78,8 +78,8 @@ def set_log_level(handler, level=None, count_verbose=0, count_quiet=0):
     error_msg = None
     if level is None:
         level = LOG_LEVELS["INFO"] - 10 * count_verbose + 10 * count_quiet
-    elif type(level) is not int:
-        if type(level) is not str:
+    elif not isinstance(level, int):
+        if not isinstance(level, str):
             error_msg = (
                 f"Invalid log level type: {type(level)} - using default log level INFO"
             )
