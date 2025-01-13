@@ -86,7 +86,7 @@ class Catchment:
         self.out_var_name = (
             out_var_name if out_var_name is not None else f"{var_name}.nc"
         )
-        if type(self.out_var_name) is not str:
+        if not isinstance(self.out_var_name, str):
             self.out_var_name = f"{var_name}.nc"
         self.do_shift = do_shift
         self.ds = ds
