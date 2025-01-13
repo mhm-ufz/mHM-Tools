@@ -109,7 +109,7 @@ def log_arguments():
             msg = f"Function '{func.__name__}' called with the following arguments: \n"
             for arg, value in non_none_args.items():
                 msg += f"  {arg}: {value} \n"
-            logging.getLogger(inspect.getmodule(func)).debug(msg)
+            logging.getLogger(inspect.getmodule(func).__name__).debug(msg)
 
             # Call the original function
             return func(*args, **kwargs)
