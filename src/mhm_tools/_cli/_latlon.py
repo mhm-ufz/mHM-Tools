@@ -15,9 +15,9 @@ from pathlib import Path
 
 from mhm_tools.common.logger import ErrorLogger, log_arguments
 
-logger = logging.getLogger(__name__)
-
 from ..pre import create_latlon
+
+logger = logging.getLogger(__name__)
 
 
 def add_args(parser):

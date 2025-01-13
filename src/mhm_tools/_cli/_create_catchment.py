@@ -1,6 +1,4 @@
-"""
-TODO: add description
-"""
+"""Create basin id file and deliniate catchments."""
 
 import logging
 
@@ -108,18 +106,17 @@ def run(args):
     args : argparse.Namespace
         parsed command line arguments
     """
-
     gauge_coords = None
     coordinate_slices = None
     if args.gauge_coords is not None:
         if args.lonlatbox is not None:
             with ErrorLogger(logger):
-                raise ValueError(
+                to_many_args_err = (
                     "You can't use --gauge_coords and --lonlatbox at the same time."
                 )
+                raise ValueError(to_many_args_err)
         lat, lon = map(float, args.gauge_coords.split(","))
         gauge_coords = (np.array([lon]), np.array([lat]))
-        logger.info
     elif args.lonlatbox is not None:
         lonmin, lonmax, latmin, latmax, resl0 = map(float, args.lonlatbox.split(","))
         coordinate_slices = {"lat": slice(latmax, latmin), "lon": slice(lonmin, lonmax)}

@@ -1,3 +1,5 @@
+"""Provide logger functionality."""
+
 import inspect
 import logging
 from contextlib import AbstractContextManager
@@ -50,6 +52,7 @@ def configure_mhm_tools_logger(
 
 
 def get_lowest_level(log_level, log_file_level, count_verbose, count_quiet):
+    """Return the most verbose log level of all handlers."""
     if log_level is not None:
         llevel = LOG_LEVELS[log_level.upper()]
     else:
@@ -136,5 +139,6 @@ class ErrorLogger(AbstractContextManager):
         self.do_log = do_log
 
     def __exit__(self, exc_type, exc_value, traceback):
+        """Log all exception messages."""
         if exc_value is not None and self.do_log:
             logging.getLogger(self.logger).exception(exc_value)

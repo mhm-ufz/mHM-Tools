@@ -294,11 +294,10 @@ def run(args):
         l0_resolution = args.l0_resolution
     else:
         with ErrorLogger(logger):
-            raise ValueError(
-                "Either all coordinat bounds and resolutions or --mask_file must be provided"
-            )
+            no_coords_error = "Either all coordinat bounds and resolutions or --mask_file must be provided"
+            raise ValueError(no_coords_error)
 
-    logger.info(f"Creating restart file for grid with the following coordinates:")
+    logger.info("Creating restart file for grid with the following coordinates:")
     logger.info(f"lon_min: {lon_min_target_grid}")
     logger.info(f"lon_max: {lon_max_target_grid}")
     logger.info(f"lat_min: {lat_min_target_grid}")
@@ -308,9 +307,8 @@ def run(args):
 
     if args.land_mask_file is None and args.no_merge is not None:
         with ErrorLogger(logger):
-            raise ValueError(
-                "You need to provide a land mask file at L1 resolution if you want to merge the restart files"
-            )
+            no_land_mask_error = "You need to provide a land mask file at L1 resolution if you want to merge the restart files"
+            raise ValueError(no_land_mask_error)
 
     l0 = LatLon(
         lon_min=float(lon_min_target_grid),

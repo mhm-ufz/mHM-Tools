@@ -232,7 +232,7 @@ class CreateSubdomainMasks:
             logger.info(f"Wrote to {fname}")
 
     def use_land_mask(self, lat, lon):
-        """Reencode and mask the input files"""
+        """Reencode and mask the input files."""
         logger.info("Non global file selected. Only reencoding and masking the input.")
 
         logger.debug(f"lat={slice(lat[0], lat[-1])}")

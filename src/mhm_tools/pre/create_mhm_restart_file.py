@@ -615,7 +615,7 @@ class MHMRestartFile:
         if not file_path or file_path is None or not file_path.is_file():
             logger.error(f"No file path provided for {name}")
             return None
-        elif file_path.suffix != ".nc":
+        if file_path.suffix != ".nc":
             logger.error(f"File {file_path} is not a netCDF file")
             return None
         logger.debug(f"Splitting {file_path}")
@@ -1133,8 +1133,8 @@ class MHMRestartFile:
                     cdf = td.cdf(data.values)
                     cdf = xr.DataArray(cdf, dims=["latitude", "longitude"])
                     ds_slope["slope"] = cdf
-                    ds_slope = ds_slope.rename({"slope": "slope_emp"})
-                    ds_slope.to_netcdf(self.grid.path / "slope_emp.nc")
+                    ds_slope_emp = ds_slope.rename({"slope": "slope_emp"})
+                    ds_slope_emp.to_netcdf(self.grid.path / "slope_emp.nc")
                     self.grid.morph_files.slope_emp = self.grid.path / "slope_emp.nc"
         else:
             for sgrid in self.subgrids:
@@ -1149,8 +1149,8 @@ class MHMRestartFile:
                     cdf = td.cdf(data.values)
                     cdf = xr.DataArray(cdf, dims=["latitude", "longitude"])
                     ds_slope["slope"] = cdf
-                    ds_slope = ds_slope.rename({"slope": "slope_emp"})
-                    ds_slope.to_netcdf(sgrid.path / "slope_emp.nc")
+                    ds_slope_emp = ds_slope.rename({"slope": "slope_emp"})
+                    ds_slope_emp.to_netcdf(sgrid.path / "slope_emp.nc")
                     sgrid.morph_files.slope_emp = sgrid.path / "slope_emp.nc"
 
     def _create_restart_for_grid(self, grid):

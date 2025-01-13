@@ -1,5 +1,5 @@
-"""
-Create the catchment file for mRM
+r"""
+Create the catchment file for mRM.
 
 Authors
 -------
@@ -11,6 +11,7 @@ Authors
 
 import logging
 import pathlib as pl
+from typing import ClassVar
 
 import numpy as np
 import pyflwdir
@@ -33,7 +34,9 @@ CUTOFF_THRESHOLD = 170
 
 # CLASSES
 class Catchment:
-    VARIABLES = {
+    """Catchment class deliniating catchmetns with pyflowdir."""
+
+    VARIABLES: ClassVar[dict[str, dict[str, object]]] = {
         "flwdir": {
             "title": f"flow direction ({OUTPUT_FTYPE.upper()})",
             "_FillValue": FDIR_FILLVALUE[OUTPUT_FTYPE],
@@ -106,6 +109,7 @@ class Catchment:
 
     @property
     def is_data_global(self):
+        """Check if the longitude data is global."""
         return (
             "lon" in self.ds.coords
             and self.ds.lon.min() < (CUTOFF_THRESHOLD * -1)
@@ -115,8 +119,7 @@ class Catchment:
     def _modify_data(self, data):
         # correct circumspanning data
         if self.do_shift and self.is_data_global:
-            tmp = data.roll(lon=int(len(self.ds.lon) / 2), roll_coords=True)
-            return tmp
+            return data.roll(lon=int(len(self.ds.lon) / 2), roll_coords=True)
         return data
 
     def _revert_data(self, data):
@@ -126,14 +129,12 @@ class Catchment:
         return data
 
     def add_dem(self, data, **kwargs):
-        """
-        Inits the FlwdirRaster class from dem.
-        """
+        """Init the FlwdirRaster class from dem."""
         # perform checks
         self.elevtn = data.data
         if self._fdir is None:
             # Create a flow direction object
-            logger.info("add_dem: kwargs: ", kwargs)
+            logger.info(f"add_dem: kwargs: {kwargs}")
             self._fdir = pyflwdir.from_dem(
                 data=self.elevtn,
                 nodata=np.nan,
@@ -143,9 +144,7 @@ class Catchment:
             self.get_fdir()
 
     def add_fdir(self, data, ftype, **kwargs):
-        """
-        Inits the FlwdirRaster class from fdir.
-        """
+        """Init the FlwdirRaster class from fdir."""
         # perform check
         if self._fdir is None:
             mask = np.isnan(data)
@@ -156,18 +155,16 @@ class Catchment:
         self.get_fdir()
 
     def delineate_basin(self, gauge_coords, stream_order=4):
-        """
-        Deliniate the basin for a given lat and lon
-        """
+        """Deliniate the basin for a given lat and lon."""
         logger.info(f"Deliniating basin for gauge coordinates {gauge_coords}")
-        gauge_coords = (gauge_coords[0], gauge_coords[1])  # * -1)
+        gauge_coords = (gauge_coords[0], gauge_coords[1])
         self.basin = self._fdir.basins(
             xy=gauge_coords, streams=self._fdir.stream_order() >= stream_order
         )
         self.catchment_mask = self.basin > 0
         if np.all(~self.catchment_mask):
             if stream_order > 1:
-                return self.delineate_basin(
+                self.delineate_basin(
                     (gauge_coords[0], gauge_coords[1]), stream_order=stream_order - 1
                 )
             logger.error("No catchment found for the given coordinates")
@@ -177,30 +174,23 @@ class Catchment:
             ]
 
     def get_basins(self):
-        """
-        Performs the calculation of the catchment ids
-        """
+        """Perform the calculation of the catchment ids."""
         self.basin = self._fdir.basins()
 
     def get_fdir(self, ftype=None):
-        """
-        Performs the calculation of the flow direction
-        """
+        """Perform the calculation of the flow direction."""
         self.flwdir = self._fdir.to_array(ftype=ftype or OUTPUT_FTYPE)
 
     def get_upstream_area(self):
-        """
-        Performs the calculation of the upstream catchment area
-        """
+        """Perform the calculation of the upstream catchment area."""
         self.upgrid = self._fdir.upstream_area(unit="km2").astype(int)
 
     def get_grid_area(self):
-        """
-        Performs the calculation of the catchment area
-        """
+        """Perform the calculation of the catchment area."""
         self.grdare = self._fdir.area.astype(int)
 
     def get_facc(self):
+        """Get the flow accumulation area."""
         data = np.ones_like(self.flwdir).astype(np.uint32)
         data[~self._fdir.mask.reshape(data.shape)] = 0
         self.uparea_grid = self._fdir.accuflux(data, nodata=0)
@@ -214,6 +204,7 @@ class Catchment:
         cut_by_basin=False,
         mask_file=None,
     ):
+        """Write the produced data to one or multiple files."""
         data_vars = {}
         out_path = pl.Path(out_path)
         data = self.basin
@@ -224,7 +215,7 @@ class Catchment:
         else:
             lat_slice, lon_slice = slice(84, -56), slice(None)
 
-        for var_name in self.VARIABLES.keys():
+        for var_name in self.VARIABLES:
             data = getattr(self, var_name)
             if cut_by_basin:
                 data[~self.catchment_mask] = self.VARIABLES[var_name]["_FillValue"]
@@ -265,7 +256,7 @@ class Catchment:
                         float(data_var["lon"][1] - data_var["lon"][0])
                     )
                     is_ascending = bool(data_var["lat"][0] < data_var["lat"][-1])
-                    with open(fname, "w") as file_object:
+                    with fname.open("w") as file_object:
                         file_object.write(f"ncols {data_var[var_name].shape[1]}\n")
                         file_object.write(f"nrows {data_var[var_name].shape[0]}\n")
                         file_object.write(
@@ -290,9 +281,8 @@ class Catchment:
                         np.savetxt(file_object, vals, delimiter=" ", fmt="%s")
                 else:
                     with ErrorLogger(logger):
-                        raise Exception(
-                            f'Format "{format}" unknown, use one of ["nc", "asc"]'
-                        )
+                        msg = f'Format "{format}" unknown, use one of ["nc", "asc"]'
+                        raise Exception(msg)
         if single_file:
             ds = xr.merge(data_vars.values())
             # set some attributes
@@ -365,8 +355,8 @@ class Catchment:
         return lat_slice, lon_slice
 
 
-# use this code to merge the rolled and non-rolled file
 def merge_catchment(path1, path2, out_path):
+    """Merge the rolled and non-rolled file."""
     # read the rolled and non-rolled files
     ds1 = xr.open_dataset(path1, engine="netcdf4")
     ds2 = xr.open_dataset(path2, engine="netcdf4")
@@ -388,6 +378,7 @@ def merge_catchment(path1, path2, out_path):
 
 
 def get_transformation_matrix_nc(ds, var_name):
+    """Get Transformation Matrix from input file dimensions and resolution."""
     da = ds[var_name]
 
     # Get attributes for geotransformation
@@ -425,14 +416,15 @@ def create_catchment(
     coordinate_slices=None,
     mask_file=None,
 ):
-
+    """Create file containing catchment ids, flowdirection and upstream area from dem or flow direction."""
     logger.info(
         f"Creating catchment file for {var_name} using {var} and {ftype} from {input_file}"
     )
 
     if var not in {"fdir", "dem"}:
         with ErrorLogger(logger):
-            raise ValueError(f"Unexpected value for var={var}, must be 'fdir' or 'dem'")
+            msg = f"Unexpected value for var={var}, must be 'fdir' or 'dem'"
+            raise ValueError(msg)
     ds = xr.open_dataset(pl.Path(input_file))
 
     # transform

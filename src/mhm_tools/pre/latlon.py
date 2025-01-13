@@ -15,8 +15,6 @@ from pyproj import Proj
 
 from mhm_tools.common.logger import log_arguments
 
-logger = logging.getLogger(__name__)
-
 from ..common import (
     NC_ENCODE_DEFAULTS,
     check_grid_compatibility,
@@ -27,6 +25,8 @@ from ..common import (
     standardize_header,
     write_header,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def xy_to_latlon(x, y, crs=None):
