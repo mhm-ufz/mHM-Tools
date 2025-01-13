@@ -5,11 +5,16 @@ A restart file contains all the static information to run mHM on a specific grid
 
 """
 
+import logging
+
 import numpy as np
-from mhm_tools.common.logger import logger, set_log_level
+
+from mhm_tools.common.logger import ErrorLogger
 from mhm_tools.pre.create_mhm_restart_file import Grid, LatLon, MPRRunner
 
 from ..pre import MHMRestartFile
+
+logger = logging.getLogger(__name__)
 
 
 def add_args(parser):
@@ -177,13 +182,6 @@ def add_args(parser):
         required=False,
         help=("delete the temporary files created during the process"),
     )
-
-    parser.add_argument(
-        "--log_level",
-        default="INFO",
-        help=("Set the logging level"),
-    )
-
     parser.add_argument(
         "--ncpus",
         default=1,
@@ -222,13 +220,13 @@ def get_coords_from_mask(mask):
     lon_max_target_grid = mask.lon.values[-1]
     lat_min_target_grid = mask.lat.values[0]
     lat_max_target_grid = mask.lat.values[-1]
-    
+
     # change values from center cell to corner values
     resolution = mask.lon.values[1] - mask.lon.values[0]
-    lon_min_target_grid -= resolution/2
-    lon_max_target_grid += resolution/2
-    lat_min_target_grid -= resolution/2
-    lat_max_target_grid += resolution/2
+    lon_min_target_grid -= resolution / 2
+    lon_max_target_grid += resolution / 2
+    lat_min_target_grid -= resolution / 2
+    lat_max_target_grid += resolution / 2
 
     # round values to get rid of inprecission
     lon_min_target_grid = np.round(lon_min_target_grid, 6)
@@ -237,9 +235,15 @@ def get_coords_from_mask(mask):
     lat_max_target_grid = np.round(lat_max_target_grid, 6)
 
     if lat_min_target_grid > lat_max_target_grid:
-        lat_min_target_grid, lat_max_target_grid = lat_max_target_grid, lat_min_target_grid
+        lat_min_target_grid, lat_max_target_grid = (
+            lat_max_target_grid,
+            lat_min_target_grid,
+        )
     if lon_min_target_grid > lon_max_target_grid:
-        lon_min_target_grid, lon_max_target_grid = lon_max_target_grid, lon_min_target_grid
+        lon_min_target_grid, lon_max_target_grid = (
+            lon_max_target_grid,
+            lon_min_target_grid,
+        )
     mask = mask.mask
     return (
         lon_min_target_grid,
@@ -258,8 +262,7 @@ def run(args):
     args : argparse.Namespace
         parsed command line arguments
     """
-    set_log_level(args.log_level)
-    mask=None
+    mask = None
     l1_resolution = float(args.l1_resolution)
     if args.lonlatbox is not None:
         lonlatbox = args.lonlatbox.split(",")
@@ -268,7 +271,7 @@ def run(args):
         lat_min_target_grid = float(lonlatbox[2])
         lat_max_target_grid = float(lonlatbox[3])
         l0_resolution = float(lonlatbox[4])
-    elif args.mask_file is not None and args.l0_resolution is not None :
+    elif args.mask_file is not None and args.l0_resolution is not None:
         (
             lon_min_target_grid,
             lon_max_target_grid,
@@ -290,22 +293,22 @@ def run(args):
         lat_max_target_grid = args.lat_max
         l0_resolution = args.l0_resolution
     else:
-        raise ValueError(
-            "Either all coordinat bounds and resolutions or --mask_file must be provided"
-        )
-    
-    logger.info(f"Creating restart file for grid with the following coordinates:")
+        with ErrorLogger(logger):
+            no_coords_error = "Either all coordinat bounds and resolutions or --mask_file must be provided"
+            raise ValueError(no_coords_error)
+
+    logger.info("Creating restart file for grid with the following coordinates:")
     logger.info(f"lon_min: {lon_min_target_grid}")
     logger.info(f"lon_max: {lon_max_target_grid}")
     logger.info(f"lat_min: {lat_min_target_grid}")
     logger.info(f"lat_max: {lat_max_target_grid}")
     logger.info(f"l0_resolution: {l0_resolution}")
     logger.info(f"l1_resolution: {l1_resolution}")
-    
+
     if args.land_mask_file is None and args.no_merge is not None:
-        raise ValueError(
-            "You need to provide a land mask file at L1 resolution if you want to merge the restart files"
-        )
+        with ErrorLogger(logger):
+            no_land_mask_error = "You need to provide a land mask file at L1 resolution if you want to merge the restart files"
+            raise ValueError(no_land_mask_error)
 
     l0 = LatLon(
         lon_min=float(lon_min_target_grid),

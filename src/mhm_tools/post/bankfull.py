@@ -7,10 +7,16 @@ Authors
 - Sebastian Müller
 """
 
+import logging
+
 import numpy as np
 import xarray as xr
 
+from mhm_tools.common.logger import log_arguments
+
 from ..common import NC_ENCODE_DEFAULTS, set_netcdf_encoding
+
+logger = logging.getLogger(__name__)
 
 
 def find_nearest_idx(array, value):
@@ -60,6 +66,7 @@ def calc_q_bkfl(q_yearly_peak, return_period):
     return q_bkfl
 
 
+@log_arguments()
 def bankfull_discharge(
     in_file, out_file, return_period=1.5, wetted_perimeter=False, var="Qrouted"
 ):

@@ -1,10 +1,14 @@
-"""
-TODO: add description
-"""
+"""Create basin id file and deliniate catchments."""
+
+import logging
 
 import numpy as np
-from mhm_tools.common.logger import logger, set_log_level
+
+from mhm_tools.common.logger import ErrorLogger
+
 from ..pre import create_catchment
+
+logger = logging.getLogger(__name__)
 
 
 def add_args(parser):
@@ -92,7 +96,6 @@ def add_args(parser):
         default=None,
         help=("Path where to save the mask file"),
     )
-    parser.add_argument("--log_level", default="INFO", type=str, help=("Logging level"))
 
 
 def run(args):
@@ -107,14 +110,19 @@ def run(args):
     coordinate_slices = None
     if args.gauge_coords is not None:
         if args.lonlatbox is not None:
-            raise ValueError("You can't use --gauge_coords and --lonlatbox at the same time.")
+            with ErrorLogger(logger):
+                to_many_args_err = (
+                    "You can't use --gauge_coords and --lonlatbox at the same time."
+                )
+                raise ValueError(to_many_args_err)
         lat, lon = map(float, args.gauge_coords.split(","))
         gauge_coords = (np.array([lon]), np.array([lat]))
-        logger.info
     elif args.lonlatbox is not None:
-        lonmin, lonmax,latmin, latmax, resl0  = map(float, args.lonlatbox.split(","))
-        coordinate_slices = {'lat': slice(latmax, latmin), 'lon': slice(lonmin, lonmax)}
-        logger.info('using lonlatbox to with extends: lat=({latmax}, {latmin}); lon=({lonmin}, {lonmax})')
+        lonmin, lonmax, latmin, latmax, resl0 = map(float, args.lonlatbox.split(","))
+        coordinate_slices = {"lat": slice(latmax, latmin), "lon": slice(lonmin, lonmax)}
+        logger.info(
+            "using lonlatbox to with extends: lat=({latmax}, {latmin}); lon=({lonmin}, {lonmax})"
+        )
     create_catchment(
         input_file=args.input_file,
         output_path=args.output_path,
@@ -123,6 +131,5 @@ def run(args):
         ftype=args.ftp,
         gauge_coords=gauge_coords,
         coordinate_slices=coordinate_slices,
-        log_level=args.log_level,
         mask_file=args.mask_file,
     )

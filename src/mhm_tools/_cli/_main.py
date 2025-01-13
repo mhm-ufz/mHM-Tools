@@ -2,6 +2,8 @@
 
 import argparse
 
+from mhm_tools.common.logger import configure_mhm_tools_logger
+
 from .. import __version__
 from . import (
     _bankfull,
@@ -77,6 +79,41 @@ def _get_parser():
         subparsers, "create_mhm_restart_file", _create_mhm_restart_file
     )
 
+    # add logging
+    # option 1 explicit log levels by name
+    parent_parser.add_argument(
+        "--log_level",
+        type=str,
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        default=None,
+        help="Set the log level explicitly.",
+    )
+    # option 2 regulation verbosity by -v and -q flags default is INFO
+    parent_parser.add_argument(
+        "--verbose", "-v", action="count", default=0, help="Increase verbosity"
+    )
+    parent_parser.add_argument(
+        "--quiet",
+        "-q",
+        action="count",
+        default=0,
+        help="Reduce verbosity can be repeted e.g. -qq",
+    )
+    # handle file and terminal output
+    parent_parser.add_argument(
+        "--log_file", type=str, default=None, help="Generate a log file."
+    )
+    parent_parser.add_argument(
+        "--log_file_level",
+        type=str,
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        default=None,
+        help="Set log level for the log file. Defaults to console log level.",
+    )
+    parent_parser.add_argument(
+        "--no_console_output", action="store_true", help="Prohibit console output."
+    )
+
     # return the parser
     return parent_parser
 
@@ -95,4 +132,12 @@ def main(argv=None):
         result of the called sub-argument routine
     """
     args = _get_parser().parse_args(argv)
+    configure_mhm_tools_logger(
+        log_level=args.log_level,
+        count_verbose=args.verbose,
+        count_quiet=args.quiet,
+        log_file=args.log_file,
+        log_file_level=args.log_file_level,
+        no_colsole_logging=args.no_console_output,
+    )
     return args.func(args)

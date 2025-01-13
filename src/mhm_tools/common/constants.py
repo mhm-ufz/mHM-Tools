@@ -22,7 +22,7 @@ Constants
 
 """
 
-__all__ = ["NO_DATA", "NC_ENCODE_DEFAULTS"]
+__all__ = ["NC_ENCODE_DEFAULTS", "NO_DATA"]
 
 NO_DATA = -9999.0
 """Default no data value for mHM."""
