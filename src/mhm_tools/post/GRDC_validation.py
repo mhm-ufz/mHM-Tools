@@ -391,6 +391,9 @@ def evaludate_grdc_data(
                     })
                 except Exception as e: 
                     logger.error(f'Error for index {index} and id {id} with error {e}')
+    else: 
+        msg = 'Direct comparison is not yet implemented'
+        raise NotImplementedError(msg)
     results_df = pd.DataFrame(results)
     results_df.to_csv(save_path / 'results.csv')
     sns.kdeplot(
