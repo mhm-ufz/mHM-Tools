@@ -2,6 +2,7 @@ import random
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+from mhm_tools.common.logger import ErrorLogger, log_arguments
 from mhm_tools.common.xarray_utils import get_coord_key
 import numpy as np
 import pandas as pd
@@ -10,8 +11,10 @@ import xarray as xr
 from joblib import Parallel, delayed
 import seaborn as sns
 
-from mhm_tools.common.logger import logger
 from mhm_tools.post.seasonality_grid_validation import climatology, spearman_correlation
+import logging
+
+logger = logging.getLogger(__name__)
 
 # make sure that the gauge location is correct basin extractor ...
 # make sample size the same length as simulation dataset, pick periods and use that for uncertainty estimate
@@ -323,9 +326,11 @@ def add_month_column(df):
             df = df.dropna(subset=['time'])
         df['month'] = df['time'].dt.month
     else:
-        raise KeyError("The 'time' column is missing from the DataFrame.")
+        with ErrorLogger(logger):
+            raise KeyError("The 'time' column is missing from the DataFrame.")
     return df
 
+@log_arguments()
 def evaludate_grdc_data(
     model_data_path,
     observed_data_path,

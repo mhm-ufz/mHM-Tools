@@ -1,5 +1,7 @@
-from mhm_tools.common.logger import logger
 import xarray as xr
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def get_coord_key(ds, lat=False, lon=False):

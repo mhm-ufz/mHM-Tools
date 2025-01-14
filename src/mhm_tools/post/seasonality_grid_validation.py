@@ -3,20 +3,24 @@ import random
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+from mhm_tools.common.logger import ErrorLogger, log_arguments
 from mhm_tools.common.xarray_utils import get_coord_key
 import numpy as np
 import xarray as xr
 from joblib import Parallel, delayed
 from matplotlib.colors import BoundaryNorm
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-from mhm_tools.common.logger import logger
 from scipy.stats import spearmanr
+import logging
+
+logger = logging.getLogger(__name__)
 
 def spearman_correlation(data1, data2):
     """Calculate Spearman rank correlation between two xarray DataArrays."""
     # Check that both arrays are of the same size and flatten them
     if data1.shape != data2.shape:
-        raise ValueError("Both DataArrays must have the same shape")
+        with ErrorLogger(logger):
+            raise ValueError("Both DataArrays must have the same shape")
     try:
         data1 = data1.flatten()
         data2 = data2.flatten()
@@ -31,7 +35,8 @@ def spearman_correlation(data1, data2):
 def spearman_spatial(data1, data2):
     """Calculate maps of Spearman rank correlation between two xarray DataArrays of shape(12,n,m)."""
     if len(np.shape(data1)) != len(np.shape(data2)) or len(np.shape(data1)) != 3:
-        raise ValueError("Wrong shape for spatial spearman correlation!")
+        with ErrorLogger(logger):
+            raise ValueError("Wrong shape for spatial spearman correlation!")
     res = np.full(np.shape(data1[0]), np.nan)
     for i, row in enumerate(data1[0]):
         for j, col in enumerate(row):
@@ -45,7 +50,8 @@ def climatology(data):
     if "time" in data.dims and data["time"].size > 0:
         data_clim = data.groupby("time.month").mean(dim="time", skipna=True)
     else:
-        raise ValueError("Input data for climatology calculation has no valid time dimension.")
+        with ErrorLogger(logger):
+            raise ValueError("Input data for climatology calculation has no valid time dimension.")
 
     # data_clim = data.groupby("time.month").mean(dim="time", skipna=True)
 
@@ -96,7 +102,8 @@ def get_std_from_ds(ds, input_var=None, clim=None, factor=1):
 
 def get_coord_key(ds, lat=False, lon=False):
     if (lon and lat) or not (lon or lat): 
-        raise ValueError(f"only lon or lat should be true but lon={lon} and lat={lat}")
+        with ErrorLogger(logger):
+            raise ValueError(f"only lon or lat should be true but lon={lon} and lat={lat}")
     if lat:
         keys = ["lat", "latitude", "northing", "y", "new_y"]
     else:
@@ -111,7 +118,8 @@ def get_coord_key(ds, lat=False, lon=False):
                 f"{type(ds)} contains key: {key} but ds[key] has shape {ds[key].shape}."
             )
             return key
-    raise ValueError(f"None of {keys} in {type(ds).__name__} keys {ds_dims}.")
+    with ErrorLogger(logger):
+        raise ValueError(f"None of {keys} in {type(ds).__name__} keys {ds_dims}.")
 
 
 def get_coord_values(ds, lat=False, lon=False):
@@ -214,7 +222,8 @@ def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None)
                     monthly_sums[month] += data_slice.fillna(0).squeeze(dim="time").values * factor
                     monthly_counts[month] += ~np.isnan(data_slice.squeeze(dim="time").values)
                 except Exception as e:
-                    raise e
+                    with ErrorLogger(logger):
+                        raise e
     logger.debug(f"{np.nanmean(mean)}, {np.nanmean(sum_square_diff)}, {count}, {np.nanmean(monthly_sums)}, {np.nanmean(monthly_counts)}")
     return mean, sum_square_diff, count, monthly_sums, monthly_counts
 
@@ -407,7 +416,8 @@ def get_stats(path, var, factor, coordinate_slice, n_bootstrap_years, ncpus, out
         elif path.is_dir():
             stats_ds = get_stats_one_pass(path, var, factor, coordinate_slice, n_bootstrap_years=n_bootstrap_years, ncpus=ncpus, output_path=output_file)
         else:
-            raise ValueError()
+            with ErrorLogger(logger):
+                raise ValueError()
     else: 
         with xr.open_dataset(path, engine="netcdf4") as ds_input:
             if coordinate_slice is not None:
@@ -415,7 +425,8 @@ def get_stats(path, var, factor, coordinate_slice, n_bootstrap_years, ncpus, out
             if 'clim' in ds_input and 'std' in ds_input and 'mean' in ds_input:
                 stats_ds = ds_input
             else: 
-                raise KeyError('Wrong statisitcs file. If you want to create new statistics you have to provide a var.')
+                with ErrorLogger(logger):
+                    raise KeyError('Wrong statisitcs file. If you want to create new statistics you have to provide a var.')
     return stats_ds
 
 def compare_input_with_ref(input_path, input_var, output_path , ref_path, ref_var, input_name=None, ref_name=None, input_factor=1, ref_factor=1, coordinate_slice=None, n_bootstrap_years=None, bootstrap_index=None, ncpus=1):
@@ -573,7 +584,8 @@ def regridd_to_higher_spatial_resolution(ds1, ds2):
 
 def direct_comparison(input_path, ref_path, input_var, ref_var, input_name, ref_name, input_factor, ref_factor, coordinate_slice, output_path):
     if ref_path is None:
-        raise ValueError('ref_path must be given for direct comparison.')
+        with ErrorLogger(logger):
+            raise ValueError('ref_path must be given for direct comparison.')
     logger.info("Start direct comparison.")
     input = get_dataset_from_path(input_path)
     ref = get_dataset_from_path(ref_path)
@@ -584,7 +596,8 @@ def direct_comparison(input_path, ref_path, input_var, ref_var, input_name, ref_
     start_time = max(input.time.min(), ref.time.min())
     end_time = min(input.time.max(), ref.time.max())
     if start_time>=end_time:
-        raise ValueError('The timeframes of the two datasets are not overlapping.')
+        with ErrorLogger(logger):
+            raise ValueError('The timeframes of the two datasets are not overlapping.')
     logger.info(f'start_time {start_time}; end_time {end_time}')
     input = input.sel(time=slice(start_time, end_time))
     ref = ref.sel(time=slice(start_time, end_time))
@@ -630,7 +643,7 @@ def direct_comparison(input_path, ref_path, input_var, ref_var, input_name, ref_
     output.to_netcdf(output_path/ f"{input_name}_{ref_name}_direct_comp.nc")
     plot_map(rel_mean, rel_std, spearman, ref_clim, input_clim, input_name, ref_name, output_path)
 
-
+@log_arguments()
 def seasonality_grid_validation(input_path, input_var, output_path, ref_path, ref_var, input_name=None, ref_name=None, input_factor=1, ref_factor=1, only_plot=False, coordinate_slice=None, n_cpus=1, n_bootstrap_years=None, n_bootstrap_selections=None, direct_comp=True):
     output_path = Path(output_path)
     input_path = Path(input_path)
@@ -651,7 +664,8 @@ def seasonality_grid_validation(input_path, input_var, output_path, ref_path, re
         elif input_path.is_dir():
             get_stats_one_pass(input_path, input_var, input_factor, coordinate_slice, output_path=output_path/output_name)
         else:
-            raise ValueError("input path does not exist")
+            with ErrorLogger(logger):
+                raise ValueError("input path does not exist")
     else:
         if n_bootstrap_years is not None and n_bootstrap_selections > 0 and input_path.is_dir() and ref_path.is_dir():
             if only_plot:
