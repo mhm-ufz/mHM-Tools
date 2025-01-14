@@ -1,6 +1,7 @@
 """Create the mHM restart file."""
 
 import itertools
+import logging
 import re
 import shutil
 from pathlib import Path
@@ -11,7 +12,9 @@ import xarray as xr
 from crick import TDigest
 from joblib import Parallel, delayed
 
-from mhm_tools.common.logger import logger
+from mhm_tools.common.logger import ErrorLogger, log_arguments
+
+logger = logging.getLogger(__name__)
 
 
 class MorphFiles:
@@ -350,19 +353,21 @@ class MPRRunner:
             if error_data:
                 grid.restart_file = None
                 msg = f"MPR failed with STDERR {error_data} for {grid.name} and command {command}"
-                raise RuntimeError(msg)
+                with ErrorLogger(logger):
+                    raise RuntimeError(msg)
         except TimeoutExpired as err:
             p.kill()
             msg = (
                 f"MPR failed with TimeoutExpired for {grid.name} and command {command}"
             )
-            raise TimeoutExpired(msg) from err
+            with ErrorLogger(logger):
+                raise TimeoutExpired(msg) from err
         except RuntimeError as err:
             msg = (
                 f"MPR failed for {grid} and command {command}"
                 )
-            raise RuntimeError(msg)
-
+            with ErrorLogger(logger):
+                raise RuntimeError(msg)
 
 class MHMRestartFile:
     """
@@ -383,7 +388,6 @@ class MHMRestartFile:
         use_split_grids (bool, optional): Whether to use split grids. Defaults to False.
         ncpus (int, optional): The number of CPUs to use for parallelization. Defaults to 1.
         clean_temp_files (bool, optional): Whether to clean temporary files. Defaults to False.
-        log_level (int, optional): The log level. Defaults to 'debug'
         merge (bool, optional): Whether to merge the restart files. Defaults to True.
         merge_only (bool, optional): Whether to only merge the restart files. Defaults to False.
 
@@ -567,7 +571,8 @@ class MHMRestartFile:
         logger.info("Splitting grid")
         if self.increment_l0 is None:
             error_message = "Increment for splitting grids is not set"
-            raise ValueError(error_message)
+            with ErrorLogger(logger):
+                raise ValueError(error_message)
         for name, file_path in self.grid.morph_files.get_files_as_dict().items():
             if file_path is not None and file_path:
                 sub_grid_paths = self._split_file(name, file_path)
@@ -1132,8 +1137,8 @@ class MHMRestartFile:
                     cdf = td.cdf(data.values)
                     cdf = xr.DataArray(cdf, dims=["latitude", "longitude"])
                     ds_slope["slope"] = cdf
-                    ds_slope = ds_slope.rename({"slope": "slope_emp"})
-                    ds_slope.to_netcdf(self.grid.path / "slope_emp.nc")
+                    ds_slope_emp = ds_slope.rename({"slope": "slope_emp"})
+                    ds_slope_emp.to_netcdf(self.grid.path / "slope_emp.nc")
                     self.grid.morph_files.slope_emp = self.grid.path / "slope_emp.nc"
         else:
             for sgrid in self.subgrids:
@@ -1148,8 +1153,8 @@ class MHMRestartFile:
                     cdf = td.cdf(data.values)
                     cdf = xr.DataArray(cdf, dims=["latitude", "longitude"])
                     ds_slope["slope"] = cdf
-                    ds_slope = ds_slope.rename({"slope": "slope_emp"})
-                    ds_slope.to_netcdf(sgrid.path / "slope_emp.nc")
+                    ds_slope_emp = ds_slope.rename({"slope": "slope_emp"})
+                    ds_slope_emp.to_netcdf(sgrid.path / "slope_emp.nc")
                     sgrid.morph_files.slope_emp = sgrid.path / "slope_emp.nc"
 
     def _create_restart_for_grid(self, grid):
@@ -1160,6 +1165,7 @@ class MHMRestartFile:
         self.mpr.run_mpr(grid)
         return grid
 
+    @log_arguments()
     def create_restart_file(self):
         """
         Create a restart file for the MHM model.

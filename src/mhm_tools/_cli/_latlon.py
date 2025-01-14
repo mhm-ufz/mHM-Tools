@@ -10,9 +10,14 @@ determined from Level-0.
 """
 
 import ast
+import logging
 from pathlib import Path
 
+from mhm_tools.common.logger import ErrorLogger, log_arguments
+
 from ..pre import create_latlon
+
+logger = logging.getLogger(__name__)
 
 
 def add_args(parser):
@@ -127,6 +132,7 @@ def add_args(parser):
     )
 
 
+@log_arguments()
 def run(args):
     """Create the latlon file.
 
@@ -164,6 +170,7 @@ def _eval(string, name):
             f"latlon: '{name}' is not an existing file "
             f"and could not be interpreted otherwise: '{string}'"
         )
-        raise ValueError(msg) from err
+        with ErrorLogger(logger):
+            raise ValueError(msg) from err
     else:
         return py_obj

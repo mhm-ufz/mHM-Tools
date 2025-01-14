@@ -5,6 +5,7 @@ from pathlib import Path
 import xarray as xr
 
 import mhm_tools as mt
+from mhm_tools.common.logger import configure_mhm_tools_logger
 from mhm_tools.pre.create_mhm_restart_file import Grid, LatLon, MPRRunner
 
 HERE = Path(__file__).parent
@@ -15,6 +16,7 @@ TMP.mkdir(parents=True, exist_ok=True)
 class TestCreateRestart(unittest.TestCase):
     def setUp(self):
         # setup read_morph_files test
+        configure_mhm_tools_logger("ERROR")
         self.morph_dir = TMP / "morph"
         self.morph_dir.mkdir(parents=True, exist_ok=True)
         # create empty files in morph directory
@@ -111,7 +113,6 @@ class TestCreateRestart(unittest.TestCase):
             use_split_grids=False,
             clean_temp_files=True,
             ncpus=1,
-            log_level="error",
             merge=True,
             merge_only=False,
         )
@@ -203,7 +204,6 @@ class TestCreateRestart(unittest.TestCase):
             use_split_grids=False,
             clean_temp_files=True,
             ncpus=1,
-            log_level="error",
             merge=True,
             merge_only=False,
         )

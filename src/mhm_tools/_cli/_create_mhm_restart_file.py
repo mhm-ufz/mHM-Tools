@@ -5,11 +5,17 @@ A restart file contains all the static information to run mHM on a specific grid
 
 """
 
+import logging
+
+import numpy as np
 from mhm_tools.common.cli_utils import get_coords
-from mhm_tools.common.logger import logger, set_log_level
+
+from mhm_tools.common.logger import ErrorLogger
 from mhm_tools.pre.create_mhm_restart_file import Grid, LatLon, MPRRunner
 
 from ..pre import MHMRestartFile
+
+logger = logging.getLogger(__name__)
 
 
 def add_args(parser):
@@ -177,13 +183,6 @@ def add_args(parser):
         required=False,
         help=("delete the temporary files created during the process"),
     )
-
-    parser.add_argument(
-        "--log_level",
-        default="INFO",
-        help=("Set the logging level"),
-    )
-
     parser.add_argument(
         "--ncpus",
         default=1,
@@ -210,7 +209,6 @@ def run(args):
     args : argparse.Namespace
         parsed command line arguments
     """
-    set_log_level(args.log_level)
 
     l1_resolution = float(args.l1_resolution)
 
@@ -236,18 +234,10 @@ def run(args):
         args.lat_max,
     )
 
-    logger.info("Creating restart file for grid with the following coordinates:")
-    logger.info(f"lon_min: {lon_min_target_grid}")
-    logger.info(f"lon_max: {lon_max_target_grid}")
-    logger.info(f"lat_min: {lat_min_target_grid}")
-    logger.info(f"lat_max: {lat_max_target_grid}")
-    logger.info(f"l0_resolution: {l0_resolution}")
-    logger.info(f"l1_resolution: {l1_resolution}")
-
     if args.land_mask_file is None and args.no_merge is not None:
-        raise ValueError(
-            "You need to provide a land mask file at L1 resolution if you want to merge the restart files"
-        )
+        with ErrorLogger(logger):
+            no_land_mask_error = "You need to provide a land mask file at L1 resolution if you want to merge the restart files"
+            raise ValueError(no_land_mask_error)
 
     l0 = LatLon(
         lon_min=float(lon_min_target_grid),

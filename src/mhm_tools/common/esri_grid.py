@@ -1,11 +1,16 @@
 """Common ESRI ASCII grid routines."""
 
+import logging
 import warnings
 from pathlib import Path
 
 import numpy as np
 
+from mhm_tools.common.logger import ErrorLogger
+
 from .constants import ESRI_REQ, ESRI_TYPES, NO_DATA
+
+logger = logging.getLogger(__name__)
 
 
 def _is_number(string):
@@ -61,7 +66,8 @@ def standardize_header(header):
     missing = ESRI_REQ - (set(header) & ESRI_REQ)
     if missing:
         msg = f"standardize_header: missing header information {missing}"
-        raise ValueError(msg)
+        with ErrorLogger(logger):
+            raise ValueError(msg)
     return header
 
 
@@ -125,7 +131,8 @@ def read_grid(file, dtype=None):
             f"read_grid: data shape {data.shape} "
             f"not matching given header ({nrows=}, {ncols=})."
         )
-        raise ValueError(msg)
+        with ErrorLogger(logger):
+            raise ValueError(msg)
     return header, data
 
 
@@ -177,20 +184,23 @@ def write_grid(file, header, data=None, dtype="f4"):
     header = standardize_header(header)
     if not issubclass(np.dtype(dtype).type, (np.integer, np.floating)):
         msg = f"write_grid: data type needs to be integer or float. Got: {dtype}"
-        raise ValueError(msg)
+        with ErrorLogger(logger):
+            raise ValueError(msg)
     is_int = issubclass(np.dtype(dtype).type, np.integer)
     if data is not None:
         data = np.array(data, dtype=dtype, copy=False, ndmin=2)
         if data.ndim != 2:
             msg = f"write_grid: data needs to be 2D. Got: {data.ndim}D"
-            raise ValueError(msg)
+            with ErrorLogger(logger):
+                raise ValueError(msg)
         nrows, ncols = header["nrows"], header["ncols"]
         if data.shape[0] != nrows or data.shape[1] != ncols:
             msg = (
                 f"write_grid: data shape {data.shape} "
                 f"not matching given header ({nrows=}, {ncols=})."
             )
-            raise ValueError(msg)
+            with ErrorLogger(logger):
+                raise ValueError(msg)
     # write header and data
     header_path = Path(file)
     header_path.parent.mkdir(parents=True, exist_ok=True)
@@ -240,7 +250,8 @@ def check_resolutions(
             f"{name_1} ({cellsize_1}) should be finer than "
             f"{name_2} ({cellsize_2})"
         )
-        raise ValueError(msg)
+        with ErrorLogger(logger):
+            raise ValueError(msg)
     f_ratio = (
         cellsize_1 / cellsize_2 if cellsize_1 > cellsize_2 else cellsize_2 / cellsize_1
     )
@@ -253,7 +264,8 @@ def check_resolutions(
             f"{name_2} ({cellsize_2}) are not compatible. "
             f"Ratio: {f_ratio}"
         )
-        raise ValueError(msg)
+        with ErrorLogger(logger):
+            raise ValueError(msg)
     return ratio
 
 
@@ -346,7 +358,8 @@ def check_grid_compatibility(header_1, header_2, name_1="LA", name_2="LB"):
             f"{name_2} ({header_2['xllcorner']}, {header_2['yllcorner']})  and "
             "don't share the same lower-left corner."
         )
-        raise ValueError(msg)
+        with ErrorLogger(logger):
+            raise ValueError(msg)
     # find the finer grid
     if header_1["cellsize"] > header_2["cellsize"]:
         header_1, header_2, name_1, name_2 = header_2, header_1, name_2, name_1
@@ -366,4 +379,5 @@ def check_grid_compatibility(header_1, header_2, name_1="LA", name_2="LB"):
             f"would need an extend of ({ncols=}, {nrows=}) "
             f"to be compatible with {name_1}."
         )
-        raise ValueError(msg)
+        with ErrorLogger(logger):
+            raise ValueError(msg)

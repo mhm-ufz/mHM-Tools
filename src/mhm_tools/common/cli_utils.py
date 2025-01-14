@@ -1,18 +1,24 @@
-import argparse
-from venv import logger
+"""Provide general cli functionality."""
 
-import numpy as np
+import argparse
+import logging
+import xarray as xr
+
+from mhm_tools.common.logger import ErrorLogger
+
+logger = logging.getLogger(__name__)
 
 
 def parse_coords(coords_str):
-    # Split the input string by comma and convert each part to a float
+    """Split the input string of 'lat,lon' by comma and convert each part to a float."""
     try:
         lat, lon = map(float, coords_str.split(","))
         return lat, lon
-    except ValueError:
-        raise argparse.ArgumentTypeError(
-            "Coordinates must be two comma-separated floats."
-        )
+    except ValueError as verr:
+        with ErrorLogger(logger):
+            raise argparse.ArgumentTypeError from verr(
+                "Coordinates must be two comma-separated floats."
+            )
 
 
 def get_coords_from_mask(mask):
@@ -28,7 +34,6 @@ def get_coords_from_mask(mask):
     tuple
         tuple containing the coordinates
     """
-    import xarray as xr
 
     mask = xr.open_dataset(mask)
     lon = mask.lon
@@ -103,9 +108,10 @@ def get_coords(
         lat_min_target_grid = lat_min
         lat_max_target_grid = lat_max
     elif raise_exception:
-        raise ValueError(
-            "Either all coordinat bounds and resolutions or --mask_file must be provided"
-        )
+        with ErrorLogger(logger):
+            raise ValueError(
+                "Either all coordinat bounds and resolutions or --mask_file must be provided"
+            )
     else:
         return None, None, None, None, None
     return (
@@ -115,3 +121,4 @@ def get_coords(
         lat_max_target_grid,
         mask,
     )
+

@@ -6,11 +6,14 @@ Authors
 - Sebastian Müller
 """
 
+import logging
 import time
 
 import numpy as np
 import xarray as xr
 from pyproj import Proj
+
+from mhm_tools.common.logger import log_arguments
 
 from ..common import (
     NC_ENCODE_DEFAULTS,
@@ -22,6 +25,8 @@ from ..common import (
     standardize_header,
     write_header,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def xy_to_latlon(x, y, crs=None):
@@ -64,6 +69,7 @@ def _create_grid(header, crs=None, dtype="f4"):
 #     """This function writes the latlon.nc file from given ASCII headers."""
 
 
+@log_arguments()
 def create_latlon(
     out_file,
     level0,

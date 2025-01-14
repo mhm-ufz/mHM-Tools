@@ -1,12 +1,14 @@
-"""
-TODO: add description
-"""
+"""Create basin id file and deliniate catchments."""
+
+import logging
 
 import numpy as np
 
-from mhm_tools.common.logger import logger, set_log_level
+from mhm_tools.common.logger import ErrorLogger
 
 from ..pre import create_catchment
+
+logger = logging.getLogger(__name__)
 
 
 def add_args(parser):
@@ -116,9 +118,10 @@ def run(args):
     coordinate_slices = None
     if args.gauge_coords is not None:
         if args.lonlatbox is not None:
-            raise ValueError(
-                "You can't use --gauge_coords and --lonlatbox at the same time."
-            )
+            with ErrorLogger(logger):
+                raise ValueError(
+                    "You can't use --gauge_coords and --lonlatbox at the same time."
+                )
         lat, lon = map(float, args.gauge_coords.split(","))
         gauge_coords = (np.array([lon]), np.array([lat]))
         logger.info(
@@ -130,7 +133,6 @@ def run(args):
         logger.info(
             f"using lonlatbox with extends: lat=({latmax}, {latmin}); lon=({lonmin}, {lonmax})"
         )
-    set_log_level(args.log_level)
     create_catchment(
         input_file=args.input_file,
         output_path=args.output_path,

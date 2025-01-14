@@ -1,4 +1,4 @@
-image: python
+image: python:3.11
 
 stages:
   - test
@@ -28,6 +28,7 @@ test:
       - cov
 
 documentation:
+  when: always
   stage: build
   script:
     - pip3 install --editable .[doc]
@@ -38,6 +39,7 @@ documentation:
       - public
 
 build:
+  when: always
   stage: build
   variables:
     GIT_STRATEGY: clone
