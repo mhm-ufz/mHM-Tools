@@ -192,11 +192,11 @@ def get_gauge_coords(ds, facc, lonlat=None, xy=None,  cell_diff=1, max_cell_diff
         logger.info(f"{lon_x}, {lat_y}, {found_facc}, {facc}, {cell_diff}")
         return lon_x, lat_y, found_facc
     elif cell_diff < max_cell_diff:
-        logger.warning(f'No similar flow acc found. Increasing search radius to {cell_diff+1} cells in each direction.')
+        logger.debug(f'No similar flow acc found. Increasing search radius to {cell_diff+1} cells in each direction.')
         return get_gauge_coords(ds, facc, lonlat=[lon, lat], cell_diff=cell_diff+1, max_cell_diff=3, diff_percent=10)
     else: 
-        logger.error(f'No similar flow accumulation found nearby.')
-        logger.info("None, None, None")
+        logger.debug(f'No similar flow accumulation found nearby.')
+        logger.debug("None, None, None")
         return None, None, None
 
 
@@ -290,9 +290,12 @@ def Q_data_to_CSV(
             )
             x_new, y_new, facc_new = [], [], []
             for xn,yn,fan in out: 
+                if xn is None or yn is None or fan is None:
+                    continue
                 x_new.append(xn)
                 y_new.append(yn)
                 facc_new.append(fan)
+        logger.info(f"There are {x_new} gauges")
         logger.info('creating sim dataframe')
         sim_data = xr.open_dataset(model_data_path)
         if slicing_condition is not None:
