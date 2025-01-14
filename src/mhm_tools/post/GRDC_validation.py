@@ -218,7 +218,7 @@ def Q_data_to_CSV(
     - observed_data (xarray.DataArray): The observed data as an xarray DataArray.
     - gauge_info_path (str): The file path to the gauge information dataset.
     - model_keyword (str): dir to be added to the path were files will be stored.
-    - save_path (str): optional, saving path
+    - output_path (str): optional, saving path
 
     Note:
     The gauge information dataset should contain the following variables:
@@ -336,7 +336,7 @@ def evaludate_grdc_data(
     observed_data_path,
     gauge_info_path,
     mrm_restart_file='/work/kelbling/ecflow_work/new_gloria_historical/output/gloria_0p05deg/mrm_restart_file/mRM_restart_001.nc',
-    save_path=None,
+    output_path=None,
     n_jobs=1,
     sim_variable="Qrouted",
     observed_variable="runoff_mean_mm",
@@ -349,8 +349,8 @@ def evaludate_grdc_data(
     n_bootstrap_years=5,
     n_boostrap_selections = 0,
 ):
-    save_path = Path(save_path)
-    observed_df, model_df = Q_data_to_CSV(model_data_path=model_data_path, observed_data_path=observed_data_path, mrm_restart_file=mrm_restart_file, observed_variable=observed_variable, sim_variable=sim_variable, gauge_info_path=gauge_info_path,model_keyword="mrm", saving_path=save_path, lon_min=lon_min, lon_max=lon_max, lat_min=lat_min, lat_max=lat_max, resolution=resolution, n_jobs=n_jobs)
+    output_path = Path(output_path)
+    observed_df, model_df = Q_data_to_CSV(model_data_path=model_data_path, observed_data_path=observed_data_path, mrm_restart_file=mrm_restart_file, observed_variable=observed_variable, sim_variable=sim_variable, gauge_info_path=gauge_info_path,model_keyword="mrm", saving_path=output_path, lon_min=lon_min, lon_max=lon_max, lat_min=lat_min, lat_max=lat_max, resolution=resolution, n_jobs=n_jobs)
 
     if direct_comparison: 
         return # use jeissons function directly
@@ -400,7 +400,10 @@ def evaludate_grdc_data(
         msg = 'Direct comparison is not yet implemented'
         raise NotImplementedError(msg)
     results_df = pd.DataFrame(results)
-    results_df.to_csv(save_path / 'results.csv')
+    results_df.to_csv(output_path / 'results.csv')
+        plot_cdf(results_df, output_path)
+    
+def plot_kdf(results_df, output_path):
     sns.kdeplot(
         data=results_df,     # The DataFrame with results
         x="alpha",           # The x-axis is the alpha value
@@ -421,7 +424,7 @@ def evaludate_grdc_data(
     )
     plt.axvline(x=1, color='black', linestyle='--', linewidth=1)
     plt.xlim(-0.05, 2)
-    plt.savefig(save_path / 'alpha.png')
+    plt.savefig(output_path / 'alpha.png')
     plt.close()
 
     sns.kdeplot(
@@ -444,7 +447,7 @@ def evaludate_grdc_data(
     )
     plt.axvline(x=1, color='black', linestyle='--', linewidth=1)
     plt.xlim(-0.05, 2)
-    plt.savefig(save_path / 'beta.png')
+    plt.savefig(output_path / 'beta.png')
     plt.close()
 
     sns.kdeplot(
@@ -467,6 +470,93 @@ def evaludate_grdc_data(
     )
     plt.axvline(x=1, color='black', linestyle='--', linewidth=1)
     plt.xlim(-0.05, 2)
-    plt.savefig(save_path / 'gamma.png')
+    plt.savefig(output_path / 'gamma.png')
     plt.close()
 
+
+def plot_cdf(df, output_path, plot_all=True):
+    # --- 1) Read your CSV ---
+    # Adjust 'mydata.csv' to your actual file path
+    # df = pd.read_csv('/work/kelbling/ecflow_work/gloria_hourly_t2k/output/gloria_0p05deg/discharge_validation/results.csv', index_col=0)
+    # output_path = Path('/work/luedke/tmp/test_discharge_plots')
+    # if not output_path.is_dir():
+    #     output_path.mkdir()
+    # The variables to plot
+    variables = ['alpha', 'beta', 'gamma']
+
+    # --- 2) Check number of unique IDs ---
+    unique_ids = df['id'].unique()
+    n_ids = len(unique_ids)
+    logger.info(f"Found {n_ids} unique IDs.")
+
+    # --- 3 & 4) Branch based on the number of unique IDs ---
+    if n_ids < 9 or plot_all:
+        logger.info("Single ids")
+        # Plot a separate CDF for each ID, for each variable
+        for var in variables:
+            plt.figure(figsize=(6,4))
+            for uid in unique_ids:
+                # Extract all values of `var` for the given ID
+                subdata = df.loc[df['id'] == uid, var].sort_values()
+                if len(subdata) == 0:
+                    continue  # no data for this ID
+
+                # Compute the empirical CDF
+                cdfvals = np.arange(1, len(subdata)+1) / float(len(subdata))
+
+                # Plot
+                plt.plot(subdata, cdfvals, label=f"id = {int(uid)}")
+
+            plt.title(f"CDF of {var} (Separate lines per ID)")
+            plt.xlabel(var)
+            plt.ylabel('CDF')
+            plt.legend()
+            plt.tight_layout()
+            plt.savefig(output_path/f"cdf_{var}_by_id.png", dpi=150)
+            plt.close()
+
+    if n_ids < 10 or plot_all:
+        logger.info("All values")
+        # Plot a separate CDF for each ID, for each variable
+        for var in variables:
+            plt.figure(figsize=(6,4))
+            # Extract all values of `var` for the given ID
+            subdata = df[var].sort_values()
+            if len(subdata) == 0:
+                continue  # no data for this ID
+
+            # Compute the empirical CDF
+            cdfvals = np.arange(1, len(subdata)+1) / float(len(subdata))
+
+            # Plot
+            plt.plot(subdata, cdfvals)
+
+            plt.title(f"CDF of {var} (Separate lines per ID)")
+            plt.xlabel(var)
+            plt.ylabel('CDF')
+            plt.legend()
+            plt.tight_layout()
+            plt.savefig(output_path/f"cdf_{var}_all.png", dpi=150)
+            plt.close()
+
+
+    if n_ids > 9 or plot_all:
+        # Many IDs => plot the distribution of mean values by ID, for each variable
+        # 1) Compute average (mean) across all rows belonging to each ID
+        means_by_id = df.groupby('id')[variables].mean()
+
+        for var in variables:
+            # This is now one mean value per ID
+            data = means_by_id[var].sort_values()
+            cdfvals = np.arange(1, len(data)+1) / float(len(data))
+
+            plt.figure(figsize=(6,4))
+            plt.plot(data, cdfvals, marker='o')
+            plt.title(f"CDF of mean {var} across {n_ids} IDs")
+            plt.xlabel(f"mean {var}")
+            plt.ylabel("CDF")
+            plt.tight_layout()
+            plt.savefig(output_path/f"cdf_{var}_mean_across_ids.png", dpi=150)
+            plt.close()
+
+    logger.info("Done! Check the saved PNG files for your CDF plots.")
