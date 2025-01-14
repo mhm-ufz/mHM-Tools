@@ -401,7 +401,7 @@ def evaludate_grdc_data(
         raise NotImplementedError(msg)
     results_df = pd.DataFrame(results)
     results_df.to_csv(output_path / 'results.csv')
-        plot_cdf(results_df, output_path)
+    plot_cdf(results_df, output_path)
     
 def plot_kdf(results_df, output_path):
     sns.kdeplot(
