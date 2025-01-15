@@ -8,13 +8,13 @@ from .. import __version__
 from . import (
     _bankfull,
     _create_catchment,
+    _hydrograph,
     _create_mhm_restart_file,
     _create_subdomain_masks,
     _grdc_validation,
     _latlon,
     _seasonality_validation,
 )
-
 
 class Formatter(
     argparse.ArgumentDefaultsHelpFormatter, argparse.RawDescriptionHelpFormatter
@@ -23,8 +23,7 @@ class Formatter(
 
 
 def add_command_from_module(subparsers, name, module):
-    """
-    Add a subcommand from a given module.
+    """Add a subcommand from a given module.
 
     Parameters
     ----------
@@ -34,6 +33,7 @@ def add_command_from_module(subparsers, name, module):
         Name of the command to add.
     module : module
         Module containing the `add_args` and `run` functions defining the command.
+
     """
     desc = module.__doc__
     kwargs = {"description": desc}
@@ -72,6 +72,8 @@ def _get_parser():
     # module needs two functions: add_args and run
 
     add_command_from_module(subparsers, "bankfull", _bankfull)
+
+    add_command_from_module(subparsers, "hydrograph", _hydrograph)
     add_command_from_module(
         subparsers, "seasonality_validation", _seasonality_validation
     )
@@ -125,8 +127,7 @@ def _get_parser():
 
 
 def main(argv=None):
-    """
-    Execute main CLI routine.
+    """Execute main CLI routine.
 
     Parameters
     ----------
@@ -136,6 +137,7 @@ def main(argv=None):
     Returns
     -------
         result of the called sub-argument routine
+
     """
     args = _get_parser().parse_args(argv)
     configure_mhm_tools_logger(
