@@ -143,5 +143,5 @@ def run(args):
         args.ncpus,
         args.n_boostrap_years,
         args.n_bootstrap_selections,
-        args.direct_comparison
+        args.direct_comparison,
     )

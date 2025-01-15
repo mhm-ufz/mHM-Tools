@@ -1,5 +1,6 @@
-import xarray as xr
 import logging
+
+import xarray as xr
 
 logger = logging.getLogger(__name__)
 

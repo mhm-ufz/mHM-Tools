@@ -95,14 +95,23 @@ def add_args(parser):
         "--l1_resolution",
         required=False,
         default=None,
-        help=("""Resolution of the mHM target grid in degrees. If given the grid will be upscaled to this resolution."""),
+        help=(
+            """Resolution of the mHM target grid in degrees. If given the grid will be upscaled to this resolution."""
+        ),
     )
     parser.add_argument(
         "--mask_file",
         default=None,
         help=("Path where to save the mask file"),
     )
-    parser.add_argument("--frame", default=0, type=int, help=("Creates a frame of nonflow cells around the domain to enable non global domains in ulysses mrm which connects the eastern and western boundaries."))
+    parser.add_argument(
+        "--frame",
+        default=0,
+        type=int,
+        help=(
+            "Creates a frame of nonflow cells around the domain to enable non global domains in ulysses mrm which connects the eastern and western boundaries."
+        ),
+    )
     parser.add_argument("--log_level", default="INFO", type=str, help=("Logging level"))
 
 
@@ -124,9 +133,7 @@ def run(args):
                 )
         lat, lon = map(float, args.gauge_coords.split(","))
         gauge_coords = (np.array([lon]), np.array([lat]))
-        logger.info(
-            f"using gauge coordinates {gauge_coords}"
-        )
+        logger.info(f"using gauge coordinates {gauge_coords}")
     elif args.lonlatbox is not None:
         lonmin, lonmax, latmin, latmax, resl0 = map(float, args.lonlatbox.split(","))
         coordinate_slices = {"lat": slice(latmax, latmin), "lon": slice(lonmin, lonmax)}
@@ -143,5 +150,5 @@ def run(args):
         coordinate_slices=coordinate_slices,
         mask_file=args.mask_file,
         target_resolution=args.l1_resolution,
-        frame=args.frame
+        frame=args.frame,
     )

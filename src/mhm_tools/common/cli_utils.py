@@ -2,6 +2,7 @@
 
 import argparse
 import logging
+
 import xarray as xr
 
 from mhm_tools.common.logger import ErrorLogger
@@ -34,7 +35,6 @@ def get_coords_from_mask(mask):
     tuple
         tuple containing the coordinates
     """
-
     mask = xr.open_dataset(mask)
     lon = mask.lon
     lat = mask.lat
@@ -56,7 +56,9 @@ def get_coords_from_mask(mask):
     lat_min_target_grid = np.round(lat_min_target_grid, 6)
     lat_max_target_grid = np.round(lat_max_target_grid, 6)
 
-    logger.debug(f'Read coord from mask file: lat ({lat_min_target_grid} to {lat_max_target_grid}) {(lon_max_target_grid-lat_min_target_grid)/resolution} cells and lon ({lon_min_target_grid} to {lon_max_target_grid}) {(lon_max_target_grid-lat_min_target_grid)/resolution} cells')
+    logger.debug(
+        f"Read coord from mask file: lat ({lat_min_target_grid} to {lat_max_target_grid}) {(lon_max_target_grid-lat_min_target_grid)/resolution} cells and lon ({lon_min_target_grid} to {lon_max_target_grid}) {(lon_max_target_grid-lat_min_target_grid)/resolution} cells"
+    )
 
     if lat_min_target_grid > lat_max_target_grid:
         lat_min_target_grid, lat_max_target_grid = (
@@ -121,4 +123,3 @@ def get_coords(
         lat_max_target_grid,
         mask,
     )
-

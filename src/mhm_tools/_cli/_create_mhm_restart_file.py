@@ -7,9 +7,7 @@ A restart file contains all the static information to run mHM on a specific grid
 
 import logging
 
-import numpy as np
 from mhm_tools.common.cli_utils import get_coords
-
 from mhm_tools.common.logger import ErrorLogger
 from mhm_tools.pre.create_mhm_restart_file import Grid, LatLon, MPRRunner
 
@@ -209,7 +207,6 @@ def run(args):
     args : argparse.Namespace
         parsed command line arguments
     """
-
     l1_resolution = float(args.l1_resolution)
 
     if args.lonlatbox is not None:

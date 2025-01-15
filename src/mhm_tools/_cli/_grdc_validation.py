@@ -75,10 +75,8 @@ def add_args(parser):
         required=False,
         help=("Use no statistics but compare timeseries directly. Needs ref_path."),
     )
-    parser.add_argument(
-        "--output_dir",
-        help="Path for the output dir.",
-        required=True)
+    parser.add_argument("--output_dir", help="Path for the output dir.", required=True)
+
 
 def run(args):
     lon_min, lon_max, lat_min, lat_max, mask = get_coords(
@@ -98,5 +96,5 @@ def run(args):
         lat_max=lat_max,
         n_boostrap_selections=args.n_bootstrap_selections,
         n_bootstrap_years=args.n_boostrap_years,
-        direct_comparison=args.direct_comparison
+        direct_comparison=args.direct_comparison,
     )

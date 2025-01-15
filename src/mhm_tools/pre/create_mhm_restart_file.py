@@ -362,12 +362,11 @@ class MPRRunner:
             )
             with ErrorLogger(logger):
                 raise TimeoutExpired(msg) from err
-        except RuntimeError as err:
-            msg = (
-                f"MPR failed for {grid} and command {command}"
-                )
+        except RuntimeError:
+            msg = f"MPR failed for {grid} and command {command}"
             with ErrorLogger(logger):
                 raise RuntimeError(msg)
+
 
 class MHMRestartFile:
     """
@@ -594,7 +593,7 @@ class MHMRestartFile:
         l0, l1 = self._create_latlon(lon_min, lat_min)
         lon_slice = slice(l1.lon_min, l1.lon_max)
         lat_slice = slice(l1.lat_max, l1.lat_min)
-        logger.debug(f'slice_{i}_{j}: lat {lat_slice}; lon {lon_slice}')
+        logger.debug(f"slice_{i}_{j}: lat {lat_slice}; lon {lon_slice}")
         ds_cut = ds.sel(
             longitude=lon_slice,
             latitude=lat_slice,
@@ -699,7 +698,7 @@ class MHMRestartFile:
             ]
         else:
             restart_file_paths = [subgrid.restart_file for subgrid in self.subgrids]
-        logger.debug(f'Restart File Paths: {restart_file_paths}')
+        logger.debug(f"Restart File Paths: {restart_file_paths}")
         restart_file_paths.sort()
 
         logger.info(f"Opening {restart_file_paths[0]} als reference")
