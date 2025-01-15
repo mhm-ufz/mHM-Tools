@@ -134,7 +134,7 @@ def get_coord_values(ds, lat=False, lon=False):
     return ds[key].values
 
 
-def get_file_stats(file, input_var, factor=1, coordinate_slice=None, output_path=None):
+def get_file_stats(file, input_var, factor=1, coordinate_slice=None, output_path=None, years=None):
     with xr.open_dataset(file, engine="netcdf4") as ds:
         # Apply coordinate slicing if needed
         if coordinate_slice is not None:
@@ -143,6 +143,8 @@ def get_file_stats(file, input_var, factor=1, coordinate_slice=None, output_path
             ds = ds.sel(
                 {lat_key: coordinate_slice["lat"], lon_key: coordinate_slice["lon"]}
             )
+        if years is not None:
+            ds = ds.sel(time=ds.time.dt.year.isin(years))
 
         # Calculate climatology and standard deviation along the time dimension
         clim = get_clim_from_ds(ds, input_var, factor)
@@ -164,19 +166,27 @@ def get_file_stats(file, input_var, factor=1, coordinate_slice=None, output_path
     return output
 
 
-def get_files(path, n_bootstrap_years=None):
+def get_files(path, n_bootstrap_years=None, years=None):
     nc_files = []
     # Search for .nc files at each depth level
+    all_years = [y for y in path.glob("*/") if y.is_dir()]
+    if years is not None:
+        selectable_years = [y for y in all_years if y.name in years]
+    else:
+        selectable_years = all_years
+    logger.debug(f"selectable years are {selectable_years} - n_bootstrap_years is {n_bootstrap_years}")
     if n_bootstrap_years is not None:
         # needs fixed folder structure of y/m/file
-        years = [y for y in path.glob("*/") if y.is_dir()]
-        selected_years = random.choices(years, k=n_bootstrap_years)
+        selected_years = random.choices(selectable_years, k=n_bootstrap_years)
         for year in selected_years:
             for depth in range(3):  # Depth 0 to 2
                 nc_files.extend(year.glob("*/" * depth + "*.nc"))
     else:
-        for depth in range(1, 4):  # Depth 1 to 3
-            nc_files.extend(path.glob("*/" * depth + "*.nc"))
+        for year in selectable_years:
+            for depth in range(3):  # Depth 0 to 2
+                nc_files.extend(year.glob("*/" * depth + "*.nc"))
+        # for depth in range(1, 4):  # Depth 1 to 3
+        #     nc_files.extend(path.glob("*/" * depth + "*.nc"))
     return nc_files
 
 
@@ -258,8 +268,11 @@ def get_stats_one_pass(
     n_bootstrap_years=None,
     bootstrap_index=None,
     output_path=None,
+    years=None
 ):
-    files = get_files(input_path, n_bootstrap_years=n_bootstrap_years)
+    logger.debug(years)
+    files = get_files(input_path, n_bootstrap_years=n_bootstrap_years, years=years)
+    logger.debug(f'List of files: {files}')
     file_subsets = split_file_list(files, ncpus)
     logger.info("creating statistics...")
     subset_results = Parallel(n_jobs=ncpus, backend="loky")(
@@ -463,7 +476,7 @@ def create_map_from_output(output_path, input_name, ref_name):
 
 
 def get_stats(
-    path, var, factor, coordinate_slice, n_bootstrap_years, ncpus, output_file
+    path, var, factor, coordinate_slice, n_bootstrap_years, ncpus, output_file, years=None
 ):
     if var is not None:
         if path.is_file():
@@ -479,6 +492,7 @@ def get_stats(
                 n_bootstrap_years=n_bootstrap_years,
                 ncpus=ncpus,
                 output_path=output_file,
+                years=years
             )
         else:
             with ErrorLogger(logger):
@@ -492,6 +506,8 @@ def get_stats(
                         get_coord_key(ds_input, lon=True): coordinate_slice["lon"],
                     }
                 )
+            if years is not None:
+                ds_input = ds_input.sel(time=ds_input.time.dt.year.isin(years))
             if "clim" in ds_input and "std" in ds_input and "mean" in ds_input:
                 stats_ds = ds_input
             else:
@@ -516,6 +532,7 @@ def compare_input_with_ref(
     n_bootstrap_years=None,
     bootstrap_index=None,
     ncpus=1,
+    years=None
 ):
     if bootstrap_index is not None:
         random.seed(bootstrap_index)
@@ -531,6 +548,7 @@ def compare_input_with_ref(
         n_bootstrap_years=n_bootstrap_years,
         ncpus=ncpus,
         output_file=input_stats_file,
+        years=years
     )
     # get output statistics
 
@@ -542,6 +560,7 @@ def compare_input_with_ref(
         n_bootstrap_years=n_bootstrap_years,
         ncpus=ncpus,
         output_file=ref_stats_file,
+        years=years
     )
 
     input, ref = regridd_to_higher_spatial_resolution(input, ref)
@@ -684,11 +703,11 @@ def evaluate_boostraping_stat_files(stat_files, input_name, ref_name):
     }
 
 
-def get_dataset_from_path(path):
+def get_dataset_from_path(path, years=None):
     if path.is_file() and path.suffix == "nc":
         return xr.open_dataset(path)
     if path.is_dir():
-        file_list = get_files(path)
+        file_list = get_files(path, years=years)
         logger.debug(file_list)
         logger.debug("combining files by coords ...")
         return xr.open_mfdataset(
@@ -733,7 +752,7 @@ def regridd_to_higher_spatial_resolution(ds1, ds2):
 
     # Return regridded dataset and finer dataset
     logger.info(
-        f'Regridded the two datasets to the resolution lat: {coarse_ds["lat"][1]-coarse_ds["lat"][0]}, lon: {fine_ds["lon"][1]-fine_ds["lon"][0]}'
+        f'Regridded the two datasets to the resolution lat: {coarse_ds["lat"].data[1]-coarse_ds["lat"].data[0]}, lon: {coarse_ds["lon"].data[1]-coarse_ds["lon"].data[0]}'
     )
     if coarse_ds is ds1:
         return regridded_ds, ds2
@@ -855,6 +874,30 @@ def direct_comparison(
         output_path,
     )
 
+def get_overlapping_years(input_path, ref_path):
+    logger.info('Determining overlapping years.')
+    years_in = []
+    years_ref = []
+    if input_path.is_dir():
+        years_in.extend([p.name for p in input_path.glob('*') if p.is_dir()])
+    years_in.sort()
+    logger.debug(f"Input years: {years_in}")
+    # elif input_path.is_file():
+    #     with xr.open_dataset(input_path) as ds:
+    #         years = ds['time'].year.unique()
+    if ref_path.is_dir():
+        years_ref.extend([p.name for p in ref_path.glob('*') if p.is_dir() and p.name])
+    years_ref.sort()
+    logger.debug(f"Ref years: {years_ref}")
+    years = []
+    for year in years_in:
+        if year in years_ref:
+            years.append(year.strip())
+            # try: 
+            #     years.append(int(year))
+            # except:
+            #     logger.debug(f"{year} can not be converted to `int`")
+    return years
 
 @log_arguments()
 def seasonality_grid_validation(
@@ -877,19 +920,22 @@ def seasonality_grid_validation(
     output_path = Path(output_path)
     input_path = Path(input_path)
     ref_path = Path(ref_path) if ref_path is not None else None
+    years = None
     if direct_comp:
-        direct_comparison(
-            input_path,
-            ref_path,
-            input_var,
-            ref_var,
-            input_name,
-            ref_name,
-            input_factor,
-            ref_factor,
-            coordinate_slice,
-            output_path,
-        )
+        # direct_comparison(
+        #     input_path,
+        #     ref_path,
+        #     input_var,
+        #     ref_var,
+        #     input_na  me,
+        #     ref_name,
+        #     input_factor,
+        #     ref_factor,
+        #     coordinate_slice,
+        #     output_path,
+        # )
+        years = get_overlapping_years(input_path, ref_path)
+        logger.info(f"Years {years} are overlapping.")
 
     if not output_path.is_dir():
         output_path.mkdir(parents=True)
@@ -906,6 +952,7 @@ def seasonality_grid_validation(
                 input_factor,
                 coordinate_slice,
                 output=output_path / output_name,
+                years=years
             )
         elif (
             n_bootstrap_years is not None
@@ -921,6 +968,7 @@ def seasonality_grid_validation(
                     n_bootstrap_years,
                     s,
                     output_path / output_name,
+                    years=years
                 )
                 for s in range(n_bootstrap_selections)
             )
@@ -931,6 +979,7 @@ def seasonality_grid_validation(
                 input_factor,
                 coordinate_slice,
                 output_path=output_path / output_name,
+                years=years
             )
         else:
             with ErrorLogger(logger):
@@ -961,6 +1010,7 @@ def seasonality_grid_validation(
                     coordinate_slice,
                     n_bootstrap_years,
                     s,
+                    years=years
                 )
                 for s in range(n_bootstrap_selections)
             )
@@ -986,4 +1036,5 @@ def seasonality_grid_validation(
             ref_factor,
             coordinate_slice,
             ncpus=n_cpus,
+            years=years
         )
