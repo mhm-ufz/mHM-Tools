@@ -332,12 +332,16 @@ def get_stats_one_pass(
 
 
 def plot_single_map(
-    ax, values, diff_to_mean=None, vmin=0, vmax=1, cmap=plt.cm.coolwarm
+    ax, values, diff_to_mean=None, vmin=0, vmax=1, cmap=plt.cm.coolwarm, bounds_type='quantiles'
 ):
     n_bins = 10
-    if diff_to_mean is not None:
-        vmin = 1 - diff_to_mean
-        vmax = 1 + diff_to_mean
+    if bounds_type == 'max':
+        if diff_to_mean is not None:
+            vmin = 1 - diff_to_mean
+            vmax = 1 + diff_to_mean
+    if bounds_type == 'quantiles':
+        vmin, vmax = np.nanquantile(values,0.05).data, np.nanquantile(values,0.95).data
+        # vmin, vmax = values.quantile(0.05).data, values.quantile(0.95).data
     bounds = np.linspace(vmin, vmax, n_bins + 1)
     cmap = cmap
     norm = BoundaryNorm(bounds, cmap.N)
@@ -349,6 +353,8 @@ def plot_single_map(
 def plot_map(
     rel_mean, rel_std, spearman, ref_clim, input_clim, input_name, ref_name, output_path
 ):
+    rel_mean = np.where(rel_mean==np.inf, np.nan, rel_mean)
+    rel_std = np.where(rel_std==np.inf, np.nan, rel_std)
     fig, axes = plt.subplots(2, 2, figsize=(10.5, 4.68))
     if input_name is not None and ref_name is not None:
         fig.suptitle(f"Comparision {input_name} with {ref_name}")
@@ -453,7 +459,7 @@ def plot_map(
 
 
 def create_map_from_output(output_path, input_name, ref_name):
-    with xr.open_dataset(get_rel_stat_file(output_path, ref_name)) as ds:
+    with xr.open_dataset(get_rel_stat_file(output_path, input_name, ref_name)) as ds:
         rel_std = ds["rel_std"]
         rel_mean = ds["rel_mean"]
         spearman = ds["spearman"]
@@ -478,6 +484,7 @@ def create_map_from_output(output_path, input_name, ref_name):
 def get_stats(
     path, var, factor, coordinate_slice, n_bootstrap_years, ncpus, output_file, years=None
 ):
+    logger.info(f"Get stats for {path}")
     if var is not None:
         if path.is_file():
             stats_ds = get_file_stats(
@@ -922,12 +929,12 @@ def seasonality_grid_validation(
     ref_path = Path(ref_path) if ref_path is not None else None
     years = None
     if direct_comp:
-        # direct_comparison(
+        # return direct_comparison(
         #     input_path,
         #     ref_path,
         #     input_var,
         #     ref_var,
-        #     input_na  me,
+        #     input_name,
         #     ref_name,
         #     input_factor,
         #     ref_factor,
