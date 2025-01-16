@@ -46,7 +46,8 @@ dependencies = [
   "joblib",
   "crick",
   "distributed",
-  "seaborn"
+  "seaborn",
+  "netCDF4"
 ]
 
 [project.urls]
