@@ -332,7 +332,7 @@ def get_stats_one_pass(
 
 
 def plot_single_map(
-    ax, values, diff_to_mean=None, vmin=0, vmax=1, cmap=plt.cm.coolwarm, bounds_type='quantiles'
+    ax, values, diff_to_mean=None, vmin=0, vmax=1, cmap=plt.cm.coolwarm, bounds_type='fixed'
 ):
     n_bins = 10
     if bounds_type == 'max':
@@ -341,8 +341,10 @@ def plot_single_map(
             vmax = 1 + diff_to_mean
     if bounds_type == 'quantiles':
         vmin, vmax = np.nanquantile(values,0.05).data, np.nanquantile(values,0.95).data
-        # vmin, vmax = values.quantile(0.05).data, values.quantile(0.95).data
+    if bounds_type == 'fixed':
+        vmin, vmax = 0.5, 1.5
     bounds = np.linspace(vmin, vmax, n_bins + 1)
+    bounds = [np.round(b,2) for b in bounds]
     cmap = cmap
     norm = BoundaryNorm(bounds, cmap.N)
 
