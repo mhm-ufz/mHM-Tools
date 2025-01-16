@@ -461,7 +461,9 @@ def plot_map(
 
 
 def create_map_from_output(output_path, input_name, ref_name):
-    with xr.open_dataset(get_rel_stat_file(output_path, input_name, ref_name)) as ds:
+    file = get_rel_stat_file(output_path, input_name, ref_name)
+    logger.info(f'Plotting data from {file}')
+    with xr.open_dataset(file) as ds:
         rel_std = ds["rel_std"]
         rel_mean = ds["rel_mean"]
         spearman = ds["spearman"]
@@ -930,6 +932,13 @@ def seasonality_grid_validation(
     input_path = Path(input_path)
     ref_path = Path(ref_path) if ref_path is not None else None
     years = None
+
+    if not output_path.is_dir():
+        output_path.mkdir(parents=True)
+    if only_plot and get_rel_stat_file(output_path, input_name, ref_name).is_file():
+        return create_map_from_output(
+            output_path=output_path, input_name=input_name, ref_name=ref_name
+        )
     if direct_comp:
         # return direct_comparison(
         #     input_path,
@@ -946,13 +955,7 @@ def seasonality_grid_validation(
         years = get_overlapping_years(input_path, ref_path)
         logger.info(f"Years {years} are overlapping.")
 
-    if not output_path.is_dir():
-        output_path.mkdir(parents=True)
-    if only_plot and get_rel_stat_file(output_path, input_name, ref_name).is_file():
-        create_map_from_output(
-            output_path=output_path, input_name=input_name, ref_name=ref_name
-        )
-    elif ref_path is None:
+    if ref_path is None:
         output_name = f"{input_name}_stats.nc" if input_name is not None else "stats.nc"
         if input_path.is_file():
             get_file_stats(
