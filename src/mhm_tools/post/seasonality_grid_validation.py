@@ -363,13 +363,13 @@ def plot_map(
 
     # Set common colormap and normalization limits for mean_et and mean_aet
     mean_diff_1 = max(np.abs(1 - np.nanmin(rel_mean)), np.abs(1 - np.nanmax(rel_mean)))
-    im0, bounds0 = plot_single_map(axes[0, 0], rel_mean, mean_diff_1)
+    im0, bounds0 = plot_single_map(axes[0, 0], rel_mean, mean_diff_1, bounds_type='fixed')
     axes[0, 0].set_title(
         f"Relative temporal Mean (median={np.nanmedian(rel_mean):.2f})"
     )
     print(bounds0)
     std_diff_1 = max(np.abs(1 - np.nanmin(rel_std)), np.abs(1 - np.nanmax(rel_std)))
-    im1, bounds1 = plot_single_map(axes[0, 1], rel_std, std_diff_1)
+    im1, bounds1 = plot_single_map(axes[0, 1], rel_std, std_diff_1, bounds_type='fixed')
     print(bounds1)
     axes[0, 1].set_title(
         f"Relative temporal Standarddeviation (median={np.nanmedian(rel_std):.2f})"
@@ -377,7 +377,7 @@ def plot_map(
 
     im2 = axes[1, 0].imshow(spearman, vmin=np.nanmin(spearman), vmax=1)
     im2, bounds2 = plot_single_map(
-        axes[1, 0], spearman, vmin=np.nanmin(spearman), vmax=1, cmap=plt.cm.viridis_r
+        axes[1, 0], spearman, vmin=np.nanmin(spearman), vmax=1, cmap=plt.cm.viridis_r, bounds_type='quantiles'
     )
     print(bounds2)
 
