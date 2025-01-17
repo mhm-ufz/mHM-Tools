@@ -17,15 +17,14 @@ def configure_mhm_tools_logger(
     no_colsole_logging=False,
 ):
     """Configure the parser setting formating as well as Stream and Filehandler."""
-    # logging.basicConfig(format="%(asctime)s - %(levelname)-8s - %(message)s")
     logger = logging.getLogger("mhm_tools")
-    general_level = get_lowest_level(
+    general_level, error_msg_gnrl, error_msg_gnrl2 = get_lowest_level(
         log_level=log_level,
         log_file_level=log_file_level,
         count_verbose=count_verbose,
         count_quiet=count_quiet,
     )
-    error_msg_gnrl = set_log_level(logger, general_level, count_verbose, count_quiet)
+    logger.setLevel(general_level)
     error_msg_fh, error_msg_ch = None, None
     formatter = logging.Formatter(
         "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -33,15 +32,17 @@ def configure_mhm_tools_logger(
     if not no_colsole_logging:
         ch = logging.StreamHandler()
         ch.setFormatter(formatter)
-        error_msg_ch = set_log_level(ch, log_level, count_verbose, count_quiet)
+        ch_level, error_msg_ch = get_log_level(log_level, count_verbose, count_quiet)
+        ch.setLevel(ch_level)
         logger.addHandler(ch)
     if log_file:
         fh = logging.FileHandler(log_file)
         fh.setFormatter(formatter)
         if log_file_level is not None:
-            error_msg_fh = set_log_level(fh, log_file_level, count_verbose, count_quiet)
+            fh_level, error_msg_fh = get_log_level(log_file_level, count_verbose, count_quiet)
         else:
-            error_msg_fh = set_log_level(fh, log_level, count_verbose, count_quiet)
+            fh_level = general_level
+        fh.setLevel(fh_level)
         logger.addHandler(fh)
     if error_msg_gnrl is not None:
         logger.error(f"Logger: {error_msg_gnrl}")
@@ -49,20 +50,20 @@ def configure_mhm_tools_logger(
         logger.error(f"StreamHandler: {error_msg_ch}")
     if error_msg_fh is not None:
         logger.error(f"FileHandler: {error_msg_fh}")
+    logger.propagate = False
 
 
 def get_lowest_level(log_level, log_file_level, count_verbose, count_quiet):
     """Return the most verbose log level of all handlers."""
-    if log_level is not None:
-        llevel = LOG_LEVELS[log_level.upper()]
-    else:
-        llevel = LOG_LEVELS["INFO"] - 10 * count_verbose + 10 * count_quiet
+    llevel, ll_msg = get_log_level(log_level, count_verbose=count_verbose, count_quiet=count_quiet)
+    if log_file_level is not None:
+        lflevel, lf_msg = get_log_level(log_file_level)
+    else: 
+        lflevel, lf_msg = llevel, None
+    return min(llevel, lflevel), ll_msg, lf_msg
 
-    lflevel = LOG_LEVELS[log_file_level.upper()] if log_file_level is not None else 60
-    return min(llevel, lflevel)
 
-
-def set_log_level(handler, level=None, count_verbose=0, count_quiet=0):
+def get_log_level(level=None, count_verbose=0, count_quiet=0):
     """Set the logging level.
 
     Parameters
@@ -73,7 +74,8 @@ def set_log_level(handler, level=None, count_verbose=0, count_quiet=0):
         verbosity
     count_quiet : int
         quietness
-
+        
+    returns level: int
     """
     error_msg = None
     if level is None:
@@ -89,8 +91,7 @@ def set_log_level(handler, level=None, count_verbose=0, count_quiet=0):
             error_msg = f"Invalid log level: {level} - using default log level INFO"
             level = "INFO"
         level = LOG_LEVELS[level.upper()]
-    handler.setLevel(level)
-    return error_msg
+    return level, error_msg
 
 
 def log_arguments():
