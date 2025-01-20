@@ -1109,7 +1109,12 @@ class MHMRestartFile:
             / f"mHM_restart_001{self.grid.restart_file.suffix}"
         )
         logger.info(f"Writing renamed restart file to {self.grid.restart_file}")
-        ds.to_netcdf(self.grid.restart_file)
+        encoding = {}
+        for data_var in ds.data_vars:
+             encoding[data_var] = {"dtype": "float32", "_FillValue": -9999.0, "zlib": True, "complevel": 4}
+        for coord in ds.coords:
+             encoding[coord] = {"dtype": "float32", "_FillValue": -9999.0, "zlib": True, "complevel": 4}
+        ds.to_netcdf(self.grid.restart_file, encoding=encoding)
 
     def _delete_temp_files(self):
         logger.info("Deleting temporary files")
