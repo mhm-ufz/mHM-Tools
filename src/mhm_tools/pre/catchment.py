@@ -46,6 +46,7 @@ class Catchment:
         transform=None,
         out_var_name=None,
         do_shift=False,
+        target_resolution=None,
         **kwargs,
     ):
         self.flwdir = None
@@ -57,6 +58,7 @@ class Catchment:
         self._fdir = None
         self.ftype = ftype
         self.catchment_mask = None
+        self.target_resolution=target_resolution
         self.out_var_name = (
             out_var_name if out_var_name is not None else f"{var_name}.nc"
         )
@@ -100,10 +102,11 @@ class Catchment:
             transform[2] = 0
             self.transform = tuple(transform)
 
+        self.input_ds = data
         if var == "fdir":
-            self.add_fdir(data=data.data, ftype=ftype, **kwargs)
+            self.add_fdir(ftype=ftype, **kwargs)
         elif var == "dem":
-            self.add_dem(data=data, **kwargs)
+            self.add_dem(**kwargs)
         else:
             with ErrorLogger(logger):
                 raise NotImplementedError
@@ -129,7 +132,7 @@ class Catchment:
             return np.roll(data, int(len(self.ds.lon) / 2), axis=1)
         return data
 
-    def add_dem(self, data, **kwargs):
+    def add_dem(self, **kwargs):
         """Init the FlwdirRaster class from dem."""
         # perform checks
         # self.input_ds = fill_nan_with_neighbors(self.input_ds)
@@ -145,9 +148,10 @@ class Catchment:
             )
             self.get_fdir()
 
-    def add_fdir(self, data, ftype, **kwargs):
+    def add_fdir(self, **kwargs):
         """Init the FlwdirRaster class from fdir."""
         # perform check
+        data = self.input_ds.data
         if self._fdir is None:
             mask = np.isnan(data)
             if mask.any():
@@ -561,6 +565,7 @@ def create_catchment(
             latlon=latlon,
             out_var_name=temp_file1,
             do_shift=False,
+            target_resolution=target_resolution,
         )
         # create a shifted version of the catchment to avoid border effects
         temp_file2 = "hydro2.nc"

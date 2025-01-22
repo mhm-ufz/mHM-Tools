@@ -205,6 +205,9 @@ def combine_results(results):
 def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None):
     """Take a list of files with all containing data for one month and creating statisitcs while reading them one by one."""
     da = None
+    logger.debug(f"{type(files)}, {files}")
+    if not isinstance(files, list):
+        logger.warning("Is not list.")
     with xr.open_dataset(files[0], engine="netcdf4") as ds:
         # Apply coordinate slicing if needed
         if coordinate_slice is not None:
@@ -256,8 +259,10 @@ def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None)
 
 
 def split_file_list(file_list, n_processes):
-    return [file_list[i::n_processes] for i in range(n_processes)]
-
+    if n_processes > 1:
+        return [file_list[i::n_processes] for i in range(n_processes)]
+    else:
+        return file_list
 
 def get_stats_one_pass(
     input_path,

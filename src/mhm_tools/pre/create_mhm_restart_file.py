@@ -961,8 +961,8 @@ class MHMRestartFile:
             BNDS_VALUES["L1_SoilHorizons_bnds"][:, 1],
         )
 
-        for coord in ds.coords:
-            ds[coord].encoding["missing_value"] = np.nan
+        # for coord in ds.coords:
+        #     ds[coord].encoding["missing_value"] = np.nan
         ds = ds.rename(
             {
                 "horizon_out": "L1_SoilHorizons",
@@ -1128,7 +1128,7 @@ class MHMRestartFile:
                 else:
                     file_path.unlink()
 
-    def _prepare_slope_emp(self, n=1000000):
+    def _prepare_slope_emp(self, n=100000):
         logger.info("Preparing slope_emp")
         td = TDigest(compression=n)
         if self.run_on_whole_domain:
