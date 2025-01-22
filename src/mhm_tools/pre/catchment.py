@@ -29,7 +29,7 @@ FACC_FILLVALUE = 0
 FILLVALUE = -9999
 # use d8 for basinex, ldd for mRM version in Ulysses
 OUTPUT_FTYPE = "ldd"
-CUTOFF_THRESHOLD = 170
+CUTOFF_THRESHOLD = 175
 # FUNCTIONS
 
 
@@ -97,7 +97,7 @@ class Catchment:
 
         data = self._modify_data(self.ds[var_name])
 
-        if self.do_shift and self.is_data_global:
+        if self.do_shift:
             transform = list(self.transform)
             transform[2] = 0
             self.transform = tuple(transform)
@@ -111,24 +111,15 @@ class Catchment:
             with ErrorLogger(logger):
                 raise NotImplementedError
 
-    @property
-    def is_data_global(self):
-        """Check if the longitude data is global."""
-        return (
-            "lon" in self.ds.coords
-            and self.ds.lon.min() < (CUTOFF_THRESHOLD * -1)
-            and self.ds.lon.max() > CUTOFF_THRESHOLD
-        )
-
     def _modify_data(self, data):
         # correct circumspanning data
-        if self.do_shift and self.is_data_global:
+        if self.do_shift:
             return data.roll(lon=int(len(self.ds.lon) / 2), roll_coords=True)
         return data
 
     def _revert_data(self, data):
         # correct circumspanning data
-        if self.do_shift and self.is_data_global:
+        if self.do_shift:
             return np.roll(data, int(len(self.ds.lon) / 2), axis=1)
         return data
 
@@ -483,7 +474,7 @@ def merge_catchment(path1, path2, out_path):
     # select all the basins in the border area
     mask_ids = np.unique(
         ds1["basin"].where(
-            (ds1.lon > CUTOFF_THRESHOLD) | (ds1.lon < (CUTOFF_THRESHOLD * -1))
+            (ds1.lon.max() > CUTOFF_THRESHOLD) | (ds1.lon.min() < (CUTOFF_THRESHOLD * -1))
         )
     )
     # get a mask of all the border area basins
@@ -522,7 +513,17 @@ def get_transformation_matrix_nc(ds, var_name):
         np.float64(-lat_res),
         np.float64(y_max + lat_res / 2),
     )
-
+def is_data_global(ds, coordinate_slice):
+    """Check if the longitude data is global."""
+    if coordinate_slice is not None:
+        ds_sliced = ds.sel(lon=coordinate_slice['lon'])
+    else: 
+        ds_sliced = ds
+    return (
+        "lon" in ds_sliced.coords
+        and ds_sliced.lon.min() < (CUTOFF_THRESHOLD * -1)
+        and ds_sliced.lon.max() > CUTOFF_THRESHOLD
+    )
 
 @log_arguments()
 def create_catchment(
@@ -554,7 +555,8 @@ def create_catchment(
     logger.info(transform)
     latlon = True
 
-    if gauge_coords is None and coordinate_slices is None:
+    if gauge_coords is None and is_data_global(ds, coordinate_slices):
+        logger.info('Creating global basin id file...')
         temp_file1 = "hydro1.nc"
         global_catchments = Catchment(
             ds=ds,
@@ -601,6 +603,7 @@ def create_catchment(
         temp_file1.unlink()
         temp_file2.unlink()
     elif coordinate_slices is not None:
+        logger.info(f'Creating basin id file for {coordinate_slices}')
         ds = ds.sel(lat=coordinate_slices["lat"], lon=coordinate_slices["lon"])
         logger.info(transform)
         c = Catchment(

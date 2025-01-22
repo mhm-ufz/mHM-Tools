@@ -94,6 +94,7 @@ def add_args(parser):
     required_args.add_argument(
         "--l1_resolution",
         required=False,
+        type=float,
         default=None,
         help=(
             """Resolution of the mHM target grid in degrees. If given the grid will be upscaled to this resolution."""
