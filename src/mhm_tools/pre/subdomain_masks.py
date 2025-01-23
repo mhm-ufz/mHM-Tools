@@ -333,8 +333,8 @@ def create_subdomain_masks(
         lon = ds.lon
         # if input is not global only create a file else create all subdomains
         if (
-            np.max(lat) - np.min(lat) != 360
-            and (np.max(lon) - np.min(lon) < 130 or np.max(lon) - np.min(lon) > 180)
+            np.max(lon) - np.min(lon) != 360
+            and (np.max(lat) - np.min(lat) < 130 or np.max(lat) - np.min(lat) > 180)
         ) or basin_clusters is None:
             csm.use_land_mask(lat, lon)
         else:

@@ -1128,7 +1128,7 @@ class MHMRestartFile:
                 else:
                     file_path.unlink()
 
-    def _prepare_slope_emp(self, n=100000):
+    def _prepare_slope_emp(self, n=10000):
         logger.info("Preparing slope_emp")
         td = TDigest(compression=n)
         if self.run_on_whole_domain:
