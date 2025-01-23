@@ -184,12 +184,21 @@ class Catchment:
             raise ValueError(not_int_multiple_msg)
         if factor == 1:
             return
-        self.get_upstream_area()
         logger.info(
             f"Upscaling flow direction from {input_res} to {self.target_resolution} with the fator {factor}."
         )
-        self._fdir, index = self._fdir.upscale(factor, method="ihu", uparea=self.upgrid)
+        fdir_upscaled, upscaling_indices = self._fdir.upscale(factor, method="ihu")
+
+        subareas = self._fdir.ucat_area(idxs_out=upscaling_indices, unit="km2")[1]
+        uparea1 = fdir_upscaled.accuflux(subareas)
+
+        flwerr = self._fdir.upscale_error(fdir_upscaled, upscaling_indices)
+        percentage_error = np.sum(flwerr == 0) / np.sum(flwerr != 255) * 100
+        logger.info(f"upscaling error in {percentage_error:.2f}% of cells")
+
+        self._fdir = fdir_upscaled
         self.get_fdir()
+        self.uparea_grid = uparea1 # replaces self.get_facc
 
         if var == "dem":
             lat_size, lon_size = self.input_ds.shape
@@ -319,9 +328,8 @@ class Catchment:
                 f"Shape of lon {np.shape(lon)}, lat {np.shape(lat)}, data {np.shape(data)}"
             )
             logger.info(f"lon_min {np.min(lon):.3f}, lon_max {np.max(lon):.3f}")
-            logger.info(f"lon_min {-13.1}, lon_max {10.1}")
             logger.info(f"{var_name} - mean {np.nanmean(data)}, max {np.nanmax(data)}")
-            logger.info(f"# values > 1e6 {np.sum(data > 1e6)}")
+            logger.debug(f"# values > 1e6 {np.sum(data > 1e6)}")
             data_var = xr.Dataset(
                 {var_name: (["lat", "lon"], self._revert_data(data))},
                 coords={
@@ -586,7 +594,10 @@ def create_catchment(
 
         for c in catchments:
             c.get_basins()
-            c.get_facc()
+            if target_resolution is not None: 
+                c.upscale(var)
+            else:
+                c.get_facc()
             c.get_grid_area()
             # c.get_upstream_area()
             c.write(output_path, single_file=True, frame=frame)
@@ -617,8 +628,11 @@ def create_catchment(
             do_shift=False,
             target_resolution=target_resolution,
         )
+        if target_resolution is not None: 
+            c.upscale(var)
+        else:
+            c.get_facc()
         c.get_basins()
-        c.get_facc()
         c.get_grid_area()
         c.write(output_path, single_file=True, mask_file=mask_file, frame=frame)
     else:
@@ -635,7 +649,10 @@ def create_catchment(
             target_resolution=target_resolution,
         )
         c.delineate_basin(gauge_coords)
-        c.get_facc()
+        if target_resolution is not None: 
+            c.upscale(var)
+        else:
+            c.get_facc()
         c.get_grid_area()
         c.write(
             output_path,
