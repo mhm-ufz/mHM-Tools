@@ -14,6 +14,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 from matplotlib import gridspec
+import logging
+
+from mhm_tools.common.logger import ErrorLogger, log_arguments
+
+logger = logging.getLogger(__name__)
 
 
 class Catchment:
@@ -70,7 +75,7 @@ class Hydrograph:
 
     Methods
     -------
-        __init__(self, log_level): Initializes the Hydrograph object with the specified log level.
+        __init__(self): Initializes the Hydrograph object with the specified log level.
         remove_empty_values(arr1, arr2): Removes empty values from two arrays and returns the cleaned data.
         calc_kling_gupta_efficiency(observed, simulated): Calculates the Kling-Gupta efficiency metric.
         calc_nash_sutcliff_efficiency(observed, simulated): Calculates the Nash-Sutcliffe efficiency metric.
@@ -94,15 +99,7 @@ class Hydrograph:
     discharge_data = None
     objectives = Objectives()
 
-    def __init__(self, log_level):
-        levels = {
-            "info": logging.INFO,
-            "warning": logging.WARNING,
-            "warn": logging.WARNING,
-            "debug": logging.DEBUG,
-            "error": logging.ERROR,
-        }
-        self.logger.setLevel(levels[log_level])
+    def __init__(self):
         self.plots = [0, 0, 0, 0]
 
     def remove_empty_values(self, arr1, arr2, recursive=True):

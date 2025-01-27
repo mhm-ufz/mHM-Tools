@@ -66,14 +66,6 @@ def add_args(parser):
         "all with out seasonality (advised for performance) = tyc",
     )
     parser.add_argument(
-        "-l",
-        "--log_level",
-        default="warning",
-        required=False,
-        dest="log_level",
-        help="log level (debug, info, warning) default is warning",
-    )
-    parser.add_argument(
         "--prec",
         dest="prec",
         required=False,
@@ -92,7 +84,7 @@ def run(args):
         parsed command line arguments
 
     """
-    hydro = Hydrograph(args.log_level)
+    hydro = Hydrograph()
     hydro.gen_hydrograph(
         input_path=args.in_dir,
         output_file=args.out_file,

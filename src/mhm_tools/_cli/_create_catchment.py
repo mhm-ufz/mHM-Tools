@@ -113,7 +113,6 @@ def add_args(parser):
             "Creates a frame of nonflow cells around the domain to enable non global domains in ulysses mrm which connects the eastern and western boundaries."
         ),
     )
-    parser.add_argument("--log_level", default="INFO", type=str, help=("Logging level"))
 
 
 def run(args):
