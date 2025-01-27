@@ -183,6 +183,7 @@ class Catchment:
             not_int_multiple_msg = f"Upscaling only works if L1 resolution is integer muplipe of L0 resolution but L1 = {self.taget_resolution / input_res:.4f} * L0"
             raise ValueError(not_int_multiple_msg)
         if factor == 1:
+            self.get_facc()
             return
         logger.info(
             f"Upscaling flow direction from {input_res} to {self.target_resolution} with the fator {factor}."
@@ -234,6 +235,7 @@ class Catchment:
 
     def get_facc(self):
         """Get the flow accumulation area."""
+        logger.info('Calculate flow accumulation...')
         data = np.ones_like(self.flwdir).astype(np.uint32)
         data[~self._fdir.mask.reshape(data.shape)] = 0
         self.uparea_grid = self._fdir.accuflux(data, nodata=0)
@@ -307,11 +309,13 @@ class Catchment:
         else:
             lat_slice, lon_slice = slice(84, -56), slice(None)
 
-        for var_name in self.VARIABLES:
+        for var_name in self.VARIABLES: 
+            logger.info(f'Processing {var_name}')
             data = getattr(self, var_name)
             if cut_by_basin:
                 data[~self.catchment_mask] = self.VARIABLES[var_name]["_FillValue"]
             if data is None:
+                logger.warning(f'No data for {var_name}')
                 continue
             lon = self.ds.lon.data
             lat = self.ds.lat.data
@@ -324,11 +328,11 @@ class Catchment:
                 lat = np.arange(
                     lat.max() + input_res / 2 + res / 2, lat.min() + res / 2, -res
                 )
-            logger.info(
+            logger.debug(
                 f"Shape of lon {np.shape(lon)}, lat {np.shape(lat)}, data {np.shape(data)}"
             )
-            logger.info(f"lon_min {np.min(lon):.3f}, lon_max {np.max(lon):.3f}")
-            logger.info(f"{var_name} - mean {np.nanmean(data)}, max {np.nanmax(data)}")
+            logger.debug(f"lon_min {np.min(lon):.3f}, lon_max {np.max(lon):.3f}")
+            logger.debug(f"{var_name} - mean {np.nanmean(data)}, max {np.nanmax(data)}")
             logger.debug(f"# values > 1e6 {np.sum(data > 1e6)}")
             data_var = xr.Dataset(
                 {var_name: (["lat", "lon"], self._revert_data(data))},
@@ -564,6 +568,8 @@ def create_catchment(
     latlon = True
 
     if gauge_coords is None and is_data_global(ds, coordinate_slices):
+        if coordinate_slices is not None: 
+            ds = ds.sel()
         logger.info('Creating global basin id file...')
         temp_file1 = "hydro1.nc"
         global_catchments = Catchment(
