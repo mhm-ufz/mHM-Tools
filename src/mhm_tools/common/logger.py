@@ -4,8 +4,9 @@ import inspect
 import logging
 from contextlib import AbstractContextManager
 from functools import wraps
+from pathlib import Path
 
-from mhm_tools.common.constants import LOG_LEVELS
+from mhm_tools.common.constants import LOG_LEVEL_STR, LOG_LEVELS
 
 
 def configure_mhm_tools_logger(
@@ -18,6 +19,7 @@ def configure_mhm_tools_logger(
 ):
     """Configure the parser setting formating as well as Stream and Filehandler."""
     logger = logging.getLogger("mhm_tools")
+    logger.propagate = False
     general_level, error_msg_gnrl, error_msg_gnrl2 = get_lowest_level(
         log_level=log_level,
         log_file_level=log_file_level,
@@ -35,22 +37,31 @@ def configure_mhm_tools_logger(
         ch_level, error_msg_ch = get_log_level(log_level, count_verbose, count_quiet)
         ch.setLevel(ch_level)
         logger.addHandler(ch)
+        logger.info(f'Steam Handler set to log_level {LOG_LEVEL_STR[ch_level]}')
     if log_file:
-        fh = logging.FileHandler(log_file)
-        fh.setFormatter(formatter)
-        if log_file_level is not None:
-            fh_level, error_msg_fh = get_log_level(log_file_level, count_verbose, count_quiet)
+        log_file = Path(log_file)
+        if not log_file.suffix:
+            logger.warning(f'Log file does not point to a file: {log_file}')
         else:
-            fh_level = general_level
-        fh.setLevel(fh_level)
-        logger.addHandler(fh)
+            if not log_file.parent.is_dir():
+                logger.info(f'Creating folder for log_files {log_file.parent}')
+                log_file.parent.mkdir()
+            fh = logging.FileHandler(log_file)
+            fh.setFormatter(formatter)
+            if log_file_level is not None:
+                fh_level, error_msg_fh = get_log_level(log_file_level, count_verbose, count_quiet)
+            else:
+                fh_level = general_level
+            fh.setLevel(fh_level)
+            logger.addHandler(fh)
+            logger.info(f'File Handler set to log_level {LOG_LEVEL_STR[fh_level]}')
+            logger.info(f'Writing logs to {log_file}')
     if error_msg_gnrl is not None:
         logger.error(f"Logger: {error_msg_gnrl}")
     if error_msg_ch is not None:
         logger.error(f"StreamHandler: {error_msg_ch}")
     if error_msg_fh is not None:
         logger.error(f"FileHandler: {error_msg_fh}")
-    logger.propagate = False
 
 
 def get_lowest_level(log_level, log_file_level, count_verbose, count_quiet):
