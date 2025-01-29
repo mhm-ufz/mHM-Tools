@@ -14,7 +14,7 @@ def add_args(parser):
     required_args = parser.add_argument_group("required arguments")
     required_args.add_argument(
         "-m",
-        "--mask",
+        "--mask_file",
         required=True,
         help="The path the the mask file. Mask files can be created using the catchment command with the --mask flag.",
     )
@@ -40,4 +40,4 @@ def run(args):
     args : argparse.Namespace
         parsed command line arguments
     """
-    crop_mhm_setup(args.mask, args.output_path, args.input_path)
+    crop_mhm_setup(args.mask_file, args.output_path, args.input_path)

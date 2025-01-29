@@ -13,10 +13,10 @@ from mhm_tools.common.xarray_utils import get_coord_key
 logger = logging.getLogger(__name__)
 
 
-def regrid_mask(ds1, ds2, lonkey1, latkey1, lonkey2, latkey2):
-    """Regrid a xarray mask dataset ds1 to the resolution of a second dataset ds2."""
-    lon1 = ds1[lonkey1].values
-    lat1 = ds1[latkey1].values
+def regrid_mask(mask_ds, mask_key, ds2, lonkey1, latkey1, lonkey2, latkey2):
+    """Regrid a xarray mask dataset mask_ds to the resolution of a second dataset ds2."""
+    lon1 = mask_ds[lonkey1].values
+    lat1 = mask_ds[latkey1].values
     res1 = lat1[0] - lat1[1]
     lon2 = ds2[lonkey2].values
     lat2 = ds2[latkey2].values
@@ -25,17 +25,17 @@ def regrid_mask(ds1, ds2, lonkey1, latkey1, lonkey2, latkey2):
         results = np.full((len(lat2), len(lon2)), 0.0)
         for i, lat in enumerate(lat2):
             for j, lon in enumerate(lon2):
-                for n, lat1 in enumerate(ds1.lat.values):
+                for n, lat1 in enumerate(mask_ds.lat.values):
                     if lat1 < (lat - res2 / 2) or lat1 > (lat + res2 / 2):
                         continue
-                    for m, lon1 in enumerate(ds1.lon.values):
+                    for m, lon1 in enumerate(mask_ds.lon.values):
                         if lon1 < lon - res2 / 2 or lon1 > lon + res2 / 2:
                             continue
-                        results[i][j] += ds1["mask"].values[n, m]
+                        results[i][j] += mask_ds[mask_key].values[n, m]
         results /= np.nanmax(results)
         mask = results > 1e-3
     elif res2 == res1:
-        return ds1
+        return mask_ds
     else:
         msg = "mask coarser than file not yet implemented"
         with ErrorLogger(logger):
@@ -185,7 +185,8 @@ def crop_mhm_setup(mask_file, output_path, input_path):
         files.extend(input_path.glob("*/" * depth + "*.*"))
 
     with xr.open_dataset(mask_file) as mask:
-        mask["mask"] = mask["mask"].astype(float)
+        mask_key = [key for key in ['mask', 'land_mask'] if key in mask.data_vars]
+        mask[mask_key] = mask[mask_key].astype(float)
         latslice = slice(mask.lat.values[-1], mask.lat.values[0])
         lonslice = slice(mask.lon.values[0], mask.lon.values[-1])
         # cut and copy each file
@@ -245,7 +246,8 @@ def crop_mhm_setup(mask_file, output_path, input_path):
             # only the dem file or and eventual mHM restart file are masked using the provided mask file
             if "mhm" in f.name.lower() or "dem" in f.name.lower():
                 mask_regridded = regrid_mask(
-                    ds1=mask,
+                    mask_ds=mask,
+                    mask_key=mask_key,
                     ds2=ds,
                     lonkey1="lon",
                     latkey1="lat",

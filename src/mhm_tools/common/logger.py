@@ -45,7 +45,7 @@ def configure_mhm_tools_logger(
         else:
             if not log_file.parent.is_dir():
                 logger.info(f'Creating folder for log_files {log_file.parent}')
-                log_file.parent.mkdir()
+                log_file.parent.mkdir(parents=True)
             fh = logging.FileHandler(log_file)
             fh.setFormatter(formatter)
             if log_file_level is not None:
