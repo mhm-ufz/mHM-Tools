@@ -12,6 +12,7 @@ Authors
 import logging
 import pathlib as pl
 
+from mhm_tools.common.file_handler import get_xarray_ds_from_file
 import numpy as np
 import pyflwdir
 import xarray as xr
@@ -579,112 +580,114 @@ def create_catchment(
         with ErrorLogger(logger):
             msg = f"Unexpected value for var={var}, must be 'fdir' or 'dem'"
             raise ValueError(msg)
-    ds = xr.open_dataset(pl.Path(input_file))
+    
+    
+    with get_xarray_ds_from_file(input_file) as input_ds:
 
-    # transform
-    transform = get_transformation_matrix_nc(ds, var_name)
+        # transform
+        transform = get_transformation_matrix_nc(input_ds, var_name)
 
-    logger.info(transform)
-    latlon = True
+        logger.info(transform)
+        latlon = True
 
-    if gauge_coords is None and is_data_global(ds, coordinate_slices):
-        if coordinate_slices is not None: 
-            ds = ds.sel()
-        logger.info('Creating global basin id file...')
-        temp_file1 = "hydro1.nc"
-        global_catchments = Catchment(
-            ds=ds,
-            var_name=var_name,
-            var=var,
-            ftype=ftype,
-            transform=transform,
-            latlon=latlon,
-            out_var_name=temp_file1,
-            do_shift=False,
-            target_resolution=target_resolution,
-        )
-        # create a shifted version of the catchment to avoid border effects
-        temp_file2 = "hydro2.nc"
-        global_catchments_shifted = Catchment(
-            ds=ds,
-            var_name=var_name,
-            var=var,
-            ftype=ftype,
-            transform=transform,
-            latlon=latlon,
-            out_var_name=temp_file2,
-            do_shift=True,
-            target_resolution=target_resolution,
-        )
-        catchments = [global_catchments, global_catchments_shifted]
+        if gauge_coords is None and is_data_global(input_ds, coordinate_slices):
+            if coordinate_slices is not None: 
+                input_ds = input_ds.sel()
+            logger.info('Creating global basin id file...')
+            temp_file1 = "hydro1.nc"
+            global_catchments = Catchment(
+                ds=input_ds,
+                var_name=var_name,
+                var=var,
+                ftype=ftype,
+                transform=transform,
+                latlon=latlon,
+                out_var_name=temp_file1,
+                do_shift=False,
+                target_resolution=target_resolution,
+            )
+            # create a shifted version of the catchment to avoid border effects
+            temp_file2 = "hydro2.nc"
+            global_catchments_shifted = Catchment(
+                ds=input_ds,
+                var_name=var_name,
+                var=var,
+                ftype=ftype,
+                transform=transform,
+                latlon=latlon,
+                out_var_name=temp_file2,
+                do_shift=True,
+                target_resolution=target_resolution,
+            )
+            catchments = [global_catchments, global_catchments_shifted]
 
-        for c in catchments:
+            for c in catchments:
+                c.get_basins()
+                if target_resolution is not None: 
+                    c.upscale(var)
+                else:
+                    c.get_facc()
+                c.get_grid_area()
+                # c.get_upstream_area()
+                c.write(output_path, single_file=True, frame=frame, mask_file=mask_file)
+            # add paths to the temp files
+            temp_file1 = pl.Path(output_path, "hydro1.nc")
+            temp_file2 = pl.Path(output_path, "hydro2.nc")
+            logger.info("Merging catchment files")
+            merge_catchment(
+                temp_file1,
+                temp_file2,
+                pl.Path(output_path, "basin_ids.nc"),
+            )
+            # remove the temporary files
+            temp_file1.unlink()
+            temp_file2.unlink()
+        elif coordinate_slices is not None:
+            logger.info(f'Creating basin id file for {coordinate_slices}')
+            ds = input_ds.sel(lat=coordinate_slices["lat"], lon=coordinate_slices["lon"])
+            logger.info(transform)
+            c = Catchment(
+                ds=input_ds,
+                var_name=var_name,
+                var=var,
+                ftype=ftype,
+                transform=transform,
+                latlon=latlon,
+                out_var_name="basin_ids.nc",
+                do_shift=False,
+                target_resolution=target_resolution,
+            )
+            if target_resolution is not None: 
+                c.upscale(var)
+            else:
+                c.get_facc()
             c.get_basins()
+            c.get_grid_area()
+            c.write(output_path, single_file=True, mask_file=mask_file, frame=frame)
+        else:
+            logger.info(f"Creating catchment for gauge coordinates {gauge_coords}")
+            c = Catchment(
+                ds=input_ds,
+                var_name=var_name,
+                var=var,
+                ftype=ftype,
+                transform=transform,
+                latlon=latlon,
+                out_var_name="basin_ids.nc",
+                do_shift=False,
+                target_resolution=target_resolution,
+            )
+            c.delineate_basin(gauge_coords)
             if target_resolution is not None: 
                 c.upscale(var)
             else:
                 c.get_facc()
             c.get_grid_area()
-            # c.get_upstream_area()
-            c.write(output_path, single_file=True, frame=frame, mask_file=mask_file)
-        # add paths to the temp files
-        temp_file1 = pl.Path(output_path, "hydro1.nc")
-        temp_file2 = pl.Path(output_path, "hydro2.nc")
-        logger.info("Merging catchment files")
-        merge_catchment(
-            temp_file1,
-            temp_file2,
-            pl.Path(output_path, "basin_ids.nc"),
-        )
-        # remove the temporary files
-        temp_file1.unlink()
-        temp_file2.unlink()
-    elif coordinate_slices is not None:
-        logger.info(f'Creating basin id file for {coordinate_slices}')
-        ds = ds.sel(lat=coordinate_slices["lat"], lon=coordinate_slices["lon"])
-        logger.info(transform)
-        c = Catchment(
-            ds=ds,
-            var_name=var_name,
-            var=var,
-            ftype=ftype,
-            transform=transform,
-            latlon=latlon,
-            out_var_name="basin_ids.nc",
-            do_shift=False,
-            target_resolution=target_resolution,
-        )
-        if target_resolution is not None: 
-            c.upscale(var)
-        else:
-            c.get_facc()
-        c.get_basins()
-        c.get_grid_area()
-        c.write(output_path, single_file=True, mask_file=mask_file, frame=frame)
-    else:
-        logger.info(f"Creating catchment for gauge coordinates {gauge_coords}")
-        c = Catchment(
-            ds=ds,
-            var_name=var_name,
-            var=var,
-            ftype=ftype,
-            transform=transform,
-            latlon=latlon,
-            out_var_name="basin_ids.nc",
-            do_shift=False,
-            target_resolution=target_resolution,
-        )
-        c.delineate_basin(gauge_coords)
-        if target_resolution is not None: 
-            c.upscale(var)
-        else:
-            c.get_facc()
-        c.get_grid_area()
-        c.write(
-            output_path,
-            single_file=True,
-            cut_by_basin=True,
-            mask_file=mask_file,
-            frame=frame,
-            buffer=frame,
-        )
+            c.write(
+                output_path,
+                single_file=True,
+                cut_by_basin=True,
+                mask_file=mask_file,
+                frame=frame,
+                buffer=frame,
+            )

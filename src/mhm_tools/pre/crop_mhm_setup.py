@@ -4,6 +4,8 @@ import logging
 import shutil
 from pathlib import Path
 
+from mhm_tools.common.file_handler import read_ascii_to_xarray
+from mhm_tools.common.file_handler import write_xarray_to_ascii
 import numpy as np
 import xarray as xr
 
@@ -44,81 +46,6 @@ def regrid_mask(mask_ds, mask_key, ds2, lonkey1, latkey1, lonkey2, latkey2):
     results[~mask] = 0
     return results
 
-
-def read_ascii_to_xarray(filepath):
-    """Read an mHM readable asci file to an xarray dataset."""
-    # Read the header from the file
-    with filepath.open("r") as f:
-        header = {}
-        for i in range(6):
-            line = f.readline().strip()
-            logger.debug(f"File {filepath.name} line {i}: {line}")
-            key, value = line.split()
-            header[key.lower()] = float(value) if "." in value else int(value)
-
-        # Extract header information
-        ncols = header["ncols"]
-        nrows = header["nrows"]
-        xllcorner = header["xllcorner"]
-        yllcorner = header["yllcorner"]
-        cellsize = header["cellsize"]
-        nodata_value = header["nodata_value"]
-
-    # Load the data values
-    data_values = np.loadtxt(filepath, skiprows=6)
-
-    # Calculate latitude and longitude coordinates
-    lon = np.arange(xllcorner, xllcorner + (ncols) * cellsize, cellsize)
-    lat = np.arange(
-        yllcorner + (nrows - 0.5) * cellsize, yllcorner - cellsize / 2, -cellsize
-    )
-
-    # Create DataArray with lat/lon dimensions and nodata value
-    data_array = xr.DataArray(
-        data=data_values,
-        dims=["lat", "lon"],
-        coords={"lon": lon, "lat": lat},
-        name="data",
-        attrs={"nodata_value": nodata_value},
-    )
-
-    # Convert to Dataset
-    return xr.Dataset({"data": data_array})
-
-
-def write_xarray_to_ascii(dataset, filepath):
-    """Take xarray dataset and writes it to an asci file that can by read by mHM."""
-    # Extract the data, coordinates, and nodata value from the Dataset
-    data = dataset["data"].values
-    lat = dataset["lat"].values
-    lon = dataset["lon"].values
-    nodata_value = dataset["data"].attrs.get("nodata_value", -9999)
-
-    # Calculate header information
-    nrows, ncols = data.shape
-    cellsize = lon[1] - lon[0]  # Assuming uniform spacing in lon
-    xllcorner = lon[0]
-    yllcorner = lat[-1]  # lat starts at the top and descends
-
-    # Create the header
-    header = (
-        f"ncols         {ncols}\n"
-        f"nrows         {nrows}\n"
-        f"xllcorner     {xllcorner}\n"
-        f"yllcorner     {yllcorner}\n"
-        f"cellsize      {cellsize}\n"
-        f"NODATA_value  {nodata_value}\n"
-    )
-
-    # Replace NaN values with nodata_value in data
-    data_to_write = np.where(np.isnan(data), nodata_value, data)
-
-    # Write header and data to ASCII file
-    with filepath.open("w") as f:
-        f.write(header)
-        np.savetxt(f, data_to_write, fmt="%g")
-
-
 def write_to_file(ds, output_file: Path):
     """Take xarray Dataset and write it to file. File type depends on path suffix."""
     suffix = output_file.suffix
@@ -126,7 +53,6 @@ def write_to_file(ds, output_file: Path):
         write_xarray_to_ascii(ds, output_file)
     elif suffix == ".nc":
         ds.to_netcdf(output_file)
-
 
 def crop_file_with_header(ds, file_path, mask, output_path, lon_key, lat_key):
     """Crop the nc file and create a new header file for the new coordinates."""
