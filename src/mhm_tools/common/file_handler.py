@@ -3,13 +3,15 @@
 
 
 from pathlib import Path
+import logging
 from mhm_tools.common.logger import ErrorLogger
-from mhm_tools.pre.crop_mhm_setup import logger
 import numpy as np
 import xarray as xr
 
 from mhm_tools.common.xarray_utils import get_coord_key
-from mhm_tools.pre.create_mhm_restart_file import logger
+
+
+logger = logging.getLogger(__name__)
 
 ######
 # more on this in the cut_classical_mhm_setups branch There are classes for Morph and meteo data
