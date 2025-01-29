@@ -91,10 +91,27 @@ def add_args(parser):
             """coordinates in the form of 'lon_min,lon_max,lat_min,lat_max,resolution_l0'"""
         ),
     )
+    required_args.add_argument(
+        "--l1_resolution",
+        required=False,
+        type=float,
+        default=None,
+        help=(
+            """Resolution of the mHM target grid in degrees. If given the grid will be upscaled to this resolution."""
+        ),
+    )
     parser.add_argument(
         "--mask_file",
         default=None,
         help=("Path where to save the mask file"),
+    )
+    parser.add_argument(
+        "--frame",
+        default=0,
+        type=int,
+        help=(
+            "Creates a frame of nonflow cells around the domain to enable non global domains in ulysses mrm which connects the eastern and western boundaries."
+        ),
     )
 
 
@@ -111,17 +128,17 @@ def run(args):
     if args.gauge_coords is not None:
         if args.lonlatbox is not None:
             with ErrorLogger(logger):
-                to_many_args_err = (
+                raise ValueError(
                     "You can't use --gauge_coords and --lonlatbox at the same time."
                 )
-                raise ValueError(to_many_args_err)
         lat, lon = map(float, args.gauge_coords.split(","))
         gauge_coords = (np.array([lon]), np.array([lat]))
+        logger.info(f"using gauge coordinates {gauge_coords}")
     elif args.lonlatbox is not None:
         lonmin, lonmax, latmin, latmax, resl0 = map(float, args.lonlatbox.split(","))
         coordinate_slices = {"lat": slice(latmax, latmin), "lon": slice(lonmin, lonmax)}
         logger.info(
-            "using lonlatbox to with extends: lat=({latmax}, {latmin}); lon=({lonmin}, {lonmax})"
+            f"using lonlatbox with extends: lat=({latmax}, {latmin}); lon=({lonmin}, {lonmax})"
         )
     create_catchment(
         input_file=args.input_file,
@@ -132,4 +149,6 @@ def run(args):
         gauge_coords=gauge_coords,
         coordinate_slices=coordinate_slices,
         mask_file=args.mask_file,
+        target_resolution=args.l1_resolution,
+        frame=args.frame,
     )

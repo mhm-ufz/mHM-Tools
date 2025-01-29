@@ -36,15 +36,18 @@ classifiers = [
 ]
 dependencies = [
   "numpy>=1.17.3",
-  "netCDF4",
   "xarray",
+  "matplotlib>=3.6.1",
   "pandas<2; python_version=='3.8'",
   "pyproj",
   "pyflwdir",
   "matplotlib",
   "scipy",
   "joblib",
-  "crick"
+  "crick",
+  "distributed",
+  "seaborn",
+  "netCDF4"
 ]
 
 [project.urls]
@@ -158,3 +161,4 @@ max-statements = 80
 
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"
+
