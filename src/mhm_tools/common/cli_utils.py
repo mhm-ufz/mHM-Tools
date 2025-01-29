@@ -4,6 +4,7 @@ import argparse
 import logging
 
 import xarray as xr
+import numpy as np
 
 from mhm_tools.common.logger import ErrorLogger
 

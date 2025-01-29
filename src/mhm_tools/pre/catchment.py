@@ -255,7 +255,7 @@ class Catchment:
                 ds.variables[var].data[:] = data
         return ds
 
-    def fill_adjacent_missing_with_sink(self, da, fill_value):
+    def fill_adjacent_missing_with_sink(self, da, fill_value, sink_value):
         """
         Replace all missing values adjacent to non-missing values with 0 in an xarray Dataset.
 
@@ -270,7 +270,7 @@ class Catchment:
         da_filled = da.copy()
 
         # Mask of missing values
-        missing_mask = np.isnan(da)
+        missing_mask = da == fill_value
 
         # Mask of non-missing values
         non_missing_mask = ~missing_mask
@@ -284,10 +284,29 @@ class Catchment:
         adjacent_missing = adjacent_mask & missing_mask
 
         # Replace adjacent missing values with 0
-        da_filled = xr.where(adjacent_missing, fill_value, da)
+        da_filled = xr.where(adjacent_missing, sink_value, da)
 
         return da_filled
 
+    # def test(self, flowdir, basins):
+    #     cmap = mpl.cm.viridis
+    #     bounds = [0, 1, 2, 4, 8, 16, 32, 64, 128]
+    #     norm = mpl.colors.BoundaryNorm(bounds, cmap.N)
+
+    #     fig, axes = plt.subplots(1,2)
+    #     flowdir = np.where(flowdir<200, flowdir, np.nan)
+    #     print('plotting upscaled flow direction....')
+    #     im = axes[0].imshow(flowdir, cmap=cmap)
+    #     im2 = axes[1].imshow(basins, cmap=cmap)
+
+    #     fig.colorbar(im2, ax=axes[1], orientation='vertical', fraction=0.02, pad=0.02)
+    #     fig.colorbar(mpl.cm.ScalarMappable(norm=norm, cmap=cmap),
+    #                  ax=axes[0], orientation='vertical')
+    #     print('saving plot...')
+    #     plt.savefig('/home/luedke/test_pyflowdir_both.png',  dpi=1400)
+    #     # plt.savefig('test_pyflowdir.png',  dpi=1400)
+
+    @log_arguments()
     def write(
         self,
         out_path,
@@ -326,7 +345,7 @@ class Catchment:
                     lon.min() - input_res / 2 + res / 2, lon.max() + res / 2, res
                 )
                 lat = np.arange(
-                    lat.max() + input_res / 2 + res / 2, lat.min() + res / 2, -res
+                    lat.max() + input_res / 2 - res / 2, lat.min()- res / 2, -res
                 )
             logger.debug(
                 f"Shape of lon {np.shape(lon)}, lat {np.shape(lat)}, data {np.shape(data)}"
@@ -420,8 +439,8 @@ class Catchment:
             mask = ds.basin > 0
             ds = self.create_frame(ds, frame, FDIR_SINKVALUE[self.ftype])
             # For the flow dir map fill masked cells adjecent to filled cells with sink instead of missing value
-            # fdir_filled = self.fill_adjacent_missing_with_sink(ds['flwdir'], FDIR_SINKVALUE[self.ftype])
-            # ds['flwdir'].data[:] = fdir_filled.data[:]
+            fdir_filled = self.fill_adjacent_missing_with_sink(ds['flwdir'], FDIR_FILLVALUE[self.ftype] ,FDIR_SINKVALUE[self.ftype])
+            ds['flwdir'].data[:] = fdir_filled.data[:]
             ds.to_netcdf(
                 out_path / self.out_var_name,
                 encoding={
@@ -437,8 +456,9 @@ class Catchment:
             if mask_file is not None:
                 # name the variable mask
                 mask_file = pl.Path(mask_file)
-                mask = xr.Dataset({"mask": mask}, coords={"lon": ds.lon, "lat": ds.lat})
-                mask.to_netcdf(mask_file)
+                mask_da = xr.DataArray(mask, coords={"lat": lat, "lon": lon}, dims=["lat", "lon"])
+                mask_ds = xr.Dataset({"land_mask": mask_da}, coords={"lon": ds.lon, "lat": ds.lat})
+                mask_ds.to_netcdf(mask_file)
                 logger.info(f"Mask file has been written to {mask_file}")
 
     def cut_to_filled_area(self, buffer=0):
@@ -606,7 +626,7 @@ def create_catchment(
                 c.get_facc()
             c.get_grid_area()
             # c.get_upstream_area()
-            c.write(output_path, single_file=True, frame=frame)
+            c.write(output_path, single_file=True, frame=frame, mask_file=mask_file)
         # add paths to the temp files
         temp_file1 = pl.Path(output_path, "hydro1.nc")
         temp_file2 = pl.Path(output_path, "hydro2.nc")
