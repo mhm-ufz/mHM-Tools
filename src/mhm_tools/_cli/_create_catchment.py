@@ -91,13 +91,21 @@ def add_args(parser):
             """coordinates in the form of 'lon_min,lon_max,lat_min,lat_max,resolution_l0'"""
         ),
     )
-    required_args.add_argument(
+    parser.add_argument(
         "--l1_resolution",
         required=False,
         type=float,
         default=None,
         help=(
-            """Resolution of the mHM target grid in degrees. If given the grid will be upscaled to this resolution."""
+            """Resolution of the mHM target grid."""
+        ),
+    )
+    parser.add_argument(
+        "--upscale",
+        action="store_true",
+        default=False,
+        help=(
+            """Upscale to l1_resolution."""
         ),
     )
     parser.add_argument(
@@ -113,6 +121,7 @@ def add_args(parser):
             "Creates a frame of nonflow cells around the domain to enable non global domains in ulysses mrm which connects the eastern and western boundaries."
         ),
     )
+
 
 
 def run(args):
@@ -140,6 +149,8 @@ def run(args):
         logger.info(
             f"using lonlatbox with extends: lat=({latmax}, {latmin}); lon=({lonmin}, {lonmax})"
         )
+    if args.upscale and not args.l1_resolution:
+        raise ValueError('If upscaling is enabled l1_resolution must be provided.')
     create_catchment(
         input_file=args.input_file,
         output_path=args.output_path,
@@ -151,4 +162,5 @@ def run(args):
         mask_file=args.mask_file,
         target_resolution=args.l1_resolution,
         frame=args.frame,
+        upscale=args.upscale
     )

@@ -48,6 +48,7 @@ class Catchment:
         out_var_name=None,
         do_shift=False,
         target_resolution=None,
+        upscale=False,
         **kwargs,
     ):
         self.flwdir = None
@@ -60,6 +61,7 @@ class Catchment:
         self.ftype = ftype
         self.catchment_mask = None
         self.target_resolution=target_resolution
+        self.do_upscale = upscale
         self.out_var_name = (
             out_var_name if out_var_name is not None else f"{var_name}.nc"
         )
@@ -94,6 +96,7 @@ class Catchment:
             self.out_var_name = f"{var_name}.nc"
         self.do_shift = do_shift
         self.ds = ds
+        logger.debug(f'self.ds: {self.ds}')
         self.transform = transform
 
         data = self._modify_data(self.ds[var_name])
@@ -171,23 +174,29 @@ class Catchment:
                 "_FillValue"
             ]
 
-    def upscale(self, var):
-        """Upscale flow direction to taget_resolution if that is int multipe of data resolution."""
+    def get_upscaling_factor(self):
+        """Create upscaling factor."""
         input_res = round(abs(self.ds.lon.data[1] - self.ds.lon.data[0]), 6)
         if (
             int(self.target_resolution / input_res + 0.5)
             - (self.target_resolution / input_res)
             < 1e6
         ):
-            factor = int(self.target_resolution / input_res + 0.5)
+            return int(self.target_resolution / input_res + 0.5)
         else:
-            not_int_multiple_msg = f"Upscaling only works if L1 resolution is integer muplipe of L0 resolution but L1 = {self.taget_resolution / input_res:.4f} * L0"
+            not_int_multiple_msg = f"Upscaling only works if L1 resolution is integer muplipe of L0 resolution but L1 = {self.target_resolution / input_res:.4f} * L0"
             raise ValueError(not_int_multiple_msg)
+        
+
+    def upscale(self, var):
+        """Upscale flow direction to target_resolution if that is int multipe of data resolution."""
+        factor = self.get_upscaling_factor()
+        
         if factor == 1:
             self.get_facc()
             return
         logger.info(
-            f"Upscaling flow direction from {input_res} to {self.target_resolution} with the fator {factor}."
+            f"Upscaling flow direction to {self.target_resolution} with the fator {factor}."
         )
         fdir_upscaled, upscaling_indices = self._fdir.upscale(factor, method="ihu")
 
@@ -325,7 +334,7 @@ class Catchment:
         if not out_path.is_dir():
             out_path.mkdir(parents=True, exist_ok=True)
         if cut_by_basin:
-            lat_slice, lon_slice = self.cut_to_filled_area(buffer)
+            lat_slice, lon_slice = self.cut_to_filled_area(buffer, self.target_resolution)
         else:
             lat_slice, lon_slice = slice(84, -56), slice(None)
 
@@ -342,18 +351,16 @@ class Catchment:
             if self.target_resolution is not None:
                 input_res = round(abs(lon[1] - lon[0]), 6)
                 res = self.target_resolution
-                lon = np.arange(
-                    lon.min() - input_res / 2 + res / 2, lon.max() + res / 2, res
-                )
-                lat = np.arange(
-                    lat.max() + input_res / 2 - res / 2, lat.min()- res / 2, -res
-                )
-            logger.debug(
-                f"Shape of lon {np.shape(lon)}, lat {np.shape(lat)}, data {np.shape(data)}"
-            )
+                if input_res != self.target_resolution and self.do_upscale:
+                    lon = np.arange(
+                        lon.min() - input_res / 2 + res / 2, lon.max() + res / 2, res
+                    )
+                    lat = np.arange(
+                        lat.max() + input_res / 2 - res / 2, lat.min()- res / 2, -res
+                    )
             logger.debug(f"lon_min {np.min(lon):.3f}, lon_max {np.max(lon):.3f}")
             logger.debug(f"{var_name} - mean {np.nanmean(data)}, max {np.nanmax(data)}")
-            logger.debug(f"# values > 1e6 {np.sum(data > 1e6)}")
+            logger.debug(f"Shape {data.shape},  lon {len(lon)}, lat {len(lat)}")
             data_var = xr.Dataset(
                 {var_name: (["lat", "lon"], self._revert_data(data))},
                 coords={
@@ -361,7 +368,9 @@ class Catchment:
                     "lat": lat,  # [slice(860, 870)],
                 },
             )
-
+            logger.info(f'Cutting {var_name} data to correct spatial dimensions')
+            data_var = data_var.sel(lat=lat_slice, lon=lon_slice)
+            logger.debug(data_var)
             if single_file:
                 data_vars[var_name] = data_var
             else:
@@ -435,9 +444,8 @@ class Catchment:
                     "units": self.VARIABLES[var_name]["units"],
                 }
 
-            logger.debug(f"lat_slice: {lat_slice}, lon_slice: {lon_slice}")
+            # logger.debug(f"lat_slice: {lat_slice}, lon_slice: {lon_slice}")
             logger.debug(f"ds: {ds}")
-            mask = ds.basin > 0
             ds = self.create_frame(ds, frame, FDIR_SINKVALUE[self.ftype])
             # For the flow dir map fill masked cells adjecent to filled cells with sink instead of missing value
             fdir_filled = self.fill_adjacent_missing_with_sink(ds['flwdir'], FDIR_FILLVALUE[self.ftype] ,FDIR_SINKVALUE[self.ftype])
@@ -456,14 +464,16 @@ class Catchment:
             # use basin_id to create a mask file
             if mask_file is not None:
                 # name the variable mask
+                mask = ds.basin > 0
                 mask_file = pl.Path(mask_file)
-                mask_da = xr.DataArray(mask, coords={"lat": lat, "lon": lon}, dims=["lat", "lon"])
-                mask_ds = xr.Dataset({"land_mask": mask_da}, coords={"lon": ds.lon, "lat": ds.lat})
+                mask_da = xr.DataArray(mask, coords={"lat": ds.lat, "lon": ds.lon}, dims=["lat", "lon"])
+                mask_ds = xr.Dataset({"land_mask": mask_da, 'mask': mask_da}, coords={"lon": ds.lon, "lat": ds.lat})
                 mask_ds.to_netcdf(mask_file)
                 logger.info(f"Mask file has been written to {mask_file}")
 
-    def cut_to_filled_area(self, buffer=0):
+    def cut_to_filled_area(self, buffer=0, target_resolution=None):
         """Create lat and lon slices to cut the data to the filled area."""
+        logger.info('Cutting to filled area.')
         # Find the non-zero elements
         cols = np.any(
             self.catchment_mask, axis=0
@@ -475,15 +485,34 @@ class Catchment:
         # Get the indices of the non-zero rows and columns
         min_row, max_row = np.where(rows)[0][[0, -1]]
         min_col, max_col = np.where(cols)[0][[0, -1]]
-        # Add a buffer of one cell
-        min_row = min_row - buffer if min_row > 0 else min_row
-        min_col = min_col - buffer if min_col > 0 else min_col
-        max_row = (
-            max_row + buffer if max_row < self.catchment_mask.shape[0] else max_row
-        )
-        max_col = (
-            max_col + buffer if max_col < self.catchment_mask.shape[1] else max_col
-        )
+
+        if buffer > 0:
+            # Add a buffer of one cell
+            logger.info(f'Using a min buffer of {buffer}')
+            min_row = min_row - buffer if min_row > 0 else min_row
+            min_col = min_col - buffer if min_col > 0 else min_col
+            max_row = (
+                max_row + buffer if max_row < self.catchment_mask.shape[0] else max_row
+            )
+            max_col = (
+                max_col + buffer if max_col < self.catchment_mask.shape[1] else max_col
+            )
+        logger.info(f'min row: {min_row} max row: {max_row} min_col: {min_col}, max_col: {max_col}')
+        if self.target_resolution is not None: 
+            factor = self.get_upscaling_factor()
+            if factor != 1:
+                logger.info(f'Regridding to fit coarse grid with res {self.target_resolution} (factor {factor})')
+                min_row = min_row // factor * factor
+                max_row = (max_row // factor + 1)* factor
+                min_col = min_col // factor * factor
+                max_col = (max_col // factor + 1) * factor
+                if max_col >= len(cols):
+                    logger.warning('While regridding max_cols was larger than col-size')
+                    max_col = len(cols) - 1 
+                if max_row >= len(rows):
+                    logger.warning('While regridding max_rows was larger than row-size')
+                    max_row = len(rows) - 1 
+        logger.info(f'min row: {min_row} max row: {max_row} min_col: {min_col}, max_col: {max_col}')
 
         # Slice the array to extract the filled part
         lon_min, lon_max = np.round(self.ds.lon.values[min_col], 3), np.round(
@@ -570,6 +599,7 @@ def create_catchment(
     mask_file=None,
     target_resolution=None,
     frame=1,
+    upscale=False
 ):
     """Create file containing catchment ids, flowdirection and upstream area from dem or flow direction."""
     logger.info(
@@ -582,8 +612,9 @@ def create_catchment(
             raise ValueError(msg)
     
     
-    with get_xarray_ds_from_file(input_file) as input_ds:
-
+    with get_xarray_ds_from_file(input_file, var_name) as input_ds:
+        
+        logger.debug(input_ds)
         # transform
         transform = get_transformation_matrix_nc(input_ds, var_name)
 
@@ -591,8 +622,6 @@ def create_catchment(
         latlon = True
 
         if gauge_coords is None and is_data_global(input_ds, coordinate_slices):
-            if coordinate_slices is not None: 
-                input_ds = input_ds.sel()
             logger.info('Creating global basin id file...')
             temp_file1 = "hydro1.nc"
             global_catchments = Catchment(
@@ -618,12 +647,13 @@ def create_catchment(
                 out_var_name=temp_file2,
                 do_shift=True,
                 target_resolution=target_resolution,
+                upscale=upscale
             )
             catchments = [global_catchments, global_catchments_shifted]
 
             for c in catchments:
                 c.get_basins()
-                if target_resolution is not None: 
+                if target_resolution is not None and upscale: 
                     c.upscale(var)
                 else:
                     c.get_facc()
@@ -644,7 +674,6 @@ def create_catchment(
             temp_file2.unlink()
         elif coordinate_slices is not None:
             logger.info(f'Creating basin id file for {coordinate_slices}')
-            ds = input_ds.sel(lat=coordinate_slices["lat"], lon=coordinate_slices["lon"])
             logger.info(transform)
             c = Catchment(
                 ds=input_ds,
@@ -656,8 +685,9 @@ def create_catchment(
                 out_var_name="basin_ids.nc",
                 do_shift=False,
                 target_resolution=target_resolution,
+                upscale=upscale
             )
-            if target_resolution is not None: 
+            if target_resolution is not None and upscale: 
                 c.upscale(var)
             else:
                 c.get_facc()
@@ -676,9 +706,10 @@ def create_catchment(
                 out_var_name="basin_ids.nc",
                 do_shift=False,
                 target_resolution=target_resolution,
+                upscale=upscale
             )
             c.delineate_basin(gauge_coords)
-            if target_resolution is not None: 
+            if target_resolution is not None and upscale: 
                 c.upscale(var)
             else:
                 c.get_facc()
