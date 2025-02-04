@@ -442,11 +442,15 @@ def evaludate_grdc_data(
         n_jobs=n_jobs,
     )
 
-    if direct_comparison: 
-        return # use jeissons function directly
-    logger.info('start boostraping')
-    
-    if n_bootstrap_years is not None and n_boostrap_selections is not None and n_boostrap_selections > 0:
+    if direct_comparison:
+        return  # use jeissons function directly
+    logger.info("start boostraping")
+
+    if (
+        n_bootstrap_years is not None
+        and n_boostrap_selections is not None
+        and n_boostrap_selections > 0
+    ):
         results = []
         total_years_sim = model_df["year"].unique()
         total_years_obs = observed_df["year"].unique()

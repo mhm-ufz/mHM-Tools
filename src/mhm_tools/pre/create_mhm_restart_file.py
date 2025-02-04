@@ -362,10 +362,10 @@ class MPRRunner:
             )
             with ErrorLogger(logger):
                 raise TimeoutExpired(msg) from err
-        except RuntimeError:
+        except RuntimeError as rte:
             msg = f"MPR failed for {grid} and command {command}"
             with ErrorLogger(logger):
-                raise RuntimeError(msg)
+                raise RuntimeError(msg) from rte
 
 
 class MHMRestartFile:
@@ -823,12 +823,16 @@ class MHMRestartFile:
 
     def _correct_restart_file(self, ds):
         ds_mask = xr.open_dataset(self.grid.land_mask_file)
-        logger.debug(f"land mask shape before sel: {ds_mask.land_mask.shape} lat_min: {ds_mask.land_mask.lat.min()}, lat_max: {ds_mask.land_mask.lat.max()}")
+        logger.debug(
+            f"land mask shape before sel: {ds_mask.land_mask.shape} lat_min: {ds_mask.land_mask.lat.min()}, lat_max: {ds_mask.land_mask.lat.max()}"
+        )
         ds_mask = ds_mask.sel(
             lon=slice(self.grid.l1.lon_min, self.grid.l1.lon_max),
             lat=slice(self.grid.l1.lat_max, self.grid.l1.lat_min),
         )
-        logger.debug(f"land mask shape after sel: {ds_mask.land_mask.shape} lat_min: {ds_mask.land_mask.lat.min()}, lat_max: {ds_mask.land_mask.lat.max()}")
+        logger.debug(
+            f"land mask shape after sel: {ds_mask.land_mask.shape} lat_min: {ds_mask.land_mask.lat.min()}, lat_max: {ds_mask.land_mask.lat.max()}"
+        )
         # logger.debug(f'lon: ds {ds['lon_out'].values[0]}-{ds['lon_out'].values[-1]} ; grid {self.grid.l1.lon_min}-{self.grid.l1.lon_max}')
         # logger.debug(f'lat: ds {ds['lat_out'].values[0]}-{ds['lat_out'].values[-1]} ; grid {self.grid.l1.lat_min}-{self.grid.l1.lat_max}')
         # logger.debug(f'mask: {np.shape(ds_mask["land_mask"].data)}')
@@ -1113,9 +1117,19 @@ class MHMRestartFile:
         logger.info(f"Writing renamed restart file to {self.grid.restart_file}")
         encoding = {}
         for data_var in ds.data_vars:
-             encoding[data_var] = {"dtype": "float32", "_FillValue": -9999.0, "zlib": True, "complevel": 4}
+            encoding[data_var] = {
+                "dtype": "float32",
+                "_FillValue": -9999.0,
+                "zlib": True,
+                "complevel": 4,
+            }
         for coord in ds.coords:
-             encoding[coord] = {"dtype": "float32", "_FillValue": -9999.0, "zlib": True, "complevel": 4}
+            encoding[coord] = {
+                "dtype": "float32",
+                "_FillValue": -9999.0,
+                "zlib": True,
+                "complevel": 4,
+            }
         ds.to_netcdf(self.grid.restart_file, encoding=encoding)
 
     def _delete_temp_files(self):

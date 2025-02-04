@@ -1,21 +1,20 @@
-
 """File handling utils."""
 
-
-from pathlib import Path
 import logging
-from mhm_tools.common.logger import ErrorLogger
+from pathlib import Path
+
 import numpy as np
 import xarray as xr
 
+from mhm_tools.common.logger import ErrorLogger
 from mhm_tools.common.xarray_utils import get_coord_key, get_single_data_var
-
 
 logger = logging.getLogger(__name__)
 
 ######
 # more on this in the cut_classical_mhm_setups branch There are classes for Morph and meteo data
 ######
+
 
 def create_header(ds, output_path=None, no_data_value="-9999", write=True):
     """Write a header file from a dataset."""
@@ -25,18 +24,18 @@ def create_header(ds, output_path=None, no_data_value="-9999", write=True):
     y = ds[lat_key].values
     # x = x[np.where((x >= mask.lon.values[0]) & (x <= mask.lon.values[-1]))]
     # y = y[np.where((y >= mask.lat.values[0]) & (y <= mask.lat.values[-1]))]
-    cellsize = abs(x[1]-x[0])
+    cellsize = abs(x[1] - x[0])
     xllcorner = np.nanmin(x) - 0.5 * cellsize
     if np.nanmin(y) == y[-1]:
         yllcorner = np.nanmin(y) + 0.5 * cellsize
     else:
         yllcorner = np.nanmin(y) - 0.5 * cellsize
 
-    ncols = len(x) - 1 
+    ncols = len(x) - 1
     nrows = len(y) - 1
-    if write: 
+    if write:
         header_out_path = output_path / "header.txt"
-        header_str =  f"""
+        header_str = f"""
 ncols                {ncols}
 nrows                {nrows}
 xllcorner            {xllcorner:.6f}
@@ -44,20 +43,21 @@ yllcorner            {yllcorner:.6f}
 cellsize             {cellsize:.6f}
 NODATA_value         {no_data_value}
             """
-        logger.info(f'Writing header file to {header_out_path} with header str: {header_str}')
+        logger.info(
+            f"Writing header file to {header_out_path} with header str: {header_str}"
+        )
         with header_out_path.open("w") as hf:
             hf.write(header_str)
         return header_out_path
-    else:
-        header_dict = {
+    header_dict = {
         "ncols": ncols,
         "nrows": nrows,
         "xllcorner": xllcorner,
         "yllcorner": yllcorner,
         "cellsize": cellsize,
-        "NODATA_value": no_data_value
-        }
-        return header_dict
+        "NODATA_value": no_data_value,
+    }
+    return header_dict
 
 
 def crop_file_by_mask(ds, mask_file):
@@ -74,29 +74,33 @@ def crop_file_by_mask(ds, mask_file):
             }
         )
 
+
 def get_xarray_ds_from_file(file_path, var_name=None):
     """Read file and return xarray dataset."""
     file_path = Path(file_path)
-    logger.info(f'Reading {file_path} to xarray')
+    logger.info(f"Reading {file_path} to xarray")
     if not file_path.is_file():
         msg = f"File path does not point to an existing file: {file_path}"
         with ErrorLogger:
             raise ValueError(msg)
-    if file_path.suffix == '.asc':
+    if file_path.suffix == ".asc":
         return read_ascii_to_xarray(filepath=file_path, var_name=var_name)
-    if file_path.suffix == '.nc':
+    if file_path.suffix == ".nc":
         return xr.open_dataset(file_path)
     msg = f"File types other than asci and netcdf are not implemented. The suffix of the file was: {file_path.suffix}"
     with ErrorLogger:
         raise NotImplementedError()
+
 
 def write_xarray_to_ascii(dataset, filepath, data_var=None):
     """Take xarray dataset and writes it to an asci file that can by read by mHM."""
     # Extract the data, coordinates, and nodata value from the Dataset
     if data_var is None:
         data_var = get_single_data_var(dataset)
-        if data_var is None: 
-            logger.error(f'Data can not be written to {filepath} as the dataset has {len(data_vars)} data_vars incompatible with asci')
+        if data_var is None:
+            logger.error(
+                f"Data can not be written to {filepath} as the dataset has {len(data_vars)} data_vars incompatible with asci"
+            )
             return
     data = dataset[data_var]
     lat = dataset["lat"].values
@@ -127,6 +131,7 @@ def write_xarray_to_ascii(dataset, filepath, data_var=None):
         f.write(header)
         np.savetxt(f, data_to_write, fmt="%g")
 
+
 def read_ascii_to_xarray(filepath, var_name=None):
     """Read an mHM readable asci file to an xarray dataset."""
     # Read the header from the file
@@ -150,7 +155,9 @@ def read_ascii_to_xarray(filepath, var_name=None):
     data_values = np.loadtxt(filepath, skiprows=6)
 
     # Calculate latitude and longitude coordinates
-    lon = np.arange(xllcorner + cellsize / 2, xllcorner + (ncols + 0.5) * cellsize, cellsize)
+    lon = np.arange(
+        xllcorner + cellsize / 2, xllcorner + (ncols + 0.5) * cellsize, cellsize
+    )
     lat = np.arange(
         yllcorner + (nrows - 0.5) * cellsize, yllcorner - cellsize / 2, -cellsize
     )
@@ -158,7 +165,7 @@ def read_ascii_to_xarray(filepath, var_name=None):
     logger.debug(lat)
 
     # Create DataArray with lat/lon dimensions and nodata value
-    name = 'data' if var_name is None else var_name
+    name = "data" if var_name is None else var_name
     data_array = xr.DataArray(
         data=data_values,
         dims=["lat", "lon"],
@@ -169,4 +176,3 @@ def read_ascii_to_xarray(filepath, var_name=None):
 
     # Convert to Dataset
     return xr.Dataset({name: data_array})
-

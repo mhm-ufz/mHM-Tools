@@ -33,7 +33,7 @@ def add_args(parser):
     parser.add_argument(
         "--l1_resolution",
         required=False,
-        help = ("Hydrological resolution. Without it no latlon file can be produced.")
+        help=("Hydrological resolution. Without it no latlon file can be produced."),
     )
     parser.add_argument(
         "--l11_resolution",
@@ -57,4 +57,11 @@ def run(args):
     args : argparse.Namespace
         parsed command line arguments
     """
-    crop_mhm_setup(args.mask_file, args.output_path, args.input_path, l1_resolution=args.l1_resolution, crs=args.crs, l11_resolution=args.l11_resolution)
+    crop_mhm_setup(
+        args.mask_file,
+        args.output_path,
+        args.input_path,
+        l1_resolution=args.l1_resolution,
+        crs=args.crs,
+        l11_resolution=args.l11_resolution,
+    )

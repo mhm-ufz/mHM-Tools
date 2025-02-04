@@ -134,31 +134,35 @@ def get_coord_values(ds, lat=False, lon=False):
     return ds[key].values
 
 
-def get_file_stats(file, input_var, factor=1, coordinate_slice=None, output_path=None, years=None):
-    with xr.open_dataset(file, engine="netcdf4") as ds:
+def get_file_stats(
+    file, input_var, factor=1, coordinate_slice=None, output_path=None, years=None
+):
+    """Get statistics for one file."""
+    with xr.open_dataset(file, engine="netcdf4") as ds_in:
         # Apply coordinate slicing if needed
+        ds_croped = ds_in
         if coordinate_slice is not None:
-            lat_key = get_coord_key(ds, lat=True)
-            lon_key = get_coord_key(ds, lon=True)
-            ds = ds.sel(
+            lat_key = get_coord_key(ds_in, lat=True)
+            lon_key = get_coord_key(ds_in, lon=True)
+            ds_croped = ds_in.sel(
                 {lat_key: coordinate_slice["lat"], lon_key: coordinate_slice["lon"]}
             )
         if years is not None:
-            ds = ds.sel(time=ds.time.dt.year.isin(years))
+            ds_croped = ds_croped.sel(time=ds_croped.time.dt.year.isin(years))
 
         # Calculate climatology and standard deviation along the time dimension
-        clim = get_clim_from_ds(ds, input_var, factor)
-        std = get_std_from_ds(ds, input_var, clim, factor)
+        clim = get_clim_from_ds(ds_croped, input_var, factor)
+        std = get_std_from_ds(ds_croped, input_var, clim, factor)
 
-        mean = ds[input_var].mean(dim="time", skipna=True) * factor
+        mean = ds_croped[input_var].mean(dim="time", skipna=True) * factor
 
         # Construct the output dataset with lazy evaluations
         output = xr.Dataset(
             {"clim": clim, "std": std, "mean": mean},
             coords={
                 "month": np.arange(1, 13, 1),
-                "lat": get_coord_values(ds, lat=True),
-                "lon": get_coord_values(ds, lon=True),
+                "lat": get_coord_values(ds_croped, lat=True),
+                "lon": get_coord_values(ds_croped, lon=True),
             },
         )
     if output_path is not None:
@@ -174,7 +178,9 @@ def get_files(path, n_bootstrap_years=None, years=None):
         selectable_years = [y for y in all_years if y.name in years]
     else:
         selectable_years = all_years
-    logger.debug(f"selectable years are {selectable_years} - n_bootstrap_years is {n_bootstrap_years}")
+    logger.debug(
+        f"selectable years are {selectable_years} - n_bootstrap_years is {n_bootstrap_years}"
+    )
     if n_bootstrap_years is not None:
         # needs fixed folder structure of y/m/file
         selected_years = random.choices(selectable_years, k=n_bootstrap_years)
@@ -261,8 +267,8 @@ def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None)
 def split_file_list(file_list, n_processes):
     if n_processes > 1:
         return [file_list[i::n_processes] for i in range(n_processes)]
-    else:
-        return file_list
+    return file_list
+
 
 def get_stats_one_pass(
     input_path,
@@ -273,11 +279,11 @@ def get_stats_one_pass(
     n_bootstrap_years=None,
     bootstrap_index=None,
     output_path=None,
-    years=None
+    years=None,
 ):
     logger.debug(years)
     files = get_files(input_path, n_bootstrap_years=n_bootstrap_years, years=years)
-    logger.debug(f'List of files: {files}')
+    logger.debug(f"List of files: {files}")
     file_subsets = split_file_list(files, ncpus)
     logger.info("creating statistics...")
     subset_results = Parallel(n_jobs=ncpus, backend="loky")(
@@ -337,19 +343,28 @@ def get_stats_one_pass(
 
 
 def plot_single_map(
-    ax, values, diff_to_mean=None, vmin=0, vmax=1, cmap=plt.cm.coolwarm, bounds_type='fixed'
+    ax,
+    values,
+    diff_to_mean=None,
+    vmin=0,
+    vmax=1,
+    cmap=plt.cm.coolwarm,
+    bounds_type="fixed",
 ):
     n_bins = 10
-    if bounds_type == 'max':
+    if bounds_type == "max":
         if diff_to_mean is not None:
             vmin = 1 - diff_to_mean
             vmax = 1 + diff_to_mean
-    if bounds_type == 'quantiles':
-        vmin, vmax = np.nanquantile(values,0.05).data, np.nanquantile(values,0.95).data
-    if bounds_type == 'fixed':
+    if bounds_type == "quantiles":
+        vmin, vmax = (
+            np.nanquantile(values, 0.05).data,
+            np.nanquantile(values, 0.95).data,
+        )
+    if bounds_type == "fixed":
         vmin, vmax = 0.5, 1.5
     bounds = np.linspace(vmin, vmax, n_bins + 1)
-    bounds = [np.round(b,2) for b in bounds]
+    bounds = [np.round(b, 2) for b in bounds]
     cmap = cmap
     norm = BoundaryNorm(bounds, cmap.N)
 
@@ -360,21 +375,23 @@ def plot_single_map(
 def plot_map(
     rel_mean, rel_std, spearman, ref_clim, input_clim, input_name, ref_name, output_path
 ):
-    rel_mean = np.where(rel_mean==np.inf, np.nan, rel_mean)
-    rel_std = np.where(rel_std==np.inf, np.nan, rel_std)
+    rel_mean = np.where(rel_mean == np.inf, np.nan, rel_mean)
+    rel_std = np.where(rel_std == np.inf, np.nan, rel_std)
     fig, axes = plt.subplots(2, 2, figsize=(10.5, 4.68))
     if input_name is not None and ref_name is not None:
         fig.suptitle(f"Comparision {input_name} with {ref_name}")
 
     # Set common colormap and normalization limits for mean_et and mean_aet
     mean_diff_1 = max(np.abs(1 - np.nanmin(rel_mean)), np.abs(1 - np.nanmax(rel_mean)))
-    im0, bounds0 = plot_single_map(axes[0, 0], rel_mean, mean_diff_1, bounds_type='fixed')
+    im0, bounds0 = plot_single_map(
+        axes[0, 0], rel_mean, mean_diff_1, bounds_type="fixed"
+    )
     axes[0, 0].set_title(
         f"Relative temporal Mean (median={np.nanmedian(rel_mean):.2f})"
     )
     print(bounds0)
     std_diff_1 = max(np.abs(1 - np.nanmin(rel_std)), np.abs(1 - np.nanmax(rel_std)))
-    im1, bounds1 = plot_single_map(axes[0, 1], rel_std, std_diff_1, bounds_type='fixed')
+    im1, bounds1 = plot_single_map(axes[0, 1], rel_std, std_diff_1, bounds_type="fixed")
     print(bounds1)
     axes[0, 1].set_title(
         f"Relative temporal Standarddeviation (median={np.nanmedian(rel_std):.2f})"
@@ -382,7 +399,12 @@ def plot_map(
 
     im2 = axes[1, 0].imshow(spearman, vmin=np.nanmin(spearman), vmax=1)
     im2, bounds2 = plot_single_map(
-        axes[1, 0], spearman, vmin=np.nanmin(spearman), vmax=1, cmap=plt.cm.viridis_r, bounds_type='quantiles'
+        axes[1, 0],
+        spearman,
+        vmin=np.nanmin(spearman),
+        vmax=1,
+        cmap=plt.cm.viridis_r,
+        bounds_type="quantiles",
     )
     print(bounds2)
 
@@ -467,7 +489,7 @@ def plot_map(
 
 def create_map_from_output(output_path, input_name, ref_name):
     file = get_rel_stat_file(output_path, input_name, ref_name)
-    logger.info(f'Plotting data from {file}')
+    logger.info(f"Plotting data from {file}")
     with xr.open_dataset(file) as ds:
         rel_std = ds["rel_std"]
         rel_mean = ds["rel_mean"]
@@ -491,7 +513,14 @@ def create_map_from_output(output_path, input_name, ref_name):
 
 
 def get_stats(
-    path, var, factor, coordinate_slice, n_bootstrap_years, ncpus, output_file, years=None
+    path,
+    var,
+    factor,
+    coordinate_slice,
+    n_bootstrap_years,
+    ncpus,
+    output_file,
+    years=None,
 ):
     logger.info(f"Get stats for {path}")
     if var is not None:
@@ -508,29 +537,29 @@ def get_stats(
                 n_bootstrap_years=n_bootstrap_years,
                 ncpus=ncpus,
                 output_path=output_file,
-                years=years
+                years=years,
             )
         else:
             with ErrorLogger(logger):
                 raise ValueError()
     else:
         with xr.open_dataset(path, engine="netcdf4") as ds_input:
+            ds = ds_input
             if coordinate_slice is not None:
-                ds_input = ds_input.sel(
+                ds = ds.sel(
                     {
-                        get_coord_key(ds_input, lat=True): coordinate_slice["lat"],
-                        get_coord_key(ds_input, lon=True): coordinate_slice["lon"],
+                        get_coord_key(ds, lat=True): coordinate_slice["lat"],
+                        get_coord_key(ds, lon=True): coordinate_slice["lon"],
                     }
                 )
             if years is not None:
-                ds_input = ds_input.sel(time=ds_input.time.dt.year.isin(years))
-            if "clim" in ds_input and "std" in ds_input and "mean" in ds_input:
-                stats_ds = ds_input
+                ds = ds.sel(time=ds_input.time.dt.year.isin(years))
+            if "clim" in ds and "std" in ds and "mean" in ds:
+                stats_ds = ds
             else:
                 with ErrorLogger(logger):
-                    raise KeyError(
-                        "Wrong statisitcs file. If you want to create new statistics you have to provide a var."
-                    )
+                    msg = "Wrong statisitcs file. If you want to create new statistics you have to provide a var."
+                    raise KeyError(msg)
     return stats_ds
 
 
@@ -548,8 +577,9 @@ def compare_input_with_ref(
     n_bootstrap_years=None,
     bootstrap_index=None,
     ncpus=1,
-    years=None
+    years=None,
 ):
+    """Compare the two datasets."""
     if bootstrap_index is not None:
         random.seed(bootstrap_index)
     # get input statistics
@@ -564,7 +594,7 @@ def compare_input_with_ref(
         n_bootstrap_years=n_bootstrap_years,
         ncpus=ncpus,
         output_file=input_stats_file,
-        years=years
+        years=years,
     )
     # get output statistics
 
@@ -576,7 +606,7 @@ def compare_input_with_ref(
         n_bootstrap_years=n_bootstrap_years,
         ncpus=ncpus,
         output_file=ref_stats_file,
-        years=years
+        years=years,
     )
 
     input, ref = regridd_to_higher_spatial_resolution(input, ref)
@@ -647,9 +677,10 @@ def compare_input_with_ref(
         output["ref_clim"] = ref_clim
     if bootstrap_index is not None:
         file_name = output_path / f"{file_name}_{bootstrap_index}.nc"
-        output.to_netcdf(file_name)
-        return file_name
-    output.to_netcdf(output_path / f"{file_name}.nc")
+    else:
+        file_name = output_path / f"{file_name}.nc"
+    output.to_netcdf(file_name)
+    logger.info(f'Written output to {file_name}')
     plot_map(
         rel_std=rel_std,
         rel_mean=rel_mean,
@@ -663,6 +694,7 @@ def compare_input_with_ref(
 
 
 def get_rel_stat_file(output_path, input_name, ref_name):
+    """Create the file name for the file  contatining relative statistics of the two datasets."""
     file_name = "relative_stats"
     if input_name is not None:
         file_name += f"_{input_name}"
@@ -720,6 +752,7 @@ def evaluate_boostraping_stat_files(stat_files, input_name, ref_name):
 
 
 def get_dataset_from_path(path, years=None):
+    """Get a dataset from a given path whether that is a file or a directory."""
     if path.is_file() and path.suffix == "nc":
         return xr.open_dataset(path)
     if path.is_dir():
@@ -730,7 +763,9 @@ def get_dataset_from_path(path, years=None):
             file_list,
             combine="by_coords",  # Ensures files are combined based on shared coordinates
         )
-
+    with ErrorLogger:
+        msg = f"Path {path} does not exist."
+        raise ValueError(msg)
 
 def regridd_to_higher_spatial_resolution(ds1, ds2):
     """
@@ -787,9 +822,11 @@ def direct_comparison(
     coordinate_slice,
     output_path,
 ):
+    """Directly compare the two datasets without bootstraping."""
     if ref_path is None:
         with ErrorLogger(logger):
-            raise ValueError("ref_path must be given for direct comparison.")
+            msg = "ref_path must be given for direct comparison."
+            raise ValueError(msg)
     logger.info("Start direct comparison.")
     input = get_dataset_from_path(input_path)
     ref = get_dataset_from_path(ref_path)
@@ -811,7 +848,8 @@ def direct_comparison(
     end_time = min(input.time.max(), ref.time.max())
     if start_time >= end_time:
         with ErrorLogger(logger):
-            raise ValueError("The timeframes of the two datasets are not overlapping.")
+            msg = "The timeframes of the two datasets are not overlapping."
+            raise ValueError(msg)
     logger.info(f"start_time {start_time}; end_time {end_time}")
     input = input.sel(time=slice(start_time, end_time))
     ref = ref.sel(time=slice(start_time, end_time))
@@ -890,30 +928,33 @@ def direct_comparison(
         output_path,
     )
 
+
 def get_overlapping_years(input_path, ref_path):
-    logger.info('Determining overlapping years.')
+    """Determine overlapping years between two datasets."""
+    logger.info("Determining overlapping years.")
     years_in = []
     years_ref = []
     if input_path.is_dir():
-        years_in.extend([p.name for p in input_path.glob('*') if p.is_dir()])
+        years_in.extend([p.name for p in input_path.glob("*") if p.is_dir()])
     years_in.sort()
     logger.debug(f"Input years: {years_in}")
     # elif input_path.is_file():
     #     with xr.open_dataset(input_path) as ds:
     #         years = ds['time'].year.unique()
     if ref_path.is_dir():
-        years_ref.extend([p.name for p in ref_path.glob('*') if p.is_dir() and p.name])
+        years_ref.extend([p.name for p in ref_path.glob("*") if p.is_dir() and p.name])
     years_ref.sort()
     logger.debug(f"Ref years: {years_ref}")
     years = []
     for year in years_in:
         if year in years_ref:
             years.append(year.strip())
-            # try: 
+            # try:
             #     years.append(int(year))
             # except:
             #     logger.debug(f"{year} can not be converted to `int`")
     return years
+
 
 @log_arguments()
 def seasonality_grid_validation(
@@ -933,6 +974,7 @@ def seasonality_grid_validation(
     n_bootstrap_selections=None,
     direct_comp=True,
 ):
+    """Validate a spatial variable from two datasets by comparing the climatology of that variable."""
     output_path = Path(output_path)
     input_path = Path(input_path)
     ref_path = Path(ref_path) if ref_path is not None else None
@@ -941,9 +983,10 @@ def seasonality_grid_validation(
     if not output_path.is_dir():
         output_path.mkdir(parents=True)
     if only_plot and get_rel_stat_file(output_path, input_name, ref_name).is_file():
-        return create_map_from_output(
+        create_map_from_output(
             output_path=output_path, input_name=input_name, ref_name=ref_name
         )
+        return
     if direct_comp:
         # return direct_comparison(
         #     input_path,
@@ -963,19 +1006,21 @@ def seasonality_grid_validation(
     if ref_path is None:
         output_name = f"{input_name}_stats.nc" if input_name is not None else "stats.nc"
         if input_path.is_file():
+            # Write file stats to file
             get_file_stats(
                 input_path,
                 input_var,
                 input_factor,
                 coordinate_slice,
                 output=output_path / output_name,
-                years=years
+                years=years,
             )
         elif (
             n_bootstrap_years is not None
             and n_bootstrap_selections > 0
             and input_path.is_dir()
         ):
+            # Write file stats for each bootstrap selection
             stat_files = Parallel(n_jobs=n_cpus)(
                 delayed(get_stats_one_pass)(
                     ref_path,
@@ -985,22 +1030,24 @@ def seasonality_grid_validation(
                     n_bootstrap_years,
                     s,
                     output_path / output_name,
-                    years=years
+                    years=years,
                 )
                 for s in range(n_bootstrap_selections)
             )
         elif input_path.is_dir():
+            # Write file stats for one dataset read in from multiple files in a directory
             get_stats_one_pass(
                 input_path,
                 input_var,
                 input_factor,
                 coordinate_slice,
                 output_path=output_path / output_name,
-                years=years
+                years=years,
             )
         else:
             with ErrorLogger(logger):
-                raise ValueError("input path does not exist")
+                msg = "input path does not exist"
+                raise ValueError(msg)
     elif (
         n_bootstrap_years is not None
         and n_bootstrap_selections > 0
@@ -1027,7 +1074,7 @@ def seasonality_grid_validation(
                     coordinate_slice,
                     n_bootstrap_years,
                     s,
-                    years=years
+                    years=years,
                 )
                 for s in range(n_bootstrap_selections)
             )
@@ -1053,5 +1100,5 @@ def seasonality_grid_validation(
             ref_factor,
             coordinate_slice,
             ncpus=n_cpus,
-            years=years
+            years=years,
         )

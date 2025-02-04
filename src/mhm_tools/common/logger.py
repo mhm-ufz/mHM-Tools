@@ -37,28 +37,30 @@ def configure_mhm_tools_logger(
         ch_level, error_msg_ch = get_log_level(log_level, count_verbose, count_quiet)
         ch.setLevel(ch_level)
         logger.addHandler(ch)
-        logger.info(f'Steam Handler set to log_level {LOG_LEVEL_STR[ch_level]}')
+        logger.info(f"Steam Handler set to log_level {LOG_LEVEL_STR[ch_level]}")
     if log_file:
         log_file = Path(log_file)
         if not log_file.suffix:
-            logger.warning(f'Log file does not point to a file: {log_file}')
+            logger.warning(f"Log file does not point to a file: {log_file}")
         else:
             if not log_file.parent.is_dir():
-                logger.info(f'Creating folder for log_files {log_file.parent}')
+                logger.info(f"Creating folder for log_files {log_file.parent}")
                 log_file.parent.mkdir(parents=True)
             if log_file.exists():
-                logger.debug('Deleting existing log file.')
+                logger.debug("Deleting existing log file.")
                 log_file.unlink()
             fh = logging.FileHandler(log_file)
             fh.setFormatter(formatter)
             if log_file_level is not None:
-                fh_level, error_msg_fh = get_log_level(log_file_level, count_verbose, count_quiet)
+                fh_level, error_msg_fh = get_log_level(
+                    log_file_level, count_verbose, count_quiet
+                )
             else:
                 fh_level = general_level
             fh.setLevel(fh_level)
             logger.addHandler(fh)
-            logger.info(f'File Handler set to log_level {LOG_LEVEL_STR[fh_level]}')
-            logger.info(f'Writing logs to {log_file}')
+            logger.info(f"File Handler set to log_level {LOG_LEVEL_STR[fh_level]}")
+            logger.info(f"Writing logs to {log_file}")
     if error_msg_gnrl is not None:
         logger.error(f"Logger: {error_msg_gnrl}")
     if error_msg_ch is not None:
@@ -69,10 +71,12 @@ def configure_mhm_tools_logger(
 
 def get_lowest_level(log_level, log_file_level, count_verbose, count_quiet):
     """Return the most verbose log level of all handlers."""
-    llevel, ll_msg = get_log_level(log_level, count_verbose=count_verbose, count_quiet=count_quiet)
+    llevel, ll_msg = get_log_level(
+        log_level, count_verbose=count_verbose, count_quiet=count_quiet
+    )
     if log_file_level is not None:
         lflevel, lf_msg = get_log_level(log_file_level)
-    else: 
+    else:
         lflevel, lf_msg = llevel, None
     return min(llevel, lflevel), ll_msg, lf_msg
 
@@ -88,7 +92,7 @@ def get_log_level(level=None, count_verbose=0, count_quiet=0):
         verbosity
     count_quiet : int
         quietness
-        
+
     returns level: int
     """
     error_msg = None
