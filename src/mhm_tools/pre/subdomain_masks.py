@@ -281,7 +281,7 @@ class CreateSubdomainMasks:
         # First condition: Set to sink_value where data_var is NaN and land_mask is not NaN
         logger.debug(f"flwdir data_vars {data_var_values}")
         data_var_values[
-            data_var_values ==247 & land_mask_values !=0
+            (data_var_values == 247) & (land_mask_values !=0)
         ] = sink_value
 
         # Second condition: Replace all values where land_mask is 0 with NaN unless they are sink values (0)
