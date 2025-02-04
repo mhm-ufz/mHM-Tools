@@ -30,6 +30,23 @@ def add_args(parser):
         required=True,
         help="Path where the new domain setup should be saved.",
     )
+    parser.add_argument(
+        "--l1_resolution",
+        required=False,
+        help = ("Hydrological resolution. Without it no latlon file can be produced.")
+    )
+    parser.add_argument(
+        "--l11_resolution",
+        required=False,
+    )
+    parser.add_argument(
+        "--crs",
+        default=None,
+        help=(
+            "Coordinates reference system (e.g. 'epsg:3035'). "
+            "If not given, headers will be interpreted as given in lat-lon ('epsg:4326')."
+        ),
+    )
 
 
 def run(args):
@@ -40,4 +57,4 @@ def run(args):
     args : argparse.Namespace
         parsed command line arguments
     """
-    crop_mhm_setup(args.mask_file, args.output_path, args.input_path)
+    crop_mhm_setup(args.mask_file, args.output_path, args.input_path, l1_resolution=args.l1_resolution, crs=args.crs, l11_resolution=args.l11_resolution)

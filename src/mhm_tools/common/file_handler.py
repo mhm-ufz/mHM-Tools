@@ -8,7 +8,7 @@ from mhm_tools.common.logger import ErrorLogger
 import numpy as np
 import xarray as xr
 
-from mhm_tools.common.xarray_utils import get_coord_key
+from mhm_tools.common.xarray_utils import get_coord_key, get_single_data_var
 
 
 logger = logging.getLogger(__name__)
@@ -17,27 +17,47 @@ logger = logging.getLogger(__name__)
 # more on this in the cut_classical_mhm_setups branch There are classes for Morph and meteo data
 ######
 
-def create_header_file(ds, output_path, no_data_value="-9999"):
+def create_header(ds, output_path=None, no_data_value="-9999", write=True):
     """Write a header file from a dataset."""
     lat_key = get_coord_key(ds, lat=True)
     lon_key = get_coord_key(ds, lon=True)
     x = ds[lon_key].values
-    y = np.flip(ds[lat_key].values)
+    y = ds[lat_key].values
     # x = x[np.where((x >= mask.lon.values[0]) & (x <= mask.lon.values[-1]))]
     # y = y[np.where((y >= mask.lat.values[0]) & (y <= mask.lat.values[-1]))]
-    header_path = output_path / "header.txt"
-    if not header_path.is_file():
-        with header_path.open("w") as hf:
-            hf.write(
-                f"""
-ncols                {len(x)}
-nrows                {len(y)}
-xllcorner            {np.nanmin(x)}
-yllcorner            {np.nanmin(y)}
-cellsize             {abs(x[1]-x[0]):.6f}
+    cellsize = abs(x[1]-x[0])
+    xllcorner = np.nanmin(x) - 0.5 * cellsize
+    if np.nanmin(y) == y[-1]:
+        yllcorner = np.nanmin(y) + 0.5 * cellsize
+    else:
+        yllcorner = np.nanmin(y) - 0.5 * cellsize
+
+    ncols = len(x) - 1 
+    nrows = len(y) - 1
+    if write: 
+        header_out_path = output_path / "header.txt"
+        header_str =  f"""
+ncols                {ncols}
+nrows                {nrows}
+xllcorner            {xllcorner:.6f}
+yllcorner            {yllcorner:.6f}
+cellsize             {cellsize:.6f}
 NODATA_value         {no_data_value}
             """
-            )
+        logger.info(f'Writing header file to {header_out_path} with header str: {header_str}')
+        with header_out_path.open("w") as hf:
+            hf.write(header_str)
+        return header_out_path
+    else:
+        header_dict = {
+        "ncols": ncols,
+        "nrows": nrows,
+        "xllcorner": xllcorner,
+        "yllcorner": yllcorner,
+        "cellsize": cellsize,
+        "NODATA_value": no_data_value
+        }
+        return header_dict
 
 
 def crop_file_by_mask(ds, mask_file):
@@ -54,34 +74,40 @@ def crop_file_by_mask(ds, mask_file):
             }
         )
 
-def get_xarray_ds_from_file(file_path):
+def get_xarray_ds_from_file(file_path, var_name=None):
     """Read file and return xarray dataset."""
     file_path = Path(file_path)
+    logger.info(f'Reading {file_path} to xarray')
     if not file_path.is_file():
         msg = f"File path does not point to an existing file: {file_path}"
         with ErrorLogger:
             raise ValueError(msg)
     if file_path.suffix == '.asc':
-        return read_ascii_to_xarray(filepath=file_path)
+        return read_ascii_to_xarray(filepath=file_path, var_name=var_name)
     if file_path.suffix == '.nc':
         return xr.open_dataset(file_path)
     msg = f"File types other than asci and netcdf are not implemented. The suffix of the file was: {file_path.suffix}"
     with ErrorLogger:
         raise NotImplementedError()
 
-def write_xarray_to_ascii(dataset, filepath):
+def write_xarray_to_ascii(dataset, filepath, data_var=None):
     """Take xarray dataset and writes it to an asci file that can by read by mHM."""
     # Extract the data, coordinates, and nodata value from the Dataset
-    data = dataset["data"].values
+    if data_var is None:
+        data_var = get_single_data_var(dataset)
+        if data_var is None: 
+            logger.error(f'Data can not be written to {filepath} as the dataset has {len(data_vars)} data_vars incompatible with asci')
+            return
+    data = dataset[data_var]
     lat = dataset["lat"].values
     lon = dataset["lon"].values
-    nodata_value = dataset["data"].attrs.get("nodata_value", -9999)
+    nodata_value = dataset[data_var].attrs.get("nodata_value", -9999)
 
     # Calculate header information
     nrows, ncols = data.shape
     cellsize = lon[1] - lon[0]  # Assuming uniform spacing in lon
-    xllcorner = lon[0]
-    yllcorner = lat[-1]  # lat starts at the top and descends
+    xllcorner = lon[0] - 0.5 * cellsize
+    yllcorner = lat[-1] - 0.5 * cellsize  # lat starts at the top and descends
 
     # Create the header
     header = (
@@ -94,14 +120,14 @@ def write_xarray_to_ascii(dataset, filepath):
     )
 
     # Replace NaN values with nodata_value in data
-    data_to_write = np.where(np.isnan(data), nodata_value, data)
+    data_to_write = np.where(np.isnan(data.values), nodata_value, data)
 
     # Write header and data to ASCII file
     with filepath.open("w") as f:
         f.write(header)
         np.savetxt(f, data_to_write, fmt="%g")
 
-def read_ascii_to_xarray(filepath):
+def read_ascii_to_xarray(filepath, var_name=None):
     """Read an mHM readable asci file to an xarray dataset."""
     # Read the header from the file
     with filepath.open("r") as f:
@@ -124,20 +150,23 @@ def read_ascii_to_xarray(filepath):
     data_values = np.loadtxt(filepath, skiprows=6)
 
     # Calculate latitude and longitude coordinates
-    lon = np.arange(xllcorner, xllcorner + (ncols) * cellsize, cellsize)
+    lon = np.arange(xllcorner + cellsize / 2, xllcorner + (ncols + 0.5) * cellsize, cellsize)
     lat = np.arange(
         yllcorner + (nrows - 0.5) * cellsize, yllcorner - cellsize / 2, -cellsize
     )
+    logger.debug(lon)
+    logger.debug(lat)
 
     # Create DataArray with lat/lon dimensions and nodata value
+    name = 'data' if var_name is None else var_name
     data_array = xr.DataArray(
         data=data_values,
         dims=["lat", "lon"],
         coords={"lon": lon, "lat": lat},
-        name="data",
+        name=name,
         attrs={"nodata_value": nodata_value},
     )
 
     # Convert to Dataset
-    return xr.Dataset({"data": data_array})
+    return xr.Dataset({name: data_array})
 
