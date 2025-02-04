@@ -58,7 +58,6 @@ def write_to_file(ds, output_file: Path):
     elif suffix == ".nc":
         ds.to_netcdf(output_file)
 
-@log_arguments()
 def crop_file_with_header(ds, file_path, mask, output_path):
     """Crop the nc file and create a new header file for the new coordinates."""
     header = file_path.parent / "header.txt"
@@ -95,12 +94,8 @@ def crop_file_with_header(ds, file_path, mask, output_path):
         header_out_path = output_path / header.name
         xll = d["xllcorner"] + d["cellsize"] * np.nanmin(x_cropped)
         yll = d["yllcorner"] + d["cellsize"] * np.nanmin(y_cropped)
-        logger.debug(f"x: {xll} ; {mask.lon.values[0] - mask_res / 2}")
-        logger.debug(f"y: {yll} ; {mask.lat.values[-1]  + mask_res / 2} ; {mask.lat.min() + mask_res / 2}")
         ncols = len(x_cropped)
         nrows = len(y_cropped)
-        logger.debug(f"xmax: {xll +  ncols * d['cellsize']} ; {mask.lon.values[-1] - mask_res / 2} ; {mask.lon.max() - mask_res / 2}")
-        logger.debug(f"ymax: {yll +  nrows * d['cellsize']} ; {mask.lat.values[0] + mask_res / 2} ; {mask.lat.max() + mask_res / 2}")
         header_str = f"""
 ncols                {ncols}
 nrows                {nrows}
@@ -112,22 +107,6 @@ NODATA_value         {d['NODATA_value']}
         logger.info(f'Writing header file to {header_out_path} with header str: {header_str}')
         with (header_out_path).open("w") as nh:
             nh.write(header_str)
-        # try:
-        #     lat_key = get_coord_key(ds, lat=True)
-        #     lon_key = get_coord_key(ds, lon=True)
-        #     logger.debug(f'lon_key: {lon_key}; lat_key: {lat_key}')
-        #     # slice_dict = {lon_key: slice(x_cropped[0], x_cropped[-1]), lat_key: slice(y_cropped[0], y_cropped[-1])}
-        #     # logger.debug(f"Selecting {file_path.name} using {slice_dict}")
-        #     ds_cropped = ds.sel({lon_key: slice(x_cropped[0], x_cropped[-1]), lat_key: slice(y_cropped[0], y_cropped[-1])})
-        #     logger.error(ds_cropped[lon_key])
-        #     logger.error(ds_cropped[lat_key])
-        #     # if 0 in ds_cropped[lon_key].shape:
-        #     #     ds_cropped = ds.sel({lon_key: slice(x_cropped[0], x_cropped[-1]), lat_key: slice(y_cropped[-1], y_cropped[0])})
-        #     return ds_cropped, header_out_path
-            
-        # except ValueError as e:
-            # Write alternative version working if there are no lat, lon coordinates in the dataset.
-            # logger.info(f"Since there are no lat lon coordinates in the file a new dataset is created.")
         try:
             data = ds[data_var]
             data = data[:, y_mask, :]
@@ -176,9 +155,6 @@ def crop_mhm_setup(mask_file, output_path, input_path, overwrite=True, l1_resolu
             
             if f.suffix in [".asc", ".nc"]:
                 ds = get_xarray_ds_from_file(f)
-                # ds = read_ascii_to_xarray(f)
-            # elif f.suffix == ".nc":
-            #     ds = xr.open_dataset(f)
             else:
                 if "header" in f.name.lower():
                     # header files are not copied but recreated as they change
@@ -194,11 +170,6 @@ def crop_mhm_setup(mask_file, output_path, input_path, overwrite=True, l1_resolu
                 logger.info('Latlon cropping depreciated will implement new latlon creation using the mhm-tools latlon functionality.')
                 latlon_output_file = output_file
                 continue
-                # ds_croped = ds
-                # for r in ["_l0", "", "_l11"]:
-                #     lat_key = "yc" + r
-                #     lon_key = "xc" + r
-                #     ds_croped = ds_croped.sel({lon_key: lonslice, lat_key: latslice})
             # 2. Restart files are complex and are not yet implemented. mHM restart files can be croped, mRM restart files can't (?).
             elif "restart" in f.name.lower():
                 logger.warning(f'Restart file {f} could not be copied as that is not yet implemented.')
@@ -206,7 +177,7 @@ def crop_mhm_setup(mask_file, output_path, input_path, overwrite=True, l1_resolu
             # 3. Files that are in the same folder as a header file. Typical examples are meteo datasets such as temperature or precipitation
             elif list(f.parent.glob("header.txt")):
                 logger.debug('Cropping and writing new header file...')
-                ds_croped, header_path = crop_file_with_header(ds, f, mask_da, output_path)
+                ds_croped, header_path = crop_file_with_header(ds, f, mask_da, output_path / f.parent.relative_to(input_path))
                 lat_key = get_coord_key(ds_croped, lat=True)
                 lon_key = get_coord_key(ds_croped, lon=True)
                 if f.stem in ['pre', 'pet', 'tavg']:
@@ -246,14 +217,7 @@ def crop_mhm_setup(mask_file, output_path, input_path, overwrite=True, l1_resolu
                     lonkey2=lon_key,
                     latkey2=lat_key,
                 )
-                # Debug: print out the regridded mask in a way that makes the catchmentshape visible for small catchments
-                logger.debug(f'Regridded mask: {mask_regridded.lon.values}')
-                # for line in mask_regridded:
-                #     logger.debug(line)
-                logger.debug(f"Dataset unmasked: {ds_croped.lon.values}")
                 ds_croped = ds_croped.where(mask_regridded == 1, np.nan)
-                # ds['data'] = ds['data'].where(mask_regridded['land_mask'] == 1)
-                logger.debug(f"Dataset masked: {ds_croped}")
             try:
                 write_to_file(ds_croped, output_file)
             except Exception as e:
@@ -277,12 +241,12 @@ def crop_mhm_setup(mask_file, output_path, input_path, overwrite=True, l1_resolu
             l11 = l1.copy()
             # if not l11_resolution is None: 
             #     l11['cellsize'] = l11_resolution
-            logger.info(latlon_output_file)
-            logger.info(l0)
-            logger.info(l1)
-            logger.info(l11)
-            logger.info(Path(meteo_header_path))
-            logger.info(crs)
+            logger.debug(latlon_output_file)
+            logger.debug(l0)
+            logger.debug(l1)
+            logger.debug(l11)
+            logger.debug(Path(meteo_header_path))
+            logger.debug(crs)
             create_latlon(
                 out_file=latlon_output_file,
                 level0=l0,
