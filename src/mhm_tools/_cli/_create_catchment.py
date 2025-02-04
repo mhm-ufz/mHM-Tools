@@ -132,8 +132,9 @@ def run(args):
     if args.gauge_coords is not None:
         if args.lonlatbox is not None:
             with ErrorLogger(logger):
+                msg = "You can't use --gauge_coords and --lonlatbox at the same time."
                 raise ValueError(
-                    "You can't use --gauge_coords and --lonlatbox at the same time."
+                    msg
                 )
         lat, lon = map(float, args.gauge_coords.split(","))
         gauge_coords = (np.array([lon]), np.array([lat]))
@@ -145,7 +146,8 @@ def run(args):
             f"using lonlatbox with extends: lat=({latmax}, {latmin}); lon=({lonmin}, {lonmax})"
         )
     if args.upscale and not args.l1_resolution:
-        raise ValueError("If upscaling is enabled l1_resolution must be provided.")
+        msg = "If upscaling is enabled l1_resolution must be provided."
+        raise ValueError(msg)
     create_catchment(
         input_file=args.input_file,
         output_path=args.output_path,

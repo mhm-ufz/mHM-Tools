@@ -22,7 +22,8 @@ def spearman_correlation(data1, data2):
     # Check that both arrays are of the same size and flatten them
     if data1.shape != data2.shape:
         with ErrorLogger(logger):
-            raise ValueError("Both DataArrays must have the same shape")
+            msg = "Both DataArrays must have the same shape"
+            raise ValueError(msg)
     try:
         data1 = data1.flatten()
         data2 = data2.flatten()
@@ -38,10 +39,11 @@ def spearman_spatial(data1, data2):
     """Calculate maps of Spearman rank correlation between two xarray DataArrays of shape(12,n,m)."""
     if len(np.shape(data1)) != len(np.shape(data2)) or len(np.shape(data1)) != 3:
         with ErrorLogger(logger):
-            raise ValueError("Wrong shape for spatial spearman correlation!")
+            msg = "Wrong shape for spatial spearman correlation!"
+            raise ValueError(msg)
     res = np.full(np.shape(data1[0]), np.nan)
     for i, row in enumerate(data1[0]):
-        for j, col in enumerate(row):
+        for j, _col in enumerate(row):
             sp_corr, sp_pval = spearman_correlation(data1[:, i, j], data2[:, i, j])
             res[i, j] = sp_corr
     return res
@@ -53,23 +55,20 @@ def climatology(data):
         data_clim = data.groupby("time.month").mean(dim="time", skipna=True)
     else:
         with ErrorLogger(logger):
+            msg = "Input data for climatology calculation has no valid time dimension."
             raise ValueError(
-                "Input data for climatology calculation has no valid time dimension."
+                msg
             )
 
     # data_clim = data.groupby("time.month").mean(dim="time", skipna=True)
 
     # Ensure the climatology has all 12 months, filling missing months with NaNs
-    data_clim = data_clim.reindex(month=np.arange(1, 13), fill_value=np.nan)
-    return data_clim
+    return data_clim.reindex(month=np.arange(1, 13), fill_value=np.nan)
 
 
 def get_clim_from_ds(ds, input_var=None, factor=1):
     """Calculate climatology from DataSet with variable or DataArray while mulitplying with a provided factor."""
-    if input_var is None:
-        data = ds * factor
-    else:
-        data = ds[input_var] * factor
+    data = ds * factor if input_var is None else ds[input_var] * factor
     return climatology(data)
 
 
@@ -79,10 +78,7 @@ def get_std_from_ds(ds, input_var=None, clim=None, factor=1):
     If a climatology is provided the timeseries can be detrended by seasonality.
     """
     # Retrieve data and apply factor
-    if input_var is None:
-        data = ds * factor
-    else:
-        data = ds[input_var] * factor
+    data = ds * factor if input_var is None else ds[input_var] * factor
 
     # Subtract climatology for each month
     if clim is None:
@@ -107,8 +103,9 @@ def get_std_from_ds(ds, input_var=None, clim=None, factor=1):
 def get_coord_key(ds, lat=False, lon=False):
     if (lon and lat) or not (lon or lat):
         with ErrorLogger(logger):
+            msg = f"only lon or lat should be true but lon={lon} and lat={lat}"
             raise ValueError(
-                f"only lon or lat should be true but lon={lon} and lat={lat}"
+                msg
             )
     if lat:
         keys = ["lat", "latitude", "northing", "y", "new_y"]
@@ -125,7 +122,8 @@ def get_coord_key(ds, lat=False, lon=False):
             )
             return key
     with ErrorLogger(logger):
-        raise ValueError(f"None of {keys} in {type(ds).__name__} keys {ds_dims}.")
+        msg = f"None of {keys} in {type(ds).__name__} keys {ds_dims}."
+        raise ValueError(msg)
 
 
 def get_coord_values(ds, lat=False, lon=False):
@@ -238,7 +236,7 @@ def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None)
                     {lat_key: coordinate_slice["lat"], lon_key: coordinate_slice["lon"]}
                 )
             da = ds[input_var]
-            for time_value, data_slice in da.groupby("time"):
+            for _time_value, data_slice in da.groupby("time"):
                 try:
                     data_values = data_slice.values[0] * factor
                     # logger.debug(f"{count} - {np.shape(data_values)}")
@@ -352,10 +350,9 @@ def plot_single_map(
     bounds_type="fixed",
 ):
     n_bins = 10
-    if bounds_type == "max":
-        if diff_to_mean is not None:
-            vmin = 1 - diff_to_mean
-            vmax = 1 + diff_to_mean
+    if bounds_type == "max" and diff_to_mean is not None:
+        vmin = 1 - diff_to_mean
+        vmax = 1 + diff_to_mean
     if bounds_type == "quantiles":
         vmin, vmax = (
             np.nanquantile(values, 0.05).data,
@@ -389,10 +386,8 @@ def plot_map(
     axes[0, 0].set_title(
         f"Relative temporal Mean (median={np.nanmedian(rel_mean):.2f})"
     )
-    print(bounds0)
     std_diff_1 = max(np.abs(1 - np.nanmin(rel_std)), np.abs(1 - np.nanmax(rel_std)))
     im1, bounds1 = plot_single_map(axes[0, 1], rel_std, std_diff_1, bounds_type="fixed")
-    print(bounds1)
     axes[0, 1].set_title(
         f"Relative temporal Standarddeviation (median={np.nanmedian(rel_std):.2f})"
     )
@@ -406,7 +401,6 @@ def plot_map(
         cmap=plt.cm.viridis_r,
         bounds_type="quantiles",
     )
-    print(bounds2)
 
     axes[1, 0].set_title(f"Spearman Correlation (median={np.nanmedian(spearman):.2f})")
 
@@ -435,7 +429,7 @@ def plot_map(
     rel_clim_diff_1 = max(
         np.abs(1 - np.nanmin(rel_clim)), np.abs(1 - np.nanmax(rel_clim))
     )
-    im4 = ax_twy.errorbar(
+    ax_twy.errorbar(
         months, rel_clim, label=f"{input_name}/{ref_name}", color="#0000A7", fmt="--"
     )
     ax_twy.axhline(y=1, color="#0000A7", linewidth=0.5)

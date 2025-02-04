@@ -112,8 +112,9 @@ def get_coords(
         lat_max_target_grid = lat_max
     elif raise_exception:
         with ErrorLogger(logger):
+            msg = "Either all coordinat bounds and resolutions or --mask_file must be provided"
             raise ValueError(
-                "Either all coordinat bounds and resolutions or --mask_file must be provided"
+                msg
             )
     else:
         return None, None, None, None, None

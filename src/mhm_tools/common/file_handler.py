@@ -49,7 +49,7 @@ NODATA_value         {no_data_value}
         with header_out_path.open("w") as hf:
             hf.write(header_str)
         return header_out_path
-    header_dict = {
+    return {
         "ncols": ncols,
         "nrows": nrows,
         "xllcorner": xllcorner,
@@ -57,7 +57,6 @@ NODATA_value         {no_data_value}
         "cellsize": cellsize,
         "NODATA_value": no_data_value,
     }
-    return header_dict
 
 
 def crop_file_by_mask(ds, mask_file):

@@ -1,6 +1,4 @@
-"""
-Discharge Validation
-"""
+"""Discharge Validation."""
 
 from mhm_tools.common.cli_utils import get_coords
 from mhm_tools.post.GRDC_validation import evaludate_grdc_data

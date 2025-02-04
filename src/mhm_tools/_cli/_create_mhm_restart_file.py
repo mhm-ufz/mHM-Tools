@@ -214,7 +214,8 @@ def run(args):
     elif args.l0_resolution is not None:
         l0_resolution = float(args.l0_resolution)
     else:
-        raise ValueError("L0 resolution was not provided.")
+        msg = "L0 resolution was not provided."
+        raise ValueError(msg)
 
     (
         lon_min_target_grid,

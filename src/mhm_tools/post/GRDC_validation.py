@@ -129,6 +129,7 @@ def gen_list_of_result_dicts(data, id, datatype="", facc=None):
             res.append(res_dict)
         return res
     logger.warning("All datapoints for {datatype} at gauge {id} are missing.")
+    return None
 
 
 def get_grdc_for_one_gauge(id, observed_data_by_id, facc=None):
@@ -255,7 +256,7 @@ def Q_data_to_CSV(
 ):
     """
     This is a function that gets observed and model Q data and
-    saves it as CSV files to be open later
+    saves it as CSV files to be open later.
 
     This function is not part of the workflow, but a pre processing tool
     that for comodity has been stored here. This was done bc mrm_data_by_id.values
@@ -401,7 +402,8 @@ def add_month_column(df):
         df["month"] = df["time"].dt.month
     else:
         with ErrorLogger(logger):
-            raise KeyError("The 'time' column is missing from the DataFrame.")
+            msg = "The 'time' column is missing from the DataFrame."
+            raise KeyError(msg)
     return df
 
 
