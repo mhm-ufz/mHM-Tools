@@ -108,7 +108,7 @@ class Catchment:
 
         self.input_ds = data
         if var == "fdir":
-            self.add_fdir(ftype=ftype, **kwargs)
+            self.add_fdir(**kwargs)
         elif var == "dem":
             self.add_dem(**kwargs)
         else:

@@ -18,6 +18,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from mhm_tools.common.logger import configure_mhm_tools_logger
 from mhm_tools.post.hydrograph import Hydrograph
 
 HERE = Path(__file__).parent
@@ -28,8 +29,9 @@ class TestHydrograph(unittest.TestCase):
 
     def setUp(self):
         """Set up the test case by initializing necessary variables and loading data from a specific path."""
+        configure_mhm_tools_logger(log_level='ERROR')
         self.path = str(HERE / "files" / "test_hydrograph") + "/"
-        self.hydro = Hydrograph("error")
+        self.hydro = Hydrograph()
         self.hydro.load_data_from_path(self.path)
 
     #    def test_file_readin(self):

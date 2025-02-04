@@ -11,10 +11,12 @@ Bankfull discharge
 
 from . import bankfull
 from .bankfull import bankfull_discharge
+from .hydrograph import Hydrograph
 from .GRDC_validation import evaludate_grdc_data
 from .seasonality_grid_validation import seasonality_grid_validation
 
 __all__ = ["bankfull"]
 __all__ += ["bankfull_discharge"]
+__all__ += ["Hydrograph"]
 __all__ += ["evaludate_grdc_data"]
 __all__ += ["seasonality_grid_validation"]
