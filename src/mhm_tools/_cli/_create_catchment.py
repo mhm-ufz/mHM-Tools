@@ -155,7 +155,7 @@ def run(args):
         gauge_coords=gauge_coords,
         coordinate_slices=coordinate_slices,
         mask_file=args.mask_file,
-        target_resolution=args.l1_resolution,
+        l1_resolution=args.l1_resolution,
         frame=args.frame,
         upscale=args.upscale,
     )
