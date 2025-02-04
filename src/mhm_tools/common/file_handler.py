@@ -98,7 +98,7 @@ def write_xarray_to_ascii(dataset, filepath, data_var=None):
         data_var = get_single_data_var(dataset)
         if data_var is None:
             logger.error(
-                f"Data can not be written to {filepath} as the dataset has {len(data_vars)} data_vars incompatible with asci"
+                f"Data can not be written to {filepath} as the dataset has multiple data_vars which is incompatible with asci."
             )
             return
     data = dataset[data_var]
@@ -175,3 +175,9 @@ def read_ascii_to_xarray(filepath, var_name=None):
 
     # Convert to Dataset
     return xr.Dataset({name: data_array})
+
+
+def get_coord_values(ds, lat=False, lon=False):
+    """Get latitude or longitude values from DataSet."""
+    key = get_coord_key(ds, lat=lat, lon=lon)
+    return ds[key].values

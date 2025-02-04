@@ -16,4 +16,5 @@ from .seasonality_grid_validation import seasonality_grid_validation
 
 __all__ = ["bankfull"]
 __all__ += ["bankfull_discharge"]
-__all__ += ["seasonality_validation"]
+__all__ += ["evaludate_grdc_data"]
+__all__ += ["seasonality_grid_validation"]

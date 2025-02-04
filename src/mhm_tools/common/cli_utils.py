@@ -90,6 +90,7 @@ def get_coords(
     lat_max=None,
     raise_exception=True,
 ):
+    """Get the coordinates from all available input."""
     mask = None
     if lonlatbox is not None:
         lonlatbox = lonlatbox.split(",")
@@ -113,9 +114,7 @@ def get_coords(
     elif raise_exception:
         with ErrorLogger(logger):
             msg = "Either all coordinat bounds and resolutions or --mask_file must be provided"
-            raise ValueError(
-                msg
-            )
+            raise ValueError(msg)
     else:
         return None, None, None, None, None
     return (

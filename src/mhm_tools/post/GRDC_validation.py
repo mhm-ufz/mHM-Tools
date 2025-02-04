@@ -1,3 +1,5 @@
+"""Compare simulated with observed discharge either directly or using a bootstraping approach."""
+
 import logging
 import random
 from pathlib import Path
@@ -11,7 +13,7 @@ from joblib import Parallel, delayed
 
 from mhm_tools.common.logger import ErrorLogger, log_arguments
 from mhm_tools.common.xarray_utils import get_coord_key
-from mhm_tools.post.seasonality_grid_validation import climatology, spearman_correlation
+from mhm_tools.post.seasonality_grid_validation import spearman_correlation
 
 logger = logging.getLogger(__name__)
 
@@ -23,84 +25,85 @@ logger = logging.getLogger(__name__)
 
 
 # currently unused
-def calculate_statistics(sim_data_by_id, obs_data_by_id):
-    # replace the following with bootstrap alorythem What takes long seems to be
-    logger.info("get mean values")
-    mean_sim = sim_data_by_id.mean(skipna=True)
-    logger.info("sim done")
-    mean_obs = obs_data_by_id.mean(skipna=True)
-    logger.info("obs done")
+# def calculate_statistics(sim_data_by_id, obs_data_by_id):
+#     # replace the following with bootstrap alorythem
+#     logger.info("get mean values")
+#     mean_sim = sim_data_by_id.mean(skipna=True)
+#     logger.info("sim done")
+#     mean_obs = obs_data_by_id.mean(skipna=True)
+#     logger.info("obs done")
 
-    logger.info("create climatologies")
-    clim_sim = climatology(sim_data_by_id)
-    logger.info("sim done")
-    clim_obs = climatology(obs_data_by_id)
-    logger.info("obs done")
+#     logger.info("create climatologies")
+#     clim_sim = climatology(sim_data_by_id)
+#     logger.info("sim done")
+#     clim_obs = climatology(obs_data_by_id)
+#     logger.info("obs done")
 
-    logger.info(f"sim: {sim_data_by_id.shape}")
-    logger.info(f" obs: {obs_data_by_id.shape}")
+#     logger.info(f"sim: {sim_data_by_id.shape}")
+#     logger.info(f" obs: {obs_data_by_id.shape}")
 
-    logger.info("get standard deviation")
-    std_obs = obs_data_by_id.std(skipna=True)
-    std_sim = sim_data_by_id.std(skipna=True)
+#     logger.info("get standard deviation")
+#     std_obs = obs_data_by_id.std(skipna=True)
+#     std_sim = sim_data_by_id.std(skipna=True)
 
-    logger.info("calc statistics")
-    alpha = float((mean_sim / mean_obs).values)
-    beta = float((std_sim / std_obs).values)
-    spearman, spera_var = spearman_correlation(clim_sim, clim_obs)
-    logger.info(f"{type(id)}, {type(alpha)}, {type(beta)}, {type(spearman)}")
-    logger.info(f"{id}, {alpha}, {beta}, {spearman}")
-    logger.info(f"sim_mean = {mean_sim.values}; obs_mean = {mean_obs.values}")
-    return {"id": id, "alpha": alpha, "beta": beta, "spearman": spearman}
-
-
-# currently unused
-def bootstrap_years(sim_data_by_id, obs_data_by_id, n_selections, n_years):
-    total_years_sim = list(set(sim_data_by_id.time.dt.year.values))
-    total_years_obs = list(set(sim_data_by_id.time.dt.year.values))
-    results = []
-    for index in range(n_selections):
-        random.seed(index)
-        years_sim = random.choices(total_years_sim, k=n_years)
-        years_obs = random.choices(total_years_obs, k=n_years)
-        ds_sim_sel = sim_data_by_id.where(
-            sim_data_by_id.time.dt.year.isin(years_sim), drop=True
-        )
-        ds_obs_sel = obs_data_by_id.where(
-            obs_data_by_id.time.dt.year.isin(years_obs), drop=True
-        )
-        res = calculate_statistics(ds_sim_sel, ds_obs_sel)
-        res["index"] = index
-        results.append(res)
-    return results
+#     logger.info("calc statistics")
+#     alpha = float((mean_sim / mean_obs).values)
+#     beta = float((std_sim / std_obs).values)
+#     spearman, spera_var = spearman_correlation(clim_sim, clim_obs)
+#     logger.info(f"{type(id)}, {type(alpha)}, {type(beta)}, {type(spearman)}")
+#     logger.info(f"{id}, {alpha}, {beta}, {spearman}")
+#     logger.info(f"sim_mean = {mean_sim.values}; obs_mean = {mean_obs.values}")
+#     return {"id": id, "alpha": alpha, "beta": beta, "spearman": spearman}
 
 
-# currently unused
-def evaluate_one_gauge(index, id, observed_data, sim_data, x, y, n_years, n_selections):
-    logger.info(f"working on gauge number: {index}...\n")
-    obs_data_by_id = observed_data.sel(id=id)
-    if obs_data_by_id.size == 0:
-        logger.info(f"No data found for ID: {id}. Skipping...\n")
-        return None
+# # currently unused
+# def bootstrap_years(sim_data_by_id, obs_data_by_id, n_selections, n_years):
+#     total_years_sim = list(set(sim_data_by_id.time.dt.year.values))
+#     total_years_obs = list(set(sim_data_by_id.time.dt.year.values))
+#     results = []
+#     for index in range(n_selections):
+#         random.seed(index)
+#         years_sim = random.choices(total_years_sim, k=n_years)
+#         years_obs = random.choices(total_years_obs, k=n_years)
+#         ds_sim_sel = sim_data_by_id.where(
+#             sim_data_by_id.time.dt.year.isin(years_sim), drop=True
+#         )
+#         ds_obs_sel = obs_data_by_id.where(
+#             obs_data_by_id.time.dt.year.isin(years_obs), drop=True
+#         )
+#         res = calculate_statistics(ds_sim_sel, ds_obs_sel)
+#         res["index"] = index
+#         results.append(res)
+#     return results
 
-    are_all_nan = obs_data_by_id.isnull().all()
-    if are_all_nan:
-        logger.info("all values are nan")
-        return None
-    logger.info(f"values found at gauge: {id}\n")
-    # This will ensure that x & y values always match lat and lon in sim dataset
-    x = np.round(x.isel(index).values, 2)
-    y = np.round(y.isel(index).values, 2)
-    logger.info("get sim data point")
-    # x,y, facc =
-    sim_data_by_id = sim_data.sel(lat=y, lon=x, method="nearest")
-    # logger.info(sim_data_by_id)
-    if n_years is not None and n_selections is not None:
-        return bootstrap_years(sim_data_by_id, obs_data_by_id, n_selections, n_years)
-    return calculate_statistics(sim_data_by_id, obs_data_by_id)
+
+# # currently unused
+# def evaluate_one_gauge(index, id, observed_data, sim_data, x, y, n_years, n_selections):
+#     logger.info(f"working on gauge number: {index}...\n")
+#     obs_data_by_id = observed_data.sel(id=id)
+#     if obs_data_by_id.size == 0:
+#         logger.info(f"No data found for ID: {id}. Skipping...\n")
+#         return None
+
+#     are_all_nan = obs_data_by_id.isnull().all()
+#     if are_all_nan:
+#         logger.info("all values are nan")
+#         return None
+#     logger.info(f"values found at gauge: {id}\n")
+#     # This will ensure that x & y values always match lat and lon in sim dataset
+#     x = np.round(x.isel(index).values, 2)
+#     y = np.round(y.isel(index).values, 2)
+#     logger.info("get sim data point")
+#     # x,y, facc =
+#     sim_data_by_id = sim_data.sel(lat=y, lon=x, method="nearest")
+#     # logger.info(sim_data_by_id)
+#     if n_years is not None and n_selections is not None:
+#         return bootstrap_years(sim_data_by_id, obs_data_by_id, n_selections, n_years)
+#     return calculate_statistics(sim_data_by_id, obs_data_by_id)
 
 
 def flatten_list(nested_list):
+    """Flatten a list."""
     flat_list = []
     for item in nested_list:
         if item is None:
@@ -113,6 +116,7 @@ def flatten_list(nested_list):
 
 
 def gen_list_of_result_dicts(data, id, datatype="", facc=None):
+    """Generate a list of result dictionaries containing time, id, discharge and year."""
     # Check if all values in the array are NaN
     discharge = data.values
     are_all_nan = np.all(np.isnan(discharge))
@@ -128,13 +132,13 @@ def gen_list_of_result_dicts(data, id, datatype="", facc=None):
                 res_dict["facc"] = facc
             res.append(res_dict)
         return res
-    logger.warning("All datapoints for {datatype} at gauge {id} are missing.")
+    logger.warning(f"All datapoints for {datatype} at gauge {id} are missing.")
     return None
 
 
 def get_grdc_for_one_gauge(id, observed_data_by_id, facc=None):
+    """Read in observed data for one gauge."""
     # id, index = id.values, index=id['index'].values
-    id = id
     if observed_data_by_id.size == 0:
         logger.info(f"No data found for ID: {id}. Skipping...\n")
         return None
@@ -147,7 +151,7 @@ def get_grdc_for_one_gauge(id, observed_data_by_id, facc=None):
 
 
 def get_sim_data_for_one_gauge(id, index, sim_data, yarr, xarr, resolution, facc=None):
-    id = id
+    """Read out simulation data for one gauge."""
     if xarr[index] is None and yarr[index] is None:
         return None
     # This will ensure that x & y values always match lat and lon in mRM dataset
@@ -255,8 +259,7 @@ def Q_data_to_CSV(
     n_jobs=1,
 ):
     """
-    This is a function that gets observed and model Q data and
-    saves it as CSV files to be open later.
+    Get observed and model Q data and save it as CSV files to be opened later.
 
     This function is not part of the workflow, but a pre processing tool
     that for comodity has been stored here. This was done bc mrm_data_by_id.values
@@ -383,6 +386,9 @@ def Q_data_to_CSV(
 
 
 def calc_clim_from_pandas(df):
+    """Calcuate the climatology from a pandas dataframe containing a `month` column."""
+    if "month" not in df:
+        df = add_month_column(df)
     # Group by month and calculate the mean for the relevant columns
     climatologies = df.groupby("month").mean()
 
@@ -394,6 +400,7 @@ def calc_clim_from_pandas(df):
 
 
 def add_month_column(df):
+    """Add a month column to the dataframe by reading out the month information from time."""
     if "time" in df.columns:
         if not np.issubdtype(df["time"].dtype, np.datetime64):
             df["time"] = pd.to_datetime(df["time"], errors="coerce")
@@ -408,7 +415,7 @@ def add_month_column(df):
 
 
 @log_arguments()
-def evaludate_grdc_data(
+def evaludate_grdc_data(  # noqa: PLR0913
     model_data_path,
     observed_data_path,
     gauge_info_path,
@@ -426,6 +433,7 @@ def evaludate_grdc_data(
     n_bootstrap_years=5,
     n_boostrap_selections=0,
 ):
+    """Compare simulated with observed discharge either directly or using a bootstraping approach."""
     output_path = Path(output_path)
     observed_df, model_df = Q_data_to_CSV(
         model_data_path=model_data_path,
@@ -511,7 +519,8 @@ def evaludate_grdc_data(
     plot_cdf(results_df, output_path)
 
 
-def plot_kdf(results_df, output_path):
+def plot_kde(results_df, output_path):
+    """Create kde plots of alpha, beta and gamma."""
     sns.kdeplot(
         data=results_df,  # The DataFrame with results
         x="alpha",  # The x-axis is the alpha value
@@ -583,6 +592,7 @@ def plot_kdf(results_df, output_path):
 
 
 def plot_cdf(df, output_path, plot_all=True):
+    """Create cdf plots for alpha, beat and gamma for different subselections (by catchment, boostrap-mean or all results)."""
     # --- 1) Read your CSV ---
     # Adjust 'mydata.csv' to your actual file path
     # df = pd.read_csv('/work/kelbling/ecflow_work/gloria_hourly_t2k/output/gloria_0p05deg/discharge_validation/results.csv', index_col=0)

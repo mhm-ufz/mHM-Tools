@@ -291,7 +291,6 @@ class Catchment:
         # Replace adjacent missing values with 0
         return xr.where(adjacent_missing, sink_value, da)
 
-
     @log_arguments()
     def write(
         self,
@@ -315,19 +314,25 @@ class Catchment:
             lat_slice, lon_slice = slice(84, -56), slice(None)
 
         for var_name in self.VARIABLES:
-            data_var = self.processing_data_variable(var_name, cut_by_basin, lat_slice, lon_slice)
+            data_var = self.processing_data_variable(
+                var_name, cut_by_basin, lat_slice, lon_slice
+            )
             if data_var is None:
                 continue
             if single_file:
                 data_vars[var_name] = data_var
             else:
-                self.write_single_variable_file(data_var, var_name, out_path, cellsize, format)
+                self.write_single_variable_file(
+                    data_var, var_name, out_path, cellsize, format
+                )
         if single_file:
             ds = self.write_basin_id_file(data_vars, frame, out_path)
             # use basin_id to create a mask file
-            self.write_mask_file(ds,  mask_file)
+            self.write_mask_file(ds, mask_file)
 
-    def write_single_variable_file(self,data_var, var_name, out_path, cellsize, format):
+    def write_single_variable_file(
+        self, data_var, var_name, out_path, cellsize, format
+    ):
         """Write a single data variable to a specified file path."""
         # set some attributes
         for coord in data_var.coords:
@@ -350,9 +355,7 @@ class Catchment:
                 },
             )
         elif format == "asc":
-            cellsize = cellsize or abs(
-                float(data_var["lon"][1] - data_var["lon"][0])
-            )
+            cellsize = cellsize or abs(float(data_var["lon"][1] - data_var["lon"][0]))
             is_ascending = bool(data_var["lat"][0] < data_var["lat"][-1])
             with fname.open("w") as file_object:
                 file_object.write(f"ncols {data_var[var_name].shape[1]}\n")
@@ -474,7 +477,7 @@ class Catchment:
             mask_ds.to_netcdf(mask_file)
             logger.info(f"Mask file has been written to {mask_file}")
         else:
-            logger.info('No mask file path specified.')
+            logger.info("No mask file path specified.")
 
     def cut_to_filled_area(self, buffer=0):
         """Create lat and lon slices to cut the data to the filled area."""

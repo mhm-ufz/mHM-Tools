@@ -136,7 +136,15 @@ NODATA_value         {d['NODATA_value']}
             with ErrorLogger(logger):
                 raise e
 
-def call_create_latlon(dem_output_file, l1_resolution, l11_resolution, latlon_output_file, meteo_header_path, crs):
+
+def call_create_latlon(
+    dem_output_file,
+    l1_resolution,
+    l11_resolution,
+    latlon_output_file,
+    meteo_header_path,
+    crs,
+):
     """Create header dictionaries for the different resolutions and call create latlon to create a latlon file for the setup."""
     # create new latlon file
     logger.info("Creating new latlon file")
@@ -197,7 +205,9 @@ def crop_mhm_setup(
         files.extend(input_path.glob("*/" * depth + "*.*"))
 
     with xr.open_dataset(mask_file) as mask_ds:
-        mask_key = next(key for key in ["mask", "land_mask"] if key in mask_ds.data_vars)
+        mask_key = next(
+            key for key in ["mask", "land_mask"] if key in mask_ds.data_vars
+        )
         mask_da = mask_ds[mask_key].astype(float)
         latslice = slice(mask_da.lat.values[-1], mask_da.lat.values[0])
         lonslice = slice(mask_da.lon.values[0], mask_da.lon.values[-1])
@@ -300,4 +310,11 @@ def crop_mhm_setup(
             logger.info(f"Written to {output_file}")
 
         if l1_resolution is not None and dem_output_file is not None:
-            call_create_latlon(dem_output_file, l1_resolution, l11_resolution, latlon_output_file, meteo_header_path, crs)
+            call_create_latlon(
+                dem_output_file,
+                l1_resolution,
+                l11_resolution,
+                latlon_output_file,
+                meteo_header_path,
+                crs,
+            )

@@ -1,3 +1,5 @@
+"""Compare a spatial variable between two datasets using the climatology of that variable."""
+
 import array
 import logging
 import random
@@ -11,6 +13,7 @@ from matplotlib.colors import BoundaryNorm
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from scipy.stats import spearmanr
 
+from mhm_tools.common.file_handler import get_coord_values
 from mhm_tools.common.logger import ErrorLogger, log_arguments
 from mhm_tools.common.xarray_utils import get_coord_key
 
@@ -27,7 +30,8 @@ def spearman_correlation(data1, data2):
     try:
         data1 = data1.flatten()
         data2 = data2.flatten()
-    except:
+    except Exception as e:
+        logger.warning(e)
         data1 = data1.values.flatten()
         data2 = data2.values.flatten()
     # Calculate Spearman rank correlation using scipy
@@ -56,12 +60,8 @@ def climatology(data):
     else:
         with ErrorLogger(logger):
             msg = "Input data for climatology calculation has no valid time dimension."
-            raise ValueError(
-                msg
-            )
-
+            raise ValueError(msg)
     # data_clim = data.groupby("time.month").mean(dim="time", skipna=True)
-
     # Ensure the climatology has all 12 months, filling missing months with NaNs
     return data_clim.reindex(month=np.arange(1, 13), fill_value=np.nan)
 
@@ -98,38 +98,6 @@ def get_std_from_ds(ds, input_var=None, clim=None, factor=1):
             dims=["lat", "lon"],
         )
     return std
-
-
-def get_coord_key(ds, lat=False, lon=False):
-    if (lon and lat) or not (lon or lat):
-        with ErrorLogger(logger):
-            msg = f"only lon or lat should be true but lon={lon} and lat={lat}"
-            raise ValueError(
-                msg
-            )
-    if lat:
-        keys = ["lat", "latitude", "northing", "y", "new_y"]
-    else:
-        keys = ["lon", "longitude", "easting", "x", "new_x"]
-    ds_dims = ds.dims if isinstance(ds, xr.DataArray) else ds.coords
-    for key in keys:
-        if key in ds_dims and len(ds[key].shape) == 1:
-            return key
-    for key in keys:
-        if key in ds_dims:
-            logger.warning(
-                f"{type(ds)} contains key: {key} but ds[key] has shape {ds[key].shape}."
-            )
-            return key
-    with ErrorLogger(logger):
-        msg = f"None of {keys} in {type(ds).__name__} keys {ds_dims}."
-        raise ValueError(msg)
-
-
-def get_coord_values(ds, lat=False, lon=False):
-    """Get latitude or longitude values from DataSet."""
-    key = get_coord_key(ds, lat=lat, lon=lon)
-    return ds[key].values
 
 
 def get_file_stats(
@@ -169,6 +137,7 @@ def get_file_stats(
 
 
 def get_files(path, n_bootstrap_years=None, years=None):
+    """Recursevely find all netcdf files in directory."""
     nc_files = []
     # Search for .nc files at each depth level
     all_years = [y for y in path.glob("*/") if y.is_dir()]
@@ -195,6 +164,7 @@ def get_files(path, n_bootstrap_years=None, years=None):
 
 
 def combine_results(results):
+    """Combine the statistics calculated for subsets into one."""
     total_count = sum(count for _, _, count, _, _ in results)
     total_mean = sum(mean * count for mean, _, count, _, _ in results) / total_count
     total_M2 = sum(M2 for _, M2, _, _, _ in results)
@@ -217,10 +187,11 @@ def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None)
         if coordinate_slice is not None:
             lat_key = get_coord_key(ds, lat=True)
             lon_key = get_coord_key(ds, lon=True)
-            ds = ds.sel(
+            da = ds.sel(
                 {lat_key: coordinate_slice["lat"], lon_key: coordinate_slice["lon"]}
-            )
-        da = ds[input_var]
+            )[input_var]
+        else:
+            da = ds[input_var]
     count = 0  # xr.DataArray(np.ones(mean.shape, dtype=int).copy(), coords=mean.coords, dims=mean.dims).expand_dims(dim='time', axis=0)
     mean = np.zeros(da.shape[1:])
     sum_square_diff = np.zeros(da.shape[1:])
@@ -232,10 +203,11 @@ def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None)
             if coordinate_slice is not None:
                 lat_key = get_coord_key(ds, lat=True)
                 lon_key = get_coord_key(ds, lon=True)
-                ds = ds.sel(
+                da = ds.sel(
                     {lat_key: coordinate_slice["lat"], lon_key: coordinate_slice["lon"]}
-                )
-            da = ds[input_var]
+                )[input_var]
+            else:
+                da = ds[input_var]
             for _time_value, data_slice in da.groupby("time"):
                 try:
                     data_values = data_slice.values[0] * factor
@@ -263,6 +235,7 @@ def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None)
 
 
 def split_file_list(file_list, n_processes):
+    """Split a list into sublists."""
     if n_processes > 1:
         return [file_list[i::n_processes] for i in range(n_processes)]
     return file_list
@@ -279,6 +252,7 @@ def get_stats_one_pass(
     output_path=None,
     years=None,
 ):
+    """Create dataset statistics by reading in one monthly or yearly file at a time and updating the statistics."""
     logger.debug(years)
     files = get_files(input_path, n_bootstrap_years=n_bootstrap_years, years=years)
     logger.debug(f"List of files: {files}")
@@ -303,16 +277,19 @@ def get_stats_one_pass(
     monthly_counts = np.where(monthly_counts > 0, monthly_counts, np.nan)
     climatology = monthly_sums / monthly_counts
     climatology = np.where(monthly_counts > 0, climatology, np.nan)
-    with xr.open_dataset(files[0], engine="netcdf4") as ds:
+    with xr.open_dataset(files[0], engine="netcdf4") as ds_in:
+        lat_key = get_coord_key(ds_in, lat=True)
+        lon_key = get_coord_key(ds_in, lon=True)
         # Apply coordinate slicing if needed
-        if coordinate_slice is not None:
-            lat_key = get_coord_key(ds, lat=True)
-            lon_key = get_coord_key(ds, lon=True)
-            ds = ds.sel(
+        ds = (
+            ds_in.sel(
                 {lat_key: coordinate_slice["lat"], lon_key: coordinate_slice["lon"]}
             )
-            lat = get_coord_values(ds, lat=True)
-            lon = get_coord_values(ds, lon=True)
+            if coordinate_slice is not None
+            else ds_in
+        )
+        lat = get_coord_values(ds, lat=True)
+        lon = get_coord_values(ds, lon=True)
     # Calculate climatology and standard deviation along the time dimension
     # Construct the output dataset with lazy evaluations
     # climatology = climatology.rename({get_coord_key(climatology, lat=True): "lat", get_coord_key(climatology, lon=True): "lon"})
@@ -349,6 +326,7 @@ def plot_single_map(
     cmap=plt.cm.coolwarm,
     bounds_type="fixed",
 ):
+    """Plot one map to an matplotlib axis, taking care of the bounds and colormap."""
     n_bins = 10
     if bounds_type == "max" and diff_to_mean is not None:
         vmin = 1 - diff_to_mean
@@ -362,7 +340,6 @@ def plot_single_map(
         vmin, vmax = 0.5, 1.5
     bounds = np.linspace(vmin, vmax, n_bins + 1)
     bounds = [np.round(b, 2) for b in bounds]
-    cmap = cmap
     norm = BoundaryNorm(bounds, cmap.N)
 
     im = ax.imshow(values, cmap=cmap, norm=norm)
@@ -372,6 +349,7 @@ def plot_single_map(
 def plot_map(
     rel_mean, rel_std, spearman, ref_clim, input_clim, input_name, ref_name, output_path
 ):
+    """Create a plot with four subplots showing relative mean, standard deviation, the spearman correlation of the climatologies and the seasonal mean of both datasets."""
     rel_mean = np.where(rel_mean == np.inf, np.nan, rel_mean)
     rel_std = np.where(rel_std == np.inf, np.nan, rel_std)
     fig, axes = plt.subplots(2, 2, figsize=(10.5, 4.68))
@@ -482,6 +460,7 @@ def plot_map(
 
 
 def create_map_from_output(output_path, input_name, ref_name):
+    """Read in statistics netcdf and create a map plots from it."""
     file = get_rel_stat_file(output_path, input_name, ref_name)
     logger.info(f"Plotting data from {file}")
     with xr.open_dataset(file) as ds:
@@ -516,6 +495,7 @@ def get_stats(
     output_file,
     years=None,
 ):
+    """Get statistics dataset from a path to a file or directory with files."""
     logger.info(f"Get stats for {path}")
     if var is not None:
         if path.is_file():
@@ -674,7 +654,7 @@ def compare_input_with_ref(
     else:
         file_name = output_path / f"{file_name}.nc"
     output.to_netcdf(file_name)
-    logger.info(f'Written output to {file_name}')
+    logger.info(f"Written output to {file_name}")
     plot_map(
         rel_std=rel_std,
         rel_mean=rel_mean,
@@ -760,6 +740,7 @@ def get_dataset_from_path(path, years=None):
     with ErrorLogger:
         msg = f"Path {path} does not exist."
         raise ValueError(msg)
+
 
 def regridd_to_higher_spatial_resolution(ds1, ds2):
     """
@@ -998,6 +979,7 @@ def seasonality_grid_validation(
         logger.info(f"Years {years} are overlapping.")
 
     if ref_path is None:
+        # Only create statistics do not compare
         output_name = f"{input_name}_stats.nc" if input_name is not None else "stats.nc"
         if input_path.is_file():
             # Write file stats to file
@@ -1048,6 +1030,7 @@ def seasonality_grid_validation(
         and input_path.is_dir()
         and ref_path.is_dir()
     ):
+        # Compare by bootstraping
         if only_plot:
             stat_files = list(
                 output_path.glob(f"relative_stats_{input_name}_{ref_name}_*")
@@ -1082,6 +1065,7 @@ def seasonality_grid_validation(
             ref_name=ref_name,
         )
     else:
+        # compare without bootstraping
         compare_input_with_ref(
             input_path,
             input_var,

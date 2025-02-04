@@ -133,9 +133,7 @@ def run(args):
         if args.lonlatbox is not None:
             with ErrorLogger(logger):
                 msg = "You can't use --gauge_coords and --lonlatbox at the same time."
-                raise ValueError(
-                    msg
-                )
+                raise ValueError(msg)
         lat, lon = map(float, args.gauge_coords.split(","))
         gauge_coords = (np.array([lon]), np.array([lat]))
         logger.info(f"using gauge coordinates {gauge_coords}")

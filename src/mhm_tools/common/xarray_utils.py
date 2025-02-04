@@ -44,7 +44,7 @@ def get_coord_key(ds, lat=False, lon=False, raise_exception=True, is_retry=False
 
 
 def get_single_data_var(ds):
-    logger.debug(ds)
+    """Get the data var name from da dataset that only contains one data variable."""
     data_vars = list(ds.data_vars)
     if len(data_vars) > 1:
         logger.error("Only single data_var allowed")
