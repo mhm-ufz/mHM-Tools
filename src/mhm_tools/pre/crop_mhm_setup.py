@@ -264,7 +264,7 @@ def crop_mhm_setup(mask_file, output_path, input_path, overwrite=True, l1_resolu
                 write_to_file(ds_croped, output_file)
             logger.info(f"Written to {output_file}")
         
-        if l1_resolution is not None:
+        if l1_resolution is not None and dem_output_file is not None:
             # create new latlon file
             logger.info('Creating new latlon file')
             with get_xarray_ds_from_file(dem_output_file) as ds_dem:

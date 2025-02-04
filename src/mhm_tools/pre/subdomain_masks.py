@@ -299,8 +299,8 @@ class CreateSubdomainMasks:
 
             # for uparea_grid set all nan values where the fdir is sink_value to 0
             if data_var == 'uparea_grid':
-                print("data_var_values dtype:", data_var_values.dtype)
-                print("flwdir dtype:", ds_sub_ref_file['flwdir'].values.dtype)
+                logger.info("data_var_values dtype:", data_var_values.dtype)
+                logger.info("flwdir dtype:", ds_sub_ref_file['flwdir'].values.dtype)
                 mask_da = (
                     ds_sub_ref_file[data_var].isnull()  # xarray-friendly check for NaNs
                     & (ds_sub_ref_file['flwdir'] == sink_value)
