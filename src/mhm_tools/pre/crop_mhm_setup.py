@@ -86,20 +86,17 @@ def crop_file_with_header(ds, file_path, mask, output_path):
         lat_key = get_coord_key(ds, lat=True, raise_exception=True)
         # x values
         mask_res = round(mask.lon.values[1] - mask.lon.values[0], 6)
-        x_mask = (lon >= mask.lon.values[0] - mask_res / 2) & (
-            lon < mask.lon.values[-1] - mask_res / 2
+        x_mask = (lon >= float(mask.lon.min()) - mask_res / 2) & (
+            lon < float(mask.lon.max()) - mask_res / 2
         )
         x = np.arange(0, ds.sizes[lon_key], 1)
         x_cropped = x[x_mask]
         # y values
-        y_mask = (lat >= mask.lat.values[0] + mask_res / 2) & (
-            lat < mask.lat.values[-1] + mask_res / 2
+        y_mask = (lat >= float(mask.lat.min()) - mask_res / 2) & (
+            lat < float(mask.lat.max()) - mask_res / 2
         )
         y = np.arange(0, ds.sizes[lat_key], 1)
         y_cropped = y[y_mask]
-        if not y_cropped:  #  if y_cropped empty reverse slicing order
-            y_mask = (lat >= mask.lat.values[-1]) & (lat <= mask.lat.values[0])
-            y_cropped = y[y_mask]
         # write header file
         header_out_path = output_path / header.name
         xll = d["xllcorner"] + d["cellsize"] * np.nanmin(x_cropped)

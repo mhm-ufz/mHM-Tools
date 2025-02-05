@@ -22,14 +22,9 @@ def create_header(ds, output_path=None, no_data_value="-9999", write=True):
     lon_key = get_coord_key(ds, lon=True)
     x = ds[lon_key].values
     y = ds[lat_key].values
-    # x = x[np.where((x >= mask.lon.values[0]) & (x <= mask.lon.values[-1]))]
-    # y = y[np.where((y >= mask.lat.values[0]) & (y <= mask.lat.values[-1]))]
     cellsize = abs(x[1] - x[0])
     xllcorner = np.nanmin(x) - 0.5 * cellsize
-    if np.nanmin(y) == y[-1]:
-        yllcorner = np.nanmin(y) + 0.5 * cellsize
-    else:
-        yllcorner = np.nanmin(y) - 0.5 * cellsize
+    yllcorner = np.nanmin(y) - 0.5 * cellsize
 
     ncols = len(x) - 1
     nrows = len(y) - 1
