@@ -78,8 +78,9 @@ def crop_file_with_header(ds, file_path, mask, output_path):
         lon = np.arange(
             d["xllcorner"], d["xllcorner"] + d["cellsize"] * d["ncols"], d["cellsize"]
         )
+        # reverse order for lat (TODO: Make this resistant input with south north ordering)
         lat = np.arange(
-            d["yllcorner"], d["yllcorner"] + d["cellsize"] * d["nrows"], d["cellsize"]
+            d["yllcorner"] + d["cellsize"] * (d["nrows"]-1), d["yllcorner"]-d["cellsize"], -d["cellsize"]
         )
         logger.info(ds[data_var].shape)
         lon_key = get_coord_key(ds, lon=True, raise_exception=True)
@@ -95,7 +96,7 @@ def crop_file_with_header(ds, file_path, mask, output_path):
         y_mask = (lat >= float(mask.lat.min()) - mask_res / 2) & (
             lat < float(mask.lat.max()) - mask_res / 2
         )
-        y = np.arange(0, ds.sizes[lat_key], 1)
+        y = np.arange(ds.sizes[lat_key], 0, -1) - 1
         y_cropped = y[y_mask]
         # write header file
         header_out_path = output_path / header.name
