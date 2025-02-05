@@ -26,8 +26,8 @@ def create_header(ds, output_path=None, no_data_value="-9999", write=True):
     xllcorner = np.nanmin(x) - 0.5 * cellsize
     yllcorner = np.nanmin(y) - 0.5 * cellsize
 
-    ncols = len(x) - 1
-    nrows = len(y) - 1
+    ncols = len(x)
+    nrows = len(y)
     if write:
         header_out_path = output_path / "header.txt"
         header_str = f"""
