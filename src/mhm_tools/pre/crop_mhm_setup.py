@@ -121,8 +121,6 @@ NODATA_value         {d['NODATA_value']}
             data = ds_in[data_var]
             data = data[:, y_mask, :]
             data = data[:, :, x_mask]
-            logger.warning(data.attrs)
-            logger.warning(ds_in.attrs)
             data_array = xr.DataArray(
                 data=data,
                 dims=["time", lat_key, lon_key],
@@ -131,12 +129,9 @@ NODATA_value         {d['NODATA_value']}
                 attrs=data.attrs,
             )
             data_array.attrs.update({'_FillValue': d['NODATA_value'],'missing_value': d['NODATA_value']})
-            logger.warning(data_array.attrs)
             # Convert to Dataset
             ds_out = xr.Dataset({data_var: data_array})
             ds_out.attrs.update(ds_in.attrs)
-            logger.warning(ds_out.attrs)
-            logger.error(ds_out)
             return ds_out , header_out_path
         except IndexError as e:
             with ErrorLogger(logger):
