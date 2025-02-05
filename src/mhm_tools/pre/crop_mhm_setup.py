@@ -64,10 +64,10 @@ def write_to_file(ds, output_file: Path):
         ds.to_netcdf(output_file)
 
 
-def crop_file_with_header(ds, file_path, mask, output_path):
+def crop_file_with_header(ds_in, file_path, mask, output_path):
     """Crop the nc file and create a new header file for the new coordinates."""
     header = file_path.parent / "header.txt"
-    data_var = get_single_data_var(ds)
+    data_var = get_single_data_var(ds_in)
     with header.open("r") as h:
         d = {}
         logger.debug(f"Reading out header.txt file {header}")
@@ -82,21 +82,21 @@ def crop_file_with_header(ds, file_path, mask, output_path):
         lat = np.arange(
             d["yllcorner"] + d["cellsize"] * (d["nrows"]-1), d["yllcorner"]-d["cellsize"], -d["cellsize"]
         )
-        logger.info(ds[data_var].shape)
-        lon_key = get_coord_key(ds, lon=True, raise_exception=True)
-        lat_key = get_coord_key(ds, lat=True, raise_exception=True)
+        logger.info(ds_in[data_var].shape)
+        lon_key = get_coord_key(ds_in, lon=True, raise_exception=True)
+        lat_key = get_coord_key(ds_in, lat=True, raise_exception=True)
         # x values
         mask_res = round(mask.lon.values[1] - mask.lon.values[0], 6)
         x_mask = (lon >= float(mask.lon.min()) - mask_res / 2) & (
             lon < float(mask.lon.max()) - mask_res / 2
         )
-        x = np.arange(0, ds.sizes[lon_key], 1)
+        x = np.arange(0, ds_in.sizes[lon_key], 1)
         x_cropped = x[x_mask]
         # y values
         y_mask = (lat >= float(mask.lat.min()) - mask_res / 2) & (
             lat < float(mask.lat.max()) - mask_res / 2
         )
-        y = np.arange(ds.sizes[lat_key], 0, -1) - 1
+        y = np.arange(ds_in.sizes[lat_key], 0, -1) - 1
         y_cropped = y[y_mask]
         # write header file
         header_out_path = output_path / header.name
@@ -118,18 +118,26 @@ NODATA_value         {d['NODATA_value']}
         with (header_out_path).open("w") as nh:
             nh.write(header_str)
         try:
-            data = ds[data_var]
+            data = ds_in[data_var]
             data = data[:, y_mask, :]
             data = data[:, :, x_mask]
+            logger.warning(data.attrs)
+            logger.warning(ds_in.attrs)
             data_array = xr.DataArray(
                 data=data,
                 dims=["time", lat_key, lon_key],
-                coords={"time": ds.time, lat_key: lat[y_mask], lon_key: lon[x_mask]},
+                coords={"time": ds_in.time, lat_key: lat[y_mask], lon_key: lon[x_mask]},
                 name=data_var,
-                attrs={"nodata_value": d["NODATA_value"]},
+                attrs=data.attrs,
             )
+            data_array.attrs.update({'_FillValue': d['NODATA_value'],'missing_value': d['NODATA_value']})
+            logger.warning(data_array.attrs)
             # Convert to Dataset
-            return xr.Dataset({data_var: data_array}), header_out_path
+            ds_out = xr.Dataset({data_var: data_array})
+            ds_out.attrs.update(ds_in.attrs)
+            logger.warning(ds_out.attrs)
+            logger.error(ds_out)
+            return ds_out , header_out_path
         except IndexError as e:
             with ErrorLogger(logger):
                 raise e
