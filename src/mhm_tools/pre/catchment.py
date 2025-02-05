@@ -515,9 +515,11 @@ class Catchment:
                     f"Regridding to fit coarse grid with res {self.l1_resolution} (factor {factor})"
                 )
                 min_row = min_row // factor * factor
-                max_row = (max_row // factor + 1) * factor
                 min_col = min_col // factor * factor
-                max_col = (max_col // factor + 1) * factor
+                # Calculating max_row/col it needs:
+                #  +1 to include the whole last coarse grid cell -1 to not get one cell from the next block
+                max_row = (max_row // factor + 1) * factor - 1
+                max_col = (max_col // factor + 1) * factor - 1
                 if max_col >= len(cols):
                     logger.warning("While regridding max_cols was larger than col-size")
                     max_col = len(cols) - 1
