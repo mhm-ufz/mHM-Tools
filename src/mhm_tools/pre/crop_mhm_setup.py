@@ -80,7 +80,9 @@ def crop_file_with_header(ds_in, file_path, mask, output_path):
         )
         # reverse order for lat (TODO: Make this resistant input with south north ordering)
         lat = np.arange(
-            d["yllcorner"] + d["cellsize"] * (d["nrows"]-1), d["yllcorner"]-d["cellsize"], -d["cellsize"]
+            d["yllcorner"] + d["cellsize"] * (d["nrows"] - 1),
+            d["yllcorner"] - d["cellsize"],
+            -d["cellsize"],
         )
         logger.info(ds_in[data_var].shape)
         lon_key = get_coord_key(ds_in, lon=True, raise_exception=True)
@@ -128,11 +130,13 @@ NODATA_value         {d['NODATA_value']}
                 name=data_var,
                 attrs=data.attrs,
             )
-            data_array.attrs.update({'_FillValue': d['NODATA_value'],'missing_value': d['NODATA_value']})
+            data_array.attrs.update(
+                {"_FillValue": d["NODATA_value"], "missing_value": d["NODATA_value"]}
+            )
             # Convert to Dataset
             ds_out = xr.Dataset({data_var: data_array})
             ds_out.attrs.update(ds_in.attrs)
-            return ds_out , header_out_path
+            return ds_out, header_out_path
         except IndexError as e:
             with ErrorLogger(logger):
                 raise e
