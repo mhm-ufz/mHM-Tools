@@ -118,7 +118,7 @@ def write_xarray_to_ascii(dataset, filepath, data_var=None, fmt=None):
     )
 
     # Replace NaN values with nodata_value in data
-    
+
     if data.dtype.kind in ["i", "u", "f"]:  # i=int, u=unsigned, f=float
         data_type = "num"
         data_to_write = np.where(np.isnan(data.values), nodata_value, data)
@@ -129,13 +129,14 @@ def write_xarray_to_ascii(dataset, filepath, data_var=None, fmt=None):
     # Write header and data to ASCII file
     with filepath.open("w") as f:
         f.write(header)
-        if fmt is not None: 
+        if fmt is not None:
             np.savetxt(f, data_to_write, fmt=fmt)
-        elif data_type == 'num':
+        elif data_type == "num":
             np.savetxt(f, data_to_write, fmt="%g")
         else:
             np.savetxt(f, data_to_write, fmt="%s")
-        logger.info(f'Writting file to {filepath}')
+        logger.info(f"Writting file to {filepath}")
+
 
 def read_ascii_to_xarray(filepath, var_name=None):
     """Read an mHM readable asci file to an xarray dataset."""
@@ -176,7 +177,7 @@ def read_ascii_to_xarray(filepath, var_name=None):
         dims=["lat", "lon"],
         coords={"lon": lon, "lat": lat},
         name=name,
-        attrs={"nodata_value": nodata_value, '_FillValue': nodata_value},
+        attrs={"nodata_value": nodata_value, "_FillValue": nodata_value},
     )
 
     # Convert to Dataset

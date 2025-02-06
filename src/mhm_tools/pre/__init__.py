@@ -12,11 +12,11 @@ latlon file creation
 
 from . import catchment, create_mhm_restart_file, latlon, subdomain_masks
 from .catchment import create_catchment, merge_catchment
+from .create_id_gauges import create_id_gauges
 from .create_mhm_restart_file import Grid, LatLon, MHMRestartFile, MorphFiles
 from .crop_mhm_setup import crop_mhm_setup
 from .latlon import create_latlon, xy_to_latlon
 from .subdomain_masks import create_subdomain_masks
-from .create_id_gauges import create_id_gauges
 
 __all__ = ["latlon"]
 __all__ += ["create_latlon", "xy_to_latlon"]

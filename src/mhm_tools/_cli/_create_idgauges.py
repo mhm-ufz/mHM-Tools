@@ -1,8 +1,7 @@
-"""Create a hydrograph showing the simulated and observed discharge."""
+"""Create am id gauges file."""
 
 from mhm_tools.common.logger import ErrorLogger
 from mhm_tools.pre import create_id_gauges
-from ..post.hydrograph import Hydrograph
 
 
 def add_args(parser):
@@ -33,7 +32,7 @@ def add_args(parser):
         dest="out_file",
         required=False,
         default="hydrograph.pdf",
-        help="The name of the output file."
+        help="The name of the output file.",
     )
     parser.add_argument(
         "--gauge_coords",
@@ -69,7 +68,7 @@ def add_args(parser):
 
 def run(args):
     """
-    Create the hydrograph plots.
+    Create the id gauges file.
 
     Parameters
     ----------
@@ -82,16 +81,18 @@ def run(args):
         lon = args.lon
     elif args.gauge_coords:
         lat, lon = map(float, args.gauge_coords.split(","))
-    else: 
+    else:
         with ErrorLogger:
-            msg = 'Coordinates must be provided either as gauge_coords or as lat and lon.'
+            msg = (
+                "Coordinates must be provided either as gauge_coords or as lat and lon."
+            )
             raise ValueError(msg)
-    
+
     create_id_gauges(
         file=args.input_file,
         out_path=args.out_file,
-        lon=lon, 
+        lon=lon,
         lat=lat,
         file_is_idgauges=args.is_id_gauges,
-        id = args.gauge_id
+        id=args.gauge_id,
     )

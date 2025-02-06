@@ -8,6 +8,7 @@ from .. import __version__
 from . import (
     _bankfull,
     _create_catchment,
+    _create_idgauges,
     _create_mhm_restart_file,
     _create_subdomain_masks,
     _crop_mhm_setup,
@@ -15,7 +16,6 @@ from . import (
     _hydrograph,
     _latlon,
     _seasonality_validation,
-    _create_idgauges
 )
 
 
