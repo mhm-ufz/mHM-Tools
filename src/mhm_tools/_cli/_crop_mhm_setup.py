@@ -22,13 +22,14 @@ def add_args(parser):
         "-i",
         "--input_path",
         required=True,
-        help="Path to the existing mHM setup.",
+        help="Path to the directory of the existing mHM setup. \
+        Can also be used with a file path to crop a single file.",
     )
     required_args.add_argument(
         "-o",
         "--output_path",
         required=True,
-        help="Path where the new domain setup should be saved.",
+        help="Path of the directory where the new domain setup should be saved.",
     )
     parser.add_argument(
         "--l1_resolution",

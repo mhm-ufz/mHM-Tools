@@ -201,14 +201,25 @@ def crop_mhm_setup(
     crs=None,
 ):
     """Cut out an existing mhm domain setup using a mask file."""
-    input_path = Path(input_path)
+    # check if the input is correct
+    mask_file = Path(mask_file)
     output_path = Path(output_path)
-
-    # recusively get all the files from the input path
+    input_path = Path(input_path)
+    error_msg = ""
+    if not mask_file.is_file():
+        error_msg += "`mask_file` must be a file. \n"
+    if not input_path.exists():
+        error_msg += "`input_path` must exist. \n"
+    if error_msg:
+        with ErrorLogger:
+            raise ValueError(error_msg)
+    # recusively get all the files from the input path if it is a dir
     files = []
-    for depth in range(3):  # Depth 0 to 2
-        files.extend(input_path.glob("*/" * depth + "*.*"))
-
+    if input_path.is_dir():
+        for depth in range(3):  # Depth 0 to 2
+            files.extend(input_path.glob("*/" * depth + "*.*"))
+    else:
+        files = [input_path]
     with xr.open_dataset(mask_file) as mask_ds:
         mask_key = next(
             key for key in ["mask", "land_mask"] if key in mask_ds.data_vars
@@ -220,7 +231,7 @@ def crop_mhm_setup(
         dem_output_file = None
         meteo_header_path = None
         logger.info(
-            f"Masking with lon {mask_da.lon.min()} to {mask_da.lon.max()} and lat: {mask_da.lat.min()} to {mask_da.lat.max()}"
+            f"Masking with lon {mask_da.lon.min().item()} to {mask_da.lon.max().item()} and lat: {mask_da.lat.min().item()} to {mask_da.lat.max().item()}"
         )
         # cut and copy each file
         for f in files:

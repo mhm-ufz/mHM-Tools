@@ -5,7 +5,7 @@ from mhm_tools.pre import create_id_gauges
 
 
 def add_args(parser):
-    """Add cli arguments for the hydrograph subcommand.
+    """Add cli arguments to create an id_gauges file.
 
     Parameters
     ----------
