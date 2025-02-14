@@ -4,6 +4,7 @@ import array
 import logging
 import random
 from pathlib import Path
+from typing import Iterable
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -180,8 +181,9 @@ def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None)
     """Take a list of files with all containing data for one month and creating statisitcs while reading them one by one."""
     da = None
     logger.debug(f"{type(files)}, {files}")
-    if not isinstance(files, list):
-        logger.warning("Is not list.")
+    if not isinstance(files, Iterable):
+        logger.warning(f"Files not a list of files but one file {files}.")
+        files = [files]
     with xr.open_dataset(files[0], engine="netcdf4") as ds:
         # Apply coordinate slicing if needed
         if coordinate_slice is not None:
