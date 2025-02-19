@@ -575,6 +575,8 @@ class MHMRestartFile:
         for name, file_path in self.grid.morph_files.get_files_as_dict().items():
             if file_path is not None and file_path:
                 sub_grid_paths = self._split_file(name, file_path)
+            else:
+                logger.warning(f'There is no file for {name} that could be split at path {file_path}')
         logger.debug("Creating subgrids")
         self.subgrids = [Grid(file_path=k, **v) for k, v in sub_grid_paths.items()]
         logger.debug("Splitting grid done")
