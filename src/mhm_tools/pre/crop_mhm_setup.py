@@ -72,6 +72,8 @@ def crop_file_with_header(ds_in, file_path, mask, output_path):
         d = {}
         logger.debug(f"Reading out header.txt file {header}")
         for line in h.readlines():
+            if not line.strip():
+                continue
             line_content = line.strip().split(" ")
             logger.debug(f"{line_content[0].strip()} = {line_content[-1].strip()}")
             d[line_content[0].strip()] = float(line_content[-1].strip())
