@@ -249,8 +249,11 @@ def crop_mhm_setup(
                     # header files are not copied but recreated as they change
                     continue
                 # other txt and markdown files are copied as they nomaly contain description or class definitions but do not change with domain cropping
-                shutil.copy(f, output_file)
-                logger.debug(f"Copied file {f.name} to {output_file}")
+                try:
+                    shutil.copy(f, output_file)
+                    logger.debug(f"Copied file {f.name} to {output_file}")
+                except Exception as e:
+                    logger.error(f"Can't copy {f} because of {e}")
                 continue
             logger.debug(f"read in dataset: {ds}")
             # Handling of special cases:
