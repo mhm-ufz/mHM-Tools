@@ -28,13 +28,13 @@ def spearman_correlation(data1, data2):
         with ErrorLogger(logger):
             msg = "Both DataArrays must have the same shape"
             raise ValueError(msg)
-    try:
-        data1 = data1.flatten()
-        data2 = data2.flatten()
-    except Exception as e:
-        logger.warning(e)
-        data1 = data1.values.flatten()
-        data2 = data2.values.flatten()
+    # try:
+    #     data1 = data1.flatten()
+    #     data2 = data2.flatten()
+    # except Exception as e:
+    # logger.warning(e)
+    data1 = data1.values.flatten()
+    data2 = data2.values.flatten()
     # Calculate Spearman rank correlation using scipy
     corr, p_value = spearmanr(data1, data2)
     return corr, p_value
