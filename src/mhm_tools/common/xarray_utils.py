@@ -53,8 +53,10 @@ def get_single_data_var(ds):
     return data_vars[0]
 
 def induce_data_var_from_file_name(ds, file_path):
+    logger.info('Searching for more than one datavar by comparing with file name.')
     name = file_path.stem
     data_vars = list(ds.data_vars)
+    logger.debug(f'{name} - {data_vars}')
     for dv in data_vars: 
         if dv in name:
             return dv

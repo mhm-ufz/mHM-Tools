@@ -90,6 +90,7 @@ def crop_file_with_header(ds_in, file_path, mask, output_path):
         if data_var is None:
             logger.error(f'File {file_path} could not be croped because the data_var could not be determined.')
             return None, None
+        logger.debug(f'Found data_var={data_var}')
     with header.open("r") as h:
         d = {}
         logger.debug(f"Reading out header.txt file {header}")
