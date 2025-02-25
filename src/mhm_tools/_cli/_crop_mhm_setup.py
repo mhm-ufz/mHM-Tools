@@ -48,6 +48,12 @@ def add_args(parser):
             "If not given, headers will be interpreted as given in lat-lon ('epsg:4326')."
         ),
     )
+    parser.add_argument(
+        "--ncpus",
+        required=False,
+        default=1,
+        help=(""),
+    )
 
 
 def run(args):
@@ -65,4 +71,5 @@ def run(args):
         l1_resolution=args.l1_resolution,
         crs=args.crs,
         l11_resolution=args.l11_resolution,
+        n_jobs=args.ncpus
     )
