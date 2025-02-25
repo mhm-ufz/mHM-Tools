@@ -281,8 +281,9 @@ class CreateSubdomainMasks:
 
         # Second condition: Replace all values where land_mask is 0 with NaN unless they are sink values (0)
         data_var_values[land_mask_values == 0 & (data_var_values != sink_value)] = (
-            -9999.0
+            sink_value
         )
+            #-9999.0
         ds_sub_ref_file["flwdir"].values = data_var_values
 
         for data_var in ds_sub_ref_file.data_vars:

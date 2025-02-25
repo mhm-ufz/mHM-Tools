@@ -350,6 +350,7 @@ class MPRRunner:
         p = Popen(command, shell=True, stdout=PIPE, stderr=PIPE)
         try:
             data, error_data = p.communicate()
+            logger.debug(data)
             if error_data:
                 grid.restart_file = None
                 msg = f"MPR failed with STDERR {error_data} for {grid.name} and command {command}"
@@ -749,7 +750,9 @@ class MHMRestartFile:
                     )
 
         # 3. iterate over all subgrids and merge them into the whole grid
-        for restart_file_path in restart_file_paths:
+        for counter, restart_file_path in enumerate(restart_file_paths):
+            logger.info(f'Merging {counter}/{len(restart_file_paths)} files')
+            logger.debug(f'Restart path of the subdomain restart file: {restart_file_path}')
             ints = re.findall(r"\d+", str(restart_file_path))
             isel_start = int(ints[-2])
             jsel_start = int(ints[-1])

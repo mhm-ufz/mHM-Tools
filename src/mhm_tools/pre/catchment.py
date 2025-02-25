@@ -698,17 +698,22 @@ def create_catchment(
             temp_file2.unlink()
         elif coordinate_slices is not None:
             logger.info(f"Creating basin id file for {coordinate_slices}")
-            if l1_resolution is not None:
-                lat_max = coordinate_slices['lat'].start + 2 * l1_resolution
-                lat_min = coordinate_slices['lat'].stop - 2 * l1_resolution
-                lon_min = coordinate_slices['lon'].start - 2 * l1_resolution
-                lon_max = coordinate_slices['lon'].stop + 2 * l1_resolution
-            else:
-                res = round(input_ds.lon[1]-input_ds.lon[0], 6)
-                lat_max = coordinate_slices['lat'].start + (frame + 1) * res
-                lat_min = coordinate_slices['lat'].stop - (frame + 1) * res
-                lon_min = coordinate_slices['lon'].start - (frame + 1) * res
-                lon_max = coordinate_slices['lon'].stop + (frame + 1) * res
+            # res = round(input_ds.lon[1]-input_ds.lon[0], 6)
+            # if l1_resolution is not None:
+            #     factor = get_upscaling_factor(input_ds, l1_resolution)
+            #     lat_max = coordinate_slices['lat'].start + 2 * l1_resolution
+            #     lat_min = coordinate_slices['lat'].stop - 2 * l1_resolution
+            #     lon_min = coordinate_slices['lon'].start - 2 * l1_resolution
+            #     lon_max = coordinate_slices['lon'].stop + 2 * l1_resolution
+            # else:
+                # lat_max = coordinate_slices['lat'].start + (frame + 1) * res
+                # lat_min = coordinate_slices['lat'].stop - (frame + 1) * res
+                # lon_min = coordinate_slices['lon'].start - (frame + 1) * res
+                # lon_max = coordinate_slices['lon'].stop + (frame + 1) * res
+            lat_max = coordinate_slices['lat'].start
+            lat_min = coordinate_slices['lat'].stop 
+            lon_min = coordinate_slices['lon'].start
+            lon_max = coordinate_slices['lon'].stop 
             input_ds = input_ds.sel(lat=slice(lat_max, lat_min), lon=slice(lon_min, lon_max))
             c = Catchment(
                 ds=input_ds,
