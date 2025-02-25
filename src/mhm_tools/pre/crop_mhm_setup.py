@@ -23,12 +23,16 @@ class LatlonFiles:
     dem_output_file=None
     meteo_header_path=None
     def are_set(self):
+        all_set = True
         if self.latlon_output_file is None:
-            return False
+            logger.info(f'latlon_output_file not set')
+            all_set = False
         if self.dem_output_file is None:
-            return False
+            logger.info(f'dem_output_file not set')
+            all_set = False
         if self.meteo_header_path is None:
-            return False
+            logger.info(f'meteo_header_path not set')
+            all_set = False
         return True
         
 
@@ -161,7 +165,7 @@ NODATA_value         {d['NODATA_value']}
             with ErrorLogger(logger):
                 raise e
 
-
+@log_arguments()
 def call_create_latlon(
     dem_output_file,
     l1_resolution,
@@ -344,9 +348,6 @@ def crop_mhm_setup(
         mask_da = mask_ds[mask_key].astype(float)
         latslice = slice(mask_da.lat.values[-1], mask_da.lat.values[0])
         lonslice = slice(mask_da.lon.values[0], mask_da.lon.values[-1])
-        latlon_output_file = ""
-        dem_output_file = ""
-        meteo_header_path = ""
         logger.info(
             f"Masking with lon {mask_da.lon.min().item()} to {mask_da.lon.max().item()} and lat: {mask_da.lat.min().item()} to {mask_da.lat.max().item()}"
         )
@@ -359,6 +360,7 @@ def crop_mhm_setup(
             for f in files
         )
         if l1_resolution is not None and latlon_files.are_set():
+            logger.info('Creating latlon')
             call_create_latlon(
                 latlon_files.dem_output_file,
                 l1_resolution,
