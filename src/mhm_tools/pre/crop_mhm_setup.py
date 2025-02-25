@@ -22,6 +22,18 @@ class LatlonFiles:
     latlon_output_file=None
     dem_output_file=None
     meteo_header_path=None
+
+    def set_latlon_output_file(self, path):
+        logger.info(f'Setting latlon_output_file to {path}')
+        self.latlon_output_file = path
+    def set_dem_output_file(self, path):
+        logger.info(f'Setting dem_output_file to {path}')
+        self.dem_output_file = path
+    def set_meteo_header_path(self, path):
+        logger.info(f'Setting meteo_header_path to {path}')
+        self.meteo_header_path = path
+
+    
     def are_set(self):
         all_set = True
         if self.latlon_output_file is None:
@@ -33,7 +45,7 @@ class LatlonFiles:
         if self.meteo_header_path is None:
             logger.info(f'meteo_header_path not set')
             all_set = False
-        return True
+        return all_set
         
 
 def regrid_mask(mask_ds, ds2, lonkey1, latkey1, lonkey2, latkey2, mask_key=None):
@@ -242,7 +254,7 @@ def crop_file(f, mask_da, latslice, lonslice, output_path, input_path, overwrite
         logger.info(
             "Latlon cropping depreciated will implement new latlon creation using the mhm-tools latlon functionality."
         )
-        latlon_files.latlon_output_file = output_file
+        latlon_files.set_latlon_output_file( output_file)
         return
     # 2. Restart files are complex and are not yet implemented. mHM restart files can be croped, mRM restart files can't (?).
     if "restart" in f.name.lower():
@@ -261,7 +273,7 @@ def crop_file(f, mask_da, latslice, lonslice, output_path, input_path, overwrite
         lat_key = get_coord_key(ds_croped, lat=True)
         lon_key = get_coord_key(ds_croped, lon=True)
         if f.stem in ["pre", "pet", "tavg"]:
-            latlon_files.meteo_header_path = header_path
+            latlon_files.set_meteo_header_path(header_path)
     # 4. All other netcdf files containing mostly morphological data.
     else:
         lat_key = get_coord_key(ds, lat=True)
@@ -289,7 +301,7 @@ def crop_file(f, mask_da, latslice, lonslice, output_path, input_path, overwrite
 
     # only the dem file or and eventual mHM restart file are masked using the provided mask file
     if "dem" in f.name.lower():  # or "mhm" in f.name.lower()
-        latlon_files.dem_output_file = output_file
+        latlon_files.set_dem_output_file(output_file)
         logger.info("Masking file")
         mask_regridded = regrid_mask(
             mask_ds=mask_da,
