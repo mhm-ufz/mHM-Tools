@@ -314,7 +314,7 @@ def crop_file(f, mask_da, latslice, lonslice, output_path, input_path, overwrite
         ds_croped = ds_croped.where(mask_regridded == 1, np.nan)
     try:
         write_to_file(ds_croped, output_file)
-    except Exception:
+    except Exception as e:
         logger.warning(f"First try writing the file failed: {e}")
         logger.info("Changing datatype to float")
         for var_name in ds_croped.data_vars:
