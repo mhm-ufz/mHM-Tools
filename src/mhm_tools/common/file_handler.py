@@ -5,9 +5,6 @@ from pathlib import Path
 
 import numpy as np
 import xarray as xr
-import geopandas as gpd
-from rasterio.features import geometry_mask
-from rasterio.transform import from_origin
 
 from mhm_tools.common.logger import ErrorLogger
 from mhm_tools.common.xarray_utils import get_coord_key, get_single_data_var
@@ -84,9 +81,7 @@ def get_xarray_ds_from_file(file_path, var_name=None):
         return read_ascii_to_xarray(filepath=file_path, var_name=var_name)
     if file_path.suffix == ".nc":
         return xr.open_dataset(file_path)
-    if file_path.suffix == ".shp":
-        return read_shape_to_xarray(filepath=file_path)
-    msg = f"File types other than asci, shape and netcdf are not implemented. The suffix of the file was: {file_path.suffix}"
+    msg = f"File types other than asci and netcdf are not implemented. The suffix of the file was: {file_path.suffix}"
     with ErrorLogger:
         raise NotImplementedError()
 
@@ -197,39 +192,6 @@ def read_ascii_to_xarray(filepath, var_name=None):
     # Convert to Dataset
     return xr.Dataset({name: data_array})
 
-def read_shape_to_xarray(filepath):
-    """ Rasterise shapefile to lonlat xarray.
-
-    Args:
-    filepath - path to shapefile
-
-    Returns:
-    xarray of same bounds as shapefile, crs epsg:4326 and resolution ~ 1km at equator
-    """
-    gdf = gdp.read_file(filepath)
-
-    #check if shapefile is in lonlat coords, if not reproject
-    if gdf.crs != 'EPSG:4326':
-        print(f"Shapefile CRS is {gdf.crs}, reprojecting to lonlat")
-        gdf = gdf.to_crs('EPSG:4326')
-
-    resolution_in_degrees = 1/111 # ~ 1km at equator
-    
-    minx, miny, maxx, maxy = gdf.total_bounds
-    
-    # compute coords for fiven resolution
-    x_coords = np.arrange(minx, maxx, resolution_in_degrees)
-    y_coords = np.arrange(miny, maxy, resolution_in_degrees)
-
-    raster_height = len(x_coords)
-    raster_width = len(y_coords)
-
-    # create mask from shape and make xarray from it
-    transform = from_origin(minx, maxy, (maxx - minx)/raster_height, (maxy - miny)/raster_width)
-    mask = geometry_mask(gdf.geometry, transform=transform, invert = True, out_shape=(raster_height, raster_width))
-    mask_xarray = xr.DataArray(mask, dims=["lat","lon"], coords ={"lon": y_coords, "lat": x_coords})
-    
-    return(mask_xarray)
 
 def get_coord_values(ds, lat=False, lon=False):
     """Get latitude or longitude values from DataSet."""
