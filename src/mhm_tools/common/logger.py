@@ -165,3 +165,7 @@ class ErrorLogger(AbstractContextManager):
         """Log all exception messages."""
         if exc_value is not None and self.do_log:
             logging.getLogger(self.logger).exception(exc_value)
+
+    def __enter__(self):
+        return self
+

@@ -2,7 +2,8 @@
 
 from mhm_tools.common.cli_utils import get_coords
 from mhm_tools.post.GRDC_validation import evaludate_grdc_data
-
+import logging
+logger = logging.getLogger(__name__)
 
 def add_args(parser):
     required_args = parser.add_argument_group("required arguments")
@@ -29,7 +30,7 @@ def add_args(parser):
     required_args.add_argument(
         "--model_variable",
         required=True,
-        help=(""),
+        help=("Variable name of the simulation data."),
     )
     parser.add_argument(
         "--ncpus",

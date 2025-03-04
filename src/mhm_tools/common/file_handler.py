@@ -75,14 +75,14 @@ def get_xarray_ds_from_file(file_path, var_name=None):
     logger.info(f"Reading {file_path} to xarray")
     if not file_path.is_file():
         msg = f"File path does not point to an existing file: {file_path}"
-        with ErrorLogger:
+        with ErrorLogger(logger):
             raise ValueError(msg)
     if file_path.suffix == ".asc":
         return read_ascii_to_xarray(filepath=file_path, var_name=var_name)
     if file_path.suffix == ".nc":
         return xr.open_dataset(file_path)
     msg = f"File types other than asci and netcdf are not implemented. The suffix of the file was: {file_path.suffix}"
-    with ErrorLogger:
+    with ErrorLogger(logger):
         raise NotImplementedError()
 
 def write_xarray_to_file(ds, file_path, var_name=None, fmt=None):
@@ -93,7 +93,7 @@ def write_xarray_to_file(ds, file_path, var_name=None, fmt=None):
     if file_path.suffix == ".nc":
         return ds.to_netcdf(file_path)
     msg = f"File types other than asci and netcdf are not implemented. The suffix of the file was: {file_path.suffix}"
-    with ErrorLogger:
+    with ErrorLogger(logger):
         raise NotImplementedError()
 
 def write_xarray_to_ascii(dataset, filepath, data_var=None, fmt=None):

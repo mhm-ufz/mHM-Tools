@@ -3,6 +3,8 @@
 from mhm_tools.common.logger import ErrorLogger
 from mhm_tools.pre import create_id_gauges
 
+import logging
+logger = logging.getLogger(__name__)
 
 def add_args(parser):
     """Add cli arguments to create an id_gauges file.
@@ -82,7 +84,7 @@ def run(args):
     elif args.gauge_coords:
         lat, lon = map(float, args.gauge_coords.split(","))
     else:
-        with ErrorLogger:
+        with ErrorLogger(logger):
             msg = (
                 "Coordinates must be provided either as gauge_coords or as lat and lon."
             )

@@ -345,7 +345,7 @@ def crop_mhm_setup(
     if not input_path.exists():
         error_msg += "`input_path` must exist. \n"
     if error_msg:
-        with ErrorLogger:
+        with ErrorLogger(logger):
             raise ValueError(error_msg)
     # recusively get all the files from the input path if it is a dir
     files = []

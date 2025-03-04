@@ -739,7 +739,7 @@ def get_dataset_from_path(path, years=None):
             file_list,
             combine="by_coords",  # Ensures files are combined based on shared coordinates
         )
-    with ErrorLogger:
+    with ErrorLogger(logger):
         msg = f"Path {path} does not exist."
         raise ValueError(msg)
 
