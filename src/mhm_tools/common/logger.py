@@ -112,7 +112,7 @@ def get_log_level(level=None, count_verbose=0, count_quiet=0):
     return level, error_msg
 
 
-def log_arguments():
+def log_arguments(log_level='Debug'):
     """Log all non-None arguments passed to a function."""
 
     def decorator(func):
@@ -132,7 +132,10 @@ def log_arguments():
             msg = f"Function '{func.__name__}' called with the following arguments: \n"
             for arg, value in non_none_args.items():
                 msg += f"  {arg}: {value} \n"
-            logger.debug(msg)
+            if log_level.upper() == "INFO":
+                logger.info(msg)
+            else:
+                logger.debug(msg)
             # Call the original function
             try:
                 return func(*args, **kwargs)
