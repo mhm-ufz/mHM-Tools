@@ -75,10 +75,10 @@ class LatlonFiles:
             if meteo_header_path is not None:
                 self.set_meteo_header_path(meteo_header_path)
 
-def regrid_mask(mask_ds, ds2, lonkey1, latkey1, lonkey2, latkey2, mask_key=None):
+def regrid_mask(mask_ds, ds2, lon_key_mask, lat_key_mask, lonkey2, latkey2, mask_key=None):
     """Regrid a xarray mask dataset mask_ds to the resolution of a second dataset ds2."""
-    lon1 = mask_ds[lonkey1].data
-    lat1 = mask_ds[latkey1].data
+    lon1 = mask_ds[lon_key_mask].data
+    lat1 = mask_ds[lat_key_mask].data
     res1 = lat1[0] - lat1[1]
     lon2 = ds2[lonkey2].data
     lat2 = ds2[latkey2].data
@@ -87,10 +87,10 @@ def regrid_mask(mask_ds, ds2, lonkey1, latkey1, lonkey2, latkey2, mask_key=None)
         results = np.full((len(lat2), len(lon2)), 0.0)
         for i, lat in enumerate(lat2):
             for j, lon in enumerate(lon2):
-                for n, lat1 in enumerate(mask_ds.lat.data):
+                for n, lat1 in enumerate(mask_ds[lat_key_mask].data):
                     if lat1 < (lat - res2 / 2) or lat1 > (lat + res2 / 2):
                         continue
-                    for m, lon1 in enumerate(mask_ds.lon.data):
+                    for m, lon1 in enumerate(mask_ds[lon_key_mask].data):
                         if lon1 < lon - res2 / 2 or lon1 > lon + res2 / 2:
                             continue
                         if mask_key is not None:
@@ -120,7 +120,7 @@ def write_to_file(ds, output_file: Path):
         ds.to_netcdf(output_file)
 
 
-def crop_file_with_header(ds_in, file_path, mask, output_path):
+def crop_file_with_header(ds_in, file_path, mask, output_path, lon_key_mask, lat_key_mask):
     """Crop the nc file and create a new header file for the new coordinates."""
     pres = 1e-5
     header = file_path.parent / "header.txt"
@@ -153,15 +153,15 @@ def crop_file_with_header(ds_in, file_path, mask, output_path):
         lon_key = get_coord_key(ds_in, lon=True, raise_exception=True)
         lat_key = get_coord_key(ds_in, lat=True, raise_exception=True)
         # x values
-        mask_res = round(mask.lon.data[1] - mask.lon.data[0], 6)
-        x_mask = (lon >= float(mask.lon.min()) - mask_res / 2 - pres) & (
-            lon < float(mask.lon.max()) - mask_res / 2 + pres
+        mask_res = round(mask[lon_key_mask].data[1] - mask[lon_key_mask].data[0], 6)
+        x_mask = (lon >= float(mask[lon_key_mask].min()) - mask_res / 2 - pres) & (
+            lon < float(mask[lon_key_mask].max()) - mask_res / 2 + pres
         )
         x = np.arange(0, ds_in.sizes[lon_key], 1)
         x_cropped = x[x_mask]
         # y values
-        y_mask = (lat >= float(mask.lat.min()) - mask_res / 2 - pres) & (
-            lat < float(mask.lat.max()) - mask_res / 2 + pres
+        y_mask = (lat >= float(mask[lat_key_mask].min()) - mask_res / 2 - pres) & (
+            lat < float(mask[lat_key_mask].max()) - mask_res / 2 + pres
         )
         y = np.arange(ds_in.sizes[lat_key], 0, -1) - 1
         y_cropped = y[y_mask]
@@ -259,6 +259,8 @@ def crop_file(f, mask_da, latslice, lonslice, output_path, input_path, overwrite
     output_file = output_path / f.relative_to(input_path)
     output_file.parent.mkdir(parents=True, exist_ok=True)
     latlon_files = LatlonFiles()
+    lon_key_mask = get_coord_key(mask_da, lon=True)
+    lat_key_mask = get_coord_key(mask_da, lat=True)
     if output_file.is_file() and not overwrite:
         logger.info("Target file already exists. Cropping is scipped.")
         return latlon_files
@@ -294,7 +296,7 @@ def crop_file(f, mask_da, latslice, lonslice, output_path, input_path, overwrite
     if list(f.parent.glob("header.txt")):
         logger.debug("Cropping and writing new header file...")
         ds_croped, header_path = crop_file_with_header(
-            ds, f, mask_da, output_path / f.parent.relative_to(input_path)
+            ds, f, mask_da, output_path / f.parent.relative_to(input_path), lon_key_mask, lat_key_mask
         )
         if ds_croped is None and header_path is None:
             return latlon_files
@@ -334,8 +336,8 @@ def crop_file(f, mask_da, latslice, lonslice, output_path, input_path, overwrite
         mask_regridded = regrid_mask(
             mask_ds=mask_da,
             ds2=ds_croped,
-            lonkey1="lon",
-            latkey1="lat",
+            lon_key_mask=lon_key_mask,
+            lat_key_mask=lat_key_mask,
             lonkey2=lon_key,
             latkey2=lat_key,
         )
@@ -388,12 +390,14 @@ def crop_mhm_setup(
             key for key in ["mask", "land_mask"] if key in mask_ds.data_vars
         )
         mask_da = mask_ds[mask_key].astype(float)
+        lon_key_mask = get_coord_key(mask_da, lon=True)
+        lat_key_mask = get_coord_key(mask_da, lat=True)
         pres = 1e-5
-        mask_res = round(mask_da.lon.data[1] - mask_da.lon.data[0], 6)
-        latslice = slice(mask_da.lat.data[-1]-mask_res/2-pres, mask_da.lat.data[0]+mask_res/2+pres)
-        lonslice = slice(mask_da.lon.data[0]-mask_res/2-pres, mask_da.lon.data[-1]+mask_res/2+pres)
+        mask_res = round(mask_da[lon_key_mask].data[1] - mask_da[lon_key_mask].data[0], 6)
+        latslice = slice(mask_da[lat_key_mask].data[-1]-mask_res/2-pres, mask_da[lat_key_mask].data[0]+mask_res/2+pres)
+        lonslice = slice(mask_da[lon_key_mask].data[0]-mask_res/2-pres, mask_da[lon_key_mask].data[-1]+mask_res/2+pres)
         logger.info(
-            f"Masking with lon {mask_da.lon.min().item()} to {mask_da.lon.max().item()} and lat: {mask_da.lat.min().item()} to {mask_da.lat.max().item()}"
+            f"Masking with lon {mask_da[lon_key_mask].min().item()} to {mask_da[lon_key_mask].max().item()} and lat: {mask_da[lat_key_mask].min().item()} to {mask_da[lat_key_mask].max().item()}"
         )
         # cut and copy each file
         list_latlon_files = Parallel(n_jobs=n_jobs, backend="loky")(
