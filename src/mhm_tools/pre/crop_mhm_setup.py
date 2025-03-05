@@ -122,6 +122,7 @@ def write_to_file(ds, output_file: Path):
 
 def crop_file_with_header(ds_in, file_path, mask, output_path):
     """Crop the nc file and create a new header file for the new coordinates."""
+    pres = 1e-5
     header = file_path.parent / "header.txt"
     data_var = get_single_data_var(ds_in)
     if data_var is None: 
@@ -152,15 +153,15 @@ def crop_file_with_header(ds_in, file_path, mask, output_path):
         lon_key = get_coord_key(ds_in, lon=True, raise_exception=True)
         lat_key = get_coord_key(ds_in, lat=True, raise_exception=True)
         # x values
-        mask_res = round(mask.lon.values[1] - mask.lon.values[0], 6)
-        x_mask = (lon >= float(mask.lon.min()) - mask_res / 2) & (
-            lon < float(mask.lon.max()) - mask_res / 2
+        mask_res = round(mask.lon.data[1] - mask.lon.data[0], 6)
+        x_mask = (lon >= float(mask.lon.min()) - mask_res / 2 - pres) & (
+            lon < float(mask.lon.max()) - mask_res / 2 + pres
         )
         x = np.arange(0, ds_in.sizes[lon_key], 1)
         x_cropped = x[x_mask]
         # y values
-        y_mask = (lat >= float(mask.lat.min()) - mask_res / 2) & (
-            lat < float(mask.lat.max()) - mask_res / 2
+        y_mask = (lat >= float(mask.lat.min()) - mask_res / 2 - pres) & (
+            lat < float(mask.lat.max()) - mask_res / 2 + pres
         )
         y = np.arange(ds_in.sizes[lat_key], 0, -1) - 1
         y_cropped = y[y_mask]
@@ -387,8 +388,10 @@ def crop_mhm_setup(
             key for key in ["mask", "land_mask"] if key in mask_ds.data_vars
         )
         mask_da = mask_ds[mask_key].astype(float)
-        latslice = slice(mask_da.lat.values[-1], mask_da.lat.values[0])
-        lonslice = slice(mask_da.lon.values[0], mask_da.lon.values[-1])
+        pres = 1e-5
+        mask_res = round(mask_da.lon.data[1] - mask_da.lon.data[0], 6)
+        latslice = slice(mask_da.lat.data[-1]-mask_res/2-pres, mask_da.lat.data[0]+mask_res/2+pres)
+        lonslice = slice(mask_da.lon.data[0]-mask_res/2-pres, mask_da.lon.data[-1]+mask_res/2+pres)
         logger.info(
             f"Masking with lon {mask_da.lon.min().item()} to {mask_da.lon.max().item()} and lat: {mask_da.lat.min().item()} to {mask_da.lat.max().item()}"
         )

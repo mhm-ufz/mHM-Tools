@@ -534,11 +534,11 @@ class Catchment:
         )
 
         # Slice the array to extract the filled part
-        lon_min, lon_max = np.round(self.ds.lon.values[min_col], 3), np.round(
-            self.ds.lon.values[max_col], 3
+        lon_min, lon_max = np.round(self.ds.lon.values[min_col], 8), np.round(
+            self.ds.lon.values[max_col], 8
         )
-        lat_min, lat_max = np.round(self.ds.lat.values[max_row], 3), np.round(
-            self.ds.lat.values[min_row], 3
+        lat_min, lat_max = np.round(self.ds.lat.values[max_row], 8), np.round(
+            self.ds.lat.values[min_row], 8
         )
         lat_slice = slice(lat_max, lat_min)
         lon_slice = slice(lon_min, lon_max)
