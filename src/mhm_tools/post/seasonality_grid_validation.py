@@ -15,7 +15,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from scipy.stats import spearmanr
 
 from mhm_tools.common.file_handler import get_coord_values
-from mhm_tools.common.logger import ErrorLogger, log_arguments
+from mhm_tools.common.logger import ErrorLogger, log_arguments, log_errors
 from mhm_tools.common.xarray_utils import get_coord_key
 
 logger = logging.getLogger(__name__)
@@ -347,7 +347,7 @@ def plot_single_map(
     im = ax.imshow(values, cmap=cmap, norm=norm)
     return im, bounds
 
-
+@log_errors()
 def plot_map(
     rel_mean, rel_std, spearman, ref_clim, input_clim, input_name, ref_name, output_path
 ):

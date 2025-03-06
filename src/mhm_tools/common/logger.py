@@ -147,6 +147,29 @@ def log_arguments(log_level='Debug'):
 
     return decorator
 
+def log_errors():
+    """Log all errors occuring in a function. Only use this wrapper if the results of the function are essential for further computations."""
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # Get the signature of the function
+            signature = inspect.signature(func)
+            bound_args = signature.bind(*args, **kwargs)
+            bound_args.apply_defaults()
+
+            # Log the arguments
+            logger = logging.getLogger(inspect.getmodule(func).__name__)
+            # Call the original function
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                logger.error(e)
+                return None
+        return wrapper
+    return decorator
+
+
 
 class ErrorLogger(AbstractContextManager):
     """
