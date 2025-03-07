@@ -71,5 +71,5 @@ def run(args):
         l1_resolution=args.l1_resolution,
         crs=args.crs,
         l11_resolution=args.l11_resolution,
-        n_jobs=args.ncpus
+        n_jobs=args.ncpus,
     )

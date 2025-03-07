@@ -112,7 +112,7 @@ def get_log_level(level=None, count_verbose=0, count_quiet=0):
     return level, error_msg
 
 
-def log_arguments(log_level='Debug'):
+def log_arguments(log_level="Debug"):
     """Log all non-None arguments passed to a function."""
 
     def decorator(func):
@@ -147,6 +147,7 @@ def log_arguments(log_level='Debug'):
 
     return decorator
 
+
 def log_errors():
     """Log all errors occuring in a function. Only use this wrapper if the results of the function are essential for further computations."""
 
@@ -166,9 +167,10 @@ def log_errors():
             except Exception as e:
                 logger.error(e)
                 return None
-        return wrapper
-    return decorator
 
+        return wrapper
+
+    return decorator
 
 
 class ErrorLogger(AbstractContextManager):
@@ -193,5 +195,5 @@ class ErrorLogger(AbstractContextManager):
             logging.getLogger(self.logger).exception(exc_value)
 
     def __enter__(self):
+        """Enter function needed."""
         return self
-

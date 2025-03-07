@@ -347,6 +347,7 @@ def plot_single_map(
     im = ax.imshow(values, cmap=cmap, norm=norm)
     return im, bounds
 
+
 @log_errors()
 def plot_map(
     rel_mean, rel_std, spearman, ref_clim, input_clim, input_name, ref_name, output_path

@@ -490,7 +490,9 @@ class Catchment:
             self.catchment_mask, axis=1
         )  # Boolean array for rows with any filled cells
 
-        logger.info(f"shape {np.shape(self.catchment_mask)}  cols: {len(cols)}, rows: {len(rows)}")
+        logger.info(
+            f"shape {np.shape(self.catchment_mask)}  cols: {len(cols)}, rows: {len(rows)}"
+        )
         logger.info(f"lon {len(self.ds.lon.values)}  lat: {len(self.ds.lat.values)}")
 
         # Get the indices of the non-zero rows and columns
@@ -603,15 +605,16 @@ def is_data_global(ds, coordinate_slice):
         ds_sliced = ds.sel(lon=coordinate_slice["lon"])
     else:
         ds_sliced = ds
-        try:
-            return (
-                "lon" in ds_sliced.coords
-                and ds_sliced.lon.min() < (CUTOFF_THRESHOLD * -1)
-                and ds_sliced.lon.max() > CUTOFF_THRESHOLD
-            )
-        except Exception as e:
-            logger.warning(e)
-            return False
+    try:
+        return (
+            "lon" in ds_sliced.coords
+            and ds_sliced.lon.min() < (CUTOFF_THRESHOLD * -1)
+            and ds_sliced.lon.max() > CUTOFF_THRESHOLD
+        )
+    except Exception as e:
+        logger.warning(e)
+        return False
+
 
 @log_arguments()
 def create_catchment(
@@ -706,17 +709,19 @@ def create_catchment(
             #     lon_min = coordinate_slices['lon'].start - 2 * l1_resolution
             #     lon_max = coordinate_slices['lon'].stop + 2 * l1_resolution
             # else:
-                # lat_max = coordinate_slices['lat'].start + (frame + 1) * res
-                # lat_min = coordinate_slices['lat'].stop - (frame + 1) * res
-                # lon_min = coordinate_slices['lon'].start - (frame + 1) * res
-                # lon_max = coordinate_slices['lon'].stop + (frame + 1) * res
-            lat_max = coordinate_slices['lat'].start
-            lat_min = coordinate_slices['lat'].stop 
-            lon_min = coordinate_slices['lon'].start
-            lon_max = coordinate_slices['lon'].stop 
-            input_ds = input_ds.sel(lat=slice(lat_max, lat_min), lon=slice(lon_min, lon_max))
+            # lat_max = coordinate_slices['lat'].start + (frame + 1) * res
+            # lat_min = coordinate_slices['lat'].stop - (frame + 1) * res
+            # lon_min = coordinate_slices['lon'].start - (frame + 1) * res
+            # lon_max = coordinate_slices['lon'].stop + (frame + 1) * res
+            lat_max = coordinate_slices["lat"].start
+            lat_min = coordinate_slices["lat"].stop
+            lon_min = coordinate_slices["lon"].start
+            lon_max = coordinate_slices["lon"].stop
+            input_ds_sliced = input_ds.sel(
+                lat=slice(lat_max, lat_min), lon=slice(lon_min, lon_max)
+            )
             c = Catchment(
-                ds=input_ds,
+                ds=input_ds_sliced,
                 var_name=var_name,
                 var=var,
                 ftype=ftype,

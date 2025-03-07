@@ -7,63 +7,82 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 from joblib import Parallel, delayed
+
 from mhm_tools.common.file_handler import (
     create_header,
     get_xarray_ds_from_file,
     write_xarray_to_ascii,
 )
 from mhm_tools.common.logger import ErrorLogger, log_arguments
-from mhm_tools.common.xarray_utils import get_coord_key, get_single_data_var, induce_data_var_from_file_name
+from mhm_tools.common.xarray_utils import (
+    get_coord_key,
+    get_single_data_var,
+    induce_data_var_from_file_name,
+)
 from mhm_tools.pre.latlon import create_latlon
 
 logger = logging.getLogger(__name__)
 
+
 class LatlonFiles:
-    latlon_output_file=None
-    dem_output_file=None
-    meteo_header_path=None
+    """Files needed for latlon creation."""
+
+    latlon_output_file = None
+    dem_output_file = None
+    meteo_header_path = None
 
     def set_latlon_output_file(self, path):
-        logger.info(f'Setting latlon_output_file to {path}')
+        """Set the output file path for the new latlon file."""
+        logger.info(f"Setting latlon_output_file to {path}")
         self.latlon_output_file = path
+
     def set_dem_output_file(self, path):
-        logger.info(f'Setting dem_output_file to {path}')
+        """Set the path where the dem containing L0 information can be found."""
+        logger.info(f"Setting dem_output_file to {path}")
         self.dem_output_file = path
+
     def set_meteo_header_path(self, path):
-        logger.info(f'Setting meteo_header_path to {path}')
+        """Set the path where the meteo header containing L11 information can be found."""
+        logger.info(f"Setting meteo_header_path to {path}")
         self.meteo_header_path = path
 
     def get_latlon_output_file(self):
+        """Get the latlon output file."""
         return self.latlon_output_file
+
     def get_dem_output_file(self):
+        """Get the dem file path."""
         return self.dem_output_file
+
     def get_meteo_header_path(self):
+        """Get the meteo header file path."""
         return self.meteo_header_path
 
-    
     def are_set(self):
+        """Check if all three files  are set and if not which one isn't."""
         all_set = True
         if self.latlon_output_file is None:
-            logger.info(f'latlon_output_file not set')
+            logger.info("latlon_output_file not set")
             all_set = False
         if self.dem_output_file is None:
-            logger.info(f'dem_output_file not set')
+            logger.info("dem_output_file not set")
             all_set = False
         if self.meteo_header_path is None:
-            logger.info(f'meteo_header_path not set')
+            logger.info("meteo_header_path not set")
             all_set = False
         return all_set
-    
-    def set_by_list_of_paths(self, path_list):
-        for latlon_output_file, dem_output_file, meteo_header_path in path_list:
-            if latlon_output_file is not None:
-                self.set_latlon_output_file(latlon_output_file)
-            if dem_output_file is not None:
-                self.set_dem_output_file(dem_output_file)
-            if meteo_header_path is not None:
-                self.set_meteo_header_path(meteo_header_path)
-        
+
+    # def set_by_list_of_paths(self, path_list):
+    #     for latlon_output_file, dem_output_file, meteo_header_path in path_list:
+    #         if latlon_output_file is not None:
+    #             self.set_latlon_output_file(latlon_output_file)
+    #         if dem_output_file is not None:
+    #             self.set_dem_output_file(dem_output_file)
+    #         if meteo_header_path is not None:
+    #             self.set_meteo_header_path(meteo_header_path)
+
     def set_by_list_of_objects(self, obj_list):
+        """Set all files by a list of LatlonFiles objects that may be empty or contain files."""
         for obj in obj_list:
             latlon_output_file = obj.get_latlon_output_file()
             dem_output_file = obj.get_dem_output_file()
@@ -75,32 +94,36 @@ class LatlonFiles:
             if meteo_header_path is not None:
                 self.set_meteo_header_path(meteo_header_path)
 
-def regrid_mask(mask_ds, ds2, lon_key_mask, lat_key_mask, lonkey2, latkey2, mask_key=None):
+
+def regrid_mask(
+    mask_ds, lon_key_mask, lat_key_mask, target_lon, target_lat, mask_key=None
+):
     """Regrid a xarray mask dataset mask_ds to the resolution of a second dataset ds2."""
-    lon1 = mask_ds[lon_key_mask].data
-    lat1 = mask_ds[lat_key_mask].data
-    res1 = lat1[0] - lat1[1]
-    lon2 = ds2[lonkey2].data
-    lat2 = ds2[latkey2].data
-    res2 = lat2[0] - lat2[1]
-    if res2 > res1:
-        results = np.full((len(lat2), len(lon2)), 0.0)
-        for i, lat in enumerate(lat2):
-            for j, lon in enumerate(lon2):
-                for n, lat1 in enumerate(mask_ds[lat_key_mask].data):
-                    if lat1 < (lat - res2 / 2) or lat1 > (lat + res2 / 2):
+    mask_lon = mask_ds[lon_key_mask].data
+    mask_lat = mask_ds[lat_key_mask].data
+    mask_res = mask_lat[0] - mask_lat[1]
+    target_res = target_lat[0] - target_lat[1]
+    if target_res > mask_res:
+        if target_res % mask_res != 0:
+            logger.warning(
+                f"Target resolution is not an integer muptiple of mask resolution. Factor: {target_res / mask_res}"
+            )
+        results = np.full((len(target_lat), len(target_lon)), 0.0)
+        for i, lat in enumerate(target_lat):
+            for j, lon in enumerate(target_lon):
+                for n, mlat in enumerate(mask_lat):
+                    if mlat < (lat - target_res / 2) or mlat > (lat + target_res / 2):
                         continue
-                    for m, lon1 in enumerate(mask_ds[lon_key_mask].data):
-                        if lon1 < lon - res2 / 2 or lon1 > lon + res2 / 2:
+                    for m, mlon in enumerate(mask_lon):
+                        if mlon < lon - target_res / 2 or mlon > lon + target_res / 2:
                             continue
                         if mask_key is not None:
                             results[i][j] += mask_ds[mask_key].data[n, m]
                         else:
                             results[i][j] += mask_ds.data[n, m]
-
         results /= np.nanmax(results)
         mask = results > 1e-3
-    elif res2 == res1:
+    elif target_res == mask_res:
         return mask_ds
     else:
         msg = "mask coarser than file not yet implemented"
@@ -120,17 +143,21 @@ def write_to_file(ds, output_file: Path):
         ds.to_netcdf(output_file)
 
 
-def crop_file_with_header(ds_in, file_path, mask, output_path, lon_key_mask, lat_key_mask):
+def crop_file_with_header(
+    ds_in, file_path, mask, output_path, lon_key_mask, lat_key_mask
+):
     """Crop the nc file and create a new header file for the new coordinates."""
     pres = 1e-5
     header = file_path.parent / "header.txt"
     data_var = get_single_data_var(ds_in)
-    if data_var is None: 
+    if data_var is None:
         data_var = induce_data_var_from_file_name(ds_in, file_path)
         if data_var is None:
-            logger.error(f'File {file_path} could not be croped because the data_var could not be determined.')
+            logger.error(
+                f"File {file_path} could not be croped because the data_var could not be determined."
+            )
             return None, None
-        logger.debug(f'Found data_var={data_var}')
+        logger.debug(f"Found data_var={data_var}")
     with header.open("r") as h:
         d = {}
         logger.debug(f"Reading out header.txt file {header}")
@@ -206,6 +233,7 @@ NODATA_value         {d['NODATA_value']}
             with ErrorLogger(logger):
                 raise e
 
+
 @log_arguments()
 def call_create_latlon(
     dem_output_file,
@@ -254,7 +282,9 @@ def call_create_latlon(
     )
     logger.info(f"Latlon file written to {latlon_output_file}")
 
+
 def crop_file(f, mask_da, latslice, lonslice, output_path, input_path, overwrite):
+    """Crops one file by lat and lon slice and may mask it with the mask dataarray."""
     logger.info(f"Cropping the file {f}")
     output_file = output_path / f.relative_to(input_path)
     output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -267,50 +297,50 @@ def crop_file(f, mask_da, latslice, lonslice, output_path, input_path, overwrite
     if f.suffix in [".asc", ".nc"]:
         ds = get_xarray_ds_from_file(f)
     else:
-        if "header" in f.name.lower():
-            # header files are not copied but recreated as they change
-            return latlon_files
+        # header files are not copied but recreated as they change
         # other txt and markdown files are copied as they nomaly contain description or class definitions but do not change with domain cropping
-        try:
-            shutil.copy(f, output_file)
-            logger.debug(f"Copied file {f.name} to {output_file}")
-        except Exception as e:
-            logger.error(f"Can't copy {f} because of {e}")
+        if "header" not in f.name.lower():
+            try:
+                shutil.copy(f, output_file)
+                logger.debug(f"Copied file {f.name} to {output_file}")
+            except Exception as e:
+                logger.error(f"Can't copy {f} because of {e}")
         return latlon_files
     logger.debug(f"read in dataset: {ds}")
     # Handling of special cases:
-    # 1. latlon file: The latlon file contains coordinates on multiple resolutions that all have to be croped
+    ds_croped = None
+    # 1. latlon file: The latlon file is not croped but its relative location is saved and the latlon file is newly created after all files are croped
     if "latlon" in f.name.lower():
         logger.info(
             "Latlon cropping depreciated will implement new latlon creation using the mhm-tools latlon functionality."
         )
-        latlon_files.set_latlon_output_file( output_file)
-        return latlon_files
+        latlon_files.set_latlon_output_file(output_file)
     # 2. Restart files are complex and are not yet implemented. mHM restart files can be croped, mRM restart files can't (?).
-    if "restart" in f.name.lower():
+    elif "restart" in f.name.lower():
         logger.warning(
             f"Restart file {f} could not be copied as that is not yet implemented."
         )
-        return latlon_files
     # 3. Files that are in the same folder as a header file. Typical examples are meteo datasets such as temperature or precipitation
-    if list(f.parent.glob("header.txt")):
+    elif list(f.parent.glob("header.txt")):
         logger.debug("Cropping and writing new header file...")
         ds_croped, header_path = crop_file_with_header(
-            ds, f, mask_da, output_path / f.parent.relative_to(input_path), lon_key_mask, lat_key_mask
+            ds,
+            f,
+            mask_da,
+            output_path / f.parent.relative_to(input_path),
+            lon_key_mask,
+            lat_key_mask,
         )
-        if ds_croped is None and header_path is None:
-            return latlon_files
-        lat_key = get_coord_key(ds_croped, lat=True)
-        lon_key = get_coord_key(ds_croped, lon=True)
-        if f.stem in ["pre", "pet", "tavg"]:
-            latlon_files.set_meteo_header_path(header_path)
+        if not (ds_croped is None and header_path is None):
+            lat_key = get_coord_key(ds_croped, lat=True)
+            lon_key = get_coord_key(ds_croped, lon=True)
+            if f.stem in ["pre", "pet", "tavg"]:
+                latlon_files.set_meteo_header_path(header_path)
     # 4. All other netcdf files containing mostly morphological data.
     else:
         lat_key = get_coord_key(ds, lat=True)
         lon_key = get_coord_key(ds, lon=True)
-        logger.debug(
-            f"Selecting {f.name} using lon:{lonslice} and lat:{latslice}"
-        )
+        logger.debug(f"Selecting {f.name} using lon:{lonslice} and lat:{latslice}")
         ds_croped = ds.sel({lon_key: lonslice, lat_key: latslice})
         if ds_croped[lat_key].shape[0] < 2:
             ds_croped = ds.sel(
@@ -319,14 +349,15 @@ def crop_file(f, mask_da, latslice, lonslice, output_path, input_path, overwrite
                     lat_key: slice(latslice.stop, latslice.start),
                 }
             )
-    if ds_croped[lat_key].shape[0] < 2 or ds_croped[lon_key].shape[0] < 2:
-        logger.warning(
-            "Copying of the file is not possible because after cropping the file is empty."
-        )
-        # logger.debug(f"File lon: {ds[lon_key].data}")
-        # logger.debug(f"lon_slice: {lonslice}")
-        # logger.debug(f"File lat: {ds[lat_key].data}")
-        # logger.debug(f"lat_slice: {latslice}")
+    if (
+        ds_croped is None
+        or ds_croped[lat_key].shape[0] < 2
+        or ds_croped[lon_key].shape[0] < 2
+    ):
+        if ds_croped is not None:
+            logger.warning(
+                "Copying of the file is not possible because after cropping the file is empty."
+            )
         return latlon_files
 
     # only the dem file or and eventual mHM restart file are masked using the provided mask file
@@ -335,11 +366,10 @@ def crop_file(f, mask_da, latslice, lonslice, output_path, input_path, overwrite
         logger.info("Masking file")
         mask_regridded = regrid_mask(
             mask_ds=mask_da,
-            ds2=ds_croped,
             lon_key_mask=lon_key_mask,
             lat_key_mask=lat_key_mask,
-            lonkey2=lon_key,
-            latkey2=lat_key,
+            target_lon=ds_croped[lon_key].data,
+            target_lat=ds_croped[lat_key].data,
         )
         ds_croped = ds_croped.where(mask_regridded == 1, np.nan)
     try:
@@ -363,7 +393,7 @@ def crop_mhm_setup(
     l1_resolution=None,
     l11_resolution=None,
     crs=None,
-    n_jobs=1
+    n_jobs=1,
 ):
     """Cut out an existing mhm domain setup using a mask file."""
     # check if the input is correct
@@ -393,9 +423,17 @@ def crop_mhm_setup(
         lon_key_mask = get_coord_key(mask_da, lon=True)
         lat_key_mask = get_coord_key(mask_da, lat=True)
         pres = 1e-5
-        mask_res = round(mask_da[lon_key_mask].data[1] - mask_da[lon_key_mask].data[0], 6)
-        latslice = slice(mask_da[lat_key_mask].data[-1]-mask_res/2-pres, mask_da[lat_key_mask].data[0]+mask_res/2+pres)
-        lonslice = slice(mask_da[lon_key_mask].data[0]-mask_res/2-pres, mask_da[lon_key_mask].data[-1]+mask_res/2+pres)
+        mask_res = round(
+            mask_da[lon_key_mask].data[1] - mask_da[lon_key_mask].data[0], 6
+        )
+        latslice = slice(
+            mask_da[lat_key_mask].data[-1] - mask_res / 2 - pres,
+            mask_da[lat_key_mask].data[0] + mask_res / 2 + pres,
+        )
+        lonslice = slice(
+            mask_da[lon_key_mask].data[0] - mask_res / 2 - pres,
+            mask_da[lon_key_mask].data[-1] + mask_res / 2 + pres,
+        )
         logger.info(
             f"Masking with lon {mask_da[lon_key_mask].min().item()} to {mask_da[lon_key_mask].max().item()} and lat: {mask_da[lat_key_mask].min().item()} to {mask_da[lat_key_mask].max().item()}"
         )
@@ -403,18 +441,18 @@ def crop_mhm_setup(
         list_latlon_files = Parallel(n_jobs=n_jobs, backend="loky")(
             delayed(crop_file)(
                 f, mask_da, latslice, lonslice, output_path, input_path, overwrite
-                )
+            )
             for f in files
         )
         latlon_files = LatlonFiles()
         latlon_files.set_by_list_of_objects(list_latlon_files)
         if l1_resolution is not None and latlon_files.are_set():
-            logger.info('Creating latlon')
+            logger.info("Creating latlon")
             call_create_latlon(
                 latlon_files.dem_output_file,
                 l1_resolution,
                 l11_resolution,
                 latlon_files.latlon_output_file,
                 latlon_files.meteo_header_path,
-                crs
+                crs,
             )

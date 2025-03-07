@@ -1,10 +1,12 @@
 """Create am id gauges file."""
 
+import logging
+
 from mhm_tools.common.logger import ErrorLogger
 from mhm_tools.pre import create_id_gauges
 
-import logging
 logger = logging.getLogger(__name__)
+
 
 def add_args(parser):
     """Add cli arguments to create an id_gauges file.
