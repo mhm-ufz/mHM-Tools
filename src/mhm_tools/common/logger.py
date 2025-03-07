@@ -4,8 +4,9 @@ import inspect
 import logging
 from contextlib import AbstractContextManager
 from functools import wraps
+from pathlib import Path
 
-from mhm_tools.common.constants import LOG_LEVELS
+from mhm_tools.common.constants import LOG_LEVEL_STR, LOG_LEVELS
 
 
 def configure_mhm_tools_logger(
@@ -17,15 +18,15 @@ def configure_mhm_tools_logger(
     no_colsole_logging=False,
 ):
     """Configure the parser setting formating as well as Stream and Filehandler."""
-    # logging.basicConfig(format="%(asctime)s - %(levelname)-8s - %(message)s")
     logger = logging.getLogger("mhm_tools")
-    general_level = get_lowest_level(
+    logger.propagate = False
+    general_level, error_msg_gnrl, error_msg_gnrl2 = get_lowest_level(
         log_level=log_level,
         log_file_level=log_file_level,
         count_verbose=count_verbose,
         count_quiet=count_quiet,
     )
-    error_msg_gnrl = set_log_level(logger, general_level, count_verbose, count_quiet)
+    logger.setLevel(general_level)
     error_msg_fh, error_msg_ch = None, None
     formatter = logging.Formatter(
         "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -33,16 +34,33 @@ def configure_mhm_tools_logger(
     if not no_colsole_logging:
         ch = logging.StreamHandler()
         ch.setFormatter(formatter)
-        error_msg_ch = set_log_level(ch, log_level, count_verbose, count_quiet)
+        ch_level, error_msg_ch = get_log_level(log_level, count_verbose, count_quiet)
+        ch.setLevel(ch_level)
         logger.addHandler(ch)
+        logger.info(f"Steam Handler set to log_level {LOG_LEVEL_STR[ch_level]}")
     if log_file:
-        fh = logging.FileHandler(log_file)
-        fh.setFormatter(formatter)
-        if log_file_level is not None:
-            error_msg_fh = set_log_level(fh, log_file_level, count_verbose, count_quiet)
+        log_file = Path(log_file)
+        if not log_file.suffix:
+            logger.warning(f"Log file does not point to a file: {log_file}")
         else:
-            error_msg_fh = set_log_level(fh, log_level, count_verbose, count_quiet)
-        logger.addHandler(fh)
+            if not log_file.parent.is_dir():
+                logger.info(f"Creating folder for log_files {log_file.parent}")
+                log_file.parent.mkdir(parents=True)
+            if log_file.exists():
+                logger.debug("Deleting existing log file.")
+                log_file.unlink()
+            fh = logging.FileHandler(log_file)
+            fh.setFormatter(formatter)
+            if log_file_level is not None:
+                fh_level, error_msg_fh = get_log_level(
+                    log_file_level, count_verbose, count_quiet
+                )
+            else:
+                fh_level = general_level
+            fh.setLevel(fh_level)
+            logger.addHandler(fh)
+            logger.info(f"File Handler set to log_level {LOG_LEVEL_STR[fh_level]}")
+            logger.info(f"Writing logs to {log_file}")
     if error_msg_gnrl is not None:
         logger.error(f"Logger: {error_msg_gnrl}")
     if error_msg_ch is not None:
@@ -53,16 +71,17 @@ def configure_mhm_tools_logger(
 
 def get_lowest_level(log_level, log_file_level, count_verbose, count_quiet):
     """Return the most verbose log level of all handlers."""
-    if log_level is not None:
-        llevel = LOG_LEVELS[log_level.upper()]
+    llevel, ll_msg = get_log_level(
+        log_level, count_verbose=count_verbose, count_quiet=count_quiet
+    )
+    if log_file_level is not None:
+        lflevel, lf_msg = get_log_level(log_file_level)
     else:
-        llevel = LOG_LEVELS["INFO"] - 10 * count_verbose + 10 * count_quiet
-
-    lflevel = LOG_LEVELS[log_file_level.upper()] if log_file_level is not None else 60
-    return min(llevel, lflevel)
+        lflevel, lf_msg = llevel, None
+    return min(llevel, lflevel), ll_msg, lf_msg
 
 
-def set_log_level(handler, level=None, count_verbose=0, count_quiet=0):
+def get_log_level(level=None, count_verbose=0, count_quiet=0):
     """Set the logging level.
 
     Parameters
@@ -74,6 +93,7 @@ def set_log_level(handler, level=None, count_verbose=0, count_quiet=0):
     count_quiet : int
         quietness
 
+    returns level: int
     """
     error_msg = None
     if level is None:
@@ -89,11 +109,10 @@ def set_log_level(handler, level=None, count_verbose=0, count_quiet=0):
             error_msg = f"Invalid log level: {level} - using default log level INFO"
             level = "INFO"
         level = LOG_LEVELS[level.upper()]
-    handler.setLevel(level)
-    return error_msg
+    return level, error_msg
 
 
-def log_arguments():
+def log_arguments(log_level="Debug"):
     """Log all non-None arguments passed to a function."""
 
     def decorator(func):
@@ -109,13 +128,45 @@ def log_arguments():
             }
 
             # Log the arguments
+            logger = logging.getLogger(inspect.getmodule(func).__name__)
             msg = f"Function '{func.__name__}' called with the following arguments: \n"
             for arg, value in non_none_args.items():
                 msg += f"  {arg}: {value} \n"
-            logging.getLogger(inspect.getmodule(func).__name__).debug(msg)
-
+            if log_level.upper() == "INFO":
+                logger.info(msg)
+            else:
+                logger.debug(msg)
             # Call the original function
-            return func(*args, **kwargs)
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                with ErrorLogger(logger):
+                    raise e
+
+        return wrapper
+
+    return decorator
+
+
+def log_errors():
+    """Log all errors occuring in a function. Only use this wrapper if the results of the function are essential for further computations."""
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # Get the signature of the function
+            signature = inspect.signature(func)
+            bound_args = signature.bind(*args, **kwargs)
+            bound_args.apply_defaults()
+
+            # Log the arguments
+            logger = logging.getLogger(inspect.getmodule(func).__name__)
+            # Call the original function
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                logger.error(e)
+                return None
 
         return wrapper
 
@@ -142,3 +193,7 @@ class ErrorLogger(AbstractContextManager):
         """Log all exception messages."""
         if exc_value is not None and self.do_log:
             logging.getLogger(self.logger).exception(exc_value)
+
+    def __enter__(self):
+        """Enter function needed."""
+        return self

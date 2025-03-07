@@ -92,9 +92,30 @@ def add_args(parser):
         ),
     )
     parser.add_argument(
+        "--l1_resolution",
+        required=False,
+        type=float,
+        default=None,
+        help=("""Resolution of the mHM target grid."""),
+    )
+    parser.add_argument(
+        "--upscale",
+        action="store_true",
+        default=False,
+        help=("""Upscale to l1_resolution."""),
+    )
+    parser.add_argument(
         "--mask_file",
         default=None,
         help=("Path where to save the mask file"),
+    )
+    parser.add_argument(
+        "--frame",
+        default=0,
+        type=int,
+        help=(
+            "Creates a frame of nonflow cells around the domain to enable non global domains in ulysses mrm which connects the eastern and western boundaries."
+        ),
     )
 
 
@@ -111,18 +132,20 @@ def run(args):
     if args.gauge_coords is not None:
         if args.lonlatbox is not None:
             with ErrorLogger(logger):
-                to_many_args_err = (
-                    "You can't use --gauge_coords and --lonlatbox at the same time."
-                )
-                raise ValueError(to_many_args_err)
+                msg = "You can't use --gauge_coords and --lonlatbox at the same time."
+                raise ValueError(msg)
         lat, lon = map(float, args.gauge_coords.split(","))
         gauge_coords = (np.array([lon]), np.array([lat]))
+        logger.info(f"using gauge coordinates {gauge_coords}")
     elif args.lonlatbox is not None:
         lonmin, lonmax, latmin, latmax, resl0 = map(float, args.lonlatbox.split(","))
         coordinate_slices = {"lat": slice(latmax, latmin), "lon": slice(lonmin, lonmax)}
         logger.info(
-            "using lonlatbox to with extends: lat=({latmax}, {latmin}); lon=({lonmin}, {lonmax})"
+            f"using lonlatbox with extends: lat=({latmax}, {latmin}); lon=({lonmin}, {lonmax})"
         )
+    if args.upscale and not args.l1_resolution:
+        msg = "If upscaling is enabled l1_resolution must be provided."
+        raise ValueError(msg)
     create_catchment(
         input_file=args.input_file,
         output_path=args.output_path,
@@ -132,4 +155,7 @@ def run(args):
         gauge_coords=gauge_coords,
         coordinate_slices=coordinate_slices,
         mask_file=args.mask_file,
+        l1_resolution=args.l1_resolution,
+        frame=args.frame,
+        upscale=args.upscale,
     )

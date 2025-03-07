@@ -8,9 +8,14 @@ from .. import __version__
 from . import (
     _bankfull,
     _create_catchment,
+    _create_idgauges,
     _create_mhm_restart_file,
     _create_subdomain_masks,
+    _crop_mhm_setup,
+    _grdc_validation,
+    _hydrograph,
     _latlon,
+    _seasonality_validation,
 )
 
 
@@ -21,8 +26,7 @@ class Formatter(
 
 
 def add_command_from_module(subparsers, name, module):
-    """
-    Add a subcommand from a given module.
+    """Add a subcommand from a given module.
 
     Parameters
     ----------
@@ -32,6 +36,7 @@ def add_command_from_module(subparsers, name, module):
         Name of the command to add.
     module : module
         Module containing the `add_args` and `run` functions defining the command.
+
     """
     desc = module.__doc__
     kwargs = {"description": desc}
@@ -70,8 +75,16 @@ def _get_parser():
     # module needs two functions: add_args and run
 
     add_command_from_module(subparsers, "bankfull", _bankfull)
+
+    add_command_from_module(subparsers, "hydrograph", _hydrograph)
+    add_command_from_module(
+        subparsers, "seasonality_validation", _seasonality_validation
+    )
+    add_command_from_module(subparsers, "grdc_validation", _grdc_validation)
     add_command_from_module(subparsers, "latlon", _latlon)
     add_command_from_module(subparsers, "create_catchment", _create_catchment)
+    add_command_from_module(subparsers, "crop_mhm_setup", _crop_mhm_setup)
+    add_command_from_module(subparsers, "create_id_gauges", _create_idgauges)
     add_command_from_module(
         subparsers, "create_subdomain_masks", _create_subdomain_masks
     )
@@ -119,8 +132,7 @@ def _get_parser():
 
 
 def main(argv=None):
-    """
-    Execute main CLI routine.
+    """Execute main CLI routine.
 
     Parameters
     ----------
@@ -130,6 +142,7 @@ def main(argv=None):
     Returns
     -------
         result of the called sub-argument routine
+
     """
     args = _get_parser().parse_args(argv)
     configure_mhm_tools_logger(

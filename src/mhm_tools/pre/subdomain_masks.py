@@ -234,15 +234,15 @@ class CreateSubdomainMasks:
     def use_land_mask(self, lat, lon):
         """Reencode and mask the input files."""
         logger.info("Non global file selected. Only reencoding and masking the input.")
-
-        logger.debug(f"lat={slice(lat[0], lat[-1])}")
-        logger.debug(f"lon={slice(lon[0], lon[-1])}")
+        res = lon[1] - lon[0]
+        logger.debug(f"lat={slice(lat.values[0], lat.values[-1])}")
+        logger.debug(f"lon={slice(lon.values[0], lon.values[-1])}")
         # Read and slice the land mask
         land_mask = self.read_var(fname=self.land_file, var_name="land_mask").astype(
             bool
         )
         land_mask = land_mask.sel(
-            lat=slice(lat[0], lat[-1]), lon=slice(lon[0], lon[-1])
+            lat=slice(lat[0], lat[-1] - res), lon=slice(lon[0] - res, lon[-1])
         )
 
         # Read and slice the reference file based on the land mask coordinates
@@ -256,11 +256,58 @@ class CreateSubdomainMasks:
         # Apply the land mask to all variables in the dataset
         logger.info("Applying land mask to the dataset")
         logger.debug(f"land_mask {land_mask}")
+        logger.debug(f"lon land_mask: {land_mask.lon}")
         logger.debug(f"ds_ref {ds_ref_file}")
         ds_sub_ref_file = ds_ref_file.copy()
+        # first process fdir
+        logger.info("processing fdir")
+        data_var_values = ds_sub_ref_file["flwdir"].values
+        land_mask_values = land_mask.values
+        # nan values inside the land mask are changed to sink values
+        # ds_sub_ref_file[data_var] = ds_sub_ref_file[data_var].where(
+        #     ~np.isnan(ds_sub_ref_file[data_var]) | np.isnan(land_mask),
+        #     0
+        # )
+        # # replace all values where land mask is nan with nan unless they are sink values
+        # ds_sub_ref_file[data_var] = ds_sub_ref_file[data_var].where(
+        #     ~np.isnan(land_mask) | (ds_sub_ref_file[data_var]==0),
+        #     np.nan
+        # )
+        # Replace values where ds_sub_ref_file[data_var] is NaN and land_mask is not NaN with 0
+        sink_value = 0 if 0 in data_var_values else 5
+        # First condition: Set to sink_value where data_var is NaN and land_mask is not NaN
+        logger.debug(f"flwdir data_vars {data_var_values}")
+        data_var_values[(data_var_values == 247) & (land_mask_values != 0)] = sink_value
+
+        # Second condition: Replace all values where land_mask is 0 with NaN unless they are sink values (0)
+        data_var_values[land_mask_values == 0 & (data_var_values != sink_value)] = (
+            sink_value
+        )
+        # -9999.0
+        ds_sub_ref_file["flwdir"].values = data_var_values
+
         for data_var in ds_sub_ref_file.data_vars:
+            if data_var == "flwdir":
+                continue
             logger.info(f"processing {data_var}")
-            ds_sub_ref_file[data_var].values[np.isnan(land_mask)] = np.nan
+            data_var_values = ds_sub_ref_file[data_var].values
+            logger.debug(f"lon {data_var}: {ds_sub_ref_file[data_var].lon}")
+            # replace all values where land mask is nan with nan
+            ds_sub_ref_file[data_var] = ds_sub_ref_file[data_var].where(
+                land_mask != 0, np.nan
+            )
+
+            # for uparea_grid set all nan values where the fdir is sink_value to 0
+            if data_var == "uparea_grid":
+                logger.info(f"data_var_values dtype: {data_var_values.dtype}")
+                logger.info(f"flwdir dtype: {ds_sub_ref_file['flwdir'].values.dtype}")
+                mask_da = ds_sub_ref_file[
+                    data_var
+                ].isnull() & (  # xarray-friendly check for NaNs
+                    ds_sub_ref_file["flwdir"] == sink_value
+                )
+                ds_sub_ref_file[data_var].data[mask_da] = sink_value
+                # ds_sub_ref_file[data_var].values = data_var_values
 
         # Write the output to a netCDF file
         fname = self.out_file_name + ".nc"
@@ -298,8 +345,8 @@ def create_subdomain_masks(
         lon = ds.lon
         # if input is not global only create a file else create all subdomains
         if (
-            np.max(lat) - np.min(lat) != 360
-            and (np.max(lon) - np.min(lon) < 130 or np.max(lon) - np.min(lon) > 180)
+            np.max(lon) - np.min(lon) != 360
+            and (np.max(lat) - np.min(lat) < 130 or np.max(lat) - np.min(lat) > 180)
         ) or basin_clusters is None:
             csm.use_land_mask(lat, lon)
         else:

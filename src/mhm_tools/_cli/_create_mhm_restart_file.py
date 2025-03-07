@@ -7,8 +7,7 @@ A restart file contains all the static information to run mHM on a specific grid
 
 import logging
 
-import numpy as np
-
+from mhm_tools.common.cli_utils import get_coords
 from mhm_tools.common.logger import ErrorLogger
 from mhm_tools.pre.create_mhm_restart_file import Grid, LatLon, MPRRunner
 
@@ -200,60 +199,6 @@ def add_args(parser):
     )
 
 
-def get_coords_from_mask(mask):
-    """Get the coordinates from a mask file.
-
-    Parameters
-    ----------
-    mask : str
-        path to the mask file
-
-    Returns
-    -------
-    tuple
-        tuple containing the coordinates
-    """
-    import xarray as xr
-
-    mask = xr.open_dataset(mask)
-    lon_min_target_grid = mask.lon.values[0]
-    lon_max_target_grid = mask.lon.values[-1]
-    lat_min_target_grid = mask.lat.values[0]
-    lat_max_target_grid = mask.lat.values[-1]
-
-    # change values from center cell to corner values
-    resolution = mask.lon.values[1] - mask.lon.values[0]
-    lon_min_target_grid -= resolution / 2
-    lon_max_target_grid += resolution / 2
-    lat_min_target_grid -= resolution / 2
-    lat_max_target_grid += resolution / 2
-
-    # round values to get rid of inprecission
-    lon_min_target_grid = np.round(lon_min_target_grid, 6)
-    lon_max_target_grid = np.round(lon_max_target_grid, 6)
-    lat_min_target_grid = np.round(lat_min_target_grid, 6)
-    lat_max_target_grid = np.round(lat_max_target_grid, 6)
-
-    if lat_min_target_grid > lat_max_target_grid:
-        lat_min_target_grid, lat_max_target_grid = (
-            lat_max_target_grid,
-            lat_min_target_grid,
-        )
-    if lon_min_target_grid > lon_max_target_grid:
-        lon_min_target_grid, lon_max_target_grid = (
-            lon_max_target_grid,
-            lon_min_target_grid,
-        )
-    mask = mask.mask
-    return (
-        lon_min_target_grid,
-        lon_max_target_grid,
-        lat_min_target_grid,
-        lat_max_target_grid,
-        mask,
-    )
-
-
 def run(args):
     """Create the catchment file.
 
@@ -262,48 +207,30 @@ def run(args):
     args : argparse.Namespace
         parsed command line arguments
     """
-    mask = None
     l1_resolution = float(args.l1_resolution)
-    if args.lonlatbox is not None:
-        lonlatbox = args.lonlatbox.split(",")
-        lon_min_target_grid = float(lonlatbox[0])
-        lon_max_target_grid = float(lonlatbox[1])
-        lat_min_target_grid = float(lonlatbox[2])
-        lat_max_target_grid = float(lonlatbox[3])
-        l0_resolution = float(lonlatbox[4])
-    elif args.mask_file is not None and args.l0_resolution is not None:
-        (
-            lon_min_target_grid,
-            lon_max_target_grid,
-            lat_min_target_grid,
-            lat_max_target_grid,
-            mask,
-        ) = get_coords_from_mask(args.mask_file)
-        l0_resolution = args.l0_resolution
-    elif not (
-        args.lon_min is None
-        or args.lon_max is None
-        or args.lat_min is None
-        or args.lat_max is None
-        or args.l0_resolution is None
-    ):
-        lon_min_target_grid = args.lon_min
-        lon_max_target_grid = args.lon_max
-        lat_min_target_grid = args.lat_min
-        lat_max_target_grid = args.lat_max
-        l0_resolution = args.l0_resolution
-    else:
-        with ErrorLogger(logger):
-            no_coords_error = "Either all coordinat bounds and resolutions or --mask_file must be provided"
-            raise ValueError(no_coords_error)
 
-    logger.info("Creating restart file for grid with the following coordinates:")
-    logger.info(f"lon_min: {lon_min_target_grid}")
-    logger.info(f"lon_max: {lon_max_target_grid}")
-    logger.info(f"lat_min: {lat_min_target_grid}")
-    logger.info(f"lat_max: {lat_max_target_grid}")
-    logger.info(f"l0_resolution: {l0_resolution}")
-    logger.info(f"l1_resolution: {l1_resolution}")
+    if args.lonlatbox is not None:
+        l0_resolution = float(args.lonlatbox.split(",")[4])
+    elif args.l0_resolution is not None:
+        l0_resolution = float(args.l0_resolution)
+    else:
+        msg = "L0 resolution was not provided."
+        raise ValueError(msg)
+
+    (
+        lon_min_target_grid,
+        lon_max_target_grid,
+        lat_min_target_grid,
+        lat_max_target_grid,
+        mask,
+    ) = get_coords(
+        args.lonlatbox,
+        args.mask_file,
+        args.lon_min,
+        args.lon_max,
+        args.lat_min,
+        args.lat_max,
+    )
 
     if args.land_mask_file is None and args.no_merge is not None:
         with ErrorLogger(logger):

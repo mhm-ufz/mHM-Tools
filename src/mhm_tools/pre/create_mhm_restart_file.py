@@ -350,6 +350,7 @@ class MPRRunner:
         p = Popen(command, shell=True, stdout=PIPE, stderr=PIPE)
         try:
             data, error_data = p.communicate()
+            logger.debug(data)
             if error_data:
                 grid.restart_file = None
                 msg = f"MPR failed with STDERR {error_data} for {grid.name} and command {command}"
@@ -362,6 +363,10 @@ class MPRRunner:
             )
             with ErrorLogger(logger):
                 raise TimeoutExpired(msg) from err
+        except RuntimeError as rte:
+            msg = f"MPR failed for {grid} and command {command}"
+            with ErrorLogger(logger):
+                raise RuntimeError(msg) from rte
 
 
 class MHMRestartFile:
@@ -571,6 +576,10 @@ class MHMRestartFile:
         for name, file_path in self.grid.morph_files.get_files_as_dict().items():
             if file_path is not None and file_path:
                 sub_grid_paths = self._split_file(name, file_path)
+            else:
+                logger.warning(
+                    f"There is no file for {name} that could be split at path {file_path}"
+                )
         logger.debug("Creating subgrids")
         self.subgrids = [Grid(file_path=k, **v) for k, v in sub_grid_paths.items()]
         logger.debug("Splitting grid done")
@@ -589,6 +598,7 @@ class MHMRestartFile:
         l0, l1 = self._create_latlon(lon_min, lat_min)
         lon_slice = slice(l1.lon_min, l1.lon_max)
         lat_slice = slice(l1.lat_max, l1.lat_min)
+        logger.debug(f"slice_{i}_{j}: lat {lat_slice}; lon {lon_slice}")
         ds_cut = ds.sel(
             longitude=lon_slice,
             latitude=lat_slice,
@@ -693,6 +703,7 @@ class MHMRestartFile:
             ]
         else:
             restart_file_paths = [subgrid.restart_file for subgrid in self.subgrids]
+        logger.debug(f"Restart File Paths: {restart_file_paths}")
         restart_file_paths.sort()
 
         logger.info(f"Opening {restart_file_paths[0]} als reference")
@@ -741,7 +752,11 @@ class MHMRestartFile:
                     )
 
         # 3. iterate over all subgrids and merge them into the whole grid
-        for restart_file_path in restart_file_paths:
+        for counter, restart_file_path in enumerate(restart_file_paths):
+            logger.info(f"Merging {counter}/{len(restart_file_paths)} files")
+            logger.debug(
+                f"Restart path of the subdomain restart file: {restart_file_path}"
+            )
             ints = re.findall(r"\d+", str(restart_file_path))
             isel_start = int(ints[-2])
             jsel_start = int(ints[-1])
@@ -817,21 +832,21 @@ class MHMRestartFile:
 
     def _correct_restart_file(self, ds):
         ds_mask = xr.open_dataset(self.grid.land_mask_file)
+        logger.debug(
+            f"land mask shape before sel: {ds_mask.land_mask.shape} lat_min: {ds_mask.land_mask.lat.min()}, lat_max: {ds_mask.land_mask.lat.max()}"
+        )
         ds_mask = ds_mask.sel(
             lon=slice(self.grid.l1.lon_min, self.grid.l1.lon_max),
             lat=slice(self.grid.l1.lat_max, self.grid.l1.lat_min),
         )
         logger.debug(
-            f"lon: ds {ds['lon_out'].values[0]}-{ds['lon_out'].values[-1]} ; grid {self.grid.l1.lon_min}-{self.grid.l1.lon_max}"
+            f"land mask shape after sel: {ds_mask.land_mask.shape} lat_min: {ds_mask.land_mask.lat.min()}, lat_max: {ds_mask.land_mask.lat.max()}"
         )
-        logger.debug(
-            f"lat: ds {ds['lat_out'].values[0]}-{ds['lat_out'].values[-1]} ; grid {self.grid.l1.lat_min}-{self.grid.l1.lat_max}"
-        )
-        logger.debug(f"mask: {np.shape(ds_mask['land_mask'].data)}")
-        logger.debug(
-            f"mask lon: {ds_mask['lon'].data[0]} to {ds_mask['lon'].data[-1]} with length {np.shape(ds_mask['lon'].data)}"
-        )
-        logger.debug(f"ds: {np.shape(ds['L1_SoilMoistureExponent'].data)}")
+        # logger.debug(f'lon: ds {ds['lon_out'].values[0]}-{ds['lon_out'].values[-1]} ; grid {self.grid.l1.lon_min}-{self.grid.l1.lon_max}')
+        # logger.debug(f'lat: ds {ds['lat_out'].values[0]}-{ds['lat_out'].values[-1]} ; grid {self.grid.l1.lat_min}-{self.grid.l1.lat_max}')
+        # logger.debug(f'mask: {np.shape(ds_mask["land_mask"].data)}')
+        # logger.debug(f'mask lon: {ds_mask['lon'].data[0]} to {ds_mask['lon'].data[-1]} with length {np.shape(ds_mask['lon'].data)}')
+        # logger.debug(f'ds: {np.shape(ds["L1_SoilMoistureExponent"].data)}')
         try:
             ds_mask = ds_mask.sortby("latitude")
         except Exception as e:
@@ -961,8 +976,8 @@ class MHMRestartFile:
             BNDS_VALUES["L1_SoilHorizons_bnds"][:, 1],
         )
 
-        for coord in ds.coords:
-            ds[coord].encoding["missing_value"] = np.nan
+        # for coord in ds.coords:
+        #     ds[coord].encoding["missing_value"] = np.nan
         ds = ds.rename(
             {
                 "horizon_out": "L1_SoilHorizons",
@@ -1104,9 +1119,27 @@ class MHMRestartFile:
 
         ds = ds.sortby("lat", ascending=False)
 
-        self.grid.restart_file = self.output_path.parent / "mHM_restart.nc"
+        self.grid.restart_file = (
+            self.grid.restart_file.parent
+            / f"mHM_restart_001{self.grid.restart_file.suffix}"
+        )
         logger.info(f"Writing renamed restart file to {self.grid.restart_file}")
-        ds.to_netcdf(self.grid.restart_file)
+        encoding = {}
+        for data_var in ds.data_vars:
+            encoding[data_var] = {
+                "dtype": "float32",
+                "_FillValue": -9999.0,
+                "zlib": True,
+                "complevel": 4,
+            }
+        for coord in ds.coords:
+            encoding[coord] = {
+                "dtype": "float32",
+                "_FillValue": -9999.0,
+                "zlib": True,
+                "complevel": 4,
+            }
+        ds.to_netcdf(self.grid.restart_file, encoding=encoding)
 
     def _delete_temp_files(self):
         logger.info("Deleting temporary files")
@@ -1120,7 +1153,7 @@ class MHMRestartFile:
                 else:
                     file_path.unlink()
 
-    def _prepare_slope_emp(self, n=1000000):
+    def _prepare_slope_emp(self, n=10000):
         logger.info("Preparing slope_emp")
         td = TDigest(compression=n)
         if self.run_on_whole_domain:
