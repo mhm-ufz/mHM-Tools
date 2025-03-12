@@ -15,7 +15,7 @@ import numpy as np
 import xarray as xr
 from matplotlib import gridspec
 
-from mhm_tools.common.logger import ErrorLogger
+from mhm_tools.common.logger import ErrorLogger, log_arguments
 
 logger = logging.getLogger(__name__)
 
@@ -369,15 +369,18 @@ class Hydrograph:
         discharge_file = path / "discharge.nc"
         if discharge_file.is_file():
             with xr.open_dataset(path + "discharge.nc") as ds:
-                self.discharge_data = ds.load()
-                for v in self.discharge_data.variables:
+                discharge_data = ds.load()
+                for v in discharge_data.variables:
                     if not isinstance(v, str):
                         msg = f"variable name is not a string - {v} - {type(v)}"
                         raise TypeError(msg)
-                    for key in ["sim", "obs"]:
-                        if key in v:
-                            self.catchment.name = str(int(v.split("_")[1]))
-                            self.discharge_data = self.discharge_data.rename({v: key})
+                    if "sim" in v:
+                        self.catchment.name = str(int(v.split("_")[1]))
+                        self.sim_discharge_data = discharge_data[v]
+                    if "obs" in v:
+                        self.catchment.name = str(int(v.split("_")[1]))
+                        self.obs_discharge_data = discharge_data[v]
+                    
             return True
         return False
 
@@ -431,14 +434,14 @@ class Hydrograph:
         self.logger.debug(self.grid)
         # self.plot_on_axis(
         #     function=ax1.scatter,
-        #     xvalues=self.discharge_data["time"],
-        #     yvalues=[self.discharge_data["sim"], self.discharge_data["obs"]],
+        #     xvalues=self.sim_discharge_data["time"],
+        #     yvalues=[self.sim_discharge_data, self.obs_discharge_data],
         #     s=1.0,
         # )
         self.plot_on_axis(
             function=ax1.plot,
-            xvalues=self.discharge_data["time"],
-            yvalues=[self.discharge_data["sim"], self.discharge_data["obs"]],
+            xvalues=self.sim_discharge_data["time"],
+            yvalues=[self.sim_discharge_data, self.obs_discharge_data],
             linewidth=0.3,
             # labels=[],  # no labels
         )
@@ -456,7 +459,7 @@ class Hydrograph:
             horizontalalignment="center",
         )
         ax1.set_ylabel(r"Q $[m^3 s^{-1}]$")
-        ax1.set_xlim(self.discharge_data["time"][0], self.discharge_data["time"][-1])
+        ax1.set_xlim(self.sim_discharge_data["time"][0], self.sim_discharge_data["time"][-1])
         ax1.spines["top"].set_visible(False)
         ax1.spines["right"].set_visible(False)
         ax1.xaxis.set_major_formatter(
@@ -486,7 +489,7 @@ class Hydrograph:
             outer_gs = gs[r, c]
             self.grid[r][c] = True
         self.logger.debug(self.grid)
-        discharge_yearly = self.discharge_data.resample(time="YE").mean(skipna=True)
+        discharge_yearly = self.sim_discharge_data.resample(time="YE").mean(skipna=True)
 
         if pre is not None:
 
@@ -617,10 +620,10 @@ class Hydrograph:
         ax3.spines["top"].set_visible(False)
         ax3.spines["right"].set_visible(False)
         season_sim = self.get_long_time_monthly_mean(
-            self.discharge_data["sim"], long=True
+            self.sim_discharge_data, long=True
         )
         season_obs = self.get_long_time_monthly_mean(
-            self.discharge_data["obs"], long=True
+            self.obs_discharge_data, long=True
         )
         self.logger.debug(f"sim: {season_sim}")
         self.logger.debug(f"osb: {season_obs}")
@@ -674,8 +677,8 @@ class Hydrograph:
         # add linear regression line to scatterplot
         self.plot_on_axis(
             function=ax4.scatter,
-            xvalues=self.discharge_data["obs"],
-            yvalues=[self.discharge_data["sim"]],
+            xvalues=self.obs_discharge_data,
+            yvalues=[self.sim_discharge_data],
             s=50.0,
             colors=["black"],
             edgecolor="white",
@@ -709,8 +712,8 @@ class Hydrograph:
         lim = (
             np.max(
                 [
-                    np.max(self.discharge_data["obs"]),
-                    np.max(self.discharge_data["sim"]),
+                    np.max(self.obs_discharge_data),
+                    np.max(self.sim_discharge_data),
                 ]
             )
             * 1.1
@@ -718,6 +721,26 @@ class Hydrograph:
         lim = lim - lim % 5 if lim - lim % 5 >= lim / 1.1 else lim + 5 - lim % 5
         ax4.set_xlim(0, lim)
         ax4.set_ylim(0, lim)
+
+    def crop_data_to_overlapping_time(self):
+        t1 = self.sim_discharge_data.time.values
+        t2 = self.obs_discharge_data.time.values
+
+        # Find overlapping range
+        start = max(t1[0], t2[0])
+        end   = min(t1[-1], t2[-1])
+
+        if end >= start:
+            msg = f"The two datasets are not overlapping."
+            with ErrorLogger:
+                raise ValueError(msg)
+
+        # Slice both datasets to that time range
+        self.sim_discharge_data = self.sim_discharge_data.sel(time=slice(start, end))
+        self.obs_discharge_data = self.obs_discharge_data.sel(time=slice(start, end))
+        if self.pre is not None:
+            self.pre = self.pre.sel(time=slice(start, end))
+
 
     def get_hydrograph(self):
         """Generate the hydrograph from the data saved as member variables."""
@@ -727,8 +750,9 @@ class Hydrograph:
         # load data
 
         # calculate metrics at timestep resolution (generally hourly)
-        self.logger.debug(self.discharge_data["sim"])
-        self.calc_objectives(self.discharge_data["obs"], self.discharge_data["sim"])
+        self.logger.debug(self.sim_discharge_data)
+        self.crop_data_to_overlapping_time()
+        self.calc_objectives(self.obs_discharge_data, self.sim_discharge_data)
 
         # create figure and determining the number of rows and cols
         fig = plt.figure(figsize=(7, 8))
@@ -750,7 +774,7 @@ class Hydrograph:
         )
         if self.catchment.area:
             fig.text(
-                s="Area = " + self.catchment.area + r"$km^2$",
+                s=f"Area = {self.catchment.area}" + r"$km^2$",
                 x=0.5,
                 y=0.97,
                 horizontalalignment="center",
@@ -786,7 +810,7 @@ class Hydrograph:
         else:
             plt.close()
 
-
+@log_arguments()
 def get_hydrograph(input_path, output_file, show, save, title, plot_code, prec_path):
     """
     Read in discharge data and produce a hydrograph with different analysises.
@@ -818,7 +842,7 @@ def get_hydrograph(input_path, output_file, show, save, title, plot_code, prec_p
     hydro.get_catchment_area(input_path, ndecimal=0)
     hydro.get_hydrograph()
 
-
+@log_arguments()
 def gen_hydrograph_by_data_sets(
     simulations,
     observation,
@@ -829,6 +853,7 @@ def gen_hydrograph_by_data_sets(
     title='',
     show=False,
     save=True,
+    id = None
 ):
     """
     Use discharge and precipitation data provided as xarrays to produce a hydrograph with different analysises.
@@ -858,3 +883,9 @@ def gen_hydrograph_by_data_sets(
     hydro.catchment.area = area
     hydro.check_which_plots_to_create(plot_code)
     hydro.get_hydrograph()
+    return {
+                "id": id,
+                "alpha": hydro.alpha,
+                "beta": hydro.beta,
+                "gamma": hydro.gamma,
+            }

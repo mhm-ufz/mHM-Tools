@@ -8,7 +8,8 @@ def add_args(parser):
     required_args = parser.add_argument_group("required arguments")
     required_args.add_argument(
         "--gauge_info_path",
-        required=True,
+        required=False,
+        default=None,
         help=("Path to the gauge information file."),
     )
     required_args.add_argument(

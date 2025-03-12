@@ -15,7 +15,7 @@ from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_
 from mhm_tools.common.logger import ErrorLogger, log_arguments
 from mhm_tools.common.xarray_utils import get_coord_key
 from mhm_tools.post.hydrograph import gen_hydrograph_by_data_sets
-from mhm_tools.post.seasonality_grid_validation import spearman_correlation
+from mhm_tools.post.seasonality_grid_validation import get_clim_from_ds, spearman_correlation
 
 logger = logging.getLogger(__name__)
 
@@ -240,7 +240,7 @@ def get_gauge_coords(
             max_cell_diff=3,
             diff_percent=10,
         )
-    logger.debug("No similar flow accumulation found nearby.")
+    logger.warning("No similar flow accumulation found nearby.")
     logger.debug("None, None, None")
     return None, None, None
 
@@ -282,27 +282,28 @@ def Q_data_to_xarray(
     - "new_y": Y-coordinates of gauges
 
     """
-    sim_output_file = Path(f"{saving_path}/{model_keyword}_dataframe.nc")
-    obs_output_file = Path(f"{saving_path}/GRDC_dataframe.nc")
+    sim_output_file = Path(f"{saving_path}/{model_keyword}_data.nc")
+    obs_output_file = Path(f"{saving_path}/GRDC_data.nc")
+    gauge_info_path = gauge_info_path if gauge_info_path else observed_data_path
     if sim_output_file.is_file():
         logger.info("reading sim data from file...")
         sim_data = get_xarray_ds_from_file(sim_output_file)
     if obs_output_file.is_file():
         logger.info("reading obs data from file...")
-        obs_data = get_xarray_ds_from_file(obs_output_file)
+        observed_data = get_xarray_ds_from_file(obs_output_file)
     if obs_output_file.is_file() and sim_output_file.is_file():
-        return obs_data, sim_data
-        # creating saving path
+        return observed_data, sim_data
+    # creating saving path
     saving_path = Path(saving_path)
     if not saving_path.is_dir():
         saving_path.mkdir(parents=True)
 
     # getting gauge infos
     with xr.open_dataset(gauge_info_path) as gauge_info:
-        gauge_ids = gauge_info["id1"]
-        x = gauge_info["gauge_x"]
-        y = gauge_info["gauge_y"]
-        facc = gauge_info["gauge_size"]
+        gauge_ids = gauge_info["id"]
+        x = gauge_info["geo_x"]
+        y = gauge_info["geo_y"]
+        facc = gauge_info["area"]
         slicing_condition = None
         if (
             lon_min is not None
@@ -323,15 +324,16 @@ def Q_data_to_xarray(
 
     # IMPORTANT: The id's in GRDC observed_data have the same index as in gauge_info
     if not obs_output_file.is_file():
-        observed_data = xr.open_dataset(observed_data_path)
-        observed_data = observed_data.sel()
-        observed_data = observed_data[observed_variable]
-        observed_data = observed_data.sel(id=gauge_ids.values)
-        observed_data = observed_data.reindex(id=gauge_ids.values)
-        facc_da = xr.DataArray(facc, name='facc', dims=['id'], coords={'id': gauge_ids.values})
-        observed_data['facc'] = facc_da
-        logger.info(f"Saving obs data to {obs_output_file}...")
-        write_xarray_to_file(observed_data, obs_output_file)
+        with xr.open_dataset(observed_data_path) as observed_data_in:
+            obs_discharge_data = observed_data_in[observed_variable]
+            # observed_data = observed_data.rename({observed_variable: "discharge"})
+            obs_discharge_data = obs_discharge_data.sel(id=gauge_ids.values)
+            obs_discharge_data = obs_discharge_data.reindex(id=gauge_ids.values)
+            facc_da = xr.DataArray(facc, name='facc', dims=['id'], coords={'id': gauge_ids.values})
+            observed_data = xr.Dataset({'facc':  facc_da, 'discharge': obs_discharge_data})
+            
+            logger.info(f"Saving obs data to {obs_output_file}...")
+            write_xarray_to_file(observed_data, obs_output_file)
 
     if not sim_output_file.is_file():
         with xr.open_dataset(mrm_restart_file) as ds:
@@ -346,48 +348,48 @@ def Q_data_to_xarray(
                 )
                 for x_i, y_i, facc_i in zip(x.values, y.values, facc.values)
             )
-            x_new, y_new, facc_new = [], [], []
-            for xn, yn, fan in out:
+            x_new, y_new, facc_new,gauge_ids_with_values = [], [], [], []
+            for i, (xn, yn, fan) in enumerate(out):
                 if xn is None or yn is None or fan is None:
                     continue
                 x_new.append(xn)
                 y_new.append(yn)
                 facc_new.append(fan)
-        logger.info(f"There are {x_new} gauges")
-        logger.info("creating sim dataframe")
+                gauge_ids_with_values.append(gauge_ids.values[i])
+        logger.info(f"There are {len(x_new)} gauges")
+        logger.info("creating sim dataset")
         with xr.open_dataset(model_data_path) as sim_data_in:
             if slicing_condition is not None:
                 sim_data_cropped = sim_data_in.sel(
                     {
-                        get_coord_key(sim_data, lat=True): slice(lat_max, lat_min),
-                        get_coord_key(sim_data, lon=True): slice(lon_min, lon_max),
+                        get_coord_key(sim_data_in, lat=True): slice(lat_max, lat_min),
+                        get_coord_key(sim_data_in, lon=True): slice(lon_min, lon_max),
                     }
                 )
             else:
                 sim_data_cropped = sim_data_in
-            sim_data_cropped = sim_data_cropped[sim_variable]
             sim = Parallel(n_jobs=n_jobs, backend="loky")(
                 delayed(get_sim_data_for_one_gauge)(
                     id=id,
                     index=i,
-                    sim_data=sim_data_cropped,
+                    sim_data=sim_data_cropped[sim_variable],
                     yarr=y_new,
                     xarr=x_new,
                     resolution=resolution,
                     facc=facc_i,
                 )
-                for i, (id, facc_i) in enumerate(zip(gauge_ids.values, facc_new))
+                for i, (id, facc_i) in enumerate(zip(gauge_ids_with_values, facc_new))
             )
-        discharge_2d = xr.concat(sim, dim="id")
-        facc_ids = xr.DataArray(data=np.array([facc_new]), dims=["id"], coords={"id":gauge_ids.values})
+        simulation_discharge = xr.concat(sim, dim="id").drop_vars(['lat', 'lon'])
+        facc_ids = xr.DataArray(data=np.array(facc_new), dims=["id"], coords={"id":gauge_ids_with_values})
 
         # 4) Build a new Dataset from this 2D DataArray
-        sim_data = xr.Dataset({"discharge": discharge_2d, "facc": facc_ids})
+        sim_data = xr.Dataset({"discharge": simulation_discharge, "facc": facc_ids})
         # sim = flatten_list(sim)
         # sim_dataframe = pd.DataFrame(sim)
         logger.info(f"Saving sim data to {sim_output_file}...")
         write_xarray_to_file(sim_data, sim_output_file)
-    return obs_data, sim_data
+    return observed_data, sim_data
 
 
 def calc_clim_from_pandas(df):
@@ -417,7 +419,6 @@ def add_month_column(df):
             msg = "The 'time' column is missing from the DataFrame."
             raise KeyError(msg)
     return df
-
 
 @log_arguments()
 def evaludate_grdc_data(  # noqa: PLR0913
@@ -456,18 +457,21 @@ def evaludate_grdc_data(  # noqa: PLR0913
         resolution=resolution,
         n_jobs=n_jobs,
     )
+    model_da = model_ds['discharge']
+    observed_da = observed_ds['discharge']
 
-    for id in observed_ds.id:
-        if id not in model_ds.id:
-            logger.warning(f'{id} in observed ids but not in model ids')
-            continue
-        gen_hydrograph_by_data_sets(
-            simulations=model_ds['discharge'].sel(id=id).data,
-            observation=observed_ds['discharge'].sel(id=id).data,
+    results = Parallel(n_jobs=n_jobs, backend="loky")(
+        delayed(gen_hydrograph_by_data_sets)(
+            simulations=model_da.sel(id=id),
+            observation=observed_da.sel(id=id),
             precipitation=None,
             output_file=output_path / f'hydrograph_{id}.pdf',
-            area=model_ds['facc'].sel(id=id).data
+            area=model_ds['facc'].sel(id=id).data,
+            id=id
         )
+        for id in observed_ds.id.values if id in model_ds.id.values
+    )
+
 
     # if (
     #     n_bootstrap_years is not None
@@ -476,8 +480,10 @@ def evaludate_grdc_data(  # noqa: PLR0913
     #     and not direct_comparison
     # ):
     #     results = []
-    #     total_years_sim = model_df["year"].unique()
-    #     total_years_obs = observed_df["year"].unique()
+    #     total_years_sim = np.unique(model_ds.time.year.data)
+    #     total_years_obs = np.unique(observed_ds.time.year.data)
+    #     model_discharge = model_ds['discharge']
+    #     observed_discharge = observed_ds['discharge']
     #     # for index in range(n_boostrap_selections):
     #     for index in range(n_boostrap_selections):
     #         logger.info(f"index: {index}")
@@ -525,12 +531,14 @@ def evaludate_grdc_data(  # noqa: PLR0913
     #                 )
     #             except Exception as e:
     #                 logger.error(f"Error for index {index} and id {id} with error {e}")
+    
+
     # else:
     #     msg = "Direct comparison is not yet implemented"
     #     raise NotImplementedError(msg)
-    # results_df = pd.DataFrame(results)
-    # results_df.to_csv(output_path / "results.csv")
-    # plot_cdf(results_df, output_path)
+    results_df = pd.DataFrame(results)
+    results_df.to_csv(output_path / "results.csv")
+    plot_cdf(results_df, output_path)
 
 
 def plot_kde(results_df, output_path):
