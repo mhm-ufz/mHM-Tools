@@ -11,6 +11,7 @@ import seaborn as sns
 import xarray as xr
 from joblib import Parallel, delayed
 
+from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_to_file
 from mhm_tools.common.logger import ErrorLogger, log_arguments
 from mhm_tools.common.xarray_utils import get_coord_key
 from mhm_tools.post.seasonality_grid_validation import spearman_correlation
@@ -135,20 +136,37 @@ def gen_list_of_result_dicts(data, id, datatype="", facc=None):
     logger.warning(f"All datapoints for {datatype} at gauge {id} are missing.")
     return None
 
+def gen_list_of_result_dicts(data, id, datatype="", facc=None):
+    """Generate a list of result dictionaries containing time, id, discharge and year."""
+    # Check if all values in the array are NaN
+    discharge = data.values
+    are_all_nan = np.all(np.isnan(discharge))
+    time = data.time.values
+    year = data.time.dt.year.values
 
-def get_grdc_for_one_gauge(id, observed_data_by_id, facc=None):
+
+    if not are_all_nan:
+        logger.info(f" values found at gauge number: {id}...\n")
+        res = []
+        for t, val, yr in zip(time, discharge, year):
+            res_dict = {"time": t, "id": int(id), "Q": val, "year": yr}
+            if facc is not None:
+                res_dict["facc"] = facc
+            res.append(res_dict)
+        return res
+    logger.warning(f"All datapoints for {datatype} at gauge {id} are missing.")
+    return None
+
+
+def get_grdc_for_one_gauge(id, observed_data_by_id):
     """Read in observed data for one gauge."""
     # id, index = id.values, index=id['index'].values
     if observed_data_by_id.size == 0:
         logger.info(f"No data found for ID: {id}. Skipping...\n")
         return None
-    observed_data_by_id = observed_data_by_id.where(
+    return observed_data_by_id.where(
         ~np.isnan(observed_data_by_id), drop=True
     )
-    return gen_list_of_result_dicts(
-        observed_data_by_id, id=id, datatype="observation", facc=facc
-    )
-
 
 def get_sim_data_for_one_gauge(id, index, sim_data, yarr, xarr, resolution, facc=None):
     """Read out simulation data for one gauge."""
@@ -156,14 +174,16 @@ def get_sim_data_for_one_gauge(id, index, sim_data, yarr, xarr, resolution, facc
         return None
     # This will ensure that x & y values always match lat and lon in mRM dataset
     try:
-        x = np.round(xarr[index], 3)
-        y = np.round(yarr[index], 3)
+        x = np.round(xarr[index], 5)
+        y = np.round(yarr[index], 5)
     except KeyError:
         logger.error(f"index {index} not found")
         return None
     mrm_data_by_id = sim_data.sel(lat=y - resolution, lon=x, method="nearest")
-    mrm_data_by_id = mrm_data_by_id.where(~np.isnan(mrm_data_by_id), drop=True)
+    # mrm_data_by_id = mrm_data_by_id.where(~np.isnan(mrm_data_by_id), drop=True)
 
+    ## now create a new dataarray  with coords time, id and name discharge, maybe also one with name facc and coords id 
+    ## they can then be combined to one dataarray and saved in a dataset
     return gen_list_of_result_dicts(
         mrm_data_by_id, id=id, datatype="simulation", facc=facc
     )
@@ -242,7 +262,7 @@ def get_gauge_coords(
     return None, None, None
 
 
-def Q_data_to_CSV(
+def Q_data_to_xarray(
     model_data_path,
     observed_data_path,
     mrm_restart_file,
@@ -279,16 +299,16 @@ def Q_data_to_CSV(
     - "new_y": Y-coordinates of gauges
 
     """
-    sim_output_file = Path(f"{saving_path}/{model_keyword}_dataframe.csv")
-    obs_output_file = Path(f"{saving_path}/GRDC_dataframe.csv")
+    sim_output_file = Path(f"{saving_path}/{model_keyword}_dataframe.nc")
+    obs_output_file = Path(f"{saving_path}/GRDC_dataframe.nc")
     if sim_output_file.is_file():
         logger.info("reading sim data from file...")
-        sim_dataframe = pd.read_csv(sim_output_file)
+        sim_data = get_xarray_ds_from_file(sim_output_file)
     if obs_output_file.is_file():
         logger.info("reading obs data from file...")
-        obs_dataframe = pd.read_csv(obs_output_file)
+        obs_data = get_xarray_ds_from_file(obs_output_file)
     if obs_output_file.is_file() and sim_output_file.is_file():
-        return obs_dataframe, sim_dataframe
+        return obs_data, sim_data
         # creating saving path
     saving_path = Path(saving_path)
     if not saving_path.is_dir():
@@ -323,20 +343,15 @@ def Q_data_to_CSV(
         observed_data = xr.open_dataset(observed_data_path)
         observed_data = observed_data.sel()
         observed_data = observed_data[observed_variable]
-        obs = Parallel(n_jobs=n_jobs, backend="loky")(
-            delayed(get_grdc_for_one_gauge)(
-                id=id, observed_data_by_id=observed_data.sel(id=id), facc=facc_i
-            )
-            for id, facc_i in zip(gauge_ids.values, facc.values)
-        )
-        obs = flatten_list(obs)
-        obs_dataframe = pd.DataFrame(obs)
+        observed_data = observed_data.sel(id=gauge_ids.values)
+        observed_data = observed_data.reindex(id=gauge_ids.values)
+        facc_da = xr.DataArray(facc, name='facc', dims=['id'], coords={'id': gauge_ids.values})
+        observed_data['facc'] = facc_da
         logger.info(f"Saving obs data to {obs_output_file}...")
-        obs_dataframe.to_csv(obs_output_file)
+        write_xarray_to_file(observed_data, obs_output_file)
+
     if not sim_output_file.is_file():
         with xr.open_dataset(mrm_restart_file) as ds:
-            # for x_i, y_i, facc_i in zip(x.values, y.values, facc.values):
-            #     print(get_gauge_coords(ds, facc=facc_i, lonlat=[x_i, y_i], cell_diff=1, max_cell_diff=3, diff_percent=10))
             out = Parallel(n_jobs=n_jobs, backend="loky")(
                 delayed(get_gauge_coords)(
                     ds,
@@ -357,27 +372,27 @@ def Q_data_to_CSV(
                 facc_new.append(fan)
         logger.info(f"There are {x_new} gauges")
         logger.info("creating sim dataframe")
-        sim_data = xr.open_dataset(model_data_path)
-        if slicing_condition is not None:
-            sim_data = sim_data.sel(
-                {
-                    get_coord_key(sim_data, lat=True): slice(lat_max, lat_min),
-                    get_coord_key(sim_data, lon=True): slice(lon_min, lon_max),
-                }
+        with xr.open_dataset(model_data_path) as sim_data:
+            if slicing_condition is not None:
+                sim_data_cropped = sim_data.sel(
+                    {
+                        get_coord_key(sim_data, lat=True): slice(lat_max, lat_min),
+                        get_coord_key(sim_data, lon=True): slice(lon_min, lon_max),
+                    }
+                )
+            sim_data_cropped = sim_data_cropped[sim_variable]
+            sim = Parallel(n_jobs=n_jobs, backend="loky")(
+                delayed(get_sim_data_for_one_gauge)(
+                    id=id,
+                    index=i,
+                    sim_data=sim_data_cropped,
+                    yarr=y_new,
+                    xarr=x_new,
+                    resolution=resolution,
+                    facc=facc_i,
+                )
+                for i, (id, facc_i) in enumerate(zip(gauge_ids.values, facc_new))
             )
-        sim_data = sim_data[sim_variable]
-        sim = Parallel(n_jobs=n_jobs, backend="loky")(
-            delayed(get_sim_data_for_one_gauge)(
-                id=id,
-                index=i,
-                sim_data=sim_data,
-                yarr=y_new,
-                xarr=x_new,
-                resolution=resolution,
-                facc=facc_i,
-            )
-            for i, (id, facc_i) in enumerate(zip(gauge_ids.values, facc_new))
-        )
         sim = flatten_list(sim)
         sim_dataframe = pd.DataFrame(sim)
         logger.info(f"Saving sim data to {sim_output_file}...")
