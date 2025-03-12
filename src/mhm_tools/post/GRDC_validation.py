@@ -14,6 +14,7 @@ from joblib import Parallel, delayed
 from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_to_file
 from mhm_tools.common.logger import ErrorLogger, log_arguments
 from mhm_tools.common.xarray_utils import get_coord_key
+from mhm_tools.post.hydrograph import gen_hydrograph_by_data_sets
 from mhm_tools.post.seasonality_grid_validation import spearman_correlation
 
 logger = logging.getLogger(__name__)
@@ -136,28 +137,6 @@ def gen_list_of_result_dicts(data, id, datatype="", facc=None):
     logger.warning(f"All datapoints for {datatype} at gauge {id} are missing.")
     return None
 
-def gen_list_of_result_dicts(data, id, datatype="", facc=None):
-    """Generate a list of result dictionaries containing time, id, discharge and year."""
-    # Check if all values in the array are NaN
-    discharge = data.values
-    are_all_nan = np.all(np.isnan(discharge))
-    time = data.time.values
-    year = data.time.dt.year.values
-
-
-    if not are_all_nan:
-        logger.info(f" values found at gauge number: {id}...\n")
-        res = []
-        for t, val, yr in zip(time, discharge, year):
-            res_dict = {"time": t, "id": int(id), "Q": val, "year": yr}
-            if facc is not None:
-                res_dict["facc"] = facc
-            res.append(res_dict)
-        return res
-    logger.warning(f"All datapoints for {datatype} at gauge {id} are missing.")
-    return None
-
-
 def get_grdc_for_one_gauge(id, observed_data_by_id):
     """Read in observed data for one gauge."""
     # id, index = id.values, index=id['index'].values
@@ -179,14 +158,18 @@ def get_sim_data_for_one_gauge(id, index, sim_data, yarr, xarr, resolution, facc
     except KeyError:
         logger.error(f"index {index} not found")
         return None
-    mrm_data_by_id = sim_data.sel(lat=y - resolution, lon=x, method="nearest")
+    sim_data_loc = sim_data.sel(lat=y - resolution, lon=x, method="nearest")
+    return sim_data_loc.expand_dims(dim={"id": [id]})
+    # discharge = xr.DataArray(name='discharge', dims=['time', 'id'],     oords={'time': time, 'id': [id]}, data=sim_data_loc.values)
+
     # mrm_data_by_id = mrm_data_by_id.where(~np.isnan(mrm_data_by_id), drop=True)
 
-    ## now create a new dataarray  with coords time, id and name discharge, maybe also one with name facc and coords id 
+    # now create a new dataarray  with coords time, id and name discharge, maybe also one with name facc and coords id 
     ## they can then be combined to one dataarray and saved in a dataset
-    return gen_list_of_result_dicts(
-        mrm_data_by_id, id=id, datatype="simulation", facc=facc
-    )
+    # return gen_list_of_result_dicts(
+    #     mrm_data_by_id, id=id, datatype="simulation", facc=facc
+    # )
+
 
 
 def get_gauge_coords(
@@ -372,14 +355,16 @@ def Q_data_to_xarray(
                 facc_new.append(fan)
         logger.info(f"There are {x_new} gauges")
         logger.info("creating sim dataframe")
-        with xr.open_dataset(model_data_path) as sim_data:
+        with xr.open_dataset(model_data_path) as sim_data_in:
             if slicing_condition is not None:
-                sim_data_cropped = sim_data.sel(
+                sim_data_cropped = sim_data_in.sel(
                     {
                         get_coord_key(sim_data, lat=True): slice(lat_max, lat_min),
                         get_coord_key(sim_data, lon=True): slice(lon_min, lon_max),
                     }
                 )
+            else:
+                sim_data_cropped = sim_data_in
             sim_data_cropped = sim_data_cropped[sim_variable]
             sim = Parallel(n_jobs=n_jobs, backend="loky")(
                 delayed(get_sim_data_for_one_gauge)(
@@ -393,11 +378,16 @@ def Q_data_to_xarray(
                 )
                 for i, (id, facc_i) in enumerate(zip(gauge_ids.values, facc_new))
             )
-        sim = flatten_list(sim)
-        sim_dataframe = pd.DataFrame(sim)
+        discharge_2d = xr.concat(sim, dim="id")
+        facc_ids = xr.DataArray(data=np.array([facc_new]), dims=["id"], coords={"id":gauge_ids.values})
+
+        # 4) Build a new Dataset from this 2D DataArray
+        sim_data = xr.Dataset({"discharge": discharge_2d, "facc": facc_ids})
+        # sim = flatten_list(sim)
+        # sim_dataframe = pd.DataFrame(sim)
         logger.info(f"Saving sim data to {sim_output_file}...")
-        sim_dataframe.to_csv(sim_output_file)
-    return obs_dataframe, sim_dataframe
+        write_xarray_to_file(sim_data, sim_output_file)
+    return obs_data, sim_data
 
 
 def calc_clim_from_pandas(df):
@@ -450,7 +440,7 @@ def evaludate_grdc_data(  # noqa: PLR0913
 ):
     """Compare simulated with observed discharge either directly or using a bootstraping approach."""
     output_path = Path(output_path)
-    observed_df, model_df = Q_data_to_CSV(
+    observed_ds, model_ds = Q_data_to_xarray(
         model_data_path=model_data_path,
         observed_data_path=observed_data_path,
         mrm_restart_file=mrm_restart_file,
@@ -467,71 +457,80 @@ def evaludate_grdc_data(  # noqa: PLR0913
         n_jobs=n_jobs,
     )
 
-    if direct_comparison:
-        return  # use jeissons function directly
-    logger.info("start boostraping")
+    for id in observed_ds.id:
+        if id not in model_ds.id:
+            logger.warning(f'{id} in observed ids but not in model ids')
+            continue
+        gen_hydrograph_by_data_sets(
+            simulations=model_ds['discharge'].sel(id=id).data,
+            observation=observed_ds['discharge'].sel(id=id).data,
+            precipitation=None,
+            output_file=output_path / f'hydrograph_{id}.pdf',
+            area=model_ds['facc'].sel(id=id).data
+        )
 
-    if (
-        n_bootstrap_years is not None
-        and n_boostrap_selections is not None
-        and n_boostrap_selections > 0
-    ):
-        results = []
-        total_years_sim = model_df["year"].unique()
-        total_years_obs = observed_df["year"].unique()
-        # for index in range(n_boostrap_selections):
-        for index in range(n_boostrap_selections):
-            logger.info(f"index: {index}")
-            years_sim = random.choices(total_years_sim, k=n_bootstrap_years)
-            years_obs = random.choices(total_years_obs, k=n_bootstrap_years)
-            logger.debug(f"years_sim: {years_sim}")
-            logger.debug(f"years_obs: {years_obs}")
-            sim_df_sel = pd.concat(
-                [model_df[model_df["year"] == year] for year in years_sim]
-            )
-            obs_df_sel = pd.concat(
-                [observed_df[observed_df["year"] == year] for year in years_obs]
-            )
+    # if (
+    #     n_bootstrap_years is not None
+    #     and n_boostrap_selections is not None
+    #     and n_boostrap_selections > 0
+    #     and not direct_comparison
+    # ):
+    #     results = []
+    #     total_years_sim = model_df["year"].unique()
+    #     total_years_obs = observed_df["year"].unique()
+    #     # for index in range(n_boostrap_selections):
+    #     for index in range(n_boostrap_selections):
+    #         logger.info(f"index: {index}")
+    #         years_sim = random.choices(total_years_sim, k=n_bootstrap_years)
+    #         years_obs = random.choices(total_years_obs, k=n_bootstrap_years)
+    #         logger.debug(f"years_sim: {years_sim}")
+    #         logger.debug(f"years_obs: {years_obs}")
+    #         sim_df_sel = pd.concat(
+    #             [model_df[model_df["year"] == year] for year in years_sim]
+    #         )
+    #         obs_df_sel = pd.concat(
+    #             [observed_df[observed_df["year"] == year] for year in years_obs]
+    #         )
 
-            obs_df_sel = add_month_column(obs_df_sel)
-            sim_df_sel = add_month_column(sim_df_sel)
-            ids_sim = [int(id) for id in sim_df_sel["id"].unique()]
-            ids_obs = [int(id) for id in obs_df_sel["id"].unique()]
-            logger.debug(f"OBS ids: {ids_obs}")
-            logger.debug(f"SIM ids: {ids_sim}")
-            for id in ids_sim:
-                if id not in ids_obs:
-                    continue
-                try:
-                    sim_id = sim_df_sel[sim_df_sel["id"] == id]
-                    obs_id = obs_df_sel[obs_df_sel["id"] == id]
-                    clim_sim = calc_clim_from_pandas(sim_id)
-                    clim_obs = calc_clim_from_pandas(obs_id)
-                    alpha = sim_id["Q"].mean(skipna=True) / obs_id["Q"].mean(
-                        skipna=True
-                    )
-                    beta = sim_id["Q"].std(skipna=True) / obs_id["Q"].std(skipna=True)
-                    gamma = spearman_correlation(clim_sim["Q"], clim_obs["Q"])[0]
-                    logger.debug(
-                        f"results for index {index} and gauge {id}: alpha={alpha:.3f}, beta={beta:.3f}, gamma={gamma:.3f}"
-                    )
-                    results.append(
-                        {
-                            "index": index,
-                            "id": id,
-                            "alpha": alpha,
-                            "beta": beta,
-                            "gamma": gamma,
-                        }
-                    )
-                except Exception as e:
-                    logger.error(f"Error for index {index} and id {id} with error {e}")
-    else:
-        msg = "Direct comparison is not yet implemented"
-        raise NotImplementedError(msg)
-    results_df = pd.DataFrame(results)
-    results_df.to_csv(output_path / "results.csv")
-    plot_cdf(results_df, output_path)
+    #         obs_df_sel = add_month_column(obs_df_sel)
+    #         sim_df_sel = add_month_column(sim_df_sel)
+    #         ids_sim = [int(id) for id in sim_df_sel["id"].unique()]
+    #         ids_obs = [int(id) for id in obs_df_sel["id"].unique()]
+    #         logger.debug(f"OBS ids: {ids_obs}")
+    #         logger.debug(f"SIM ids: {ids_sim}")
+    #         for id in ids_sim:
+    #             if id not in ids_obs:
+    #                 continue
+    #             try:
+    #                 sim_id = sim_df_sel[sim_df_sel["id"] == id]
+    #                 obs_id = obs_df_sel[obs_df_sel["id"] == id]
+    #                 clim_sim = calc_clim_from_pandas(sim_id)
+    #                 clim_obs = calc_clim_from_pandas(obs_id)
+    #                 alpha = sim_id["Q"].mean(skipna=True) / obs_id["Q"].mean(
+    #                     skipna=True
+    #                 )
+    #                 beta = sim_id["Q"].std(skipna=True) / obs_id["Q"].std(skipna=True)
+    #                 gamma = spearman_correlation(clim_sim["Q"], clim_obs["Q"])[0]
+    #                 logger.debug(
+    #                     f"results for index {index} and gauge {id}: alpha={alpha:.3f}, beta={beta:.3f}, gamma={gamma:.3f}"
+    #                 )
+    #                 results.append(
+    #                     {
+    #                         "index": index,
+    #                         "id": id,
+    #                         "alpha": alpha,
+    #                         "beta": beta,
+    #                         "gamma": gamma,
+    #                     }
+    #                 )
+    #             except Exception as e:
+    #                 logger.error(f"Error for index {index} and id {id} with error {e}")
+    # else:
+    #     msg = "Direct comparison is not yet implemented"
+    #     raise NotImplementedError(msg)
+    # results_df = pd.DataFrame(results)
+    # results_df.to_csv(output_path / "results.csv")
+    # plot_cdf(results_df, output_path)
 
 
 def plot_kde(results_df, output_path):

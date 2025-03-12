@@ -823,12 +823,12 @@ def gen_hydrograph_by_data_sets(
     simulations,
     observation,
     precipitation,
-    input_path,
     output_file,
-    plot_code,
-    title,
-    show,
-    save,
+    area=None,
+    plot_code='tysc',
+    title='',
+    show=False,
+    save=True,
 ):
     """
     Use discharge and precipitation data provided as xarrays to produce a hydrograph with different analysises.
@@ -855,6 +855,6 @@ def gen_hydrograph_by_data_sets(
     hydro.title = title
     hydro.show = show
     hydro.save = save
+    hydro.catchment.area = area
     hydro.check_which_plots_to_create(plot_code)
-    hydro.get_catchment_area(input_path, ndecimal=0)
     hydro.get_hydrograph()
