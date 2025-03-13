@@ -87,14 +87,14 @@ class TestHydrograph(unittest.TestCase):
         """
         # test equal arrays
         self.hydro.calc_objectives(
-            self.hydro.discharge_data["obs"], self.hydro.discharge_data["obs"]
+            self.hydro.obs_discharge_data, self.hydro.obs_discharge_data
         )
         assert np.abs(self.hydro.objectives.kge - 1) < 1e-4
         assert np.abs(self.hydro.objectives.nse - 1) < 1e-4
 
         # test offset
         self.hydro.calc_objectives(
-            self.hydro.discharge_data["obs"], self.hydro.discharge_data["obs"] * 2
+            self.hydro.obs_discharge_data, self.hydro.obs_discharge_data * 2
         )
         assert np.abs(self.hydro.objectives.kge - 1) > 1e-4
         assert np.abs(self.hydro.objectives.nse - 1) > 1e-4
@@ -110,7 +110,7 @@ class TestHydrograph(unittest.TestCase):
         )  # test if the relation of the mean is correct
 
         self.hydro.calc_objectives(np.linspace(0, 10, 100), np.linspace(1, 11, 100))
-        assert np.abs(self.hydro.objectives.r - 1) < 1e-4  # slope
+        assert np.abs(self.hydro.objectives.gamma - 1) < 1e-4  # slope
 
         # test for wrong input
         with pytest.raises(
@@ -128,7 +128,7 @@ class TestHydrograph(unittest.TestCase):
 
         # test for right result
         self.hydro.calc_objectives(
-            self.hydro.discharge_data["obs"], self.hydro.discharge_data["sim"]
+            self.hydro.obs_discharge_data, self.hydro.sim_discharge_data
         )
         assert (
             np.abs(self.hydro.objectives.kge - 0.74597) < 1e-5

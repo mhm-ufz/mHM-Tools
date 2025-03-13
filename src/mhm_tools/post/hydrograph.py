@@ -53,7 +53,7 @@ class Objectives:
     nse = None
     alpha = None
     beta = None
-    r = None
+    gamma = None
     diff = None
     rel_diff = None
 
@@ -157,13 +157,13 @@ class Hydrograph:
         """
         alpha = np.nanstd(simulated) / np.nanstd(observed)
         beta = np.nanmean(simulated) / np.nanmean(observed)
-        r = np.corrcoef(observed, simulated)[1, 0]
+        gamma = np.corrcoef(observed, simulated)[1, 0]
         self.objectives.kge = 1 - np.sqrt(
-            (r - 1) ** 2 + (alpha - 1) ** 2 + (beta - 1) ** 2
+            (gamma - 1) ** 2 + (alpha - 1) ** 2 + (beta - 1) ** 2
         )
         self.objectives.alpha = alpha
         self.objectives.beta = beta
-        self.objectives.r = r
+        self.objectives.gamma = gamma
 
     def calc_nash_sutcliff_efficiency(self, observed, simulated):
         """
@@ -181,7 +181,7 @@ class Hydrograph:
         """
         self.objectives.nse = 1 - (
             np.nansum((observed - simulated) ** 2)
-            / np.nansum((observed - np.mean(observed)) ** 2)
+            / np.nansum((observed - np.nanmean(observed)) ** 2)
         )
 
     def calc_objectives(self, observed, simulated):
@@ -199,6 +199,9 @@ class Hydrograph:
         None
         """
         observed, simulated = self.remove_empty_values(observed, simulated)
+        if np.all(np.isnan(observed)) or np.all(np.isnan(simulated)):
+            logger.warning(f"In calc objectives: obs is nan {np.all(np.isnan(observed))} or sim is nan {np.all(np.isnan(simulated))}")
+            return False
         self.calc_nash_sutcliff_efficiency(observed, simulated)
         self.calc_kling_gupta_efficiency(observed, simulated)
         self.logger.debug(
@@ -206,6 +209,7 @@ class Hydrograph:
         )
         self.objectives.diff = np.nansum(simulated) - np.nansum(observed)
         self.objectives.rel_diff = self.objectives.diff / np.nansum(observed)
+        return True
 
     def get_row_col(self):
         """
@@ -453,7 +457,7 @@ class Hydrograph:
             f"beta = {self.objectives.beta:.2f}"
         )
         if not self.plots[3]:
-            title += f", r = {self.objectives.r:.2f}"
+            title += f", r = {self.objectives.gamma:.2f}"
         ax1.set_title(
             title,
             horizontalalignment="center",
@@ -489,7 +493,8 @@ class Hydrograph:
             outer_gs = gs[r, c]
             self.grid[r][c] = True
         self.logger.debug(self.grid)
-        discharge_yearly = self.sim_discharge_data.resample(time="YE").mean(skipna=True)
+        sim_discharge_yearly = self.sim_discharge_data.resample(time="YE").mean(skipna=True)
+        obs_discharge_yearly = self.obs_discharge_data.resample(time="YE").mean(skipna=True)
 
         if pre is not None:
 
@@ -511,7 +516,7 @@ class Hydrograph:
                 alpha=0.6,
                 label="Precipitation",
             )
-            ax2_pre.set_ylim(-np.max(pre_yearly) - np.max(pre_yearly) / 6, 0)
+            ax2_pre.set_ylim(-np.nanmax(pre_yearly) - np.nanmax(pre_yearly) / 6, 0)
             ax2_pre.set_yticklabels(
                 [f"{int(abs(tick))}" for tick in ax2_pre.get_yticks()]
             )
@@ -538,24 +543,25 @@ class Hydrograph:
         ax2.spines["top"].set_visible(False)
         ax2.spines["right"].set_visible(False)
         # calculate metrics at yearly resolution
-        time_yearly = [int(y.dt.year.data) for y in discharge_yearly["time"]]
-        self.plot_on_axis(
-            function=ax2.scatter,
-            xvalues=time_yearly,
-            yvalues=[discharge_yearly["sim"], discharge_yearly["obs"]],
-            s=1.0,
-        )
-        self.plot_on_axis(
-            function=ax2.plot,
-            xvalues=time_yearly,
-            yvalues=[discharge_yearly["sim"], discharge_yearly["obs"]],
-            linewidth=0.3,
-        )
-        if r == 0:
-            ax2.legend()
-        ax2.set_ylabel(r"Q $[m^3 s^{-1}]$")
-        ax2.set_xlim(time_yearly[0] - 0.5, time_yearly[-1] + 0.5)
-        ax2.set_xticks(time_yearly[:: len(time_yearly) // 3])
+        time_yearly = [int(y.dt.year.data) for y in sim_discharge_yearly.time]
+        if len(time_yearly) > 3:
+            self.plot_on_axis(
+                function=ax2.scatter,
+                xvalues=time_yearly,
+                yvalues=[sim_discharge_yearly, obs_discharge_yearly],
+                s=1.0,
+            )
+            self.plot_on_axis(
+                function=ax2.plot,
+                xvalues=time_yearly,
+                yvalues=[sim_discharge_yearly, obs_discharge_yearly],
+                linewidth=0.3,
+            )
+            if r == 0:
+                ax2.legend()
+            ax2.set_ylabel(r"Q $[m^3 s^{-1}]$")
+            ax2.set_xlim(time_yearly[0] - 0.5, time_yearly[-1] + 0.5)
+            ax2.set_xticks(time_yearly[:: len(time_yearly) // 3])
 
     def create_plot_seasonality(self, fig, gs, pre):
         """
@@ -597,7 +603,7 @@ class Hydrograph:
                 alpha=0.6,
                 label="Precipitation",
             )
-            ax3_pre.set_ylim(-np.max(pre_monthly) - np.max(pre_monthly) / 6, 0)
+            ax3_pre.set_ylim(-np.nanmax(pre_monthly) - np.nanmax(pre_monthly) / 6, 0)
             # ax3_pre.set_yticks([-100, -75, -50, -25, 0])  # Set specific tick positions for clarity
             ax3_pre.set_yticklabels(
                 [f"{int(abs(tick))}" for tick in ax3_pre.get_yticks()]
@@ -702,7 +708,7 @@ class Hydrograph:
         if r == 0:
             ax4.legend()
         ax4.set_title(
-            f"correlation coeff r = {self.objectives.r:.2f}",
+            f"correlation coeff r = {self.objectives.gamma:.2f}",
             horizontalalignment="center",
         )
         ax4.set_xlabel("observed $[m^3 s^{-1}]$")  # X Achsenbeschriftung
@@ -710,10 +716,10 @@ class Hydrograph:
         ax4.spines["top"].set_visible(False)
         ax4.spines["right"].set_visible(False)
         lim = (
-            np.max(
+            np.nanmax(
                 [
-                    np.max(self.obs_discharge_data),
-                    np.max(self.sim_discharge_data),
+                    np.nanmax(self.obs_discharge_data),
+                    np.nanmax(self.sim_discharge_data),
                 ]
             )
             * 1.1
@@ -723,21 +729,29 @@ class Hydrograph:
         ax4.set_ylim(0, lim)
 
     def crop_data_to_overlapping_time(self):
-        t1 = self.sim_discharge_data.time.values
-        t2 = self.obs_discharge_data.time.values
+        t1 = self.sim_discharge_data.dropna(dim="time").time.values
+        t2 = self.obs_discharge_data.dropna(dim="time").time.values
 
         # Find overlapping range
-        start = max(t1[0], t2[0])
-        end   = min(t1[-1], t2[-1])
-
-        if end >= start:
-            msg = f"The two datasets are not overlapping."
-            with ErrorLogger:
-                raise ValueError(msg)
-
-        # Slice both datasets to that time range
-        self.sim_discharge_data = self.sim_discharge_data.sel(time=slice(start, end))
-        self.obs_discharge_data = self.obs_discharge_data.sel(time=slice(start, end))
+        if t1.any() and t2.any():
+            start = max(t1[0], t2[0])
+            end   = min(t1[-1], t2[-1])
+            if end <= start:
+                msg = f"The two datasets are not overlapping. Sim data hass non nan data from {t1[0]} to {t1[-1]} and obs from {t2[0]} to {t2[-1]}."
+                with ErrorLogger(logger):
+                    raise ValueError(msg)
+            logger.info(f'Cropping data to timeframe {start} to {end}')
+            # Slice both datasets to that time range
+            self.sim_discharge_data = self.sim_discharge_data.sel(time=slice(start, end))
+            self.obs_discharge_data = self.obs_discharge_data.sel(time=slice(start, end))
+            if np.all(np.isnan(self.sim_discharge_data)) or np.all(np.isnan(self.sim_discharge_data)):
+                logger.warning(f"In crop data: obs is nan {not t1} or sim is nan {not t2}")
+                raise ValueError("No non nan value data.")
+        else:
+            logger.warning(f"In crop data: obs is nan {t1.any()} or sim is nan {t2.any() }")
+            raise ValueError("No non nan value data.")
+        logger.info(f'sim_discharge_data: {self.sim_discharge_data.data}')
+        logger.info(f'obs_discharge_data: {self.obs_discharge_data.data}')
         if self.pre is not None:
             self.pre = self.pre.sel(time=slice(start, end))
 
@@ -751,8 +765,15 @@ class Hydrograph:
 
         # calculate metrics at timestep resolution (generally hourly)
         self.logger.debug(self.sim_discharge_data)
-        self.crop_data_to_overlapping_time()
-        self.calc_objectives(self.obs_discharge_data, self.sim_discharge_data)
+        logger.info('Crop to overlapping time.')
+        try:
+            self.crop_data_to_overlapping_time()
+        except ValueError as e: 
+            logger.warning(e)
+            return False
+        logger.info('Calculate objectives')
+        if not self.calc_objectives(self.obs_discharge_data, self.sim_discharge_data):
+            return False
 
         # create figure and determining the number of rows and cols
         fig = plt.figure(figsize=(7, 8))
@@ -799,16 +820,17 @@ class Hydrograph:
             self.create_plot_scatter(fig, gs)
         plt.tight_layout()
         if self.save:
-            if (
-                len(self.output_file.split("/")) == 1
-            ):  # by default the hydrograph is saved to the data directory
-                self.output_file = self.output_file
+            # if (
+            #     len(self.output_file.split("/")) == 1
+            # ):  # by default the hydrograph is saved to the data directory
+                # self.output_file = self.output_file
             fig.savefig(self.output_file, bbox_inches="tight")
             self.logger.info(f"saved hydrograph to '{self.output_file}'")
         if self.show:
             plt.show()
         else:
             plt.close()
+        return True
 
 @log_arguments()
 def get_hydrograph(input_path, output_file, show, save, title, plot_code, prec_path):
@@ -877,15 +899,11 @@ def gen_hydrograph_by_data_sets(
     hydro.obs_discharge_data = observation
     hydro.pre = precipitation
     hydro.output_file = output_file
-    hydro.title = title
+    hydro.title = str(id) if not title and id is not None else title
     hydro.show = show
     hydro.save = save
     hydro.catchment.area = area
     hydro.check_which_plots_to_create(plot_code)
-    hydro.get_hydrograph()
-    return {
-                "id": id,
-                "alpha": hydro.alpha,
-                "beta": hydro.beta,
-                "gamma": hydro.gamma,
-            }
+    if not hydro.get_hydrograph():
+        logger.error(f'For {id} no hydrograph could be created.')
+    return {**hydro.objectives.__dict__, "id": id}
