@@ -1,9 +1,11 @@
 """Compare simulated with observed discharge either directly or using a bootstraping approach."""
 
+import itertools
 import logging
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+from mhm_tools.post.seasonality_grid_validation import get_clim_from_ds, spearman_correlation
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -16,91 +18,6 @@ from mhm_tools.common.xarray_utils import get_coord_key
 from mhm_tools.post.hydrograph import gen_hydrograph_by_data_sets
 
 logger = logging.getLogger(__name__)
-
-# make sure that the gauge location is correct basin extractor ...
-# make sample size the same length as simulation dataset, pick periods and use that for uncertainty estimate
-# how to deal with climate variablity:
-#   - trend correction?
-#   - bootstrap years around event
-
-
-# currently unused
-# def calculate_statistics(sim_data_by_id, obs_data_by_id):
-#     # replace the following with bootstrap alorythem
-#     logger.info("get mean values")
-#     mean_sim = sim_data_by_id.mean(skipna=True)
-#     logger.info("sim done")
-#     mean_obs = obs_data_by_id.mean(skipna=True)
-#     logger.info("obs done")
-
-#     logger.info("create climatologies")
-#     clim_sim = climatology(sim_data_by_id)
-#     logger.info("sim done")
-#     clim_obs = climatology(obs_data_by_id)
-#     logger.info("obs done")
-
-#     logger.info(f"sim: {sim_data_by_id.shape}")
-#     logger.info(f" obs: {obs_data_by_id.shape}")
-
-#     logger.info("get standard deviation")
-#     std_obs = obs_data_by_id.std(skipna=True)
-#     std_sim = sim_data_by_id.std(skipna=True)
-
-#     logger.info("calc statistics")
-#     alpha = float((mean_sim / mean_obs).values)
-#     beta = float((std_sim / std_obs).values)
-#     spearman, spera_var = spearman_correlation(clim_sim, clim_obs)
-#     logger.info(f"{type(id)}, {type(alpha)}, {type(beta)}, {type(spearman)}")
-#     logger.info(f"{id}, {alpha}, {beta}, {spearman}")
-#     logger.info(f"sim_mean = {mean_sim.values}; obs_mean = {mean_obs.values}")
-#     return {"id": id, "alpha": alpha, "beta": beta, "spearman": spearman}
-
-
-# # currently unused
-# def bootstrap_years(sim_data_by_id, obs_data_by_id, n_selections, n_years):
-#     total_years_sim = list(set(sim_data_by_id.time.dt.year.values))
-#     total_years_obs = list(set(sim_data_by_id.time.dt.year.values))
-#     results = []
-#     for index in range(n_selections):
-#         random.seed(index)
-#         years_sim = random.choices(total_years_sim, k=n_years)
-#         years_obs = random.choices(total_years_obs, k=n_years)
-#         ds_sim_sel = sim_data_by_id.where(
-#             sim_data_by_id.time.dt.year.isin(years_sim), drop=True
-#         )
-#         ds_obs_sel = obs_data_by_id.where(
-#             obs_data_by_id.time.dt.year.isin(years_obs), drop=True
-#         )
-#         res = calculate_statistics(ds_sim_sel, ds_obs_sel)
-#         res["index"] = index
-#         results.append(res)
-#     return results
-
-
-# # currently unused
-# def evaluate_one_gauge(index, id, observed_data, sim_data, x, y, n_years, n_selections):
-#     logger.info(f"working on gauge number: {index}...\n")
-#     obs_data_by_id = observed_data.sel(id=id)
-#     if obs_data_by_id.size == 0:
-#         logger.info(f"No data found for ID: {id}. Skipping...\n")
-#         return None
-
-#     are_all_nan = obs_data_by_id.isnull().all()
-#     if are_all_nan:
-#         logger.info("all values are nan")
-#         return None
-#     logger.info(f"values found at gauge: {id}\n")
-#     # This will ensure that x & y values always match lat and lon in sim dataset
-#     x = np.round(x.isel(index).values, 2)
-#     y = np.round(y.isel(index).values, 2)
-#     logger.info("get sim data point")
-#     # x,y, facc =
-#     sim_data_by_id = sim_data.sel(lat=y, lon=x, method="nearest")
-#     # logger.info(sim_data_by_id)
-#     if n_years is not None and n_selections is not None:
-#         return bootstrap_years(sim_data_by_id, obs_data_by_id, n_selections, n_years)
-#     return calculate_statistics(sim_data_by_id, obs_data_by_id)
-
 
 def flatten_list(nested_list):
     """Flatten a list."""
@@ -158,15 +75,6 @@ def get_sim_data_for_one_gauge(id, index, sim_data, yarr, xarr, resolution, facc
         return None
     sim_data_loc = sim_data.sel(lat=y - resolution, lon=x, method="nearest")
     return sim_data_loc.expand_dims(dim={"id": [id]})
-    # discharge = xr.DataArray(name='discharge', dims=['time', 'id'],     oords={'time': time, 'id': [id]}, data=sim_data_loc.values)
-
-    # mrm_data_by_id = mrm_data_by_id.where(~np.isnan(mrm_data_by_id), drop=True)
-
-    # now create a new dataarray  with coords time, id and name discharge, maybe also one with name facc and coords id
-    ## they can then be combined to one dataarray and saved in a dataset
-    # return gen_list_of_result_dicts(
-    #     mrm_data_by_id, id=id, datatype="simulation", facc=facc
-    # )
 
 
 def get_gauge_coords(
@@ -316,8 +224,6 @@ def Q_data_to_xarray(
             facc = facc.where(slicing_condition, drop=True)
             gauge_ids = gauge_ids.where(slicing_condition, drop=True)
     logger.info(f"There are {len(gauge_ids.values)} gauges")
-    # logger.info(f'xarr {x}')
-    # logger.info(f'yarr {y}')
 
     # IMPORTANT: The id's in GRDC observed_data have the same index as in gauge_info
     if not obs_output_file.is_file():
@@ -388,41 +294,47 @@ def Q_data_to_xarray(
 
         # 4) Build a new Dataset from this 2D DataArray
         sim_data = xr.Dataset({"discharge": simulation_discharge, "facc": facc_ids})
-        # sim = flatten_list(sim)
-        # sim_dataframe = pd.DataFrame(sim)
         logger.info(f"Saving sim data to {sim_output_file}...")
         write_xarray_to_file(sim_data, sim_output_file)
     return observed_data, sim_data
 
-
-def calc_clim_from_pandas(df):
-    """Calcuate the climatology from a pandas dataframe containing a `month` column."""
-    if "month" not in df:
-        df = add_month_column(df)
-    # Group by month and calculate the mean for the relevant columns
-    climatologies = df.groupby("month").mean()
-
-    # Rename the index for clarity (optional)
-    climatologies.index.name = "month"
-    climatologies.reset_index(inplace=True)
-
-    return climatologies
-
-
-def add_month_column(df):
-    """Add a month column to the dataframe by reading out the month information from time."""
-    if "time" in df.columns:
-        if not np.issubdtype(df["time"].dtype, np.datetime64):
-            df["time"] = pd.to_datetime(df["time"], errors="coerce")
-        if df["time"].isna().any():
-            df = df.dropna(subset=["time"])
-        df["month"] = df["time"].dt.month
-    else:
-        with ErrorLogger(logger):
-            msg = "The 'time' column is missing from the DataFrame."
-            raise KeyError(msg)
-    return df
-
+def boostap_statistics(index, id, model_da, observed_da, total_years_sim, total_years_obs, n_bootstrap_years):
+    """Calculate the statistics for one boostrap selection."""
+    np.random.seed(index)
+    years_sim = np.random.choice(total_years_sim, size=n_bootstrap_years)
+    years_obs = np.random.choice(total_years_obs, size=n_bootstrap_years)
+    logger.debug(f"years_sim: {years_sim}")
+    logger.debug(f"years_obs: {years_obs}")
+    sim_da_sel = xr.concat(
+        [model_da.where(model_da.time.dt.year == year) for year in years_sim], dim="time"
+    )
+    obs_da_sel = xr.concat(
+        [observed_da.where(observed_da.time.dt.year == year) for year in years_sim], dim="time"
+    )
+    alpha, beta, gamma = np.nan, np.nan, np.nan
+    if (id in obs_da_sel.id and id in sim_da_sel.id) or not sim_da_sel.isnull().all() or obs_da_sel.isnull().all():
+        try:
+            sim_id = sim_da_sel.sel(id=id)
+            obs_id = obs_da_sel.sel(id=id)
+            clim_sim = get_clim_from_ds(sim_id)
+            clim_obs = get_clim_from_ds(obs_id)
+            alpha = sim_id.mean(skipna=True) / obs_id.mean(
+                skipna=True
+            )
+            beta = sim_id.std(skipna=True) / obs_id.std(skipna=True)
+            gamma = spearman_correlation(clim_sim, clim_obs)[0]
+            logger.debug(
+                f"results for index {index} and gauge {id}: alpha={alpha:.3f}, beta={beta:.3f}, gamma={gamma:.3f}"
+            )
+        except Exception as e:
+            logger.error(f"Error for index {index} and id {id} with error {e}")
+    return {
+                "index": index,
+                "id": id,
+                "alpha": alpha,
+                "beta": beta,
+                "gamma": gamma,
+            }
 
 @log_arguments()
 def evaludate_grdc_data(  # noqa: PLR0913
@@ -463,83 +375,41 @@ def evaludate_grdc_data(  # noqa: PLR0913
     )
     model_da = model_ds["discharge"]
     observed_da = observed_ds["discharge"]
-
-    results = Parallel(n_jobs=n_jobs, backend="loky")(
+    results = []
+    if (
+        n_bootstrap_years is not None
+        and n_boostrap_selections is not None
+        and n_boostrap_selections > 0
+        and not direct_comparison
+    ):
+        logger.info(f'Bootstrapping with {n_boostrap_selections} selections with {n_bootstrap_years} years each.')
+        results = []
+        total_years_sim = np.unique(model_da.dropna(dim="time", how="all").time.dt.year.data)
+        total_years_obs = np.unique(observed_da.dropna(dim="time", how="all").time.dt.year.data)
+        # for index in range(n_boostrap_selections):
+        ids_sim = np.unique(model_da.id.values)
+        ids_obs = np.unique(observed_da.id.values)
+        results = Parallel(n_jobs=n_jobs, backend="loky")(
+            delayed(boostap_statistics)(
+               index=index, id=id, model_da=model_da, observed_da=observed_da, total_years_sim=total_years_sim, total_years_obs=total_years_obs, n_bootstrap_years=n_bootstrap_years
+            )
+            for index, id in itertools.product(range(n_boostrap_selections), ids_sim) 
+            if id in ids_obs
+        )
+    results_direct = Parallel(n_jobs=n_jobs, backend="loky")(
         delayed(gen_hydrograph_by_data_sets)(
             simulations=model_da.sel(id=id),
             observation=observed_da.sel(id=id),
             precipitation=None,
-            output_file=output_path / f"hydrograph_{id}.pdf",
+            output_file=output_path / f"hydrograph_{int(id)}.pdf",
             area=model_ds["facc"].sel(id=id).data,
             id=id,
+            calc_stats=direct_comparison
         )
         for id in observed_ds.id.values
         if id in model_ds.id.values
     )
-
-    # if (
-    #     n_bootstrap_years is not None
-    #     and n_boostrap_selections is not None
-    #     and n_boostrap_selections > 0
-    #     and not direct_comparison
-    # ):
-    #     results = []
-    #     total_years_sim = np.unique(model_ds.time.year.data)
-    #     total_years_obs = np.unique(observed_ds.time.year.data)
-    #     model_discharge = model_ds['discharge']
-    #     observed_discharge = observed_ds['discharge']
-    #     # for index in range(n_boostrap_selections):
-    #     for index in range(n_boostrap_selections):
-    #         logger.info(f"index: {index}")
-    #         years_sim = random.choices(total_years_sim, k=n_bootstrap_years)
-    #         years_obs = random.choices(total_years_obs, k=n_bootstrap_years)
-    #         logger.debug(f"years_sim: {years_sim}")
-    #         logger.debug(f"years_obs: {years_obs}")
-    #         sim_df_sel = pd.concat(
-    #             [model_df[model_df["year"] == year] for year in years_sim]
-    #         )
-    #         obs_df_sel = pd.concat(
-    #             [observed_df[observed_df["year"] == year] for year in years_obs]
-    #         )
-
-    #         obs_df_sel = add_month_column(obs_df_sel)
-    #         sim_df_sel = add_month_column(sim_df_sel)
-    #         ids_sim = [int(id) for id in sim_df_sel["id"].unique()]
-    #         ids_obs = [int(id) for id in obs_df_sel["id"].unique()]
-    #         logger.debug(f"OBS ids: {ids_obs}")
-    #         logger.debug(f"SIM ids: {ids_sim}")
-    #         for id in ids_sim:
-    #             if id not in ids_obs:
-    #                 continue
-    #             try:
-    #                 sim_id = sim_df_sel[sim_df_sel["id"] == id]
-    #                 obs_id = obs_df_sel[obs_df_sel["id"] == id]
-    #                 clim_sim = calc_clim_from_pandas(sim_id)
-    #                 clim_obs = calc_clim_from_pandas(obs_id)
-    #                 alpha = sim_id["Q"].mean(skipna=True) / obs_id["Q"].mean(
-    #                     skipna=True
-    #                 )
-    #                 beta = sim_id["Q"].std(skipna=True) / obs_id["Q"].std(skipna=True)
-    #                 gamma = spearman_correlation(clim_sim["Q"], clim_obs["Q"])[0]
-    #                 logger.debug(
-    #                     f"results for index {index} and gauge {id}: alpha={alpha:.3f}, beta={beta:.3f}, gamma={gamma:.3f}"
-    #                 )
-    #                 results.append(
-    #                     {
-    #                         "index": index,
-    #                         "id": id,
-    #                         "alpha": alpha,
-    #                         "beta": beta,
-    #                         "gamma": gamma,
-    #                     }
-    #                 )
-    #             except Exception as e:
-    #                 logger.error(f"Error for index {index} and id {id} with error {e}")
-
-    # else:
-    #     msg = "Direct comparison is not yet implemented"
-    #     raise NotImplementedError(msg)
-    results_df = pd.DataFrame(results)
+    results_df = pd.DataFrame(results_direct) if not results else pd.DataFrame(results)
     results_df.to_csv(output_path / "results.csv")
     plot_cdf(results_df, output_path)
 
@@ -625,6 +495,7 @@ def plot_cdf(df, output_path, plot_all=True):
     # if not output_path.is_dir():
     #     output_path.mkdir()
     # The variables to plot
+    logger.info(df.head())
     variables = ["alpha", "beta", "gamma"]
 
     # --- 2) Check number of unique IDs ---

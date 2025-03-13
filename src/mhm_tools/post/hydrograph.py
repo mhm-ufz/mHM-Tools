@@ -8,6 +8,7 @@ Authors
 
 import logging
 from pathlib import Path
+from typing import Iterable
 
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
@@ -97,15 +98,24 @@ class Hydrograph:
     catchment = Catchment()
     sim_discharge_data = None
     obs_discharge_data = None
+    sim_discharge_data_clean = None
+    obs_discharge_data_clean = None
     pre = None
     objectives = Objectives()
     title = None
     output_file = None
-    show = None
-    save = None
+    show = False
+    save = False
+    calc_stats=False
 
-    def __init__(self):
+    def __init__(self, simulation=None, observation=None, calc_stats=True):
         self.plots = [0, 0, 0, 0]
+        self.sim_discharge_data = simulation
+        self.obs_discharge_data = observation
+        self.calc_stats = calc_stats
+        if simulation is not None and observation is not None and calc_stats:
+            self.sim_discharge_data_clean, self.obs_discharge_data_clean = self.remove_empty_values(self.sim_discharge_data, self.obs_discharge_data)
+
 
     def remove_empty_values(self, arr1, arr2, recursive=True):
         """
@@ -198,19 +208,20 @@ class Hydrograph:
         -------
         None
         """
-        observed, simulated = self.remove_empty_values(observed, simulated)
-        if np.all(np.isnan(observed)) or np.all(np.isnan(simulated)):
+        if self.obs_discharge_data_clean is None or self.sim_discharge_data_clean is None:
+            self.obs_discharge_data_clean, self.sim_discharge_data_clean = self.remove_empty_values(observed, simulated)
+        if np.all(np.isnan(self.obs_discharge_data_clean)) or np.all(np.isnan(self.sim_discharge_data_clean)):
             logger.warning(
-                f"In calc objectives: obs is nan {np.all(np.isnan(observed))} or sim is nan {np.all(np.isnan(simulated))}"
+                f"In calc objectives: obs is nan {np.all(np.isnan(self.obs_discharge_data_clean))} or sim is nan {np.all(np.isnan(self.sim_discharge_data_clean))}"
             )
             return False
-        self.calc_nash_sutcliff_efficiency(observed, simulated)
-        self.calc_kling_gupta_efficiency(observed, simulated)
+        self.calc_nash_sutcliff_efficiency(self.obs_discharge_data_clean, self.sim_discharge_data_clean)
+        self.calc_kling_gupta_efficiency(self.obs_discharge_data_clean, self.sim_discharge_data_clean)
         self.logger.debug(
-            f"sum simulated: {np.nansum(simulated)}, sum observed: {np.nansum(observed)}"
+            f"sum simulated: {np.nansum(self.sim_discharge_data_clean)}, sum observed: {np.nansum(self.obs_discharge_data_clean)}"
         )
-        self.objectives.diff = np.nansum(simulated) - np.nansum(observed)
-        self.objectives.rel_diff = self.objectives.diff / np.nansum(observed)
+        self.objectives.diff = np.nansum(self.sim_discharge_data_clean) - np.nansum(self.obs_discharge_data_clean)
+        self.objectives.rel_diff = self.objectives.diff / np.nansum(self.obs_discharge_data_clean)
         return True
 
     def get_row_col(self):
@@ -294,7 +305,7 @@ class Hydrograph:
 
     @staticmethod
     def plot_on_axis(
-        function, xvalues, yvalues: list, colors=None, labels=None, **arguments
+        function, yvalues: list, xvalues=None, colors=None, labels=None, **arguments
     ):
         """
         Plot multiple graphs for specified function.
@@ -315,7 +326,12 @@ class Hydrograph:
             arguments["color"] = colors[i]
             if labels:
                 arguments["label"] = labels[i]
-            function(xvalues, yvalue, **arguments)
+            if xvalues is None: 
+                function(yvalue.time, yvalue, **arguments)
+            elif len(xvalues) == len(yvalues):
+                function(xvalues[i], yvalue, **arguments)
+            else:
+                function(xvalues, yvalue, **arguments)
 
     def check_which_plots_to_create(self, code):
         """
@@ -340,7 +356,7 @@ class Hydrograph:
             self.plots[1] = 1
         if "s" in code:
             self.plots[2] = 1
-        if "c" in code:
+        if "c" in code and self.calc_stats:
             self.plots[3] = 1
 
     @staticmethod
@@ -447,20 +463,21 @@ class Hydrograph:
         # )
         self.plot_on_axis(
             function=ax1.plot,
-            xvalues=self.sim_discharge_data["time"],
             yvalues=[self.sim_discharge_data, self.obs_discharge_data],
             linewidth=0.3,
             # labels=[],  # no labels
         )
         ax1.legend()
-        title = (
-            f"NSE = {self.objectives.nse:.2f}, "
-            f"KGE = {self.objectives.kge:.2f}, "
-            f"alpha = {self.objectives.alpha:.2f}, "
-            f"beta = {self.objectives.beta:.2f}"
-        )
-        if not self.plots[3]:
-            title += f", r = {self.objectives.gamma:.2f}"
+        title = ''
+        if self.calc_stats:
+            title = (
+                f"NSE = {self.objectives.nse:.2f}, "
+                f"KGE = {self.objectives.kge:.2f}, "
+                f"alpha = {self.objectives.alpha:.2f}, "
+                f"beta = {self.objectives.beta:.2f}"
+            )
+            if not self.plots[3]:
+                title += f", r = {self.objectives.gamma:.2f}"
         ax1.set_title(
             title,
             horizontalalignment="center",
@@ -488,6 +505,20 @@ class Hydrograph:
         -------
             None
         """
+         # calculate metrics at yearly resolution
+        sim_discharge_yearly = self.sim_discharge_data.dropna(dim='time', how='all').resample(time="YE").mean(
+            skipna=True
+        )
+        obs_discharge_yearly = self.obs_discharge_data.dropna(dim='time', how='all').resample(time="YE").mean(
+            skipna=True
+        )
+        time_yearly_sim = [int(y.dt.year.data) for y in sim_discharge_yearly.time]
+        time_yearly_obs = [int(y.dt.year.data) for y in obs_discharge_yearly.time]
+        years_combined = np.unique(time_yearly_sim + time_yearly_obs)
+        years_combined.sort()
+        if years_combined is None or len(years_combined) < 3:
+            logger.warning("Cannot create yearly plot because the data is insufficient.")
+            return
         self.logger.info("generating yearly discharge plot")
         r, c = self.get_row_col()
         self.logger.debug(f"yearly plot as row {r} and col {c}")
@@ -498,15 +529,8 @@ class Hydrograph:
             outer_gs = gs[r, c]
             self.grid[r][c] = True
         self.logger.debug(self.grid)
-        sim_discharge_yearly = self.sim_discharge_data.resample(time="YE").mean(
-            skipna=True
-        )
-        obs_discharge_yearly = self.obs_discharge_data.resample(time="YE").mean(
-            skipna=True
-        )
 
         if pre is not None:
-
             inner_gs = gridspec.GridSpecFromSubplotSpec(
                 3, 1, subplot_spec=outer_gs, height_ratios=[1, 1, 1]
             )
@@ -539,39 +563,38 @@ class Hydrograph:
                 3, 1, subplot_spec=outer_gs, height_ratios=[0.75, 1.25, 1]
             )
             ax2 = fig.add_subplot(inner_gs_update[1:], sharex=ax2_pre)
-            ax2_pre.set_title(
-                f"sim - obs = {self.objectives.diff:.0f}$m^3$ or {self.objectives.rel_diff*100:.0f}%",
-                horizontalalignment="center",
-            )
+            if self.calc_stats:
+                ax2_pre.set_title(
+                    f"sim - obs = {self.objectives.diff:.0f}$m^3$ or {self.objectives.rel_diff*100:.0f}%",
+                    horizontalalignment="center",
+                )
         else:
             ax2 = fig.add_subplot(outer_gs)
-            ax2.set_title(
-                f"sim - obs = {self.objectives.diff:.0f}$m^3$ or {self.objectives.rel_diff*100:.0f}%",
-                horizontalalignment="center",
-            )
+            if self.calc_stats:
+                ax2.set_title(
+                    f"sim - obs = {self.objectives.diff:.0f}$m^3$ or {self.objectives.rel_diff*100:.0f}%",
+                    horizontalalignment="center",
+                )
         ax2.spines["top"].set_visible(False)
         ax2.spines["right"].set_visible(False)
-        # calculate metrics at yearly resolution
-        time_yearly = [int(y.dt.year.data) for y in sim_discharge_yearly.time]
-        if len(time_yearly) > 3:
-            self.plot_on_axis(
-                function=ax2.scatter,
-                xvalues=time_yearly,
-                yvalues=[sim_discharge_yearly, obs_discharge_yearly],
-                s=1.0,
-            )
-            self.plot_on_axis(
-                function=ax2.plot,
-                xvalues=time_yearly,
-                yvalues=[sim_discharge_yearly, obs_discharge_yearly],
-                linewidth=0.3,
-            )
-            if r == 0:
-                ax2.legend()
-            ax2.set_ylabel(r"Q $[m^3 s^{-1}]$")
-            ax2.set_xlim(time_yearly[0] - 0.5, time_yearly[-1] + 0.5)
-            ax2.set_xticks(time_yearly[:: len(time_yearly) // 3])
-
+    
+        self.plot_on_axis(
+            function=ax2.scatter,
+            xvalues=[time_yearly_sim, time_yearly_obs],
+            yvalues=[sim_discharge_yearly, obs_discharge_yearly],
+            s=1.0,
+        )
+        self.plot_on_axis(
+            function=ax2.plot,
+            xvalues=[time_yearly_sim, time_yearly_obs],
+            yvalues=[sim_discharge_yearly, obs_discharge_yearly],
+            linewidth=0.3,
+        )
+        if r == 0:
+            ax2.legend()
+        ax2.set_ylabel(r"Q $[m^3 s^{-1}]$")
+        ax2.set_xlim(np.min(years_combined) - 0.5, np.max(years_combined) + 0.5)
+        ax2.set_xticks(years_combined[:: len((years_combined)-np.min(years_combined)) // 3])
     def create_plot_seasonality(self, fig, gs, pre):
         """
         Generate a discharge seasonality plot.
@@ -688,8 +711,8 @@ class Hydrograph:
         # add linear regression line to scatterplot
         self.plot_on_axis(
             function=ax4.scatter,
-            xvalues=self.obs_discharge_data,
-            yvalues=[self.sim_discharge_data],
+            xvalues=self.obs_discharge_data_clean,
+            yvalues=[self.sim_discharge_data_clean],
             s=50.0,
             colors=["black"],
             edgecolor="white",
@@ -712,10 +735,11 @@ class Hydrograph:
         )
         if r == 0:
             ax4.legend()
-        ax4.set_title(
-            f"correlation coeff r = {self.objectives.gamma:.2f}",
-            horizontalalignment="center",
-        )
+        if self.calc_stats:
+            ax4.set_title(
+                f"correlation coeff r = {self.objectives.gamma:.2f}",
+                horizontalalignment="center",
+            )
         ax4.set_xlabel("observed $[m^3 s^{-1}]$")  # X Achsenbeschriftung
         ax4.set_ylabel("simulated $[m^3 s^{-1}]$")  # Y Achsenbeschriftung
         ax4.spines["top"].set_visible(False)
@@ -735,8 +759,8 @@ class Hydrograph:
 
     def crop_data_to_overlapping_time(self):
         """Crop data to overlapping time."""
-        t1 = self.sim_discharge_data.dropna(dim="time").time.values
-        t2 = self.obs_discharge_data.dropna(dim="time").time.values
+        t1 = self.sim_discharge_data.dropna(dim="time", how='all').time.values
+        t2 = self.obs_discharge_data.dropna(dim="time", how='all').time.values
 
         # Find overlapping range
         only_nan_msg = "No non nan value data."
@@ -744,9 +768,8 @@ class Hydrograph:
             start = max(t1[0], t2[0])
             end = min(t1[-1], t2[-1])
             if end <= start:
-                msg = f"The two datasets are not overlapping. Sim data hass non nan data from {t1[0]} to {t1[-1]} and obs from {t2[0]} to {t2[-1]}."
-                with ErrorLogger(logger):
-                    raise ValueError(msg)
+                logger.warning(f"The two datasets are not overlapping. Sim data hass non nan data from {t1[0]} to {t1[-1]} and obs from {t2[0]} to {t2[-1]}.")
+                return False
             logger.info(f"Cropping data to timeframe {start} to {end}")
             # Slice both datasets to that time range
             self.sim_discharge_data = self.sim_discharge_data.sel(
@@ -771,6 +794,7 @@ class Hydrograph:
         logger.info(f"obs_discharge_data: {self.obs_discharge_data.data}")
         if self.pre is not None:
             self.pre = self.pre.sel(time=slice(start, end))
+        return True
 
     def get_hydrograph(self):
         """Generate the hydrograph from the data saved as member variables."""
@@ -782,14 +806,12 @@ class Hydrograph:
         # calculate metrics at timestep resolution (generally hourly)
         self.logger.debug(self.sim_discharge_data)
         logger.info("Crop to overlapping time.")
-        try:
-            self.crop_data_to_overlapping_time()
-        except ValueError as e:
-            logger.warning(e)
-            return False
-        logger.info("Calculate objectives")
-        if not self.calc_objectives(self.obs_discharge_data, self.sim_discharge_data):
-            return False
+        if self.calc_stats:
+            if not self.crop_data_to_overlapping_time():
+                return False
+            logger.info("Calculate objectives")
+            if not self.calc_objectives(self.obs_discharge_data, self.sim_discharge_data):
+                return False
 
         # create figure and determining the number of rows and cols
         fig = plt.figure(figsize=(7, 8))
@@ -811,7 +833,7 @@ class Hydrograph:
         )
         if self.catchment.area:
             fig.text(
-                s=f"Area = {self.catchment.area}" + r"$km^2$",
+                s=f"Area = {self.catchment.area:.2f}" + r"$km^2$",
                 x=0.5,
                 y=0.97,
                 horizontalalignment="center",
@@ -894,6 +916,7 @@ def gen_hydrograph_by_data_sets(
     show=False,
     save=True,
     id=None,
+    calc_stats=False
 ):
     """
     Use discharge and precipitation data provided as xarrays to produce a hydrograph with different analysises.
@@ -912,9 +935,7 @@ def gen_hydrograph_by_data_sets(
         title: title given to the hydrograph
         plot_code: code indicating which plots to create
     """
-    hydro = Hydrograph()
-    hydro.sim_discharge_data = simulations
-    hydro.obs_discharge_data = observation
+    hydro = Hydrograph(simulation=simulations, observation=observation, calc_stats=calc_stats)
     hydro.pre = precipitation
     hydro.output_file = output_file
     hydro.title = str(id) if not title and id is not None else title
