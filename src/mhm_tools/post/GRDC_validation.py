@@ -504,72 +504,73 @@ def plot_cdf(df, output_path, plot_all=True):
     logger.info(f"Found {n_ids} unique IDs.")
 
     # --- 3 & 4) Branch based on the number of unique IDs ---
-    if n_ids < 9 or plot_all:
-        logger.info("Single ids")
-        # Plot a separate CDF for each ID, for each variable
-        for var in variables:
-            plt.figure(figsize=(6, 4))
-            for uid in unique_ids:
-                # Extract all values of `var` for the given ID
-                subdata = df.loc[df["id"] == uid, var].sort_values()
-                if len(subdata) == 0:
-                    continue  # no data for this ID
+    # if n_ids < 9 or plot_all:
+    #     logger.info("Single ids")
+    #     # Plot a separate CDF for each ID, for each variable
+    #     for var in variables:
+    #         plt.figure(figsize=(6, 4))
+    #         for uid in unique_ids:
+    #             # Extract all values of `var` for the given ID
+    #             subdata = df.loc[df["id"] == uid, var].sort_values()
+    #             if len(subdata) == 0:
+    #                 continue  # no data for this ID
 
-                # Compute the empirical CDF
-                cdfvals = np.arange(1, len(subdata) + 1) / float(len(subdata))
+    #             # Compute the empirical CDF
+    #             cdfvals = np.arange(1, len(subdata) + 1) / float(len(subdata))
 
-                # Plot
-                plt.plot(subdata, cdfvals, label=f"id = {int(uid)}")
+    #             # Plot
+    #             plt.plot(subdata, cdfvals, label=f"id = {int(uid)}")
 
-            plt.title(f"CDF of {var} (Separate lines per ID)")
-            plt.xlabel(var)
-            plt.ylabel("CDF")
-            plt.legend()
-            plt.tight_layout()
-            plt.savefig(output_path / f"cdf_{var}_by_id.png", dpi=150)
-            plt.close()
+    #         plt.title(f"CDF of {var} (Separate lines per ID)")
+    #         plt.xlabel(var)
+    #         plt.ylabel("CDF")
+    #         plt.legend()
+    #         plt.tight_layout()
+    #         plt.savefig(output_path / f"cdf_{var}_by_id.png", dpi=150)
+    #         plt.close()
 
-    if n_ids < 10 or plot_all:
-        logger.info("All values")
-        # Plot a separate CDF for each ID, for each variable
-        for var in variables:
-            plt.figure(figsize=(6, 4))
-            # Extract all values of `var` for the given ID
-            subdata = df[var].sort_values()
-            if len(subdata) == 0:
-                continue  # no data for this ID
+    # if n_ids < 10 or plot_all:
+    logger.info("All values")
+    for var in variables:
+        plt.figure(figsize=(6, 4))
+        # Extract all values of `var` for the given ID
+        subdata = df[var].sort_values()
+        if len(subdata) == 0:
+            continue  # no data for this ID
 
-            # Compute the empirical CDF
-            cdfvals = np.arange(1, len(subdata) + 1) / float(len(subdata))
+        # Compute the empirical CDF
+        cdfvals = np.arange(1, len(subdata) + 1) / float(len(subdata))
 
-            # Plot
-            plt.plot(subdata, cdfvals)
+        # Plot
+        plt.plot(subdata, cdfvals)
 
-            plt.title(f"CDF of {var} (Separate lines per ID)")
-            plt.xlabel(var)
-            plt.ylabel("CDF")
-            plt.legend()
-            plt.tight_layout()
-            plt.savefig(output_path / f"cdf_{var}_all.png", dpi=150)
-            plt.close()
+        plt.title(f"CDF of {var} (Separate lines per ID)")
+        plt.xlabel(var)
+        plt.ylabel("CDF")
+        plt.legend()
+        plt.xlim(np.min(np.min(subdata), 0), np.max(np.max(subdata),1))
+        plt.ylim(np.min(np.min(cdfvals), 0), np.max(np.max(cdfvals),1))
+        plt.tight_layout()
+        plt.savefig(output_path / f"cdf_{var}_all_stations.png", dpi=450)
+        plt.close()
 
-    if n_ids > 9 or plot_all:
-        # Many IDs => plot the distribution of mean values by ID, for each variable
-        # 1) Compute average (mean) across all rows belonging to each ID
-        means_by_id = df.groupby("id")[variables].mean()
+    # if n_ids > 9 or plot_all:
+    #     # Many IDs => plot the distribution of mean values by ID, for each variable
+    #     # 1) Compute average (mean) across all rows belonging to each ID
+    #     means_by_id = df.groupby("id")[variables].mean()
 
-        for var in variables:
-            # This is now one mean value per ID
-            data = means_by_id[var].sort_values()
-            cdfvals = np.arange(1, len(data) + 1) / float(len(data))
+    #     for var in variables:
+    #         # This is now one mean value per ID
+    #         data = means_by_id[var].sort_values()
+    #         cdfvals = np.arange(1, len(data) + 1) / float(len(data))
 
-            plt.figure(figsize=(6, 4))
-            plt.plot(data, cdfvals, marker="o")
-            plt.title(f"CDF of mean {var} across {n_ids} IDs")
-            plt.xlabel(f"mean {var}")
-            plt.ylabel("CDF")
-            plt.tight_layout()
-            plt.savefig(output_path / f"cdf_{var}_mean_across_ids.png", dpi=150)
-            plt.close()
+    #         plt.figure(figsize=(6, 4))
+    #         plt.plot(data, cdfvals, marker="o")
+    #         plt.title(f"CDF of mean {var} across {n_ids} IDs")
+    #         plt.xlabel(f"mean {var}")
+    #         plt.ylabel("CDF")
+    #         plt.tight_layout()
+    #         plt.savefig(output_path / f"cdf_{var}_mean_across_ids.png", dpi=150)
+    #         plt.close()
 
     logger.info("Done! Check the saved PNG files for your CDF plots.")
