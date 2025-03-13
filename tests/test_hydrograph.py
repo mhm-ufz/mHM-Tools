@@ -30,9 +30,9 @@ class TestHydrograph(unittest.TestCase):
     def setUp(self):
         """Set up the test case by initializing necessary variables and loading data from a specific path."""
         configure_mhm_tools_logger(log_level="ERROR")
-        self.path = str(HERE / "files" / "test_hydrograph") + "/"
+        self.path = HERE / "files" / "test_hydrograph"
         self.hydro = Hydrograph()
-        self.hydro.load_data_from_path(self.path)
+        self.hydro.load_data_from_discharge_nc(self.path)
 
     #    def test_file_readin(self):
     #         self.hydro.discharge_data

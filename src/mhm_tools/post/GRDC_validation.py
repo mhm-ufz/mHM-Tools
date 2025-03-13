@@ -1,7 +1,6 @@
 """Compare simulated with observed discharge either directly or using a bootstraping approach."""
 
 import logging
-import random
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -15,7 +14,6 @@ from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_
 from mhm_tools.common.logger import ErrorLogger, log_arguments
 from mhm_tools.common.xarray_utils import get_coord_key
 from mhm_tools.post.hydrograph import gen_hydrograph_by_data_sets
-from mhm_tools.post.seasonality_grid_validation import get_clim_from_ds, spearman_correlation
 
 logger = logging.getLogger(__name__)
 
@@ -137,15 +135,15 @@ def gen_list_of_result_dicts(data, id, datatype="", facc=None):
     logger.warning(f"All datapoints for {datatype} at gauge {id} are missing.")
     return None
 
+
 def get_grdc_for_one_gauge(id, observed_data_by_id):
     """Read in observed data for one gauge."""
     # id, index = id.values, index=id['index'].values
     if observed_data_by_id.size == 0:
         logger.info(f"No data found for ID: {id}. Skipping...\n")
         return None
-    return observed_data_by_id.where(
-        ~np.isnan(observed_data_by_id), drop=True
-    )
+    return observed_data_by_id.where(~np.isnan(observed_data_by_id), drop=True)
+
 
 def get_sim_data_for_one_gauge(id, index, sim_data, yarr, xarr, resolution, facc=None):
     """Read out simulation data for one gauge."""
@@ -164,12 +162,11 @@ def get_sim_data_for_one_gauge(id, index, sim_data, yarr, xarr, resolution, facc
 
     # mrm_data_by_id = mrm_data_by_id.where(~np.isnan(mrm_data_by_id), drop=True)
 
-    # now create a new dataarray  with coords time, id and name discharge, maybe also one with name facc and coords id 
+    # now create a new dataarray  with coords time, id and name discharge, maybe also one with name facc and coords id
     ## they can then be combined to one dataarray and saved in a dataset
     # return gen_list_of_result_dicts(
     #     mrm_data_by_id, id=id, datatype="simulation", facc=facc
     # )
-
 
 
 def get_gauge_coords(
@@ -329,9 +326,13 @@ def Q_data_to_xarray(
             # observed_data = observed_data.rename({observed_variable: "discharge"})
             obs_discharge_data = obs_discharge_data.sel(id=gauge_ids.values)
             obs_discharge_data = obs_discharge_data.reindex(id=gauge_ids.values)
-            facc_da = xr.DataArray(facc, name='facc', dims=['id'], coords={'id': gauge_ids.values})
-            observed_data = xr.Dataset({'facc':  facc_da, 'discharge': obs_discharge_data})
-            
+            facc_da = xr.DataArray(
+                facc, name="facc", dims=["id"], coords={"id": gauge_ids.values}
+            )
+            observed_data = xr.Dataset(
+                {"facc": facc_da, "discharge": obs_discharge_data}
+            )
+
             logger.info(f"Saving obs data to {obs_output_file}...")
             write_xarray_to_file(observed_data, obs_output_file)
 
@@ -348,7 +349,7 @@ def Q_data_to_xarray(
                 )
                 for x_i, y_i, facc_i in zip(x.values, y.values, facc.values)
             )
-            x_new, y_new, facc_new,gauge_ids_with_values = [], [], [], []
+            x_new, y_new, facc_new, gauge_ids_with_values = [], [], [], []
             for i, (xn, yn, fan) in enumerate(out):
                 if xn is None or yn is None or fan is None:
                     continue
@@ -380,8 +381,10 @@ def Q_data_to_xarray(
                 )
                 for i, (id, facc_i) in enumerate(zip(gauge_ids_with_values, facc_new))
             )
-        simulation_discharge = xr.concat(sim, dim="id").drop_vars(['lat', 'lon'])
-        facc_ids = xr.DataArray(data=np.array(facc_new), dims=["id"], coords={"id":gauge_ids_with_values})
+        simulation_discharge = xr.concat(sim, dim="id").drop_vars(["lat", "lon"])
+        facc_ids = xr.DataArray(
+            data=np.array(facc_new), dims=["id"], coords={"id": gauge_ids_with_values}
+        )
 
         # 4) Build a new Dataset from this 2D DataArray
         sim_data = xr.Dataset({"discharge": simulation_discharge, "facc": facc_ids})
@@ -420,6 +423,7 @@ def add_month_column(df):
             raise KeyError(msg)
     return df
 
+
 @log_arguments()
 def evaludate_grdc_data(  # noqa: PLR0913
     model_data_path,
@@ -457,21 +461,21 @@ def evaludate_grdc_data(  # noqa: PLR0913
         resolution=resolution,
         n_jobs=n_jobs,
     )
-    model_da = model_ds['discharge']
-    observed_da = observed_ds['discharge']
+    model_da = model_ds["discharge"]
+    observed_da = observed_ds["discharge"]
 
     results = Parallel(n_jobs=n_jobs, backend="loky")(
         delayed(gen_hydrograph_by_data_sets)(
             simulations=model_da.sel(id=id),
             observation=observed_da.sel(id=id),
             precipitation=None,
-            output_file=output_path / f'hydrograph_{id}.pdf',
-            area=model_ds['facc'].sel(id=id).data,
-            id=id
+            output_file=output_path / f"hydrograph_{id}.pdf",
+            area=model_ds["facc"].sel(id=id).data,
+            id=id,
         )
-        for id in observed_ds.id.values if id in model_ds.id.values
+        for id in observed_ds.id.values
+        if id in model_ds.id.values
     )
-
 
     # if (
     #     n_bootstrap_years is not None
@@ -531,7 +535,6 @@ def evaludate_grdc_data(  # noqa: PLR0913
     #                 )
     #             except Exception as e:
     #                 logger.error(f"Error for index {index} and id {id} with error {e}")
-    
 
     # else:
     #     msg = "Direct comparison is not yet implemented"
