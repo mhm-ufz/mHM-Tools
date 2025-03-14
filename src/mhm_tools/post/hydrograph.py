@@ -100,6 +100,8 @@ class Hydrograph:
     obs_discharge_data = None
     sim_discharge_data_clean = None
     obs_discharge_data_clean = None
+    sim_discharge_data_nonan = None 
+    obs_discharge_data_nonan = None 
     pre = None
     objectives = Objectives()
     title = None
@@ -110,12 +112,20 @@ class Hydrograph:
 
     def __init__(self, simulation=None, observation=None, calc_stats=True):
         self.plots = [0, 0, 0, 0]
+        self.calc_stats = calc_stats
+        if simulation is not None and observation is not None: 
+            self.set_discharge(simulation=simulation, observation=observation)
+
+    def set_discharge(self, simulation, observation):
         self.sim_discharge_data = simulation
         self.obs_discharge_data = observation
-        self.calc_stats = calc_stats
-        if simulation is not None and observation is not None and calc_stats:
+        self.sim_discharge_data_nonan = self.sim_discharge_data.dropna(dim='time', how='all')
+        self.obs_discharge_data_nonan = self.obs_discharge_data.dropna(dim='time', how='all')
+        if self.sim_discharge_data_nonan.time.size == 0 or self.obs_discharge_data_nonan.time.size == 0:
+            return False
+        if simulation is not None and observation is not None and self.calc_stats:
             self.sim_discharge_data_clean, self.obs_discharge_data_clean = self.remove_empty_values(self.sim_discharge_data, self.obs_discharge_data)
-
+        return True
 
     def remove_empty_values(self, arr1, arr2, recursive=True):
         """
@@ -483,8 +493,8 @@ class Hydrograph:
             horizontalalignment="center",
         )
         ax1.set_ylabel(r"Q $[m^3 s^{-1}]$")
-        xmin = min(self.sim_discharge_data.dropna(dim='time', how='all').time.min(), self.obs_discharge_data.dropna(dim='time', how='all').time.min())
-        xmax = max(self.sim_discharge_data.dropna(dim='time', how='all').time.max(), self.obs_discharge_data.dropna(dim='time', how='all').time.max()) 
+        xmin = min(self.sim_discharge_data_nonan.time.min(), self.obs_discharge_data_nonan.time.min())
+        xmax = max(self.sim_discharge_data_nonan.time.max(), self.obs_discharge_data_nonan.time.max()) 
         ax1.set_xlim(xmin, xmax)
         ax1.spines["top"].set_visible(False)
         ax1.spines["right"].set_visible(False)
@@ -509,10 +519,10 @@ class Hydrograph:
         if np.all(np.isnan(self.sim_discharge_data)) or np.all(np.isnan(self.obs_discharge_data)):
             logger.warning("Cannot create yearly plot because one of the dataarrays is empty except for nan values.")
             return
-        sim_discharge_yearly = self.sim_discharge_data.dropna(dim='time', how='all').resample(time="YE").mean(
+        sim_discharge_yearly = self.sim_discharge_data_nonan.resample(time="YE").mean(
             skipna=True
         )
-        obs_discharge_yearly = self.obs_discharge_data.dropna(dim='time', how='all').resample(time="YE").mean(
+        obs_discharge_yearly = self.obs_discharge_data_nonan.resample(time="YE").mean(
             skipna=True
         )
         time_yearly_sim = [int(y.dt.year.data) for y in sim_discharge_yearly.time]
@@ -938,14 +948,17 @@ def gen_hydrograph_by_data_sets(
         title: title given to the hydrograph
         plot_code: code indicating which plots to create
     """
-    hydro = Hydrograph(simulation=simulations, observation=observation, calc_stats=calc_stats)
-    hydro.pre = precipitation
-    hydro.output_file = output_file
-    hydro.title = str(id) if not title and id is not None else title
-    hydro.show = show
-    hydro.save = save
-    hydro.catchment.area = area
-    hydro.check_which_plots_to_create(plot_code)
-    if not hydro.get_hydrograph():
+    hydro = Hydrograph(calc_stats=calc_stats)
+    if hydro.set_discharge(simulation=simulations, observation=observation):
+        hydro.pre = precipitation
+        hydro.output_file = output_file
+        hydro.title = str(id) if not title and id is not None else title
+        hydro.show = show
+        hydro.save = save
+        hydro.catchment.area = area
+        hydro.check_which_plots_to_create(plot_code)
+        if not hydro.get_hydrograph():
+            logger.error(f"For {id} no hydrograph could be created.")
+    else:
         logger.error(f"For {id} no hydrograph could be created.")
     return {**hydro.objectives.__dict__, "id": id}
