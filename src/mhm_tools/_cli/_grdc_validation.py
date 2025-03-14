@@ -88,6 +88,13 @@ def add_args(parser):
         required=False,
         help=("Use no statistics but compare timeseries directly. Needs ref_path."),
     )
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        dest="overwrite",
+        required=False,
+        help=("Overwrite existing files. Otherwise input data changes might not result in output changes."),
+    )
     parser.add_argument("--output_dir", help="Path for the output dir.", required=True)
 
 def run(args):
@@ -111,4 +118,5 @@ def run(args):
         direct_comparison=args.direct_comparison,
         start_date=args.start_date,
         end_date=args.end_date,
+        overwrite=args.overwrite
     )

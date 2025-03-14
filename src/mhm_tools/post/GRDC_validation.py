@@ -166,7 +166,8 @@ def Q_data_to_xarray(
     resolution=0.1,
     n_jobs=1,
     start_date=None, 
-    end_date=None
+    end_date=None,
+    overwrite=False
 ):
     """
     Get observed and model Q data and save it as CSV files to be opened later.
@@ -192,15 +193,15 @@ def Q_data_to_xarray(
     sim_output_file = Path(f"{saving_path}/{model_keyword}_data.nc")
     obs_output_file = Path(f"{saving_path}/GRDC_data.nc")
     gauge_info_path = gauge_info_path if gauge_info_path else observed_data_path
-    if sim_output_file.is_file():
+    if sim_output_file.is_file() and not overwrite:
         logger.info("reading sim data from file...")
         sim_data = get_xarray_ds_from_file(sim_output_file)
         sim_data = sim_data.sel(time=slice(start_date, end_date))
-    if obs_output_file.is_file():
+    if obs_output_file.is_file() and not overwrite:
         logger.info("reading obs data from file...")
         observed_data = get_xarray_ds_from_file(obs_output_file)
         observed_data = observed_data.sel(time=slice(start_date, end_date))
-    if obs_output_file.is_file() and sim_output_file.is_file():
+    if obs_output_file.is_file() and sim_output_file.is_file() and not overwrite:
         return observed_data, sim_data
     # creating saving path
     saving_path = Path(saving_path)
@@ -230,7 +231,7 @@ def Q_data_to_xarray(
     logger.info(f"There are {len(gauge_ids.values)} gauges")
 
     # IMPORTANT: The id's in GRDC observed_data have the same index as in gauge_info
-    if not obs_output_file.is_file():
+    if not obs_output_file.is_file() or overwrite:
         with xr.open_dataset(observed_data_path) as observed_data_in:
             obs_discharge_data = observed_data_in[observed_variable]
             obs_discharge_data = obs_discharge_data.sel(time=slice(start_date, end_date))
@@ -247,7 +248,7 @@ def Q_data_to_xarray(
             logger.info(f"Saving obs data to {obs_output_file}...")
             write_xarray_to_file(observed_data, obs_output_file)
 
-    if not sim_output_file.is_file():
+    if not sim_output_file.is_file() or overwrite:
         with xr.open_dataset(mrm_restart_file) as ds:
             # get the gauge coordinates by matching coordinates and flow accumulation
             out = Parallel(n_jobs=n_jobs, backend="loky")(
@@ -363,7 +364,8 @@ def evaludate_grdc_data(  # noqa: PLR0913
     n_bootstrap_years=5,
     n_boostrap_selections=0,
     start_date=None,
-    end_date=None
+    end_date=None,
+    overwrite=False
 ):
     """Compare simulated with observed discharge either directly or using a bootstraping approach."""
     output_path = Path(output_path)
@@ -383,7 +385,8 @@ def evaludate_grdc_data(  # noqa: PLR0913
         resolution=resolution,
         n_jobs=n_jobs,
         start_date=start_date,
-        end_date=end_date
+        end_date=end_date,
+        overwrite=overwrite
     )
     model_da = model_ds["discharge"]
     observed_da = observed_ds["discharge"]
