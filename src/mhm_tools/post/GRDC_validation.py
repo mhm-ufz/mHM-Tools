@@ -576,9 +576,9 @@ def plot_cdf(df, output_path, plot_all=True, boostrap_iterations=None):
         # Plot
         # plt.scatter(subdata, cdfvals, s=0.5, color='blue')
         # plt.plot(subdata, cdfvals, linewidth=0.3, color='blue')
-        title = f"CDF of {var} for {unique_ids} stations"
+        title = f"CDF of {var} for {len(unique_ids)} stations"
         if boostrap_iterations is not None:
-            title += f"and {boostrap_iterations} boostrapping iterations"
+            title += f"and {boostrap_iterations} bootstrap iterations"
         plt.title(title)
         plt.xlabel(var)
         plt.ylabel("CDF")
