@@ -13,7 +13,7 @@ import xarray as xr
 from joblib import Parallel, delayed
 
 from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_to_file
-from mhm_tools.common.logger import ErrorLogger, log_arguments
+from mhm_tools.common.logger import ErrorLogger, log_arguments, log_errors
 from mhm_tools.common.xarray_utils import get_coord_key
 from mhm_tools.post.hydrograph import gen_hydrograph_by_data_sets
 
@@ -318,7 +318,7 @@ def boostap_statistics(index, id, model_da, observed_da, total_years_sim, total_
         [observed_da.where(observed_da.time.dt.year == year) for year in years_sim], dim="time"
     )
     alpha, beta, gamma = np.nan, np.nan, np.nan
-    if (id in obs_da_sel.id and id in sim_da_sel.id) or not sim_da_sel.isnull().all() or obs_da_sel.isnull().all():
+    if (id in obs_da_sel.id and id in sim_da_sel.id) or not sim_da_sel.isnull().all() or not obs_da_sel.isnull().all():
         try:
             sim_id = sim_da_sel.sel(id=id)
             obs_id = obs_da_sel.sel(id=id)
@@ -334,6 +334,8 @@ def boostap_statistics(index, id, model_da, observed_da, total_years_sim, total_
             )
         except Exception as e:
             logger.error(f"Error for index {index} and id {id} with error {e}")
+    else:
+        logger.warning(f"(id in obs_da_sel.id = {id in obs_da_sel.id} and id in sim_da_sel.id = {id in sim_da_sel.id}) or not sim_da_sel.isnull().all() = {sim_da_sel.isnull().all()} or not obs_da_sel.isnull().all() = {obs_da_sel.isnull().all()}")
     return {
                 "index": index,
                 "id": id,
@@ -495,7 +497,7 @@ def plot_kde(results_df, output_path):
     plt.savefig(output_path / "gamma.png")
     plt.close()
 
-
+@log_errors()
 def plot_cdf(df, output_path, plot_all=True):
     """Create cdf plots for alpha, beat and gamma for different subselections (by catchment, boostrap-mean or all results)."""
     # --- 1) Read your CSV ---

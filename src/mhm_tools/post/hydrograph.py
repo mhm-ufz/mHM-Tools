@@ -483,9 +483,9 @@ class Hydrograph:
             horizontalalignment="center",
         )
         ax1.set_ylabel(r"Q $[m^3 s^{-1}]$")
-        ax1.set_xlim(
-            self.sim_discharge_data["time"][0], self.sim_discharge_data["time"][-1]
-        )
+        xmin = min(self.sim_discharge_data.dropna(dim='time', how='all').time.min(), self.obs_discharge_data.dropna(dim='time', how='all').time.min())
+        xmax = max(self.sim_discharge_data.dropna(dim='time', how='all').time.max(), self.obs_discharge_data.dropna(dim='time', how='all').time.max()) 
+        ax1.set_xlim(xmin, xmax)
         ax1.spines["top"].set_visible(False)
         ax1.spines["right"].set_visible(False)
         ax1.xaxis.set_major_formatter(
@@ -506,6 +506,9 @@ class Hydrograph:
             None
         """
          # calculate metrics at yearly resolution
+        if np.all(np.isnan(self.sim_discharge_data)) or np.all(np.isnan(self.obs_discharge_data)):
+            logger.warning("Cannot create yearly plot because one of the dataarrays is empty except for nan values.")
+            return
         sim_discharge_yearly = self.sim_discharge_data.dropna(dim='time', how='all').resample(time="YE").mean(
             skipna=True
         )

@@ -109,6 +109,6 @@ def run(args):
         n_boostrap_selections=args.n_bootstrap_selections,
         n_bootstrap_years=args.n_boostrap_years,
         direct_comparison=args.direct_comparison,
-        start_data=args.start_date,
+        start_date=args.start_date,
         end_date=args.end_date,
     )
