@@ -165,6 +165,8 @@ def Q_data_to_xarray(
     lat_max=None,
     resolution=0.1,
     n_jobs=1,
+    start_date=None, 
+    end_date=None
 ):
     """
     Get observed and model Q data and save it as CSV files to be opened later.
@@ -193,9 +195,11 @@ def Q_data_to_xarray(
     if sim_output_file.is_file():
         logger.info("reading sim data from file...")
         sim_data = get_xarray_ds_from_file(sim_output_file)
+        sim_data = sim_data.sel(time=slice(start_date, end_date))
     if obs_output_file.is_file():
         logger.info("reading obs data from file...")
         observed_data = get_xarray_ds_from_file(obs_output_file)
+        observed_data = observed_data.sel(time=slice(start_date, end_date))
     if obs_output_file.is_file() and sim_output_file.is_file():
         return observed_data, sim_data
     # creating saving path
@@ -229,6 +233,7 @@ def Q_data_to_xarray(
     if not obs_output_file.is_file():
         with xr.open_dataset(observed_data_path) as observed_data_in:
             obs_discharge_data = observed_data_in[observed_variable]
+            obs_discharge_data = obs_discharge_data.sel(time=slice(start_date, end_date))
             # observed_data = observed_data.rename({observed_variable: "discharge"})
             obs_discharge_data = obs_discharge_data.sel(id=gauge_ids.values)
             obs_discharge_data = obs_discharge_data.reindex(id=gauge_ids.values)
@@ -244,6 +249,7 @@ def Q_data_to_xarray(
 
     if not sim_output_file.is_file():
         with xr.open_dataset(mrm_restart_file) as ds:
+            # get the gauge coordinates by matching coordinates and flow accumulation
             out = Parallel(n_jobs=n_jobs, backend="loky")(
                 delayed(get_gauge_coords)(
                     ds,
@@ -272,9 +278,9 @@ def Q_data_to_xarray(
                         get_coord_key(sim_data_in, lat=True): slice(lat_max, lat_min),
                         get_coord_key(sim_data_in, lon=True): slice(lon_min, lon_max),
                     }
-                )
+                ).sel(time=slice(start_date, end_date))
             else:
-                sim_data_cropped = sim_data_in
+                sim_data_cropped = sim_data_in.sel(time=slice(start_date, end_date))
             sim = Parallel(n_jobs=n_jobs, backend="loky")(
                 delayed(get_sim_data_for_one_gauge)(
                     id=id,
@@ -354,6 +360,8 @@ def evaludate_grdc_data(  # noqa: PLR0913
     resolution=0.1,
     n_bootstrap_years=5,
     n_boostrap_selections=0,
+    start_date=None,
+    end_date=None
 ):
     """Compare simulated with observed discharge either directly or using a bootstraping approach."""
     output_path = Path(output_path)
@@ -372,6 +380,8 @@ def evaludate_grdc_data(  # noqa: PLR0913
         lat_max=lat_max,
         resolution=resolution,
         n_jobs=n_jobs,
+        start_date=start_date,
+        end_date=end_date
     )
     model_da = model_ds["discharge"]
     observed_da = observed_ds["discharge"]

@@ -68,6 +68,20 @@ def add_args(parser):
         help=("Number of boostrap experiments"),
     )
     parser.add_argument(
+        "--start_date",
+        required=False,
+        default=None,
+        type=str,
+        help=("""First year allowed in the analysis."""),
+    )
+    parser.add_argument(
+        "--end_date",
+        required=False,
+        default=None,
+        type=str,
+        help=("Lates year that is allowed in the analysis."),
+    )
+    parser.add_argument(
         "--direct_comparison",
         action="store_true",
         dest="direct_comparison",
@@ -75,7 +89,6 @@ def add_args(parser):
         help=("Use no statistics but compare timeseries directly. Needs ref_path."),
     )
     parser.add_argument("--output_dir", help="Path for the output dir.", required=True)
-
 
 def run(args):
     lon_min, lon_max, lat_min, lat_max, mask = get_coords(
@@ -96,4 +109,6 @@ def run(args):
         n_boostrap_selections=args.n_bootstrap_selections,
         n_bootstrap_years=args.n_boostrap_years,
         direct_comparison=args.direct_comparison,
+        start_data=args.start_date,
+        end_date=args.end_date,
     )
