@@ -339,9 +339,9 @@ def boostap_statistics(index, id, model_da, observed_da, total_years_sim, total_
     return {
                 "index": index,
                 "id": id,
-                "alpha": alpha,
-                "beta": beta,
-                "gamma": gamma,
+                "alpha": float(alpha),
+                "beta": float(beta),
+                "gamma": float(gamma),
             }
 
 @log_arguments()
@@ -408,22 +408,26 @@ def evaludate_grdc_data(  # noqa: PLR0913
             for index, id in itertools.product(range(n_boostrap_selections), ids_sim) 
             if id in ids_obs
         )
-    results_direct = Parallel(n_jobs=n_jobs, backend="loky")(
-        delayed(gen_hydrograph_by_data_sets)(
-            simulations=model_da.sel(id=id),
-            observation=observed_da.sel(id=id),
-            precipitation=None,
-            output_file=output_path / f"hydrograph_{int(id)}.pdf",
-            area=model_ds["facc"].sel(id=id).data,
-            id=id,
-            calc_stats=direct_comparison
-        )
-        for id in observed_ds.id.values
-        if id in model_ds.id.values
-    )
-    results_df = pd.DataFrame(results_direct) if not results else pd.DataFrame(results)
+    # results_direct = Parallel(n_jobs=n_jobs, backend="loky")(
+    #     delayed(gen_hydrograph_by_data_sets)(
+    #         simulations=model_da.sel(id=id),
+    #         observation=observed_da.sel(id=id),
+    #         precipitation=None,
+    #         output_file=output_path / f"hydrograph_{int(id)}.pdf",
+    #         area=model_ds["facc"].sel(id=id).data,
+    #         id=id,
+    #         calc_stats=direct_comparison
+    #     )
+    #     for id in observed_ds.id.values
+    #     if id in model_ds.id.values
+    # )
+    # results_df = pd.DataFrame(results_direct) if not results else pd.DataFrame(results)
+    results_df = pd.DataFrame(results)
     results_df.to_csv(output_path / "results.csv")
-    plot_cdf(results_df, output_path)
+    if results:
+        plot_cdf(results_df, output_path, boostrap_iterations=n_boostrap_selections)
+    else: 
+        plot_cdf(results_df, output_path)
 
 
 def plot_kde(results_df, output_path):
@@ -498,7 +502,7 @@ def plot_kde(results_df, output_path):
     plt.close()
 
 @log_errors()
-def plot_cdf(df, output_path, plot_all=True):
+def plot_cdf(df, output_path, plot_all=True, boostrap_iterations=None):
     """Create cdf plots for alpha, beat and gamma for different subselections (by catchment, boostrap-mean or all results)."""
     # --- 1) Read your CSV ---
     # Adjust 'mydata.csv' to your actual file path
@@ -507,6 +511,7 @@ def plot_cdf(df, output_path, plot_all=True):
     # if not output_path.is_dir():
     #     output_path.mkdir()
     # The variables to plot
+    df = df.dropna(subset=["alpha", "beta", "gamma"], how="any")
     logger.info(df.head())
     variables = ["alpha", "beta", "gamma"]
 
@@ -546,22 +551,37 @@ def plot_cdf(df, output_path, plot_all=True):
     for var in variables:
         plt.figure(figsize=(6, 4))
         # Extract all values of `var` for the given ID
-        subdata = df[var].sort_values()
-        if len(subdata) == 0:
-            continue  # no data for this ID
+        da = xr.DataArray(df[var], dims=["index"], name=var).dropna(how='all', dim='index')
+        da_sorted = da.sortby(da)  # sort by the data values
+        n = da_sorted.sizes["index"]
 
+        # Create an array of ranks: [1, 2, ..., n]
+        ranks = xr.DataArray(np.arange(1, n + 1), dims=["index"])
+
+        # Compute the fraction => empirical CDF
+        cdf = ranks / n
+        # subdata = df[var].sort_values()
+        # if len(subdata) == 0:
+            # continue  # no data for this ID
+        # logger.info(float(len(subdata)))
+        logger.info(n)
+        logger.info(da_sorted.values)
+        logger.info(cdf.values)
+        plt.plot(da_sorted, cdf, marker="+", linestyle="-")  # step or line is typical
         # Compute the empirical CDF
-        cdfvals = np.arange(1, len(subdata) + 1) / float(len(subdata))
-
+        # cdfvals = np.arange(1, len(subdata) + 1) / float(len(subdata))
         # Plot
-        plt.plot(subdata, cdfvals)
-
-        plt.title(f"CDF of {var} (Separate lines per ID)")
+        # plt.scatter(subdata, cdfvals, s=0.5, color='blue')
+        # plt.plot(subdata, cdfvals, linewidth=0.3, color='blue')
+        title = f"CDF of {var} for {unique_ids} stations"
+        if boostrap_iterations is not None:
+            title += f"and {boostrap_iterations} boostrapping iterations"
+        plt.title(title)
         plt.xlabel(var)
         plt.ylabel("CDF")
         plt.legend()
-        plt.xlim(np.min(np.min(subdata), 0), np.max(np.max(subdata),1))
-        plt.ylim(np.min(np.min(cdfvals), 0), np.max(np.max(cdfvals),1))
+        plt.xlim(min(da_sorted.min(), 0), max(da_sorted.max(),1))
+        plt.ylim(0,1.05)
         plt.tight_layout()
         plt.savefig(output_path / f"cdf_{var}_all_stations.png", dpi=450)
         plt.close()
