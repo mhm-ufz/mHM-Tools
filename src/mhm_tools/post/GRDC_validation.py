@@ -5,7 +5,6 @@ import logging
 from pathlib import Path
 
 import matplotlib.pyplot as plt
-from mhm_tools.post.seasonality_grid_validation import get_clim_from_ds, spearman_correlation
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -13,11 +12,15 @@ import xarray as xr
 from joblib import Parallel, delayed
 
 from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_to_file
-from mhm_tools.common.logger import ErrorLogger, log_arguments, log_errors
+from mhm_tools.common.logger import log_arguments, log_errors
 from mhm_tools.common.xarray_utils import get_coord_key
-from mhm_tools.post.hydrograph import gen_hydrograph_by_data_sets
+from mhm_tools.post.seasonality_grid_validation import (
+    get_clim_from_ds,
+    spearman_correlation,
+)
 
 logger = logging.getLogger(__name__)
+
 
 def flatten_list(nested_list):
     """Flatten a list."""
@@ -62,7 +65,7 @@ def get_grdc_for_one_gauge(id, observed_data_by_id):
     return observed_data_by_id.where(~np.isnan(observed_data_by_id), drop=True)
 
 
-def get_sim_data_for_one_gauge(id, index, sim_data, yarr, xarr, resolution, facc=None):
+def get_sim_data_for_one_gauge(id, index, sim_data, yarr, xarr, resolution):
     """Read out simulation data for one gauge."""
     if xarr[index] is None and yarr[index] is None:
         return None
@@ -156,7 +159,6 @@ def Q_data_to_xarray(
     mrm_restart_file,
     sim_variable,
     observed_variable,
-    gauge_info_path,
     model_keyword,
     saving_path=None,
     lon_min=None,
@@ -165,9 +167,8 @@ def Q_data_to_xarray(
     lat_max=None,
     resolution=0.1,
     n_jobs=1,
-    start_date=None, 
-    end_date=None,
-    overwrite=False
+    date_slice=None,
+    overwrite=False,
 ):
     """
     Get observed and model Q data and save it as CSV files to be opened later.
@@ -179,7 +180,6 @@ def Q_data_to_xarray(
     Args:
     - mrm_data (xarray.DataArray): The mRM simulated data as an xarray DataArray.
     - observed_data (xarray.DataArray): The observed data as an xarray DataArray.
-    - gauge_info_path (str): The file path to the gauge information dataset.
     - model_keyword (str): dir to be added to the path were files will be stored.
     - output_path (str): optional, saving path
 
@@ -190,17 +190,18 @@ def Q_data_to_xarray(
     - "new_y": Y-coordinates of gauges
 
     """
+    if date_slice is None:
+        date_slice = slice(None, None)
     sim_output_file = Path(f"{saving_path}/{model_keyword}_data.nc")
     obs_output_file = Path(f"{saving_path}/GRDC_data.nc")
-    gauge_info_path = gauge_info_path if gauge_info_path else observed_data_path
     if sim_output_file.is_file() and not overwrite:
         logger.info("reading sim data from file...")
         sim_data = get_xarray_ds_from_file(sim_output_file)
-        sim_data = sim_data.sel(time=slice(start_date, end_date))
+        sim_data = sim_data.sel(time=date_slice)
     if obs_output_file.is_file() and not overwrite:
         logger.info("reading obs data from file...")
         observed_data = get_xarray_ds_from_file(obs_output_file)
-        observed_data = observed_data.sel(time=slice(start_date, end_date))
+        observed_data = observed_data.sel(time=date_slice)
     if obs_output_file.is_file() and sim_output_file.is_file() and not overwrite:
         return observed_data, sim_data
     # creating saving path
@@ -209,7 +210,7 @@ def Q_data_to_xarray(
         saving_path.mkdir(parents=True)
 
     # getting gauge infos
-    with xr.open_dataset(gauge_info_path) as gauge_info:
+    with xr.open_dataset(observed_data_path) as gauge_info:
         gauge_ids = gauge_info["id"]
         x = gauge_info["geo_x"]
         y = gauge_info["geo_y"]
@@ -230,11 +231,10 @@ def Q_data_to_xarray(
             gauge_ids = gauge_ids.where(slicing_condition, drop=True)
     logger.info(f"There are {len(gauge_ids.values)} gauges")
 
-    # IMPORTANT: The id's in GRDC observed_data have the same index as in gauge_info
     if not obs_output_file.is_file() or overwrite:
         with xr.open_dataset(observed_data_path) as observed_data_in:
             obs_discharge_data = observed_data_in[observed_variable]
-            obs_discharge_data = obs_discharge_data.sel(time=slice(start_date, end_date))
+            obs_discharge_data = obs_discharge_data.sel(time=date_slice)
             # observed_data = observed_data.rename({observed_variable: "discharge"})
             obs_discharge_data = obs_discharge_data.sel(id=gauge_ids.values)
             obs_discharge_data = obs_discharge_data.reindex(id=gauge_ids.values)
@@ -279,9 +279,9 @@ def Q_data_to_xarray(
                         get_coord_key(sim_data_in, lat=True): slice(lat_max, lat_min),
                         get_coord_key(sim_data_in, lon=True): slice(lon_min, lon_max),
                     }
-                ).sel(time=slice(start_date, end_date))
+                ).sel(time=date_slice)
             else:
-                sim_data_cropped = sim_data_in.sel(time=slice(start_date, end_date))
+                sim_data_cropped = sim_data_in.sel(time=date_slice)
             sim = Parallel(n_jobs=n_jobs, backend="loky")(
                 delayed(get_sim_data_for_one_gauge)(
                     id=id,
@@ -305,7 +305,16 @@ def Q_data_to_xarray(
         write_xarray_to_file(sim_data, sim_output_file)
     return observed_data, sim_data
 
-def boostap_statistics(index, id, model_da, observed_da, total_years_sim, total_years_obs, n_bootstrap_years):
+
+def boostap_statistics(
+    index,
+    id,
+    model_da,
+    observed_da,
+    total_years_sim,
+    total_years_obs,
+    n_bootstrap_years,
+):
     """Calculate the statistics for one boostrap selection."""
     np.random.seed(index)
     years_sim = np.random.choice(total_years_sim, size=n_bootstrap_years)
@@ -313,21 +322,25 @@ def boostap_statistics(index, id, model_da, observed_da, total_years_sim, total_
     logger.debug(f"years_sim: {years_sim}")
     logger.debug(f"years_obs: {years_obs}")
     sim_da_sel = xr.concat(
-        [model_da.where(model_da.time.dt.year == year) for year in years_sim], dim="time"
+        [model_da.where(model_da.time.dt.year == year) for year in years_sim],
+        dim="time",
     )
     obs_da_sel = xr.concat(
-        [observed_da.where(observed_da.time.dt.year == year) for year in years_sim], dim="time"
+        [observed_da.where(observed_da.time.dt.year == year) for year in years_sim],
+        dim="time",
     )
     alpha, beta, gamma = np.nan, np.nan, np.nan
-    if (id in obs_da_sel.id and id in sim_da_sel.id) or not sim_da_sel.isnull().all() or not obs_da_sel.isnull().all():
+    if (
+        (id in obs_da_sel.id and id in sim_da_sel.id)
+        or not sim_da_sel.isnull().all()
+        or not obs_da_sel.isnull().all()
+    ):
         try:
             sim_id = sim_da_sel.sel(id=id)
             obs_id = obs_da_sel.sel(id=id)
             clim_sim = get_clim_from_ds(sim_id)
             clim_obs = get_clim_from_ds(obs_id)
-            alpha = sim_id.mean(skipna=True) / obs_id.mean(
-                skipna=True
-            )
+            alpha = sim_id.mean(skipna=True) / obs_id.mean(skipna=True)
             beta = sim_id.std(skipna=True) / obs_id.std(skipna=True)
             gamma = spearman_correlation(clim_sim, clim_obs)[0]
             logger.debug(
@@ -336,20 +349,22 @@ def boostap_statistics(index, id, model_da, observed_da, total_years_sim, total_
         except Exception as e:
             logger.error(f"Error for index {index} and id {id} with error {e}")
     else:
-        logger.warning(f"(id in obs_da_sel.id = {id in obs_da_sel.id} and id in sim_da_sel.id = {id in sim_da_sel.id}) or not sim_da_sel.isnull().all() = {sim_da_sel.isnull().all()} or not obs_da_sel.isnull().all() = {obs_da_sel.isnull().all()}")
+        logger.warning(
+            f"(id in obs_da_sel.id = {id in obs_da_sel.id} and id in sim_da_sel.id = {id in sim_da_sel.id}) or not sim_da_sel.isnull().all() = {sim_da_sel.isnull().all()} or not obs_da_sel.isnull().all() = {obs_da_sel.isnull().all()}"
+        )
     return {
-                "index": index,
-                "id": id,
-                "alpha": float(alpha),
-                "beta": float(beta),
-                "gamma": float(gamma),
-            }
+        "index": index,
+        "id": id,
+        "alpha": float(alpha),
+        "beta": float(beta),
+        "gamma": float(gamma),
+    }
+
 
 @log_arguments()
 def evaludate_grdc_data(  # noqa: PLR0913
     model_data_path,
     observed_data_path,
-    gauge_info_path,
     mrm_restart_file="/work/kelbling/ecflow_work/new_gloria_historical/output/gloria_0p05deg/mrm_restart_file/mRM_restart_001.nc",
     output_path=None,
     n_jobs=1,
@@ -365,7 +380,7 @@ def evaludate_grdc_data(  # noqa: PLR0913
     n_boostrap_selections=0,
     start_date=None,
     end_date=None,
-    overwrite=False
+    overwrite=False,
 ):
     """Compare simulated with observed discharge either directly or using a bootstraping approach."""
     output_path = Path(output_path)
@@ -375,7 +390,6 @@ def evaludate_grdc_data(  # noqa: PLR0913
         mrm_restart_file=mrm_restart_file,
         observed_variable=observed_variable,
         sim_variable=sim_variable,
-        gauge_info_path=gauge_info_path,
         model_keyword="mrm",
         saving_path=output_path,
         lon_min=lon_min,
@@ -384,9 +398,8 @@ def evaludate_grdc_data(  # noqa: PLR0913
         lat_max=lat_max,
         resolution=resolution,
         n_jobs=n_jobs,
-        start_date=start_date,
-        end_date=end_date,
-        overwrite=overwrite
+        date_slice=slice(start_date, end_date),
+        overwrite=overwrite,
     )
     model_da = model_ds["discharge"]
     observed_da = observed_ds["discharge"]
@@ -397,18 +410,30 @@ def evaludate_grdc_data(  # noqa: PLR0913
         and n_boostrap_selections > 0
         and not direct_comparison
     ):
-        logger.info(f'Bootstrapping with {n_boostrap_selections} selections with {n_bootstrap_years} years each.')
+        logger.info(
+            f"Bootstrapping with {n_boostrap_selections} selections with {n_bootstrap_years} years each."
+        )
         results = []
-        total_years_sim = np.unique(model_da.dropna(dim="time", how="all").time.dt.year.data)
-        total_years_obs = np.unique(observed_da.dropna(dim="time", how="all").time.dt.year.data)
+        total_years_sim = np.unique(
+            model_da.dropna(dim="time", how="all").time.dt.year.data
+        )
+        total_years_obs = np.unique(
+            observed_da.dropna(dim="time", how="all").time.dt.year.data
+        )
         # for index in range(n_boostrap_selections):
         ids_sim = np.unique(model_da.id.values)
         ids_obs = np.unique(observed_da.id.values)
         results = Parallel(n_jobs=n_jobs, backend="loky")(
             delayed(boostap_statistics)(
-               index=index, id=id, model_da=model_da, observed_da=observed_da, total_years_sim=total_years_sim, total_years_obs=total_years_obs, n_bootstrap_years=n_bootstrap_years
+                index=index,
+                id=id,
+                model_da=model_da,
+                observed_da=observed_da,
+                total_years_sim=total_years_sim,
+                total_years_obs=total_years_obs,
+                n_bootstrap_years=n_bootstrap_years,
             )
-            for index, id in itertools.product(range(n_boostrap_selections), ids_sim) 
+            for index, id in itertools.product(range(n_boostrap_selections), ids_sim)
             if id in ids_obs
         )
     # results_direct = Parallel(n_jobs=n_jobs, backend="loky")(
@@ -429,7 +454,7 @@ def evaludate_grdc_data(  # noqa: PLR0913
     results_df.to_csv(output_path / "results.csv")
     if results:
         plot_cdf(results_df, output_path, boostrap_iterations=n_boostrap_selections)
-    else: 
+    else:
         plot_cdf(results_df, output_path)
 
 
@@ -504,8 +529,9 @@ def plot_kde(results_df, output_path):
     plt.savefig(output_path / "gamma.png")
     plt.close()
 
+
 @log_errors()
-def plot_cdf(df, output_path, plot_all=True, boostrap_iterations=None):
+def plot_cdf(df, output_path, boostrap_iterations=None):
     """Create cdf plots for alpha, beat and gamma for different subselections (by catchment, boostrap-mean or all results)."""
     # --- 1) Read your CSV ---
     # Adjust 'mydata.csv' to your actual file path
@@ -554,7 +580,9 @@ def plot_cdf(df, output_path, plot_all=True, boostrap_iterations=None):
     for var in variables:
         plt.figure(figsize=(6, 4))
         # Extract all values of `var` for the given ID
-        da = xr.DataArray(df[var], dims=["index"], name=var).dropna(how='all', dim='index')
+        da = xr.DataArray(df[var], dims=["index"], name=var).dropna(
+            how="all", dim="index"
+        )
         da_sorted = da.sortby(da)  # sort by the data values
         n = da_sorted.sizes["index"]
 
@@ -565,7 +593,7 @@ def plot_cdf(df, output_path, plot_all=True, boostrap_iterations=None):
         cdf = ranks / n
         # subdata = df[var].sort_values()
         # if len(subdata) == 0:
-            # continue  # no data for this ID
+        # continue  # no data for this ID
         # logger.info(float(len(subdata)))
         logger.info(n)
         logger.info(da_sorted.values)
@@ -583,8 +611,8 @@ def plot_cdf(df, output_path, plot_all=True, boostrap_iterations=None):
         plt.xlabel(var)
         plt.ylabel("CDF")
         plt.legend()
-        plt.xlim(min(da_sorted.min(), 0), max(da_sorted.max(),1))
-        plt.ylim(0,1.05)
+        plt.xlim(min(da_sorted.min(), 0), max(da_sorted.max(), 1))
+        plt.ylim(0, 1.05)
         plt.tight_layout()
         plt.savefig(output_path / f"cdf_{var}_all_stations.png", dpi=450)
         plt.close()

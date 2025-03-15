@@ -8,7 +8,6 @@ Authors
 
 import logging
 from pathlib import Path
-from typing import Iterable
 
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
@@ -100,31 +99,43 @@ class Hydrograph:
     obs_discharge_data = None
     sim_discharge_data_clean = None
     obs_discharge_data_clean = None
-    sim_discharge_data_nonan = None 
-    obs_discharge_data_nonan = None 
+    sim_discharge_data_nonan = None
+    obs_discharge_data_nonan = None
     pre = None
     objectives = Objectives()
     title = None
     output_file = None
     show = False
     save = False
-    calc_stats=False
+    calc_stats = False
 
     def __init__(self, simulation=None, observation=None, calc_stats=True):
         self.plots = [0, 0, 0, 0]
         self.calc_stats = calc_stats
-        if simulation is not None and observation is not None: 
+        if simulation is not None and observation is not None:
             self.set_discharge(simulation=simulation, observation=observation)
 
     def set_discharge(self, simulation, observation):
+        """Set the discharge variables and remove nan values."""
         self.sim_discharge_data = simulation
         self.obs_discharge_data = observation
-        self.sim_discharge_data_nonan = self.sim_discharge_data.dropna(dim='time', how='all')
-        self.obs_discharge_data_nonan = self.obs_discharge_data.dropna(dim='time', how='all')
-        if self.sim_discharge_data_nonan.time.size == 0 or self.obs_discharge_data_nonan.time.size == 0:
+        self.sim_discharge_data_nonan = self.sim_discharge_data.dropna(
+            dim="time", how="all"
+        )
+        self.obs_discharge_data_nonan = self.obs_discharge_data.dropna(
+            dim="time", how="all"
+        )
+        if (
+            self.sim_discharge_data_nonan.time.size == 0
+            or self.obs_discharge_data_nonan.time.size == 0
+        ):
             return False
         if simulation is not None and observation is not None and self.calc_stats:
-            self.sim_discharge_data_clean, self.obs_discharge_data_clean = self.remove_empty_values(self.sim_discharge_data, self.obs_discharge_data)
+            self.sim_discharge_data_clean, self.obs_discharge_data_clean = (
+                self.remove_empty_values(
+                    self.sim_discharge_data, self.obs_discharge_data
+                )
+            )
         return True
 
     def remove_empty_values(self, arr1, arr2, recursive=True):
@@ -218,20 +229,35 @@ class Hydrograph:
         -------
         None
         """
-        if self.obs_discharge_data_clean is None or self.sim_discharge_data_clean is None:
-            self.obs_discharge_data_clean, self.sim_discharge_data_clean = self.remove_empty_values(observed, simulated)
-        if np.all(np.isnan(self.obs_discharge_data_clean)) or np.all(np.isnan(self.sim_discharge_data_clean)):
+        if (
+            self.obs_discharge_data_clean is None
+            or self.sim_discharge_data_clean is None
+        ):
+            self.obs_discharge_data_clean, self.sim_discharge_data_clean = (
+                self.remove_empty_values(observed, simulated)
+            )
+        if np.all(np.isnan(self.obs_discharge_data_clean)) or np.all(
+            np.isnan(self.sim_discharge_data_clean)
+        ):
             logger.warning(
                 f"In calc objectives: obs is nan {np.all(np.isnan(self.obs_discharge_data_clean))} or sim is nan {np.all(np.isnan(self.sim_discharge_data_clean))}"
             )
             return False
-        self.calc_nash_sutcliff_efficiency(self.obs_discharge_data_clean, self.sim_discharge_data_clean)
-        self.calc_kling_gupta_efficiency(self.obs_discharge_data_clean, self.sim_discharge_data_clean)
+        self.calc_nash_sutcliff_efficiency(
+            self.obs_discharge_data_clean, self.sim_discharge_data_clean
+        )
+        self.calc_kling_gupta_efficiency(
+            self.obs_discharge_data_clean, self.sim_discharge_data_clean
+        )
         self.logger.debug(
             f"sum simulated: {np.nansum(self.sim_discharge_data_clean)}, sum observed: {np.nansum(self.obs_discharge_data_clean)}"
         )
-        self.objectives.diff = np.nansum(self.sim_discharge_data_clean) - np.nansum(self.obs_discharge_data_clean)
-        self.objectives.rel_diff = self.objectives.diff / np.nansum(self.obs_discharge_data_clean)
+        self.objectives.diff = np.nansum(self.sim_discharge_data_clean) - np.nansum(
+            self.obs_discharge_data_clean
+        )
+        self.objectives.rel_diff = self.objectives.diff / np.nansum(
+            self.obs_discharge_data_clean
+        )
         return True
 
     def get_row_col(self):
@@ -336,7 +362,7 @@ class Hydrograph:
             arguments["color"] = colors[i]
             if labels:
                 arguments["label"] = labels[i]
-            if xvalues is None: 
+            if xvalues is None:
                 function(yvalue.time, yvalue, **arguments)
             elif len(xvalues) == len(yvalues):
                 function(xvalues[i], yvalue, **arguments)
@@ -478,7 +504,7 @@ class Hydrograph:
             # labels=[],  # no labels
         )
         ax1.legend()
-        title = ''
+        title = ""
         if self.calc_stats:
             title = (
                 f"NSE = {self.objectives.nse:.2f}, "
@@ -493,8 +519,14 @@ class Hydrograph:
             horizontalalignment="center",
         )
         ax1.set_ylabel(r"Q $[m^3 s^{-1}]$")
-        xmin = min(self.sim_discharge_data_nonan.time.min(), self.obs_discharge_data_nonan.time.min())
-        xmax = max(self.sim_discharge_data_nonan.time.max(), self.obs_discharge_data_nonan.time.max()) 
+        xmin = min(
+            self.sim_discharge_data_nonan.time.min(),
+            self.obs_discharge_data_nonan.time.min(),
+        )
+        xmax = max(
+            self.sim_discharge_data_nonan.time.max(),
+            self.obs_discharge_data_nonan.time.max(),
+        )
         ax1.set_xlim(xmin, xmax)
         ax1.spines["top"].set_visible(False)
         ax1.spines["right"].set_visible(False)
@@ -515,9 +547,13 @@ class Hydrograph:
         -------
             None
         """
-         # calculate metrics at yearly resolution
-        if np.all(np.isnan(self.sim_discharge_data)) or np.all(np.isnan(self.obs_discharge_data)):
-            logger.warning("Cannot create yearly plot because one of the dataarrays is empty except for nan values.")
+        # calculate metrics at yearly resolution
+        if np.all(np.isnan(self.sim_discharge_data)) or np.all(
+            np.isnan(self.obs_discharge_data)
+        ):
+            logger.warning(
+                "Cannot create yearly plot because one of the dataarrays is empty except for nan values."
+            )
             return
         sim_discharge_yearly = self.sim_discharge_data_nonan.resample(time="YE").mean(
             skipna=True
@@ -530,7 +566,9 @@ class Hydrograph:
         years_combined = np.unique(time_yearly_sim + time_yearly_obs)
         years_combined.sort()
         if years_combined is None or len(years_combined) < 3:
-            logger.warning("Cannot create yearly plot because the data is insufficient.")
+            logger.warning(
+                "Cannot create yearly plot because the data is insufficient."
+            )
             return
         self.logger.info("generating yearly discharge plot")
         r, c = self.get_row_col()
@@ -590,7 +628,7 @@ class Hydrograph:
                 )
         ax2.spines["top"].set_visible(False)
         ax2.spines["right"].set_visible(False)
-    
+
         self.plot_on_axis(
             function=ax2.scatter,
             xvalues=[time_yearly_sim, time_yearly_obs],
@@ -607,7 +645,10 @@ class Hydrograph:
             ax2.legend()
         ax2.set_ylabel(r"Q $[m^3 s^{-1}]$")
         ax2.set_xlim(np.min(years_combined) - 0.5, np.max(years_combined) + 0.5)
-        ax2.set_xticks(years_combined[:: len((years_combined)-np.min(years_combined)) // 3])
+        ax2.set_xticks(
+            years_combined[:: len((years_combined) - np.min(years_combined)) // 3]
+        )
+
     def create_plot_seasonality(self, fig, gs, pre):
         """
         Generate a discharge seasonality plot.
@@ -772,8 +813,8 @@ class Hydrograph:
 
     def crop_data_to_overlapping_time(self):
         """Crop data to overlapping time."""
-        t1 = self.sim_discharge_data.dropna(dim="time", how='all').time.values
-        t2 = self.obs_discharge_data.dropna(dim="time", how='all').time.values
+        t1 = self.sim_discharge_data.dropna(dim="time", how="all").time.values
+        t2 = self.obs_discharge_data.dropna(dim="time", how="all").time.values
 
         # Find overlapping range
         only_nan_msg = "No non nan value data."
@@ -781,7 +822,9 @@ class Hydrograph:
             start = max(t1[0], t2[0])
             end = min(t1[-1], t2[-1])
             if end <= start:
-                logger.warning(f"The two datasets are not overlapping. Sim data hass non nan data from {t1[0]} to {t1[-1]} and obs from {t2[0]} to {t2[-1]}.")
+                logger.warning(
+                    f"The two datasets are not overlapping. Sim data hass non nan data from {t1[0]} to {t1[-1]} and obs from {t2[0]} to {t2[-1]}."
+                )
                 return False
             logger.info(f"Cropping data to timeframe {start} to {end}")
             # Slice both datasets to that time range
@@ -823,7 +866,9 @@ class Hydrograph:
             if not self.crop_data_to_overlapping_time():
                 return False
             logger.info("Calculate objectives")
-            if not self.calc_objectives(self.obs_discharge_data, self.sim_discharge_data):
+            if not self.calc_objectives(
+                self.obs_discharge_data, self.sim_discharge_data
+            ):
                 return False
 
         # create figure and determining the number of rows and cols
@@ -929,7 +974,7 @@ def gen_hydrograph_by_data_sets(
     show=False,
     save=True,
     id=None,
-    calc_stats=False
+    calc_stats=False,
 ):
     """
     Use discharge and precipitation data provided as xarrays to produce a hydrograph with different analysises.
