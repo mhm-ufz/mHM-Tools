@@ -14,6 +14,7 @@ from joblib import Parallel, delayed
 from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_to_file
 from mhm_tools.common.logger import log_arguments, log_errors
 from mhm_tools.common.xarray_utils import get_coord_key
+from mhm_tools.post.hydrograph import gen_hydrograph_by_data_sets
 from mhm_tools.post.seasonality_grid_validation import (
     get_clim_from_ds,
     spearman_correlation,
@@ -436,20 +437,20 @@ def evaludate_grdc_data(  # noqa: PLR0913
             for index, id in itertools.product(range(n_boostrap_selections), ids_sim)
             if id in ids_obs
         )
-    # results_direct = Parallel(n_jobs=n_jobs, backend="loky")(
-    #     delayed(gen_hydrograph_by_data_sets)(
-    #         simulations=model_da.sel(id=id),
-    #         observation=observed_da.sel(id=id),
-    #         precipitation=None,
-    #         output_file=output_path / f"hydrograph_{int(id)}.pdf",
-    #         area=model_ds["facc"].sel(id=id).data,
-    #         id=id,
-    #         calc_stats=direct_comparison
-    #     )
-    #     for id in observed_ds.id.values
-    #     if id in model_ds.id.values
-    # )
-    # results_df = pd.DataFrame(results_direct) if not results else pd.DataFrame(results)
+    results_direct = Parallel(n_jobs=n_jobs, backend="loky")(
+        delayed(gen_hydrograph_by_data_sets)(
+            simulations=model_da.sel(id=id),
+            observation=observed_da.sel(id=id),
+            precipitation=None,
+            output_file=output_path / f"hydrograph_{int(id)}.pdf",
+            area=model_ds["facc"].sel(id=id).data,
+            id=id,
+            calc_stats=direct_comparison,
+        )
+        for id in observed_ds.id.values
+        if id in model_ds.id.values
+    )
+    results_df = pd.DataFrame(results_direct) if not results else pd.DataFrame(results)
     results_df = pd.DataFrame(results)
     results_df.to_csv(output_path / "results.csv")
     if results:
