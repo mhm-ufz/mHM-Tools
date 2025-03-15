@@ -861,8 +861,8 @@ class Hydrograph:
 
         # calculate metrics at timestep resolution (generally hourly)
         self.logger.debug(self.sim_discharge_data)
-        logger.info("Crop to overlapping time.")
         if self.calc_stats:
+            logger.info("Crop to overlapping time.")
             if not self.crop_data_to_overlapping_time():
                 return False
             logger.info("Calculate objectives")
@@ -994,6 +994,7 @@ def gen_hydrograph_by_data_sets(
         plot_code: code indicating which plots to create
     """
     hydro = Hydrograph(calc_stats=calc_stats)
+    missing_data_error_msg = f"For {id} the hydrograph could not be created."
     if hydro.set_discharge(simulation=simulations, observation=observation):
         hydro.pre = precipitation
         hydro.output_file = output_file
@@ -1003,7 +1004,7 @@ def gen_hydrograph_by_data_sets(
         hydro.catchment.area = area
         hydro.check_which_plots_to_create(plot_code)
         if not hydro.get_hydrograph():
-            logger.error(f"For {id} no hydrograph could be created.")
+            logger.error(missing_data_error_msg)
     else:
-        logger.error(f"For {id} no hydrograph could be created.")
+        logger.error(missing_data_error_msg)
     return {**hydro.objectives.__dict__, "id": id}
