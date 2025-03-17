@@ -1,7 +1,7 @@
 """Compare simulated with observed discharge either directly or using a bootstraping approach."""
 
+import itertools
 import logging
-import random
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -11,95 +11,16 @@ import seaborn as sns
 import xarray as xr
 from joblib import Parallel, delayed
 
-from mhm_tools.common.logger import ErrorLogger, log_arguments
+from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_to_file
+from mhm_tools.common.logger import log_arguments, log_errors
 from mhm_tools.common.xarray_utils import get_coord_key
-from mhm_tools.post.seasonality_grid_validation import spearman_correlation
+from mhm_tools.post.hydrograph import gen_hydrograph_by_data_sets
+from mhm_tools.post.seasonality_grid_validation import (
+    get_clim_from_ds,
+    spearman_correlation,
+)
 
 logger = logging.getLogger(__name__)
-
-# make sure that the gauge location is correct basin extractor ...
-# make sample size the same length as simulation dataset, pick periods and use that for uncertainty estimate
-# how to deal with climate variablity:
-#   - trend correction?
-#   - bootstrap years around event
-
-
-# currently unused
-# def calculate_statistics(sim_data_by_id, obs_data_by_id):
-#     # replace the following with bootstrap alorythem
-#     logger.info("get mean values")
-#     mean_sim = sim_data_by_id.mean(skipna=True)
-#     logger.info("sim done")
-#     mean_obs = obs_data_by_id.mean(skipna=True)
-#     logger.info("obs done")
-
-#     logger.info("create climatologies")
-#     clim_sim = climatology(sim_data_by_id)
-#     logger.info("sim done")
-#     clim_obs = climatology(obs_data_by_id)
-#     logger.info("obs done")
-
-#     logger.info(f"sim: {sim_data_by_id.shape}")
-#     logger.info(f" obs: {obs_data_by_id.shape}")
-
-#     logger.info("get standard deviation")
-#     std_obs = obs_data_by_id.std(skipna=True)
-#     std_sim = sim_data_by_id.std(skipna=True)
-
-#     logger.info("calc statistics")
-#     alpha = float((mean_sim / mean_obs).values)
-#     beta = float((std_sim / std_obs).values)
-#     spearman, spera_var = spearman_correlation(clim_sim, clim_obs)
-#     logger.info(f"{type(id)}, {type(alpha)}, {type(beta)}, {type(spearman)}")
-#     logger.info(f"{id}, {alpha}, {beta}, {spearman}")
-#     logger.info(f"sim_mean = {mean_sim.values}; obs_mean = {mean_obs.values}")
-#     return {"id": id, "alpha": alpha, "beta": beta, "spearman": spearman}
-
-
-# # currently unused
-# def bootstrap_years(sim_data_by_id, obs_data_by_id, n_selections, n_years):
-#     total_years_sim = list(set(sim_data_by_id.time.dt.year.values))
-#     total_years_obs = list(set(sim_data_by_id.time.dt.year.values))
-#     results = []
-#     for index in range(n_selections):
-#         random.seed(index)
-#         years_sim = random.choices(total_years_sim, k=n_years)
-#         years_obs = random.choices(total_years_obs, k=n_years)
-#         ds_sim_sel = sim_data_by_id.where(
-#             sim_data_by_id.time.dt.year.isin(years_sim), drop=True
-#         )
-#         ds_obs_sel = obs_data_by_id.where(
-#             obs_data_by_id.time.dt.year.isin(years_obs), drop=True
-#         )
-#         res = calculate_statistics(ds_sim_sel, ds_obs_sel)
-#         res["index"] = index
-#         results.append(res)
-#     return results
-
-
-# # currently unused
-# def evaluate_one_gauge(index, id, observed_data, sim_data, x, y, n_years, n_selections):
-#     logger.info(f"working on gauge number: {index}...\n")
-#     obs_data_by_id = observed_data.sel(id=id)
-#     if obs_data_by_id.size == 0:
-#         logger.info(f"No data found for ID: {id}. Skipping...\n")
-#         return None
-
-#     are_all_nan = obs_data_by_id.isnull().all()
-#     if are_all_nan:
-#         logger.info("all values are nan")
-#         return None
-#     logger.info(f"values found at gauge: {id}\n")
-#     # This will ensure that x & y values always match lat and lon in sim dataset
-#     x = np.round(x.isel(index).values, 2)
-#     y = np.round(y.isel(index).values, 2)
-#     logger.info("get sim data point")
-#     # x,y, facc =
-#     sim_data_by_id = sim_data.sel(lat=y, lon=x, method="nearest")
-#     # logger.info(sim_data_by_id)
-#     if n_years is not None and n_selections is not None:
-#         return bootstrap_years(sim_data_by_id, obs_data_by_id, n_selections, n_years)
-#     return calculate_statistics(sim_data_by_id, obs_data_by_id)
 
 
 def flatten_list(nested_list):
@@ -136,37 +57,28 @@ def gen_list_of_result_dicts(data, id, datatype="", facc=None):
     return None
 
 
-def get_grdc_for_one_gauge(id, observed_data_by_id, facc=None):
+def get_grdc_for_one_gauge(id, observed_data_by_id):
     """Read in observed data for one gauge."""
     # id, index = id.values, index=id['index'].values
     if observed_data_by_id.size == 0:
         logger.info(f"No data found for ID: {id}. Skipping...\n")
         return None
-    observed_data_by_id = observed_data_by_id.where(
-        ~np.isnan(observed_data_by_id), drop=True
-    )
-    return gen_list_of_result_dicts(
-        observed_data_by_id, id=id, datatype="observation", facc=facc
-    )
+    return observed_data_by_id.where(~np.isnan(observed_data_by_id), drop=True)
 
 
-def get_sim_data_for_one_gauge(id, index, sim_data, yarr, xarr, resolution, facc=None):
+def get_sim_data_for_one_gauge(id, index, sim_data, yarr, xarr, resolution):
     """Read out simulation data for one gauge."""
     if xarr[index] is None and yarr[index] is None:
         return None
     # This will ensure that x & y values always match lat and lon in mRM dataset
     try:
-        x = np.round(xarr[index], 3)
-        y = np.round(yarr[index], 3)
+        x = np.round(xarr[index], 5)
+        y = np.round(yarr[index], 5)
     except KeyError:
         logger.error(f"index {index} not found")
         return None
-    mrm_data_by_id = sim_data.sel(lat=y - resolution, lon=x, method="nearest")
-    mrm_data_by_id = mrm_data_by_id.where(~np.isnan(mrm_data_by_id), drop=True)
-
-    return gen_list_of_result_dicts(
-        mrm_data_by_id, id=id, datatype="simulation", facc=facc
-    )
+    sim_data_loc = sim_data.sel(lat=y - resolution, lon=x, method="nearest")
+    return sim_data_loc.expand_dims(dim={"id": [id]})
 
 
 def get_gauge_coords(
@@ -237,18 +149,17 @@ def get_gauge_coords(
             max_cell_diff=3,
             diff_percent=10,
         )
-    logger.debug("No similar flow accumulation found nearby.")
+    logger.warning("No similar flow accumulation found nearby.")
     logger.debug("None, None, None")
     return None, None, None
 
 
-def Q_data_to_CSV(
+def Q_data_to_xarray(
     model_data_path,
     observed_data_path,
     mrm_restart_file,
     sim_variable,
     observed_variable,
-    gauge_info_path,
     model_keyword,
     saving_path=None,
     lon_min=None,
@@ -257,6 +168,8 @@ def Q_data_to_CSV(
     lat_max=None,
     resolution=0.1,
     n_jobs=1,
+    date_slice=None,
+    overwrite=False,
 ):
     """
     Get observed and model Q data and save it as CSV files to be opened later.
@@ -268,7 +181,6 @@ def Q_data_to_CSV(
     Args:
     - mrm_data (xarray.DataArray): The mRM simulated data as an xarray DataArray.
     - observed_data (xarray.DataArray): The observed data as an xarray DataArray.
-    - gauge_info_path (str): The file path to the gauge information dataset.
     - model_keyword (str): dir to be added to the path were files will be stored.
     - output_path (str): optional, saving path
 
@@ -279,27 +191,31 @@ def Q_data_to_CSV(
     - "new_y": Y-coordinates of gauges
 
     """
-    sim_output_file = Path(f"{saving_path}/{model_keyword}_dataframe.csv")
-    obs_output_file = Path(f"{saving_path}/GRDC_dataframe.csv")
-    if sim_output_file.is_file():
+    if date_slice is None:
+        date_slice = slice(None, None)
+    sim_output_file = Path(f"{saving_path}/{model_keyword}_data.nc")
+    obs_output_file = Path(f"{saving_path}/GRDC_data.nc")
+    if sim_output_file.is_file() and not overwrite:
         logger.info("reading sim data from file...")
-        sim_dataframe = pd.read_csv(sim_output_file)
-    if obs_output_file.is_file():
+        sim_data = get_xarray_ds_from_file(sim_output_file)
+        sim_data = sim_data.sel(time=date_slice)
+    if obs_output_file.is_file() and not overwrite:
         logger.info("reading obs data from file...")
-        obs_dataframe = pd.read_csv(obs_output_file)
-    if obs_output_file.is_file() and sim_output_file.is_file():
-        return obs_dataframe, sim_dataframe
-        # creating saving path
+        observed_data = get_xarray_ds_from_file(obs_output_file)
+        observed_data = observed_data.sel(time=date_slice)
+    if obs_output_file.is_file() and sim_output_file.is_file() and not overwrite:
+        return observed_data, sim_data
+    # creating saving path
     saving_path = Path(saving_path)
     if not saving_path.is_dir():
         saving_path.mkdir(parents=True)
 
     # getting gauge infos
-    with xr.open_dataset(gauge_info_path) as gauge_info:
-        gauge_ids = gauge_info["id1"]
-        x = gauge_info["gauge_x"]
-        y = gauge_info["gauge_y"]
-        facc = gauge_info["gauge_size"]
+    with xr.open_dataset(observed_data_path) as gauge_info:
+        gauge_ids = gauge_info["id"]
+        x = gauge_info["geo_x"]
+        y = gauge_info["geo_y"]
+        facc = gauge_info["area"]
         slicing_condition = None
         if (
             lon_min is not None
@@ -315,28 +231,27 @@ def Q_data_to_CSV(
             facc = facc.where(slicing_condition, drop=True)
             gauge_ids = gauge_ids.where(slicing_condition, drop=True)
     logger.info(f"There are {len(gauge_ids.values)} gauges")
-    # logger.info(f'xarr {x}')
-    # logger.info(f'yarr {y}')
 
-    # IMPORTANT: The id's in GRDC observed_data have the same index as in gauge_info
-    if not obs_output_file.is_file():
-        observed_data = xr.open_dataset(observed_data_path)
-        observed_data = observed_data.sel()
-        observed_data = observed_data[observed_variable]
-        obs = Parallel(n_jobs=n_jobs, backend="loky")(
-            delayed(get_grdc_for_one_gauge)(
-                id=id, observed_data_by_id=observed_data.sel(id=id), facc=facc_i
+    if not obs_output_file.is_file() or overwrite:
+        with xr.open_dataset(observed_data_path) as observed_data_in:
+            obs_discharge_data = observed_data_in[observed_variable]
+            obs_discharge_data = obs_discharge_data.sel(time=date_slice)
+            # observed_data = observed_data.rename({observed_variable: "discharge"})
+            obs_discharge_data = obs_discharge_data.sel(id=gauge_ids.values)
+            obs_discharge_data = obs_discharge_data.reindex(id=gauge_ids.values)
+            facc_da = xr.DataArray(
+                facc, name="facc", dims=["id"], coords={"id": gauge_ids.values}
             )
-            for id, facc_i in zip(gauge_ids.values, facc.values)
-        )
-        obs = flatten_list(obs)
-        obs_dataframe = pd.DataFrame(obs)
-        logger.info(f"Saving obs data to {obs_output_file}...")
-        obs_dataframe.to_csv(obs_output_file)
-    if not sim_output_file.is_file():
+            observed_data = xr.Dataset(
+                {"facc": facc_da, "discharge": obs_discharge_data}
+            )
+
+            logger.info(f"Saving obs data to {obs_output_file}...")
+            write_xarray_to_file(observed_data, obs_output_file)
+
+    if not sim_output_file.is_file() or overwrite:
         with xr.open_dataset(mrm_restart_file) as ds:
-            # for x_i, y_i, facc_i in zip(x.values, y.values, facc.values):
-            #     print(get_gauge_coords(ds, facc=facc_i, lonlat=[x_i, y_i], cell_diff=1, max_cell_diff=3, diff_percent=10))
+            # get the gauge coordinates by matching coordinates and flow accumulation
             out = Parallel(n_jobs=n_jobs, backend="loky")(
                 delayed(get_gauge_coords)(
                     ds,
@@ -348,77 +263,109 @@ def Q_data_to_CSV(
                 )
                 for x_i, y_i, facc_i in zip(x.values, y.values, facc.values)
             )
-            x_new, y_new, facc_new = [], [], []
-            for xn, yn, fan in out:
+            x_new, y_new, facc_new, gauge_ids_with_values = [], [], [], []
+            for i, (xn, yn, fan) in enumerate(out):
                 if xn is None or yn is None or fan is None:
                     continue
                 x_new.append(xn)
                 y_new.append(yn)
                 facc_new.append(fan)
-        logger.info(f"There are {x_new} gauges")
-        logger.info("creating sim dataframe")
-        sim_data = xr.open_dataset(model_data_path)
-        if slicing_condition is not None:
-            sim_data = sim_data.sel(
-                {
-                    get_coord_key(sim_data, lat=True): slice(lat_max, lat_min),
-                    get_coord_key(sim_data, lon=True): slice(lon_min, lon_max),
-                }
+                gauge_ids_with_values.append(gauge_ids.values[i])
+        logger.info(f"There are {len(x_new)} gauges")
+        logger.info("creating sim dataset")
+        with xr.open_dataset(model_data_path) as sim_data_in:
+            if slicing_condition is not None:
+                sim_data_cropped = sim_data_in.sel(
+                    {
+                        get_coord_key(sim_data_in, lat=True): slice(lat_max, lat_min),
+                        get_coord_key(sim_data_in, lon=True): slice(lon_min, lon_max),
+                    }
+                ).sel(time=date_slice)
+            else:
+                sim_data_cropped = sim_data_in.sel(time=date_slice)
+            sim = Parallel(n_jobs=n_jobs, backend="loky")(
+                delayed(get_sim_data_for_one_gauge)(
+                    id=id,
+                    index=i,
+                    sim_data=sim_data_cropped[sim_variable],
+                    yarr=y_new,
+                    xarr=x_new,
+                    resolution=resolution,
+                    facc=facc_i,
+                )
+                for i, (id, facc_i) in enumerate(zip(gauge_ids_with_values, facc_new))
             )
-        sim_data = sim_data[sim_variable]
-        sim = Parallel(n_jobs=n_jobs, backend="loky")(
-            delayed(get_sim_data_for_one_gauge)(
-                id=id,
-                index=i,
-                sim_data=sim_data,
-                yarr=y_new,
-                xarr=x_new,
-                resolution=resolution,
-                facc=facc_i,
-            )
-            for i, (id, facc_i) in enumerate(zip(gauge_ids.values, facc_new))
+        simulation_discharge = xr.concat(sim, dim="id").drop_vars(["lat", "lon"])
+        facc_ids = xr.DataArray(
+            data=np.array(facc_new), dims=["id"], coords={"id": gauge_ids_with_values}
         )
-        sim = flatten_list(sim)
-        sim_dataframe = pd.DataFrame(sim)
+
+        # 4) Build a new Dataset from this 2D DataArray
+        sim_data = xr.Dataset({"discharge": simulation_discharge, "facc": facc_ids})
         logger.info(f"Saving sim data to {sim_output_file}...")
-        sim_dataframe.to_csv(sim_output_file)
-    return obs_dataframe, sim_dataframe
+        write_xarray_to_file(sim_data, sim_output_file)
+    return observed_data, sim_data
 
 
-def calc_clim_from_pandas(df):
-    """Calcuate the climatology from a pandas dataframe containing a `month` column."""
-    if "month" not in df:
-        df = add_month_column(df)
-    # Group by month and calculate the mean for the relevant columns
-    climatologies = df.groupby("month").mean()
-
-    # Rename the index for clarity (optional)
-    climatologies.index.name = "month"
-    climatologies.reset_index(inplace=True)
-
-    return climatologies
-
-
-def add_month_column(df):
-    """Add a month column to the dataframe by reading out the month information from time."""
-    if "time" in df.columns:
-        if not np.issubdtype(df["time"].dtype, np.datetime64):
-            df["time"] = pd.to_datetime(df["time"], errors="coerce")
-        if df["time"].isna().any():
-            df = df.dropna(subset=["time"])
-        df["month"] = df["time"].dt.month
+def boostap_statistics(
+    index,
+    id,
+    model_da,
+    observed_da,
+    total_years_sim,
+    total_years_obs,
+    n_bootstrap_years,
+):
+    """Calculate the statistics for one boostrap selection."""
+    np.random.seed(index)
+    years_sim = np.random.choice(total_years_sim, size=n_bootstrap_years)
+    years_obs = np.random.choice(total_years_obs, size=n_bootstrap_years)
+    logger.debug(f"years_sim: {years_sim}")
+    logger.debug(f"years_obs: {years_obs}")
+    sim_da_sel = xr.concat(
+        [model_da.where(model_da.time.dt.year == year) for year in years_sim],
+        dim="time",
+    )
+    obs_da_sel = xr.concat(
+        [observed_da.where(observed_da.time.dt.year == year) for year in years_sim],
+        dim="time",
+    )
+    alpha, beta, gamma = np.nan, np.nan, np.nan
+    if (
+        (id in obs_da_sel.id and id in sim_da_sel.id)
+        or not sim_da_sel.isnull().all()
+        or not obs_da_sel.isnull().all()
+    ):
+        try:
+            sim_id = sim_da_sel.sel(id=id)
+            obs_id = obs_da_sel.sel(id=id)
+            clim_sim = get_clim_from_ds(sim_id)
+            clim_obs = get_clim_from_ds(obs_id)
+            alpha = sim_id.mean(skipna=True) / obs_id.mean(skipna=True)
+            beta = sim_id.std(skipna=True) / obs_id.std(skipna=True)
+            gamma = spearman_correlation(clim_sim, clim_obs)[0]
+            logger.debug(
+                f"results for index {index} and gauge {id}: alpha={alpha:.3f}, beta={beta:.3f}, gamma={gamma:.3f}"
+            )
+        except Exception as e:
+            logger.error(f"Error for index {index} and id {id} with error {e}")
     else:
-        with ErrorLogger(logger):
-            msg = "The 'time' column is missing from the DataFrame."
-            raise KeyError(msg)
-    return df
+        logger.warning(
+            f"(id in obs_da_sel.id = {id in obs_da_sel.id} and id in sim_da_sel.id = {id in sim_da_sel.id}) or not sim_da_sel.isnull().all() = {sim_da_sel.isnull().all()} or not obs_da_sel.isnull().all() = {obs_da_sel.isnull().all()}"
+        )
+    return {
+        "index": index,
+        "id": id,
+        "alpha": float(alpha),
+        "beta": float(beta),
+        "gamma": float(gamma),
+    }
 
 
 @log_arguments()
 def evaludate_grdc_data(  # noqa: PLR0913
     model_data_path,
     observed_data_path,
-    gauge_info_path,
     mrm_restart_file="/work/kelbling/ecflow_work/new_gloria_historical/output/gloria_0p05deg/mrm_restart_file/mRM_restart_001.nc",
     output_path=None,
     n_jobs=1,
@@ -432,16 +379,18 @@ def evaludate_grdc_data(  # noqa: PLR0913
     resolution=0.1,
     n_bootstrap_years=5,
     n_boostrap_selections=0,
+    start_date=None,
+    end_date=None,
+    overwrite=False,
 ):
     """Compare simulated with observed discharge either directly or using a bootstraping approach."""
     output_path = Path(output_path)
-    observed_df, model_df = Q_data_to_CSV(
+    observed_ds, model_ds = Q_data_to_xarray(
         model_data_path=model_data_path,
         observed_data_path=observed_data_path,
         mrm_restart_file=mrm_restart_file,
         observed_variable=observed_variable,
         sim_variable=sim_variable,
-        gauge_info_path=gauge_info_path,
         model_keyword="mrm",
         saving_path=output_path,
         lon_min=lon_min,
@@ -450,73 +399,64 @@ def evaludate_grdc_data(  # noqa: PLR0913
         lat_max=lat_max,
         resolution=resolution,
         n_jobs=n_jobs,
+        date_slice=slice(start_date, end_date),
+        overwrite=overwrite,
     )
-
-    if direct_comparison:
-        return  # use jeissons function directly
-    logger.info("start boostraping")
-
+    model_da = model_ds["discharge"]
+    observed_da = observed_ds["discharge"]
+    results = []
     if (
         n_bootstrap_years is not None
         and n_boostrap_selections is not None
         and n_boostrap_selections > 0
+        and not direct_comparison
     ):
+        logger.info(
+            f"Bootstrapping with {n_boostrap_selections} selections with {n_bootstrap_years} years each."
+        )
         results = []
-        total_years_sim = model_df["year"].unique()
-        total_years_obs = observed_df["year"].unique()
+        total_years_sim = np.unique(
+            model_da.dropna(dim="time", how="all").time.dt.year.data
+        )
+        total_years_obs = np.unique(
+            observed_da.dropna(dim="time", how="all").time.dt.year.data
+        )
         # for index in range(n_boostrap_selections):
-        for index in range(n_boostrap_selections):
-            logger.info(f"index: {index}")
-            years_sim = random.choices(total_years_sim, k=n_bootstrap_years)
-            years_obs = random.choices(total_years_obs, k=n_bootstrap_years)
-            logger.debug(f"years_sim: {years_sim}")
-            logger.debug(f"years_obs: {years_obs}")
-            sim_df_sel = pd.concat(
-                [model_df[model_df["year"] == year] for year in years_sim]
+        ids_sim = np.unique(model_da.id.values)
+        ids_obs = np.unique(observed_da.id.values)
+        results = Parallel(n_jobs=n_jobs, backend="loky")(
+            delayed(boostap_statistics)(
+                index=index,
+                id=id,
+                model_da=model_da,
+                observed_da=observed_da,
+                total_years_sim=total_years_sim,
+                total_years_obs=total_years_obs,
+                n_bootstrap_years=n_bootstrap_years,
             )
-            obs_df_sel = pd.concat(
-                [observed_df[observed_df["year"] == year] for year in years_obs]
-            )
-
-            obs_df_sel = add_month_column(obs_df_sel)
-            sim_df_sel = add_month_column(sim_df_sel)
-            ids_sim = [int(id) for id in sim_df_sel["id"].unique()]
-            ids_obs = [int(id) for id in obs_df_sel["id"].unique()]
-            logger.debug(f"OBS ids: {ids_obs}")
-            logger.debug(f"SIM ids: {ids_sim}")
-            for id in ids_sim:
-                if id not in ids_obs:
-                    continue
-                try:
-                    sim_id = sim_df_sel[sim_df_sel["id"] == id]
-                    obs_id = obs_df_sel[obs_df_sel["id"] == id]
-                    clim_sim = calc_clim_from_pandas(sim_id)
-                    clim_obs = calc_clim_from_pandas(obs_id)
-                    alpha = sim_id["Q"].mean(skipna=True) / obs_id["Q"].mean(
-                        skipna=True
-                    )
-                    beta = sim_id["Q"].std(skipna=True) / obs_id["Q"].std(skipna=True)
-                    gamma = spearman_correlation(clim_sim["Q"], clim_obs["Q"])[0]
-                    logger.debug(
-                        f"results for index {index} and gauge {id}: alpha={alpha:.3f}, beta={beta:.3f}, gamma={gamma:.3f}"
-                    )
-                    results.append(
-                        {
-                            "index": index,
-                            "id": id,
-                            "alpha": alpha,
-                            "beta": beta,
-                            "gamma": gamma,
-                        }
-                    )
-                except Exception as e:
-                    logger.error(f"Error for index {index} and id {id} with error {e}")
-    else:
-        msg = "Direct comparison is not yet implemented"
-        raise NotImplementedError(msg)
+            for index, id in itertools.product(range(n_boostrap_selections), ids_sim)
+            if id in ids_obs
+        )
+    results_direct = Parallel(n_jobs=n_jobs, backend="loky")(
+        delayed(gen_hydrograph_by_data_sets)(
+            simulations=model_da.sel(id=id),
+            observation=observed_da.sel(id=id),
+            precipitation=None,
+            output_file=output_path / f"hydrograph_{int(id)}.pdf",
+            area=model_ds["facc"].sel(id=id).data,
+            id=id,
+            calc_stats=direct_comparison,
+        )
+        for id in observed_ds.id.values
+        if id in model_ds.id.values
+    )
+    results_df = pd.DataFrame(results_direct) if not results else pd.DataFrame(results)
     results_df = pd.DataFrame(results)
     results_df.to_csv(output_path / "results.csv")
-    plot_cdf(results_df, output_path)
+    if results:
+        plot_cdf(results_df, output_path, boostrap_iterations=n_boostrap_selections)
+    else:
+        plot_cdf(results_df, output_path)
 
 
 def plot_kde(results_df, output_path):
@@ -591,7 +531,8 @@ def plot_kde(results_df, output_path):
     plt.close()
 
 
-def plot_cdf(df, output_path, plot_all=True):
+@log_errors()
+def plot_cdf(df, output_path, boostrap_iterations=None):
     """Create cdf plots for alpha, beat and gamma for different subselections (by catchment, boostrap-mean or all results)."""
     # --- 1) Read your CSV ---
     # Adjust 'mydata.csv' to your actual file path
@@ -600,6 +541,8 @@ def plot_cdf(df, output_path, plot_all=True):
     # if not output_path.is_dir():
     #     output_path.mkdir()
     # The variables to plot
+    df = df.dropna(subset=["alpha", "beta", "gamma"], how="any")
+    logger.info(df.head())
     variables = ["alpha", "beta", "gamma"]
 
     # --- 2) Check number of unique IDs ---
@@ -608,72 +551,90 @@ def plot_cdf(df, output_path, plot_all=True):
     logger.info(f"Found {n_ids} unique IDs.")
 
     # --- 3 & 4) Branch based on the number of unique IDs ---
-    if n_ids < 9 or plot_all:
-        logger.info("Single ids")
-        # Plot a separate CDF for each ID, for each variable
-        for var in variables:
-            plt.figure(figsize=(6, 4))
-            for uid in unique_ids:
-                # Extract all values of `var` for the given ID
-                subdata = df.loc[df["id"] == uid, var].sort_values()
-                if len(subdata) == 0:
-                    continue  # no data for this ID
+    # if n_ids < 9 or plot_all:
+    #     logger.info("Single ids")
+    #     # Plot a separate CDF for each ID, for each variable
+    #     for var in variables:
+    #         plt.figure(figsize=(6, 4))
+    #         for uid in unique_ids:
+    #             # Extract all values of `var` for the given ID
+    #             subdata = df.loc[df["id"] == uid, var].sort_values()
+    #             if len(subdata) == 0:
+    #                 continue  # no data for this ID
 
-                # Compute the empirical CDF
-                cdfvals = np.arange(1, len(subdata) + 1) / float(len(subdata))
+    #             # Compute the empirical CDF
+    #             cdfvals = np.arange(1, len(subdata) + 1) / float(len(subdata))
 
-                # Plot
-                plt.plot(subdata, cdfvals, label=f"id = {int(uid)}")
+    #             # Plot
+    #             plt.plot(subdata, cdfvals, label=f"id = {int(uid)}")
 
-            plt.title(f"CDF of {var} (Separate lines per ID)")
-            plt.xlabel(var)
-            plt.ylabel("CDF")
-            plt.legend()
-            plt.tight_layout()
-            plt.savefig(output_path / f"cdf_{var}_by_id.png", dpi=150)
-            plt.close()
+    #         plt.title(f"CDF of {var} (Separate lines per ID)")
+    #         plt.xlabel(var)
+    #         plt.ylabel("CDF")
+    #         plt.legend()
+    #         plt.tight_layout()
+    #         plt.savefig(output_path / f"cdf_{var}_by_id.png", dpi=150)
+    #         plt.close()
 
-    if n_ids < 10 or plot_all:
-        logger.info("All values")
-        # Plot a separate CDF for each ID, for each variable
-        for var in variables:
-            plt.figure(figsize=(6, 4))
-            # Extract all values of `var` for the given ID
-            subdata = df[var].sort_values()
-            if len(subdata) == 0:
-                continue  # no data for this ID
+    # if n_ids < 10 or plot_all:
+    logger.info("All values")
+    for var in variables:
+        plt.figure(figsize=(6, 4))
+        # Extract all values of `var` for the given ID
+        da = xr.DataArray(df[var], dims=["index"], name=var).dropna(
+            how="all", dim="index"
+        )
+        da_sorted = da.sortby(da)  # sort by the data values
+        n = da_sorted.sizes["index"]
 
-            # Compute the empirical CDF
-            cdfvals = np.arange(1, len(subdata) + 1) / float(len(subdata))
+        # Create an array of ranks: [1, 2, ..., n]
+        ranks = xr.DataArray(np.arange(1, n + 1), dims=["index"])
 
-            # Plot
-            plt.plot(subdata, cdfvals)
+        # Compute the fraction => empirical CDF
+        cdf = ranks / n
+        # subdata = df[var].sort_values()
+        # if len(subdata) == 0:
+        # continue  # no data for this ID
+        # logger.info(float(len(subdata)))
+        logger.info(n)
+        logger.info(da_sorted.values)
+        logger.info(cdf.values)
+        plt.plot(da_sorted, cdf, marker="+", linestyle="-")  # step or line is typical
+        # Compute the empirical CDF
+        # cdfvals = np.arange(1, len(subdata) + 1) / float(len(subdata))
+        # Plot
+        # plt.scatter(subdata, cdfvals, s=0.5, color='blue')
+        # plt.plot(subdata, cdfvals, linewidth=0.3, color='blue')
+        title = f"CDF of {var} for {len(unique_ids)} stations"
+        if boostrap_iterations is not None:
+            title += f" and {boostrap_iterations} bootstrap iterations"
+        plt.title(title)
+        plt.xlabel(var)
+        plt.ylabel("CDF")
+        plt.legend()
+        plt.xlim(min(da_sorted.min(), 0), max(da_sorted.max(), 1))
+        plt.ylim(0, 1.05)
+        plt.tight_layout()
+        plt.savefig(output_path / f"cdf_{var}_all_stations.png", dpi=450)
+        plt.close()
 
-            plt.title(f"CDF of {var} (Separate lines per ID)")
-            plt.xlabel(var)
-            plt.ylabel("CDF")
-            plt.legend()
-            plt.tight_layout()
-            plt.savefig(output_path / f"cdf_{var}_all.png", dpi=150)
-            plt.close()
+    # if n_ids > 9 or plot_all:
+    #     # Many IDs => plot the distribution of mean values by ID, for each variable
+    #     # 1) Compute average (mean) across all rows belonging to each ID
+    #     means_by_id = df.groupby("id")[variables].mean()
 
-    if n_ids > 9 or plot_all:
-        # Many IDs => plot the distribution of mean values by ID, for each variable
-        # 1) Compute average (mean) across all rows belonging to each ID
-        means_by_id = df.groupby("id")[variables].mean()
+    #     for var in variables:
+    #         # This is now one mean value per ID
+    #         data = means_by_id[var].sort_values()
+    #         cdfvals = np.arange(1, len(data) + 1) / float(len(data))
 
-        for var in variables:
-            # This is now one mean value per ID
-            data = means_by_id[var].sort_values()
-            cdfvals = np.arange(1, len(data) + 1) / float(len(data))
-
-            plt.figure(figsize=(6, 4))
-            plt.plot(data, cdfvals, marker="o")
-            plt.title(f"CDF of mean {var} across {n_ids} IDs")
-            plt.xlabel(f"mean {var}")
-            plt.ylabel("CDF")
-            plt.tight_layout()
-            plt.savefig(output_path / f"cdf_{var}_mean_across_ids.png", dpi=150)
-            plt.close()
+    #         plt.figure(figsize=(6, 4))
+    #         plt.plot(data, cdfvals, marker="o")
+    #         plt.title(f"CDF of mean {var} across {n_ids} IDs")
+    #         plt.xlabel(f"mean {var}")
+    #         plt.ylabel("CDF")
+    #         plt.tight_layout()
+    #         plt.savefig(output_path / f"cdf_{var}_mean_across_ids.png", dpi=150)
+    #         plt.close()
 
     logger.info("Done! Check the saved PNG files for your CDF plots.")

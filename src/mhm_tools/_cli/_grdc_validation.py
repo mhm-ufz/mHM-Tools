@@ -8,7 +8,8 @@ def add_args(parser):
     required_args = parser.add_argument_group("required arguments")
     required_args.add_argument(
         "--gauge_info_path",
-        required=True,
+        required=False,
+        default=None,
         help=("Path to the gauge information file."),
     )
     required_args.add_argument(
@@ -67,11 +68,34 @@ def add_args(parser):
         help=("Number of boostrap experiments"),
     )
     parser.add_argument(
+        "--start_date",
+        required=False,
+        default=None,
+        type=str,
+        help=("""First year allowed in the analysis."""),
+    )
+    parser.add_argument(
+        "--end_date",
+        required=False,
+        default=None,
+        type=str,
+        help=("Lates year that is allowed in the analysis."),
+    )
+    parser.add_argument(
         "--direct_comparison",
         action="store_true",
         dest="direct_comparison",
         required=False,
         help=("Use no statistics but compare timeseries directly. Needs ref_path."),
+    )
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        dest="overwrite",
+        required=False,
+        help=(
+            "Overwrite existing files. Otherwise input data changes might not result in output changes."
+        ),
     )
     parser.add_argument("--output_dir", help="Path for the output dir.", required=True)
 
@@ -83,7 +107,6 @@ def run(args):
     evaludate_grdc_data(
         args.model_data_path,
         args.observed_data_path,
-        args.gauge_info_path,
         output_path=args.output_dir,
         n_jobs=int(args.ncpus),
         sim_variable=args.model_variable,
@@ -95,4 +118,7 @@ def run(args):
         n_boostrap_selections=args.n_bootstrap_selections,
         n_bootstrap_years=args.n_boostrap_years,
         direct_comparison=args.direct_comparison,
+        start_date=args.start_date,
+        end_date=args.end_date,
+        overwrite=args.overwrite,
     )

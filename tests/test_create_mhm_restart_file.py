@@ -48,10 +48,10 @@ class TestCreateRestart(unittest.TestCase):
         assert mf.clay_content == self.morph_dir / "CLYPPT.nc"
         assert mf.sand_content == self.morph_dir / "sand_content.nc"
         assert mf.bulk_density == self.morph_dir / "BLDFIE.nc"
-        assert mf.land_cover == [
+        assert set(mf.land_cover) == {
             self.morph_dir / "land_cover_1990.nc",
             self.morph_dir / "land_cover_2020.nc",
-        ]
+        }
         assert mf.get_file("lai") == self.morph_dir / "lai.nc"
 
     def test_read_latlon(self):
