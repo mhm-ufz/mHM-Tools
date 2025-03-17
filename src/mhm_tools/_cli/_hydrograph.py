@@ -1,6 +1,6 @@
 """Create a hydrograph showing the simulated and observed discharge."""
 
-from ..post.hydrograph import Hydrograph
+from ..post.hydrograph import get_hydrograph_from_path
 
 
 def add_args(parser):
@@ -84,8 +84,7 @@ def run(args):
         parsed command line arguments
 
     """
-    hydro = Hydrograph()
-    hydro.gen_hydrograph(
+    get_hydrograph_from_path(
         input_path=args.in_dir,
         output_file=args.out_file,
         show=args.show,
