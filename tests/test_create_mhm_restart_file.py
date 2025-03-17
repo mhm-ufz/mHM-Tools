@@ -50,7 +50,7 @@ class TestCreateRestart(unittest.TestCase):
         assert mf.bulk_density == self.morph_dir / "BLDFIE.nc"
         assert set(mf.land_cover) == {
             self.morph_dir / "land_cover_1990.nc",
-            self.morph_dir / "land_cover_2020.nc"
+            self.morph_dir / "land_cover_2020.nc",
         }
         assert mf.get_file("lai") == self.morph_dir / "lai.nc"
 
