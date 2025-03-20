@@ -108,6 +108,8 @@ class Catchment:
 
         self.input_ds = data
         if var == "fdir":
+            self.input_ds.attrs['_FillValue'] = FDIR_SINKVALUE[ftype]
+            self.input_ds.attrs['missing_value'] = FDIR_SINKVALUE[ftype]
             self.add_fdir(**kwargs)
         elif var == "dem":
             self.add_dem(**kwargs)
@@ -152,7 +154,7 @@ class Catchment:
             if mask.any():
                 data[mask] = FDIR_FILLVALUE[self.ftype]
             data = data.astype(np.uint8)
-            self._fdir = pyflwdir.from_array(data=data, ftype=self.ftype, **kwargs)
+            self._fdir = pyflwdir.from_array(data=data, ftype=self.ftype, transform=self.transform, **kwargs)
         self.get_fdir()
 
     def delineate_basin(self, gauge_coords, stream_order=4):
@@ -389,6 +391,9 @@ class Catchment:
         """Process data variable, masking it and croping it spatial dimensions."""
         logger.info(f"Processing {var_name}")
         data = getattr(self, var_name)
+        if data is None:
+            logger.warning(f"No data for {var_name}")
+            return None
         if cut_by_basin:
             data[~self.catchment_mask] = self.VARIABLES[var_name]["_FillValue"]
         if data is None:
@@ -578,17 +583,17 @@ def get_transformation_matrix_nc(ds, var_name):
     # Get attributes for geotransformation
     lat = da.coords["lat"].values  # Assuming 'lat' and 'lon' are dimensions
     lon = da.coords["lon"].values
-    logger.info(f"lat: {lat[0]} | {lat[-1]}")
-    logger.info(f"lon: {lon[0]} | {lon[-1]}")
+    logger.info(f"lat: {lat.max()} | {lat.min()}")
+    logger.info(f"lon: {lon.min()} | {lon.max()}")
 
     # Assuming uniform spacing, calculate resolution
     lat_res = abs(lat[1] - lat[0]) if len(lat) > 1 else 0.0
     lon_res = abs(lon[1] - lon[0]) if len(lon) > 1 else 0.0
-    lon_res, lat_res = np.round(lon_res, decimals=5), np.round(lat_res, decimals=5)
-    logger.info(f"lat_res {lat_res}; lon_res {lon_res}")
+    lon_res, lat_res = lon_res, lat_res
+    # logger.info(f"lat_res {lat_res}; lon_res {lon_res}")
 
     # Get the corner coordinate of the dataset
-    x_min, y_max = np.round(lon.min(), decimals=5), np.round(lat.max(), decimals=5)
+    x_min, y_max = lon.min(), lat.max()
     return (
         np.float64(lon_res),
         np.float64(0.0),
@@ -629,6 +634,7 @@ def create_catchment(
     l1_resolution=None,
     frame=1,
     upscale=False,
+    latlon=True
 ):
     """Create file containing catchment ids, flowdirection and upstream area from dem or flow direction."""
     logger.info(
