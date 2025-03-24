@@ -106,8 +106,21 @@ class Catchment:
             transform[2] = 0
             self.transform = tuple(transform)
 
-        self.input_ds = data
+        self.input_da = data
+              
         if var == "fdir":
+            if 'nodata_value' in self.input_da.attrs:
+                old_no_data_val = self.input_da.attrs['nodata_value']
+            elif '_FillValue' in self.input_da.attrs:
+                old_no_data_val = self.input_da.attrs['_FillValue']
+            elif 'missing_value' in self.input_da.attrs:
+                old_no_data_val = self.input_da.attrs['missing_value']
+            else:
+                old_no_data_val = np.nan
+            self.input_da.attrs['_FillValue'] = FDIR_FILLVALUE[ftype]
+            self.input_da.attrs['nodata_value'] = FDIR_FILLVALUE[ftype]
+            self.input_da = self.input_da.where(ds[var_name] != old_no_data_val  &  ~np.isnan(ds[var_name]), FDIR_FILLVALUE[ftype])
+            logger.debug(self.input_da)
             self.add_fdir(**kwargs)
         elif var == "dem":
             self.add_dem(**kwargs)
@@ -131,7 +144,7 @@ class Catchment:
         """Init the FlwdirRaster class from dem."""
         # perform checks
         # self.input_ds = fill_nan_with_neighbors(self.input_ds)
-        self.elevtn = self.input_ds.data
+        self.elevtn = self.input_da.data
         if self._fdir is None:
             # Create a flow direction object
             logger.info(f"add_dem: kwargs: {kwargs}")
@@ -146,13 +159,11 @@ class Catchment:
     def add_fdir(self, **kwargs):
         """Init the FlwdirRaster class from fdir."""
         # perform check
-        data = self.input_ds.data
+        data = self.input_da.data
         if self._fdir is None:
-            mask = np.isnan(data)
-            if mask.any():
-                data[mask] = FDIR_FILLVALUE[self.ftype]
             data = data.astype(np.uint8)
-            self._fdir = pyflwdir.from_array(data=data, ftype=self.ftype, **kwargs)
+            logger.debug(data)
+            self._fdir = pyflwdir.from_array(data=data, ftype=self.ftype, transform=self.transform, **kwargs)
         self.get_fdir()
 
     def delineate_basin(self, gauge_coords, stream_order=4):
@@ -209,7 +220,7 @@ class Catchment:
         self.uparea_grid = uparea1  # replaces self.get_facc
 
         if var == "dem":
-            lat_size, lon_size = self.input_ds.shape
+            lat_size, lon_size = self.input_da.shape
             # Ensure the dimensions are evenly divisible by the factor
             if lat_size % factor != 0 or lon_size % factor != 0:
                 msg = f"Data dimensions must be divisible by the upscaling factor of {factor}. Lat ({lat_size}/{factor})={lat_size/factor:.2f}; Lon ({lon_size}/{factor})={lon_size/factor:.2f}"
@@ -217,7 +228,7 @@ class Catchment:
                     raise ValueError(msg)
 
             # Reshape and aggregate data
-            reshaped = self.input_ds.values.reshape(
+            reshaped = self.input_da.values.reshape(
                 lat_size // factor, factor, lon_size // factor, factor
             )
             aggregated = reshaped.mean(axis=(1, 3))  # Conservative mean over each block
@@ -230,6 +241,7 @@ class Catchment:
 
     def get_fdir(self):
         """Perform the calculation of the flow direction."""
+        logger.debug('Get flwdir as array.')
         self.flwdir = self._fdir.to_array(ftype=self.ftype or OUTPUT_FTYPE)
 
     def get_upstream_area(self):
