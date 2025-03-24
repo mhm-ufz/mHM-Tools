@@ -108,8 +108,18 @@ class Catchment:
 
         self.input_ds = data
         if var == "fdir":
-            self.input_ds.attrs['_FillValue'] = FDIR_SINKVALUE[ftype]
-            self.input_ds.attrs['missing_value'] = FDIR_SINKVALUE[ftype]
+            if 'nodata_value' in self.input_ds.attrs:
+                old_no_data_val = self.input_ds.attrs['nodata_value']
+            elif '_FillValue' in self.input_ds.attrs:
+                old_no_data_val = self.input_ds.attrs['_FillValue']
+            elif 'missing_value' in self.input_ds.attrs:
+                old_no_data_val = self.input_ds.attrs['missing_value']
+            else:
+                old_no_data_val = np.nan
+            self.input_ds.attrs['_FillValue'] = FDIR_FILLVALUE[ftype]
+            self.input_ds.attrs['nodata_value'] = FDIR_FILLVALUE[ftype]
+            self.input_ds = self.input_ds.where(ds[var_name] != old_no_data_val, FDIR_FILLVALUE[ftype])
+            logger.debug(self.input_ds)
             self.add_fdir(**kwargs)
         elif var == "dem":
             self.add_dem(**kwargs)
@@ -449,10 +459,10 @@ class Catchment:
         logger.debug(f"ds: {ds}")
         ds = self.create_frame(ds, frame, FDIR_SINKVALUE[self.ftype])
         # For the flow dir map fill masked cells adjecent to filled cells with sink instead of missing value
-        fdir_filled = self.fill_adjacent_missing_with_sink(
-            ds["flwdir"], FDIR_FILLVALUE[self.ftype], FDIR_SINKVALUE[self.ftype]
-        )
-        ds["flwdir"].data[:] = fdir_filled.data[:]
+        # fdir_filled = self.fill_adjacent_missing_with_sink(
+        #     ds["flwdir"], FDIR_FILLVALUE[self.ftype], FDIR_SINKVALUE[self.ftype]
+        # )
+        # ds["flwdir"].data[:] = fdir_filled.data[:]
         ds.to_netcdf(
             out_path / self.out_var_name,
             encoding={
@@ -652,7 +662,6 @@ def create_catchment(
         transform = get_transformation_matrix_nc(input_ds, var_name)
 
         logger.info(transform)
-        latlon = True
 
         if gauge_coords is None and is_data_global(input_ds, coordinate_slices):
             logger.info("Creating global basin id file...")

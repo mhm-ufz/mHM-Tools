@@ -105,6 +105,12 @@ def add_args(parser):
         help=("""Upscale to l1_resolution."""),
     )
     parser.add_argument(
+        "--coords_are_latlon",
+        action="store_true",
+        default=False,
+        help=("""Set this flag if the coordinates are in degree not m."""),
+    )
+    parser.add_argument(
         "--mask_file",
         default=None,
         help=("Path where to save the mask file"),
@@ -158,4 +164,5 @@ def run(args):
         l1_resolution=args.l1_resolution,
         frame=args.frame,
         upscale=args.upscale,
+        latlon=args.coords_are_latlon
     )
