@@ -394,8 +394,8 @@ def crop_mhm_setup(
     l11_resolution=None,
     crs=None,
     n_jobs=1,
-    filename="*.*", 
-    recursive_depth=5
+    filename="*.*",
+    recursive_depth=5,
 ):
     """Cut out an existing mhm domain setup using a mask file."""
     # check if the input is correct

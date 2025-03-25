@@ -85,6 +85,6 @@ def run(args):
         crs=args.crs,
         l11_resolution=args.l11_resolution,
         n_jobs=args.ncpus,
-        filename=args.filename, 
-        recursive_depth=args.folder_recursion_depth
+        filename=args.filename,
+        recursive_depth=args.folder_recursion_depth,
     )
