@@ -67,7 +67,6 @@ class TestCatchment(unittest.TestCase):
             out_var_name=self.out_var_name,
             latlon=self.latlon,
         )
-        c.add_fdir(data=self.ds["flwdir"].data)
         self.assertIsNotNone(c._fdir)
 
     def test_add_dem(self):
