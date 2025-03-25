@@ -394,6 +394,8 @@ def crop_mhm_setup(
     l11_resolution=None,
     crs=None,
     n_jobs=1,
+    filename="*.*",
+    recursive_depth=5,
 ):
     """Cut out an existing mhm domain setup using a mask file."""
     # check if the input is correct
@@ -411,8 +413,8 @@ def crop_mhm_setup(
     # recusively get all the files from the input path if it is a dir
     files = []
     if input_path.is_dir():
-        for depth in range(3):  # Depth 0 to 2
-            files.extend(input_path.glob("*/" * depth + "*.*"))
+        for depth in range(recursive_depth):
+            files.extend(input_path.glob("*/" * depth + filename))
     else:
         files = [input_path]
     with xr.open_dataset(mask_file) as mask_ds:

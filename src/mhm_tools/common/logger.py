@@ -180,6 +180,7 @@ def log_errors(raise_exceptions=True):
                 else:
                     logger.error(e)
                     return None
+
         return wrapper
 
     return decorator

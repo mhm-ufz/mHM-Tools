@@ -108,18 +108,23 @@ class Catchment:
 
         self.input_da = data
               
+        self.input_da = data
+
         if var == "fdir":
-            if 'nodata_value' in self.input_da.attrs:
-                old_no_data_val = self.input_da.attrs['nodata_value']
-            elif '_FillValue' in self.input_da.attrs:
-                old_no_data_val = self.input_da.attrs['_FillValue']
-            elif 'missing_value' in self.input_da.attrs:
-                old_no_data_val = self.input_da.attrs['missing_value']
+            if "nodata_value" in self.input_da.attrs:
+                old_no_data_val = self.input_da.attrs["nodata_value"]
+            elif "_FillValue" in self.input_da.attrs:
+                old_no_data_val = self.input_da.attrs["_FillValue"]
+            elif "missing_value" in self.input_da.attrs:
+                old_no_data_val = self.input_da.attrs["missing_value"]
             else:
                 old_no_data_val = np.nan
-            self.input_da.attrs['_FillValue'] = FDIR_FILLVALUE[ftype]
-            self.input_da.attrs['nodata_value'] = FDIR_FILLVALUE[ftype]
-            self.input_da = self.input_da.where(ds[var_name] != old_no_data_val  &  ~np.isnan(ds[var_name]), FDIR_FILLVALUE[ftype])
+            self.input_da.attrs["_FillValue"] = FDIR_FILLVALUE[ftype]
+            self.input_da.attrs["nodata_value"] = FDIR_FILLVALUE[ftype]
+            self.input_da = self.input_da.where(
+                (ds[var_name] != old_no_data_val) & ~np.isnan(ds[var_name]),
+                FDIR_FILLVALUE[ftype],
+            )
             logger.debug(self.input_da)
             self.add_fdir(**kwargs)
         elif var == "dem":
@@ -163,7 +168,9 @@ class Catchment:
         if self._fdir is None:
             data = data.astype(np.uint8)
             logger.debug(data)
-            self._fdir = pyflwdir.from_array(data=data, ftype=self.ftype, transform=self.transform, **kwargs)
+            self._fdir = pyflwdir.from_array(
+                data=data, ftype=self.ftype, transform=self.transform, **kwargs
+            )
         self.get_fdir()
 
     def delineate_basin(self, gauge_coords, stream_order=4):
@@ -241,7 +248,7 @@ class Catchment:
 
     def get_fdir(self):
         """Perform the calculation of the flow direction."""
-        logger.debug('Get flwdir as array.')
+        logger.debug("Get flwdir as array.")
         self.flwdir = self._fdir.to_array(ftype=self.ftype or OUTPUT_FTYPE)
 
     def get_upstream_area(self):

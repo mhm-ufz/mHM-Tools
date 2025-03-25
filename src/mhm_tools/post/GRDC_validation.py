@@ -82,7 +82,7 @@ def get_sim_data_for_one_gauge(id, index, sim_data, yarr, xarr, resolution):
 
 
 def get_gauge_coords(
-    ds, facc, lonlat=None, xy=None, cell_diff=1, max_cell_diff=3, diff_percent=10
+    ds, facc, lonlat=None, xy=None, cell_diff=1, max_cell_diff=3, diff_percent=10, id=None
 ):
     """
     Find correct gauge location.
@@ -149,7 +149,7 @@ def get_gauge_coords(
             max_cell_diff=3,
             diff_percent=10,
         )
-    logger.warning("No similar flow accumulation found nearby.")
+    logger.warning("No similar flow accumulation found nearby for gauge {id}.")
     logger.debug("None, None, None")
     return None, None, None
 
@@ -260,8 +260,9 @@ def Q_data_to_xarray(
                     cell_diff=1,
                     max_cell_diff=3,
                     diff_percent=10,
+                    id=id_i,
                 )
-                for x_i, y_i, facc_i in zip(x.values, y.values, facc.values)
+                for x_i, y_i, facc_i, id_i in zip(x.values, y.values, facc.values, gauge_ids.values)
             )
             x_new, y_new, facc_new, gauge_ids_with_values = [], [], [], []
             for i, (xn, yn, fan) in enumerate(out):
@@ -290,10 +291,9 @@ def Q_data_to_xarray(
                     sim_data=sim_data_cropped[sim_variable],
                     yarr=y_new,
                     xarr=x_new,
-                    resolution=resolution,
-                    facc=facc_i,
+                    resolution=resolution
                 )
-                for i, (id, facc_i) in enumerate(zip(gauge_ids_with_values, facc_new))
+                for i, id in enumerate(gauge_ids_with_values)
             )
         simulation_discharge = xr.concat(sim, dim="id").drop_vars(["lat", "lon"])
         facc_ids = xr.DataArray(
