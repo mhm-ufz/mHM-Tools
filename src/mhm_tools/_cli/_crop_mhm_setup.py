@@ -31,6 +31,13 @@ def add_args(parser):
         required=True,
         help="Path of the directory where the new domain setup should be saved.",
     )
+    required_args.add_argument(
+        "-f",
+        "--file_name",
+        required=False,
+        default="*.*",
+        help="Input file name. E.g. '*.nc' to copy only nc files or 'pre*' to copy only precipitation files. If the file has a header in it's folder the header is reproduced regardless of wether nor not it fits the filename.",
+    )
     parser.add_argument(
         "--l1_resolution",
         required=False,
@@ -54,6 +61,12 @@ def add_args(parser):
         default=1,
         help=(""),
     )
+    parser.add_argument(
+        "--folder_recursion_depth",
+        required=False,
+        default=5,
+        help=("How deep in the folder structure should the file be searched?"),
+    )
 
 
 def run(args):
@@ -72,4 +85,6 @@ def run(args):
         crs=args.crs,
         l11_resolution=args.l11_resolution,
         n_jobs=args.ncpus,
+        filename=args.file_name,
+        recursive_depth=args.folder_recursion_depth,
     )
