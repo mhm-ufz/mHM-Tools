@@ -290,10 +290,9 @@ def Q_data_to_xarray(
                     sim_data=sim_data_cropped[sim_variable],
                     yarr=y_new,
                     xarr=x_new,
-                    resolution=resolution,
-                    facc=facc_i,
+                    resolution=resolution
                 )
-                for i, (id, facc_i) in enumerate(zip(gauge_ids_with_values, facc_new))
+                for i, id in enumerate(gauge_ids_with_values)
             )
         simulation_discharge = xr.concat(sim, dim="id").drop_vars(["lat", "lon"])
         facc_ids = xr.DataArray(
