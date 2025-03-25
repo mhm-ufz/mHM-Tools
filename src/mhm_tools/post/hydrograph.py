@@ -930,7 +930,9 @@ class Hydrograph:
 
 
 @log_arguments()
-def get_hydrograph(input_path, output_file, show, save, title, plot_code, prec_path):
+def get_hydrograph_from_path(
+    input_path, output_file, show, save, title, plot_code, prec_path
+):
     """
     Read in discharge data and produce a hydrograph with different analysises.
 
