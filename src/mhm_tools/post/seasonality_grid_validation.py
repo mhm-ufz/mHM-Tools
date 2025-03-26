@@ -51,7 +51,8 @@ def spearman_spatial(data1, data2):
         for j, _col in enumerate(row):
             sp_corr, sp_pval = spearman_correlation(data1[:, i, j], data2[:, i, j])
             res[i, j] = sp_corr
-    return res
+            pval[i, j] = sp_pval
+    return res, pval
 
 
 def climatology(data):
@@ -182,7 +183,7 @@ def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None)
     da = None
     logger.debug(f"{type(files)}, {files}")
     if not isinstance(files, Iterable):
-        logger.warning(f"Files not a list of files but one file {files}.")
+        # logger.warning(f"Files not a list of files but one file {files}.")
         files = [files]
     with xr.open_dataset(files[0], engine="netcdf4") as ds:
         # Apply coordinate slicing if needed
@@ -590,7 +591,7 @@ def compare_input_with_ref(
     # compare and save statistics
     rel_mean = input["mean"].values / ref["mean"].values
     rel_std = input["std"].values / ref["std"].values
-    spearman = spearman_spatial(input["clim"], ref["clim"])
+    spearman, spearman_pval = spearman_spatial(input["clim"], ref["clim"])
     rel_mean = xr.DataArray(
         rel_mean,
         coords={
@@ -609,6 +610,14 @@ def compare_input_with_ref(
     )
     spearman = xr.DataArray(
         spearman,
+        coords={
+            "lat": get_coord_values(input, lat=True),
+            "lon": get_coord_values(input, lon=True),
+        },
+        dims=["lat", "lon"],
+    )    
+    spearman_pval = xr.DataArray(
+        spearman_pval,
         coords={
             "lat": get_coord_values(input, lat=True),
             "lon": get_coord_values(input, lon=True),
@@ -634,7 +643,7 @@ def compare_input_with_ref(
         dims=["month", "lat", "lon"],
     )
     output = xr.Dataset(
-        {"spearman": spearman, "rel_std": rel_std, "rel_mean": rel_mean},
+        {"spearman": spearman, "rel_std": rel_std, "rel_mean": rel_mean, "spearman_pval": spearman_pval},
         coords={
             "month": np.arange(1, 13, 1),
             "lat": get_coord_values(input, lat=True),
@@ -683,25 +692,28 @@ def get_rel_stat_file(output_path, input_name, ref_name):
 def evaluate_boostraping_stat_files(stat_files, input_name, ref_name):
     """Evaluate bootstrapped statistics and compute median across bootstrap iterations."""
     # Open the first file to initialize dimensions and weights
-    with xr.open_dataset(stat_files[0]) as first_file:
-        shape = first_file["rel_mean"].shape
-        n_bootstrap = len(stat_files)
+    try:
+        with xr.open_dataset(stat_files[0]) as first_file:
+            shape = first_file["rel_mean"].shape
+            n_bootstrap = len(stat_files)
 
-        # Determine keys for climatology fields
-        input_clim_key = (
-            f"{input_name}_clim" if f"{input_name}_clim" in first_file else "input_clim"
-        )
-        ref_clim_key = (
-            f"{ref_name}_clim" if f"{ref_name}_clim" in first_file else "ref_clim"
-        )
+            # Determine keys for climatology fields
+            input_clim_key = (
+                f"{input_name}_clim" if f"{input_name}_clim" in first_file else "input_clim"
+            )
+            ref_clim_key = (
+                f"{ref_name}_clim" if f"{ref_name}_clim" in first_file else "ref_clim"
+            )
 
-        # Preallocate arrays for all variables
-        mean = np.empty((n_bootstrap, *shape))
-        std = np.empty((n_bootstrap, *shape))
-        spearman = np.empty((n_bootstrap, *shape))
-        input_clim = np.empty((n_bootstrap, 12, *shape))  # Month x lat x lon
-        ref_clim = np.empty((n_bootstrap, 12, *shape))  # Month x lat x lon
-
+            # Preallocate arrays for all variables
+            mean = np.empty((n_bootstrap, *shape))
+            std = np.empty((n_bootstrap, *shape))
+            spearman = np.empty((n_bootstrap, *shape))
+            input_clim = np.empty((n_bootstrap, 12, *shape))  # Month x lat x lon
+            ref_clim = np.empty((n_bootstrap, 12, *shape))  # Month x lat x lon
+    except ValueError as ve: 
+        logger.error(f"opening file {stat_files[0]} as first file failed.")
+        raise ve
     # Fill the preallocated arrays with bootstrap data
     for i, file in enumerate(stat_files):
         with xr.open_dataset(file) as ds:
@@ -858,7 +870,7 @@ def direct_comparison(
         / ref.mean(dim="time", skipna=True).values
     )
     logger.info("calculate spearman spatial ")
-    spearman = spearman_spatial(input, ref).values
+    spearman, spearman_pval = spearman_spatial(input, ref).values
 
     rel_mean = xr.DataArray(
         rel_mean,
@@ -883,9 +895,17 @@ def direct_comparison(
             "lon": get_coord_values(input, lon=True),
         },
         dims=["lat", "lon"],
+    )    
+    spearman_pval = xr.DataArray( 
+        spearman_pval,
+        coords={
+            "lat": get_coord_values(input, lat=True),
+            "lon": get_coord_values(input, lon=True),
+        },
+        dims=["lat", "lon"],
     )
     output = xr.Dataset(
-        {"spearman": spearman, "rel_std": rel_std, "rel_mean": rel_mean},
+        {"spearman": spearman, "rel_std": rel_std, "rel_mean": rel_mean, "spearman_pval": spearman_pval},
         coords={
             "lat": get_coord_values(input, lat=True),
             "lon": get_coord_values(input, lon=True),
