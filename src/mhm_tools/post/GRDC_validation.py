@@ -437,11 +437,13 @@ def evaludate_grdc_data(  # noqa: PLR0913
         )
         results = []
         total_years_sim = np.unique(
-            model_da.dropna(dim="time", how="all").time.dt.year.data
+            model_da.dropna(dim="time", how="any").time.dt.year.data
         )
         total_years_obs = np.unique(
-            observed_da.dropna(dim="time", how="all").time.dt.year.data
+            observed_da.dropna(dim="time", how="any").time.dt.year.data
         )
+        logger.info(f'Observed years with non nan values: {total_years_obs}')
+        logger.info(f'Simulated years with non nan values: {total_years_obs}')
         # for index in range(n_boostrap_selections):
         ids_sim = np.unique(model_da.id.values)
         ids_obs = np.unique(observed_da.id.values)
