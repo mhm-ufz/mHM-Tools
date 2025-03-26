@@ -469,7 +469,12 @@ def evaludate_grdc_data(  # noqa: PLR0913
         for id in observed_ds.id.values
         if id in model_ds.id.values
     )
-    results_df = pd.DataFrame(results_direct) if not results else pd.DataFrame(results)
+    if not results:
+        logger.info('Using the results from direct comparison.')
+        results_df = pd.DataFrame(results_direct)
+    else:
+        logger.info('Using the results from bootstraping.')
+        results_df = pd.DataFrame(results)
     results_df = pd.DataFrame(results)
     results_df.to_csv(output_path / "results.csv")
     if results:
@@ -551,7 +556,7 @@ def plot_kde(results_df, output_path):
 
 
 @log_errors()
-def plot_cdf(df, output_path, boostrap_iterations=None):
+def plot_cdf(df, output_path, boostrap_iterations=None, mask_any=True):
     """Create cdf plots for alpha, beat and gamma for different subselections (by catchment, boostrap-mean or all results)."""
     # --- 1) Read your CSV ---
     # Adjust 'mydata.csv' to your actual file path
@@ -560,14 +565,17 @@ def plot_cdf(df, output_path, boostrap_iterations=None):
     # if not output_path.is_dir():
     #     output_path.mkdir()
     # The variables to plot
+    logger.info(f'In total there are {len(df["id"].unique())} catchments of which ')
+    logger.info(f'   {len(df.dropna(subset=["alpha"], how="any")["id"].unique())} have all alpha values')
+    logger.info(f'   {len(df.dropna(subset=["beta"], how="any")["id"].unique())} have beta values ')
+    logger.info(f'   {len(df.dropna(subset=["gamma"], how="any")["id"].unique())} have all gamma values ')
+    logger.info(f'   {len(df.dropna(subset=["alpha", "beta", "gamma"], how="any")["id"].unique())} have all values ')
     df = df.dropna(subset=["alpha", "beta", "gamma"], how="any")
     logger.info(df.head())
     variables = ["alpha", "beta", "gamma"]
 
     # --- 2) Check number of unique IDs ---
     unique_ids = df["id"].unique()
-    n_ids = len(unique_ids)
-    logger.info(f"Found {n_ids} unique IDs.")
 
     # --- 3 & 4) Branch based on the number of unique IDs ---
     # if n_ids < 9 or plot_all:
