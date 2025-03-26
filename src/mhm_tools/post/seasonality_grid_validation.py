@@ -667,6 +667,7 @@ def compare_input_with_ref(
         file_name = output_path / f"{file_name}.nc"
     output.to_netcdf(file_name)
     logger.info(f"Written output to {file_name}")
+    return file_name
     # plot_map(
     #     rel_std=rel_std,
     #     rel_mean=rel_mean,
@@ -1078,15 +1079,19 @@ def seasonality_grid_validation(
                 )
                 for s in range(n_bootstrap_selections)
             )
-        results = evaluate_boostraping_stat_files(
-            stat_files, input_name=input_name, ref_name=ref_name
-        )
-        plot_map(
-            **results,
-            output_path=output_path,
-            input_name=input_name,
-            ref_name=ref_name,
-        )
+        stat_files = [file for file in stat_files if file is not None]
+        if stat_files:
+            results = evaluate_boostraping_stat_files(
+                stat_files, input_name=input_name, ref_name=ref_name
+            )
+            plot_map(
+                **results,
+                output_path=output_path,
+                input_name=input_name,
+                ref_name=ref_name,
+            )
+        else: 
+            logger.error('There are no statfiles created from the evaluation.')
     else:
         # compare without bootstraping
         compare_input_with_ref(
