@@ -425,6 +425,8 @@ def evaludate_grdc_data(  # noqa: PLR0913
     )
     model_da = model_ds["discharge"]
     observed_da = observed_ds["discharge"]
+    logger.debug(f'Model dataarray: {model_da}')
+    logger.debug(f'Observed dataarray: {observed_da}')
     results = []
     if (
         n_bootstrap_years is not None
@@ -436,11 +438,13 @@ def evaludate_grdc_data(  # noqa: PLR0913
             f"Bootstrapping with {n_boostrap_selections} selections with {n_bootstrap_years} years each."
         )
         results = []
+        model_da = model_da.dropna(dim="time", how="all")
+        observed_da = observed_da.dropna(dim="time", how="all")
         total_years_sim = np.unique(
-            model_da.dropna(dim="time", how="any").time.dt.year.data
+            model_da.time.dt.year.data
         )
         total_years_obs = np.unique(
-            observed_da.dropna(dim="time", how="any").time.dt.year.data
+            observed_da.time.dt.year.data
         )
         logger.info(f'Observed years with non nan values: {total_years_obs}')
         logger.info(f'Simulated years with non nan values: {total_years_obs}')
