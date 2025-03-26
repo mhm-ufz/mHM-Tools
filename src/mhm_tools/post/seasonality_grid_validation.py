@@ -47,6 +47,7 @@ def spearman_spatial(data1, data2):
             msg = "Wrong shape for spatial spearman correlation!"
             raise ValueError(msg)
     res = np.full(np.shape(data1[0]), np.nan)
+    pval = np.full(np.shape(data1[0]), np.nan)
     for i, row in enumerate(data1[0]):
         for j, _col in enumerate(row):
             sp_corr, sp_pval = spearman_correlation(data1[:, i, j], data2[:, i, j])
@@ -181,7 +182,6 @@ def combine_results(results):
 def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None):
     """Take a list of files with all containing data for one month and creating statisitcs while reading them one by one."""
     da = None
-    logger.debug(f"{type(files)}, {files}")
     if not isinstance(files, Iterable):
         # logger.warning(f"Files not a list of files but one file {files}.")
         files = [files]
@@ -259,7 +259,7 @@ def get_stats_one_pass(
     logger.debug(years)
     files = get_files(input_path, n_bootstrap_years=n_bootstrap_years, years=years)
     logger.debug(f"List of files: {files}")
-    file_subsets = split_file_list(files, ncpus)
+    file_subsets = split_file_list(files, ncpus) if ncpus > 1 else [files]
     logger.info("creating statistics...")
     subset_results = Parallel(n_jobs=ncpus, backend="loky")(
         delayed(get_stats_one_pass_subset)(
