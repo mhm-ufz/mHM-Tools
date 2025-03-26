@@ -667,16 +667,16 @@ def compare_input_with_ref(
         file_name = output_path / f"{file_name}.nc"
     output.to_netcdf(file_name)
     logger.info(f"Written output to {file_name}")
-    plot_map(
-        rel_std=rel_std,
-        rel_mean=rel_mean,
-        spearman=spearman,
-        ref_clim=ref["clim"],
-        input_clim=input["clim"],
-        input_name=input_name,
-        ref_name=ref_name,
-        output_path=output_path,
-    )
+    # plot_map(
+    #     rel_std=rel_std,
+    #     rel_mean=rel_mean,
+    #     spearman=spearman,
+    #     ref_clim=ref["clim"],
+    #     input_clim=input["clim"],
+    #     input_name=input_name,
+    #     ref_name=ref_name,
+    #     output_path=output_path,
+    # )
 
 
 def get_rel_stat_file(output_path, input_name, ref_name):
