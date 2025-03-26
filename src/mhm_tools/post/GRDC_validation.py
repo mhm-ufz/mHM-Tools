@@ -372,13 +372,15 @@ def boostap_statistics(
         logger.warning(
             f"(id in obs_da_sel.id = {id in obs_da_sel.id} and id in sim_da_sel.id = {id in sim_da_sel.id}) or not sim_da_sel.isnull().all() = {sim_da_sel.isnull().all()} or not obs_da_sel.isnull().all() = {obs_da_sel.isnull().all()}"
         )
-    return {
+    results = {
         "index": index,
         "id": id,
         "alpha": float(alpha),
         "beta": float(beta),
         "gamma": float(gamma),
     }
+    logger.debug(results)
+    return results
 
 
 @log_arguments()
