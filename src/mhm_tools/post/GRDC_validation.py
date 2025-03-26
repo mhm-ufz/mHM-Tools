@@ -148,6 +148,7 @@ def get_gauge_coords(
             cell_diff=cell_diff + 1,
             max_cell_diff=3,
             diff_percent=10,
+            id=id
         )
     logger.warning(f"No similar flow accumulation found nearby for gauge {id}.")
     logger.debug("None, None, None")
@@ -352,8 +353,8 @@ def boostap_statistics(
     alpha, beta, gamma = np.nan, np.nan, np.nan
     if (
         (id in obs_da_sel.id and id in sim_da_sel.id)
-        or not sim_da_sel.isnull().all()
-        or not obs_da_sel.isnull().all()
+        and not sim_da_sel.isnull().all()
+        and not obs_da_sel.isnull().all()
     ):
         try:
             sim_id = sim_da_sel.sel(id=id)
@@ -366,21 +367,22 @@ def boostap_statistics(
             logger.debug(
                 f"results for index {index} and gauge {id}: alpha={alpha:.3f}, beta={beta:.3f}, gamma={gamma:.3f}"
             )
+            if np.isnan(alpha):
+                logger.debug('sim: {sim_id} and clim {clim_sim}')
+                logger.debug('obs: {obs_id} and clim {clim_obs}')
         except Exception as e:
             logger.error(f"Error for index {index} and id {id} with error {e}")
     else:
         logger.warning(
             f"(id in obs_da_sel.id = {id in obs_da_sel.id} and id in sim_da_sel.id = {id in sim_da_sel.id}) or not sim_da_sel.isnull().all() = {sim_da_sel.isnull().all()} or not obs_da_sel.isnull().all() = {obs_da_sel.isnull().all()}"
         )
-    results = {
+    return {
         "index": index,
         "id": id,
         "alpha": float(alpha),
         "beta": float(beta),
         "gamma": float(gamma),
     }
-    logger.debug(results)
-    return results
 
 
 @log_arguments()
