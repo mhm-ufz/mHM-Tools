@@ -209,7 +209,7 @@ def Q_data_to_xarray(
     saving_path = Path(saving_path)
     if not saving_path.is_dir():
         saving_path.mkdir(parents=True)
-
+    
     # getting gauge infos
     with xr.open_dataset(observed_data_path) as gauge_info:
         gauge_ids = gauge_info["id"]
@@ -232,8 +232,22 @@ def Q_data_to_xarray(
             gauge_ids = gauge_ids.where(slicing_condition, drop=True)
     logger.info(f"There are {len(gauge_ids.values)} gauges")
 
+    # prepare for later resampling 
+    with xr.open_dataset(model_data_path) as sim_data_in:
+        res_sim = sim_data_in.time.diff('time').median()
+    with xr.open_dataset(observed_data_path) as observed_data_in:
+        res_obs = observed_data_in.time.diff('time').median()
+
+
+
+
     if not obs_output_file.is_file() or overwrite:
         with xr.open_dataset(observed_data_path) as observed_data_in:
+            if res_sim > res_obs:
+                # resample the datasets for them to have the same temporal resolution
+                logger.info(f'The observation dataset is resampled to fit the simulation dataset with a temporal resolution of {target_freq}')
+                target_freq = f"{int(res_sim / np.timedelta64(1, 'h'))}h"  # Convert to '24H' for daily, etc.
+                sim_data_in = sim_data_in.resample(time=target_freq).mean()
             obs_discharge_data = observed_data_in[observed_variable]
             obs_discharge_data = obs_discharge_data.sel(time=date_slice)
             # observed_data = observed_data.rename({observed_variable: "discharge"})
@@ -275,6 +289,11 @@ def Q_data_to_xarray(
         logger.info(f"There are {len(x_new)} gauges")
         logger.info("creating sim dataset")
         with xr.open_dataset(model_data_path) as sim_data_in:
+            if res_obs > res_sim:
+                # resample the datasets for them to have the same temporal resolution
+                target_freq = f"{int(res_obs / np.timedelta64(1, 'h'))}h"  # Convert to '24H' for daily, etc.
+                logger.info(f'The simulation dataset is resampled to fit the observation dataset with a temporal resolution of {target_freq}')
+                sim_data_in = sim_data_in.resample(time=target_freq).mean()
             if slicing_condition is not None:
                 sim_data_cropped = sim_data_in.sel(
                     {
