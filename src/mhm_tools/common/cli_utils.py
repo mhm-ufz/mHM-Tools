@@ -3,7 +3,6 @@
 import argparse
 import logging
 
-import numpy as np
 import xarray as xr
 
 from mhm_tools.common.logger import ErrorLogger
@@ -51,11 +50,11 @@ def get_coords_from_mask(mask):
     lat_min_target_grid -= resolution / 2
     lat_max_target_grid += resolution / 2
 
-    # round values to get rid of inprecission
-    lon_min_target_grid = np.round(lon_min_target_grid, 6)
-    lon_max_target_grid = np.round(lon_max_target_grid, 6)
-    lat_min_target_grid = np.round(lat_min_target_grid, 6)
-    lat_max_target_grid = np.round(lat_max_target_grid, 6)
+    # # round values to get rid of inprecission
+    # lon_min_target_grid = np.round(lon_min_target_grid, 9)
+    # lon_max_target_grid = np.round(lon_max_target_grid, 9)
+    # lat_min_target_grid = np.round(lat_min_target_grid, 9)
+    # lat_max_target_grid = np.round(lat_max_target_grid, 9)
 
     logger.debug(
         f"Read coord from mask file: lat ({lat_min_target_grid} to {lat_max_target_grid}) {(lon_max_target_grid-lat_min_target_grid)/resolution} cells and lon ({lon_min_target_grid} to {lon_max_target_grid}) {(lon_max_target_grid-lat_min_target_grid)/resolution} cells"
@@ -71,7 +70,8 @@ def get_coords_from_mask(mask):
             lon_max_target_grid,
             lon_min_target_grid,
         )
-    mask = mask.mask
+    mask_key = next(key for key in ["mask", "land_mask"] if key in mask.data_vars)
+    mask = mask[mask_key]
     return (
         lon_min_target_grid,
         lon_max_target_grid,
@@ -83,7 +83,7 @@ def get_coords_from_mask(mask):
 
 def get_coords(
     lonlatbox,
-    mask_file,
+    mask_file=None,
     lon_min=None,
     lon_max=None,
     lat_min=None,
