@@ -136,9 +136,7 @@ def write_to_file(ds, output_file: Path):
         ds.to_netcdf(output_file)
 
 
-def crop_file_with_header(
-    ds_in, file_path, output_path, lonslice, latslice
-):
+def crop_file_with_header(ds_in, file_path, output_path, lonslice, latslice):
     """Crop the nc file and create a new header file for the new coordinates."""
     pres = 1e-5
     header = file_path.parent / "header.txt"
@@ -178,7 +176,7 @@ def crop_file_with_header(
         #     lon < float(mask[lon_key_mask].max()) - mask_res / 2 + pres
         # )
         # x_mask = (lon >= lonslice.start - pres) & (lon < lonslice.stop + pres)
-        
+
         # x = np.arange(0, ds_in.sizes[lon_key], 1)
         # x_cropped = x[x_mask]
         # # y values
@@ -189,10 +187,12 @@ def crop_file_with_header(
         # y = np.arange(ds_in.sizes[lat_key], 0, -1) - 1
         # y_cropped = y[y_mask]
 
-        index_x_min = int((lonslice.start  - pres - d["xllcorner"]) / d["cellsize"] + 0.5)
-        index_x_max = int((lonslice.stop  + pres - d["xllcorner"]) / d["cellsize"])
-        index_y_min = int((latslice.stop  - pres - d["yllcorner"]) / d["cellsize"] + 0.5)
-        index_y_max = int((latslice.start  + pres - d["yllcorner"]) / d["cellsize"])
+        index_x_min = int(
+            (lonslice.start - pres - d["xllcorner"]) / d["cellsize"] + 0.5
+        )
+        index_x_max = int((lonslice.stop + pres - d["xllcorner"]) / d["cellsize"])
+        index_y_min = int((latslice.stop - pres - d["yllcorner"]) / d["cellsize"] + 0.5)
+        index_y_max = int((latslice.start + pres - d["yllcorner"]) / d["cellsize"])
         # write header file
         header_out_path = output_path / header.name
         xll = d["xllcorner"] + d["cellsize"] * index_x_min
@@ -211,11 +211,20 @@ NODATA_value         {d['NODATA_value']}
         with (header_out_path).open("w") as nh:
             nh.write(header_str)
         try:
-            data = ds_in[data_var].isel({lat_key: slice(index_y_max, index_y_min), lon_key: slice(index_x_min, index_x_max)})
+            data = ds_in[data_var].isel(
+                {
+                    lat_key: slice(index_y_max, index_y_min),
+                    lon_key: slice(index_x_min, index_x_max),
+                }
+            )
             data_array = xr.DataArray(
                 data=data,
                 dims=["time", lat_key, lon_key],
-                coords={"time": ds_in.time, lat_key: data[lat_key], lon_key:data[lon_key] },
+                coords={
+                    "time": ds_in.time,
+                    lat_key: data[lat_key],
+                    lon_key: data[lon_key],
+                },
                 name=data_var,
                 attrs=data.attrs,
             )
@@ -323,7 +332,7 @@ def crop_file(f, mask_da, latslice, lonslice, output_path, input_path, overwrite
             f,
             output_path / f.parent.relative_to(input_path),
             lonslice=lonslice,
-            latslice=latslice
+            latslice=latslice,
         )
         if not (ds_croped is None and header_path is None):
             lat_key = get_coord_key(ds_croped, lat=True)
@@ -413,7 +422,13 @@ def crop_mhm_setup(
     # cut and copy each file
     list_latlon_files = Parallel(n_jobs=n_jobs, backend="loky")(
         delayed(crop_file)(
-            f=f, mask_da=mask_da, latslice=latslice, lonslice=lonslice, output_path=output_path, input_path=input_path, overwrite=overwrite
+            f=f,
+            mask_da=mask_da,
+            latslice=latslice,
+            lonslice=lonslice,
+            output_path=output_path,
+            input_path=input_path,
+            overwrite=overwrite,
         )
         for f in files
     )

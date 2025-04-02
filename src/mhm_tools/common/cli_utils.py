@@ -3,7 +3,6 @@
 import argparse
 import logging
 
-import numpy as np
 import xarray as xr
 
 from mhm_tools.common.logger import ErrorLogger
@@ -71,9 +70,7 @@ def get_coords_from_mask(mask):
             lon_max_target_grid,
             lon_min_target_grid,
         )
-    mask_key = next(
-            key for key in ["mask", "land_mask"] if key in mask.data_vars
-        )
+    mask_key = next(key for key in ["mask", "land_mask"] if key in mask.data_vars)
     mask = mask[mask_key]
     return (
         lon_min_target_grid,
