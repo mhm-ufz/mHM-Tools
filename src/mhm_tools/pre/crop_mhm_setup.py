@@ -160,15 +160,15 @@ def crop_file_with_header(
             line_content = line.strip().split(" ")
             logger.debug(f"{line_content[0].strip()} = {line_content[-1].strip()}")
             d[line_content[0].strip()] = float(line_content[-1].strip())
-        lon = np.arange(
-            d["xllcorner"], d["xllcorner"] + d["cellsize"] * d["ncols"], d["cellsize"]
-        )
+        # lon = np.arange(
+        #     d["xllcorner"], d["xllcorner"] + d["cellsize"] * d["ncols"], d["cellsize"]
+        # )
         # reverse order for lat (TODO: Make this resistant input with south north ordering)
-        lat = np.arange(
-            d["yllcorner"] + d["cellsize"] * (d["nrows"] - 1),
-            d["yllcorner"] - d["cellsize"],
-            -d["cellsize"],
-        )
+        # lat = np.arange(
+        #     d["yllcorner"] + d["cellsize"] * (d["nrows"] - 1),
+        #     d["yllcorner"] - d["cellsize"],
+        #     -d["cellsize"],
+        # )
         logger.info(ds_in[data_var].shape)
         lon_key = get_coord_key(ds_in, lon=True, raise_exception=True)
         lat_key = get_coord_key(ds_in, lat=True, raise_exception=True)
@@ -177,26 +177,29 @@ def crop_file_with_header(
         # x_mask = (lon >= float(mask[lon_key_mask].min()) - mask_res / 2 - pres) & (
         #     lon < float(mask[lon_key_mask].max()) - mask_res / 2 + pres
         # )
-        x_mask = (lon >= lonslice.start - pres) & (lon < lonslice.stop + pres)
+        # x_mask = (lon >= lonslice.start - pres) & (lon < lonslice.stop + pres)
         
-        x = np.arange(0, ds_in.sizes[lon_key], 1)
-        x_cropped = x[x_mask]
-        # y values
-        y_mask = (lat >= latslice.stop - pres) & (lat < latslice.start + pres)
+        # x = np.arange(0, ds_in.sizes[lon_key], 1)
+        # x_cropped = x[x_mask]
+        # # y values
+        # y_mask = (lat >= latslice.stop - pres) & (lat < latslice.start + pres)
         # y_mask = (lat >= float(mask[lat_key_mask].min()) - mask_res / 2 - pres) & (
         #     lat < float(mask[lat_key_mask].max()) - mask_res / 2 + pres
         # )
-        y = np.arange(ds_in.sizes[lat_key], 0, -1) - 1
-        y_cropped = y[y_mask]
+        # y = np.arange(ds_in.sizes[lat_key], 0, -1) - 1
+        # y_cropped = y[y_mask]
+
+        index_x_min = int((lonslice.start  - pres - d["xllcorner"]) / d["cellsize"] + 0.5)
+        index_x_max = int((lonslice.stop  + pres - d["xllcorner"]) / d["cellsize"])
+        index_y_min = int((latslice.stop  - pres - d["yllcorner"]) / d["cellsize"] + 0.5)
+        index_y_max = int((latslice.start  + pres - d["yllcorner"]) / d["cellsize"])
         # write header file
         header_out_path = output_path / header.name
-        xll = d["xllcorner"] + d["cellsize"] * np.nanmin(x_cropped)
-        yll = d["yllcorner"] + d["cellsize"] * np.nanmin(y_cropped)
-        ncols = len(x_cropped)
-        nrows = len(y_cropped)
+        xll = d["xllcorner"] + d["cellsize"] * index_x_min
+        yll = d["yllcorner"] + d["cellsize"] * index_y_min
         header_str = f"""
-ncols                {ncols}
-nrows                {nrows}
+ncols                {index_x_max-index_x_min}
+nrows                {index_y_max-index_y_min}
 xllcorner            {xll}
 yllcorner            {yll}
 cellsize             {d['cellsize']}
@@ -208,13 +211,11 @@ NODATA_value         {d['NODATA_value']}
         with (header_out_path).open("w") as nh:
             nh.write(header_str)
         try:
-            data = ds_in[data_var]
-            data = data[:, y_mask, :]
-            data = data[:, :, x_mask]
+            data = ds_in[data_var].isel({lat_key: slice(index_y_max, index_y_min), lon_key: slice(index_x_min, index_x_max)})
             data_array = xr.DataArray(
                 data=data,
                 dims=["time", lat_key, lon_key],
-                coords={"time": ds_in.time, lat_key: lat[y_mask], lon_key: lon[x_mask]},
+                coords={"time": ds_in.time, lat_key: data[lat_key], lon_key:data[lon_key] },
                 name=data_var,
                 attrs=data.attrs,
             )
