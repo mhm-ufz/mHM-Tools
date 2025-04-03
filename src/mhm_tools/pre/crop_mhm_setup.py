@@ -171,28 +171,17 @@ def crop_file_with_header(ds_in, file_path, output_path, lonslice, latslice):
         lon_key = get_coord_key(ds_in, lon=True, raise_exception=True)
         lat_key = get_coord_key(ds_in, lat=True, raise_exception=True)
         # x values
-        # mask_res = round(mask[lon_key_mask].data[1] - mask[lon_key_mask].data[0], 6)
-        # x_mask = (lon >= float(mask[lon_key_mask].min()) - mask_res / 2 - pres) & (
-        #     lon < float(mask[lon_key_mask].max()) - mask_res / 2 + pres
-        # )
-        # x_mask = (lon >= lonslice.start - pres) & (lon < lonslice.stop + pres)
-
-        # x = np.arange(0, ds_in.sizes[lon_key], 1)
-        # x_cropped = x[x_mask]
-        # # y values
-        # y_mask = (lat >= latslice.stop - pres) & (lat < latslice.start + pres)
-        # y_mask = (lat >= float(mask[lat_key_mask].min()) - mask_res / 2 - pres) & (
-        #     lat < float(mask[lat_key_mask].max()) - mask_res / 2 + pres
-        # )
-        # y = np.arange(ds_in.sizes[lat_key], 0, -1) - 1
-        # y_cropped = y[y_mask]
-
         index_x_min = int(
             (lonslice.start - pres - d["xllcorner"]) / d["cellsize"] + 0.5
         )
         index_x_max = int((lonslice.stop + pres - d["xllcorner"]) / d["cellsize"])
-        index_y_min = int((latslice.stop - pres - d["yllcorner"]) / d["cellsize"] + 0.5)
-        index_y_max = int((latslice.start + pres - d["yllcorner"]) / d["cellsize"])
+        # index_y_min = int((latslice.stop - pres - d["yllcorner"]) / d["cellsize"] + 0.5)
+        # index_y_max = int((latslice.start + pres - d["yllcorner"]) / d["cellsize"])
+        ymax = d["yllcorner"]+d["cellsize"]*d["nrows"]
+        index_y_min = int((ymax - latslice.stop - pres ) / d["cellsize"] + 0.5)
+        index_y_max = int((ymax - latslice.start + pres ) / d["cellsize"])
+        logger.debug(f'x: {index_x_min}, {index_x_max}')
+        logger.debug(f'y: {index_y_min}, {index_y_max}')
         # write header file
         header_out_path = output_path / header.name
         xll = d["xllcorner"] + d["cellsize"] * index_x_min
