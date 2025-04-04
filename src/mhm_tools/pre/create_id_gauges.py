@@ -29,21 +29,9 @@ def create_id_gauges(id, lon, lat, file, out_path, file_is_idgauges=False):
                 ds[var_name].values[:] = missing_value
                 contains_value = False
         else:
-            contains_value = bool(ds[data_var] == float(id)).any()
-        data_var = get_single_data_var(ds)
+            contains_value = bool(ds[data_name] == float(id)).any()
         if not contains_value:
-            nearest_lon = ds["lon"].sel(
-                lon=lon, method="nearest"
-            )  # , tolerance=tolerance)
-            # Find the nearest actual lat in the dataset
-            nearest_lat = ds["lat"].sel(
-                lat=lat, method="nearest"
-            )  # , tolerance=tolerance)
-            # Convert from DataArray to scalar for indexing
-            nearest_lon_val = nearest_lon.item()  # or float(nearest_lon.values)
-            nearest_lat_val = nearest_lat.item()
-            # TODO: Compare flow acc at this coordinate with known flow accumulation by using the basin_ids.nc file
-            ds[data_var].loc[{"lon": nearest_lon_val, "lat": nearest_lat_val}] = id
-            write_xarray_to_ascii(ds, out_path, data_var, fmt="%.0f")
+            ds.loc[ds.sel(lon=lon, lat=lat, method='nearest').coords] = id
+            write_xarray_to_ascii(ds, out_path, data_name, fmt="%.0f")
         else:
             logger.info("Id {id} is already in {file}.")
