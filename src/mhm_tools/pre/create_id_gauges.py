@@ -18,11 +18,11 @@ def create_id_gauges(id, lon, lat, file, out_path, file_is_idgauges=False):
     file = Path(file)
     out_path = Path(out_path)
     with get_xarray_ds_from_file(file) as ds:
-        if "nodata_value" in ds.attrs:
-            missing_value = ds.attrs["nodata_value"]
+        data_name = list(ds.keys())[0]
+        if "nodata_value" in ds[data_name].attrs:
+            missing_value = ds[data_name].attrs["nodata_value"]
         else:
-            data_var = next(ds.data_vars)
-            missing_value = ds[data_var].encoding.get("_FillValue", np.nan)
+            missing_value = ds[data_name].encoding.get("_FillValue", np.nan)
         if not file_is_idgauges:
             for var_name in ds.data_vars:
                 # Set every element of this variable to missing_value:
