@@ -208,6 +208,8 @@ class Catchment:
         if factor == 1:
             self.get_facc()
             return
+        # if we upscale the do_upscale flag should be true
+        self.do_upscale = True
         logger.info(
             f"Upscaling flow direction to {self.l1_resolution} with the fator {factor}."
         )
@@ -219,7 +221,7 @@ class Catchment:
         flwerr = self._fdir.upscale_error(fdir_upscaled, upscaling_indices)
         percentage_error = np.sum(flwerr == 0) / np.sum(flwerr != 255) * 100
         logger.info(f"upscaling error in {percentage_error:.2f}% of cells")
-
+        logger.debug(f"Upscaled form {self._fdir.shape} to {fdir_upscaled.shape}")
         self._fdir = fdir_upscaled
         self.get_fdir()
         self.uparea_grid = uparea1  # replaces self.get_facc
@@ -414,16 +416,16 @@ class Catchment:
         lon = self.ds.lon.data
         lat = self.ds.lat.data
         if self.l1_resolution is not None:
-            input_res = round(abs(lon[1] - lon[0]), 6)
-            res = self.l1_resolution
+            input_res = round(abs(lon[1] - lon[0]), 9)
             if input_res != self.l1_resolution and self.do_upscale:
+                logger.debug(f'Creating lon and lat arrays from l1_resolution {self.l1_resolution}')
                 lon = np.arange(
-                    lon.min() - input_res / 2 + res / 2, lon.max() + res / 2, res
+                    lon.min() - input_res / 2 + self.l1_resolution / 2, lon.max() + self.l1_resolution / 2, self.l1_resolution
                 )
                 lat = np.arange(
-                    lat.max() + input_res / 2 - res / 2, lat.min() - res / 2, -res
+                    lat.max() + input_res / 2 - self.l1_resolution / 2, lat.min() - self.l1_resolution / 2, -self.l1_resolution
                 )
-        logger.debug(f"lon_min {np.min(lon):.3f}, lon_max {np.max(lon):.3f}")
+        logger.debug(f"lon_min {np.min(lon):.3f}, lon_max {np.max(lon):.3f}, resulution: {self.l1_resolution}")
         logger.debug(f"{var_name} - mean {np.nanmean(data)}, max {np.nanmax(data)}")
         logger.debug(f"Shape {data.shape},  lon {len(lon)}, lat {len(lat)}")
         data_var = xr.Dataset(
@@ -678,6 +680,7 @@ def create_catchment(
                 out_var_name=temp_file1,
                 do_shift=False,
                 l1_resolution=l1_resolution,
+                upscale=upscale
             )
             # create a shifted version of the catchment to avoid border effects
             temp_file2 = "hydro2.nc"
@@ -696,11 +699,11 @@ def create_catchment(
             catchments = [global_catchments, global_catchments_shifted]
 
             for c in catchments:
-                c.get_basins()
                 if l1_resolution is not None and upscale:
                     c.upscale(var)
                 else:
                     c.get_facc()
+                c.get_basins()
                 c.get_grid_area()
                 # c.get_upstream_area()
                 c.write(output_path, single_file=True, frame=frame, mask_file=mask_file)
@@ -718,18 +721,6 @@ def create_catchment(
             temp_file2.unlink()
         elif coordinate_slices is not None:
             logger.info(f"Creating basin id file for {coordinate_slices}")
-            # res = round(input_ds.lon[1]-input_ds.lon[0], 6)
-            # if l1_resolution is not None:
-            #     factor = get_upscaling_factor(input_ds, l1_resolution)
-            #     lat_max = coordinate_slices['lat'].start + 2 * l1_resolution
-            #     lat_min = coordinate_slices['lat'].stop - 2 * l1_resolution
-            #     lon_min = coordinate_slices['lon'].start - 2 * l1_resolution
-            #     lon_max = coordinate_slices['lon'].stop + 2 * l1_resolution
-            # else:
-            # lat_max = coordinate_slices['lat'].start + (frame + 1) * res
-            # lat_min = coordinate_slices['lat'].stop - (frame + 1) * res
-            # lon_min = coordinate_slices['lon'].start - (frame + 1) * res
-            # lon_max = coordinate_slices['lon'].stop + (frame + 1) * res
             lat_max = coordinate_slices["lat"].start
             lat_min = coordinate_slices["lat"].stop
             lon_min = coordinate_slices["lon"].start
