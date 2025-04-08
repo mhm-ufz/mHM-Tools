@@ -115,8 +115,8 @@ def run(args):
             mask_da[lon_key_mask].data[-1] + l0_resolution / 2 + pres,
         )
     elif args.lonlatbox is not None:
-        latslice = (lat_max_target_grid, lat_min_target_grid)
-        lonslice = (lon_min_target_grid, lon_max_target_grid)
+        latslice = slice(lat_max_target_grid, lat_min_target_grid)
+        lonslice = slice(lon_min_target_grid, lon_max_target_grid)
         # l0_resolution = float(args.lonlatbox.split(",")[4])
     crop_mhm_setup(
         mask_da,
