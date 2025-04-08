@@ -50,7 +50,6 @@ class Catchment:
         l1_resolution=None,
         upscale=False,
         latlon=True,
-        **kwargs,
     ):
         self.flwdir = None
         self.basin = None
@@ -151,7 +150,7 @@ class Catchment:
         self.elevtn = self.input_da.data
         if self._fdir is None:
             # Create a flow direction object
-            logger.info(f"add_dem: kwargs: {kwargs}")
+            logger.info("add_dem")
             self._fdir = pyflwdir.from_dem(
                 data=self.elevtn,
                 nodata=np.nan,
@@ -421,14 +420,22 @@ class Catchment:
         if self.l1_resolution is not None:
             input_res = round(abs(lon[1] - lon[0]), 9)
             if input_res != self.l1_resolution and self.do_upscale:
-                logger.debug(f'Creating lon and lat arrays from l1_resolution {self.l1_resolution}')
+                logger.debug(
+                    f"Creating lon and lat arrays from l1_resolution {self.l1_resolution}"
+                )
                 lon = np.arange(
-                    lon.min() - input_res / 2 + self.l1_resolution / 2, lon.max() + self.l1_resolution / 2, self.l1_resolution
+                    lon.min() - input_res / 2 + self.l1_resolution / 2,
+                    lon.max() + self.l1_resolution / 2,
+                    self.l1_resolution,
                 )
                 lat = np.arange(
-                    lat.max() + input_res / 2 - self.l1_resolution / 2, lat.min() - self.l1_resolution / 2, -self.l1_resolution
+                    lat.max() + input_res / 2 - self.l1_resolution / 2,
+                    lat.min() - self.l1_resolution / 2,
+                    -self.l1_resolution,
                 )
-        logger.debug(f"lon_min {np.min(lon):.3f}, lon_max {np.max(lon):.3f}, resulution: {self.l1_resolution}")
+        logger.debug(
+            f"lon_min {np.min(lon):.3f}, lon_max {np.max(lon):.3f}, resulution: {self.l1_resolution}"
+        )
         logger.debug(f"{var_name} - mean {np.nanmean(data)}, max {np.nanmax(data)}")
         logger.debug(f"Shape {data.shape},  lon {len(lon)}, lat {len(lat)}")
         data_var = xr.Dataset(
@@ -682,7 +689,7 @@ def create_catchment(
                 out_var_name=temp_file1,
                 do_shift=False,
                 l1_resolution=l1_resolution,
-                upscale=upscale
+                upscale=upscale,
             )
             # create a shifted version of the catchment to avoid border effects
             temp_file2 = "hydro2.nc"

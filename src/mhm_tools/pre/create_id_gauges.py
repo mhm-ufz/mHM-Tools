@@ -7,7 +7,6 @@ import numpy as np
 
 from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_to_ascii
 from mhm_tools.common.logger import log_arguments
-from mhm_tools.common.xarray_utils import get_single_data_var
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +17,7 @@ def create_id_gauges(id, lon, lat, file, out_path, file_is_idgauges=False):
     file = Path(file)
     out_path = Path(out_path)
     with get_xarray_ds_from_file(file) as ds:
-        data_name = list(ds.keys())[0]
+        data_name = next(iter(ds.keys()))
         if "nodata_value" in ds[data_name].attrs:
             missing_value = ds[data_name].attrs["nodata_value"]
         else:
@@ -31,7 +30,7 @@ def create_id_gauges(id, lon, lat, file, out_path, file_is_idgauges=False):
         else:
             contains_value = bool(ds[data_name] == float(id)).any()
         if not contains_value:
-            ds.loc[ds.sel(lon=lon, lat=lat, method='nearest').coords] = id
+            ds.loc[ds.sel(lon=lon, lat=lat, method="nearest").coords] = id
             write_xarray_to_ascii(ds, out_path, data_name, fmt="%.0f")
         else:
             logger.info("Id {id} is already in {file}.")
