@@ -92,7 +92,6 @@ class TestCatchment(unittest.TestCase):
             out_var_name=self.out_var_name,
             latlon=self.latlon,
         )
-        c.add_dem(data=self.ds[self.var_name])
         c.get_basins()
         self.assertIsNotNone(c.basin)
 
@@ -125,7 +124,6 @@ class TestCatchment(unittest.TestCase):
         output_path.mkdir(parents=True, exist_ok=True)
 
         for c, out_var_name in zip(catchments, output_var_names):
-            c.add_dem(data=self.ds[self.var_name])
             c.get_basins()
             c.get_facc()
             c.get_grid_area()
