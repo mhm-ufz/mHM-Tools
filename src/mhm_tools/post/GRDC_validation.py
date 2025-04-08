@@ -82,7 +82,13 @@ def get_sim_data_for_one_gauge(id, index, sim_data, yarr, xarr, resolution):
 
 
 def get_gauge_coords(
-    ds, facc, lonlat=None, xy=None, cell_diff=1, max_cell_diff=3, diff_percent=10, id=None
+    ds,
+    facc,
+    lonlat=None,
+    xy=None,
+    cell_diff=1,
+    max_cell_diff=3,
+    diff_percent=10,
 ):
     """
     Find correct gauge location.
@@ -262,7 +268,9 @@ def Q_data_to_xarray(
                     diff_percent=10,
                     id=id_i,
                 )
-                for x_i, y_i, facc_i, id_i in zip(x.values, y.values, facc.values, gauge_ids.values)
+                for x_i, y_i, facc_i, id_i in zip(
+                    x.values, y.values, facc.values, gauge_ids.values
+                )
             )
             x_new, y_new, facc_new, gauge_ids_with_values = [], [], [], []
             for i, (xn, yn, fan) in enumerate(out):
@@ -291,7 +299,7 @@ def Q_data_to_xarray(
                     sim_data=sim_data_cropped[sim_variable],
                     yarr=y_new,
                     xarr=x_new,
-                    resolution=resolution
+                    resolution=resolution,
                 )
                 for i, id in enumerate(gauge_ids_with_values)
             )

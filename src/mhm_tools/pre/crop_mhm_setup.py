@@ -177,11 +177,11 @@ def crop_file_with_header(ds_in, file_path, output_path, lonslice, latslice):
         index_x_max = int((lonslice.stop + pres - d["xllcorner"]) / d["cellsize"])
         # index_y_min = int((latslice.stop - pres - d["yllcorner"]) / d["cellsize"] + 0.5)
         # index_y_max = int((latslice.start + pres - d["yllcorner"]) / d["cellsize"])
-        ymax = d["yllcorner"]+d["cellsize"]*d["nrows"]
-        index_y_min = int((ymax - latslice.stop - pres ) / d["cellsize"] + 0.5)
-        index_y_max = int((ymax - latslice.start + pres ) / d["cellsize"])
-        logger.debug(f'x: {index_x_min}, {index_x_max}')
-        logger.debug(f'y: {index_y_min}, {index_y_max}')
+        ymax = d["yllcorner"] + d["cellsize"] * d["nrows"]
+        index_y_min = int((ymax - latslice.stop - pres) / d["cellsize"] + 0.5)
+        index_y_max = int((ymax - latslice.start + pres) / d["cellsize"])
+        logger.debug(f"x: {index_x_min}, {index_x_max}")
+        logger.debug(f"y: {index_y_min}, {index_y_max}")
         # write header file
         header_out_path = output_path / header.name
         xll = d["xllcorner"] + d["cellsize"] * index_x_min
