@@ -108,17 +108,19 @@ class Catchment:
 
         self.input_ds = data
         if var == "fdir":
-            if 'nodata_value' in self.input_ds.attrs:
-                old_no_data_val = self.input_ds.attrs['nodata_value']
-            elif '_FillValue' in self.input_ds.attrs:
-                old_no_data_val = self.input_ds.attrs['_FillValue']
-            elif 'missing_value' in self.input_ds.attrs:
-                old_no_data_val = self.input_ds.attrs['missing_value']
+            if "nodata_value" in self.input_ds.attrs:
+                old_no_data_val = self.input_ds.attrs["nodata_value"]
+            elif "_FillValue" in self.input_ds.attrs:
+                old_no_data_val = self.input_ds.attrs["_FillValue"]
+            elif "missing_value" in self.input_ds.attrs:
+                old_no_data_val = self.input_ds.attrs["missing_value"]
             else:
                 old_no_data_val = np.nan
-            self.input_ds.attrs['_FillValue'] = FDIR_FILLVALUE[ftype]
-            self.input_ds.attrs['nodata_value'] = FDIR_FILLVALUE[ftype]
-            self.input_ds = self.input_ds.where(ds[var_name] != old_no_data_val, FDIR_FILLVALUE[ftype])
+            self.input_ds.attrs["_FillValue"] = FDIR_FILLVALUE[ftype]
+            self.input_ds.attrs["nodata_value"] = FDIR_FILLVALUE[ftype]
+            self.input_ds = self.input_ds.where(
+                ds[var_name] != old_no_data_val, FDIR_FILLVALUE[ftype]
+            )
             logger.debug(self.input_ds)
             self.add_fdir(**kwargs)
         elif var == "dem":
@@ -164,7 +166,9 @@ class Catchment:
             if mask.any():
                 data[mask] = FDIR_FILLVALUE[self.ftype]
             data = data.astype(np.uint8)
-            self._fdir = pyflwdir.from_array(data=data, ftype=self.ftype, transform=self.transform, **kwargs)
+            self._fdir = pyflwdir.from_array(
+                data=data, ftype=self.ftype, transform=self.transform, **kwargs
+            )
         self.get_fdir()
 
     def delineate_basin(self, gauge_coords, stream_order=4):
@@ -599,7 +603,6 @@ def get_transformation_matrix_nc(ds, var_name):
     # Assuming uniform spacing, calculate resolution
     lat_res = abs(lat[1] - lat[0]) if len(lat) > 1 else 0.0
     lon_res = abs(lon[1] - lon[0]) if len(lon) > 1 else 0.0
-    lon_res, lat_res = lon_res, lat_res
     # logger.info(f"lat_res {lat_res}; lon_res {lon_res}")
 
     # Get the corner coordinate of the dataset
@@ -644,7 +647,7 @@ def create_catchment(
     l1_resolution=None,
     frame=1,
     upscale=False,
-    latlon=True
+    latlon=True,
 ):
     """Create file containing catchment ids, flowdirection and upstream area from dem or flow direction."""
     logger.info(

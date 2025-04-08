@@ -164,5 +164,5 @@ def run(args):
         l1_resolution=args.l1_resolution,
         frame=args.frame,
         upscale=args.upscale,
-        latlon=args.coords_are_not_latlon
+        latlon=args.coords_are_not_latlon,
     )

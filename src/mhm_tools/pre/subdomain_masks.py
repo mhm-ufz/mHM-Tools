@@ -308,7 +308,7 @@ class CreateSubdomainMasks:
             #         ds_sub_ref_file["flwdir"] == sink_value
             #     )
             #     ds_sub_ref_file[data_var].data[mask_da] = sink_value
-                # ds_sub_ref_file[data_var].values = data_var_values
+            # ds_sub_ref_file[data_var].values = data_var_values
 
         # Write the output to a netCDF file
         fname = self.out_file_name + ".nc"
