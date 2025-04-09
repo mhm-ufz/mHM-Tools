@@ -1157,7 +1157,7 @@ class MHMRestartFile:
         logger.info("Preparing slope_emp")
         td = TDigest(compression=n)
         if self.run_on_whole_domain:
-            if not self.grid.morph_files.slope_emp.is_file():
+            if self.grid.morph_files.slope_emp is None or not self.grid.morph_files.slope_emp.is_file():
                 with xr.open_dataset(self.grid.morph_files.slope) as ds_slope:
                     data = ds_slope["slope"]
                     flattened = data.values.flatten()
