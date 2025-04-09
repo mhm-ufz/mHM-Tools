@@ -6,6 +6,7 @@ A restart file contains all the static information to run mHM on a specific grid
 """
 
 import logging
+from pathlib import Path
 
 from mhm_tools.common.cli_utils import get_coords
 from mhm_tools.common.logger import ErrorLogger
@@ -252,9 +253,13 @@ def run(args):
         lat_max=float(lat_max_target_grid),
         resolution=l1_resolution,
     )
-
+    input_dir = Path(args.input_dir)
+    if not input_dir.is_dir():
+        msg = f"Input dir {input_dir} is not a directory."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
     grid = Grid(
-        file_path=args.input_dir,
+        file_path=input_dir,
         name="whole_grid",
         latlon_file=None,
         l0=l0,
