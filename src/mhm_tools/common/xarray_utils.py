@@ -15,11 +15,19 @@ def get_coord_key(ds, lat=False, lon=False, raise_exception=True, is_retry=False
         with ErrorLogger(logger):
             msg = f"only lon or lat should be true but lon={lon} and lat={lat}"
             raise ValueError(msg)
+    ds_dims = ds.dims if isinstance(ds, xr.DataArray) or is_retry else ds.coords
+    # first check if there are dimensions with a fitting axis attribute
+    try:
+        for dim in ds_dims:
+            if (lat and ds[dim].axis == 'Y') or (lon and ds[dim].axis == 'X'):
+                return dim
+    except AttributeError:
+        pass
+    # then select possible keys from the following lists and try them untill a fitting one is found.
     if lat:
         keys = ["lat", "latitude", "northing", "y", "new_y", "Y"]
     else:
         keys = ["lon", "longitude", "easting", "x", "new_x", "X"]
-    ds_dims = ds.dims if isinstance(ds, xr.DataArray) or is_retry else ds.coords
     for key in keys:
         if key in ds_dims and len(ds[key].shape) == 1:
             return key
