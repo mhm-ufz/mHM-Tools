@@ -185,7 +185,7 @@ def crop_file_with_header(ds_in, file_path, output_path, lonslice, latslice):
         # write header file
         header_out_path = output_path / header.name
         xll = d["xllcorner"] + d["cellsize"] * index_x_min
-        yll = d["yllcorner"] + d["cellsize"] * (d["nrows"]-index_y_max)
+        yll = d["yllcorner"] + d["cellsize"] * (d["nrows"] - index_y_max)
         header_str = f"""
 ncols                {index_x_max-index_x_min}
 nrows                {index_y_max-index_y_min}
