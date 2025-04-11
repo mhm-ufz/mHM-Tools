@@ -830,7 +830,9 @@ class MHMRestartFile:
                 ds = ds.drop(arg)
         return ds
 
-    def _correct_restart_file(self, ds):
+    def _correct_restart_file(self, ds=None):
+        if ds is None:
+            ds = xr.open_dataset(self.grid.restart_file)
         ds_mask = xr.open_dataset(self.grid.land_mask_file)
         logger.debug(
             f"land mask shape before sel: {ds_mask.land_mask.shape} lat_min: {ds_mask.land_mask.lat.min()}, lat_max: {ds_mask.land_mask.lat.max()}"
@@ -1216,6 +1218,7 @@ class MHMRestartFile:
             logger.info("grid will be processed as a whole")
             self._prepare_slope_emp()
             self._create_restart_for_grid(self.grid)
+            self._correct_restart_file()
         else:
             logger.info(
                 f"grid will be split and processed in parallel on {self.ncpus} cores"
