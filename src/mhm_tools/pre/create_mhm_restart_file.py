@@ -262,6 +262,15 @@ class Grid:
         ) and latlon_file is not None:
             self.read_latlon(latlon_file)
 
+    def migrate_grid_using_systemlink(self, new_path):
+        """Mirgrates the file path by creating a new path and system linking all files there."""
+        new_path = Path(new_path)
+        new_path.mkdir(parents=True)
+        for file in self.file_path.glob('*.*'):
+            (new_path / file.name).symlink_to(file)
+        self.file_path = new_path
+
+
     def read_latlon(self, latlon_file: Path):
         """
         Read the latlon file and sets the lower-left (l0) and upper-right (l1) corners of the grid as well as the resolution.
