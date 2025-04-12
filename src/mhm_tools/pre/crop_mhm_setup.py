@@ -149,6 +149,7 @@ def crop_file_with_header(ds_in, file_path, output_path, lonslice, latslice):
             )
             return None, None
         logger.debug(f"Found data_var={data_var}")
+    logger.debug(type(ds_in[data_var].data))
     with header.open("r") as h:
         d = {}
         logger.debug(f"Reading out header.txt file {header}")
@@ -241,7 +242,7 @@ def call_create_latlon(
     """Create header dictionaries for the different resolutions and call create latlon to create a latlon file for the setup."""
     # create new latlon file
     logger.info("Creating new latlon file")
-    with get_xarray_ds_from_file(dem_output_file) as ds_dem:
+    with get_xarray_ds_from_file(dem_output_file, chunking=True) as ds_dem:
         l0 = create_header(ds_dem, None, write=False)
     logger.debug(f"L0: {l0}")
     l1 = l0.copy()
@@ -288,7 +289,7 @@ def crop_file(f, mask_da, latslice, lonslice, output_path, input_path, overwrite
         logger.info("Target file already exists. Cropping is scipped.")
         return latlon_files
     if f.suffix in [".asc", ".nc"]:
-        ds = get_xarray_ds_from_file(f)
+        ds = get_xarray_ds_from_file(f, chunking=True)
     else:
         # header files are not copied but recreated as they change
         # other txt and markdown files are copied as they nomaly contain description or class definitions but do not change with domain cropping
@@ -401,6 +402,7 @@ def crop_mhm_setup(
     output_path = Path(output_path)
     input_path = Path(input_path)
     # recusively get all the files from the input path if it is a dir
+    logger.info(f'Cropping to: longitude ({lonslice.start}, {lonslice.stop}) and latitude ({latslice.stop}, {latslice.start})')
     files = []
     if input_path.is_dir():
         for depth in range(recursive_depth):
