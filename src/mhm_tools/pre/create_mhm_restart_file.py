@@ -265,10 +265,11 @@ class Grid:
     def migrate_grid_using_systemlink(self, new_path):
         """Mirgrates the file path by creating a new path and system linking all files there."""
         new_path = Path(new_path)
-        new_path.mkdir(parents=True)
-        for file in self.file_path.glob('*.*'):
+        new_path.mkdir(parents=True, exist_ok=True)
+        for file in self.path.glob('*.*'):
             (new_path / file.name).symlink_to(file)
-        self.file_path = new_path
+        self.path = new_path
+        self.morph_files = MorphFiles(self.path)
 
 
     def read_latlon(self, latlon_file: Path):
