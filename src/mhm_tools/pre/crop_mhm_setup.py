@@ -207,17 +207,29 @@ NODATA_value         {d['NODATA_value']}
                     lon_key: slice(index_x_min, index_x_max),
                 }
             )
-            data_array = xr.DataArray(
-                data=data,
-                dims=["time", lat_key, lon_key],
-                coords={
-                    "time": ds_in.time,
-                    lat_key: data[lat_key],
-                    lon_key: data[lon_key],
-                },
-                name=data_var,
-                attrs=data.attrs,
-            )
+            if 'time' in ds_in.dims:
+                data_array = xr.DataArray(
+                    data=data,
+                    dims=["time", lat_key, lon_key],
+                    coords={
+                        "time": ds_in.time,
+                        lat_key: data[lat_key],
+                        lon_key: data[lon_key],
+                    },
+                    name=data_var,
+                    attrs=data.attrs,
+                )
+            else:
+                data_array = xr.DataArray(
+                    data=data,
+                    dims=[lat_key, lon_key],
+                    coords={
+                        lat_key: data[lat_key],
+                        lon_key: data[lon_key],
+                    },
+                    name=data_var,
+                    attrs=data.attrs,
+                )
             data_array.attrs.update(
                 {"_FillValue": d["NODATA_value"], "missing_value": d["NODATA_value"]}
             )
