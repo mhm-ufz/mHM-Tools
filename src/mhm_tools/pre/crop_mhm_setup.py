@@ -242,7 +242,7 @@ def call_create_latlon(
     """Create header dictionaries for the different resolutions and call create latlon to create a latlon file for the setup."""
     # create new latlon file
     logger.info("Creating new latlon file")
-    with get_xarray_ds_from_file(dem_output_file, chunking=True) as ds_dem:
+    with get_xarray_ds_from_file(dem_output_file, chunking=False) as ds_dem:
         l0 = create_header(ds_dem, None, write=False)
     logger.debug(f"L0: {l0}")
     l1 = l0.copy()
@@ -289,7 +289,7 @@ def crop_file(f, mask_da, latslice, lonslice, output_path, input_path, overwrite
         logger.info("Target file already exists. Cropping is scipped.")
         return latlon_files
     if f.suffix in [".asc", ".nc"]:
-        ds = get_xarray_ds_from_file(f, chunking=True)
+        ds = get_xarray_ds_from_file(f, chunking=False)
     else:
         # header files are not copied but recreated as they change
         # other txt and markdown files are copied as they nomaly contain description or class definitions but do not change with domain cropping

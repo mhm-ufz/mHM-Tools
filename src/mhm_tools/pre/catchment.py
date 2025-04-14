@@ -121,7 +121,7 @@ class Catchment:
             self.input_da.attrs["nodata_value"] = FDIR_FILLVALUE[ftype]
             self.input_da = self.input_da.where(
                 (ds[var_name] != old_no_data_val) & ~np.isnan(ds[var_name]),
-                FDIR_FILLVALUE[ftype],
+                FDIR_FILLVALUE[ftype]
             )
             logger.debug(self.input_da)
             self.add_fdir(latlon=latlon)
@@ -497,11 +497,11 @@ class Catchment:
             mask = ds.basin > 0
             mask_file = pl.Path(mask_file)
             mask_da = xr.DataArray(
-                mask, coords={"lat": ds.lat, "lon": ds.lon}, dims=["lat", "lon"]
+                mask, coords={"lat": ("lat", ds.lat, {"axis": "Y"}), "lon": ("lon", ds.lon, {"axis": "X"})}, dims=["lat", "lon"]
             )
             mask_ds = xr.Dataset(
                 {"land_mask": mask_da, "mask": mask_da},
-                coords={"lon": ds.lon, "lat": ds.lat},
+                coords={"lon": ("lon", ds.lon, {"axis": "X"}), "lat": ("lat", ds.lat, {"axis": "Y"})},
             )
             mask_ds.to_netcdf(mask_file)
             logger.info(f"Mask file has been written to {mask_file}")
