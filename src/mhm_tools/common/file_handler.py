@@ -69,22 +69,29 @@ def crop_file_by_mask(ds, mask_file):
         )
 
 
-def get_xarray_ds_from_file(file_path, var_name=None):
+def get_xarray_ds_from_file(file_path, var_name=None, chunking=False):
     """Read file and return xarray dataset."""
     file_path = Path(file_path)
-    logger.info(f"Reading {file_path} to xarray")
+    logger.info(f"Reading {file_path} to xarray with chunking = {chunking}")
+    ds_out = None
     if not file_path.is_file():
         msg = f"File path does not point to an existing file: {file_path}"
         with ErrorLogger(logger):
             raise ValueError(msg)
     if file_path.suffix == ".asc":
-        return read_ascii_to_xarray(filepath=file_path, var_name=var_name)
+        ds_out = read_ascii_to_xarray(filepath=file_path, var_name=var_name, chunking=chunking)
     if file_path.suffix == ".nc":
-        return xr.open_dataset(file_path)
-    msg = f"File types other than asci and netcdf are not implemented. The suffix of the file was: {file_path.suffix}"
-    with ErrorLogger(logger):
-        raise NotImplementedError()
-
+        if chunking:
+            ds_out = xr.open_dataset(file_path, chunks={"time": 1, "lat": 250, "lon": 250})
+        ds_out = xr.open_dataset(file_path)
+    if ds_out is None:
+        msg = f"File types other than asci and netcdf are not implemented. The suffix of the file was: {file_path.suffix}"
+        with ErrorLogger(logger):
+            raise NotImplementedError()
+    # if var_name is None:
+    #     data_var = induce_data_var_from_file_name(ds_out, file_path)
+    #     print(type(ds_out[data_var].data))
+    return ds_out
 
 def write_xarray_to_file(ds, file_path, var_name=None, fmt=None):
     """Write xarray Datasets to file with file type depending on the file suffix."""
@@ -151,7 +158,7 @@ def write_xarray_to_ascii(dataset, filepath, data_var=None, fmt=None):
         logger.info(f"Writting file to {filepath}")
 
 
-def read_ascii_to_xarray(filepath, var_name=None):
+def read_ascii_to_xarray(filepath, var_name=None, chunking=False):
     """Read an mHM readable asci file to an xarray dataset."""
     # Read the header from the file
     with filepath.open("r") as f:
@@ -188,12 +195,14 @@ def read_ascii_to_xarray(filepath, var_name=None):
     data_array = xr.DataArray(
         data=data_values,
         dims=["lat", "lon"],
-        coords={"lon": lon, "lat": lat},
+        coords={"lon": ("lon", lon, {"axis": "X"}), "lat": ("lat", lat, {"axis": "Y"})},
         name=name,
         attrs={"nodata_value": nodata_value, "_FillValue": nodata_value},
     )
 
     # Convert to Dataset
+    if chunking: 
+        return xr.Dataset({name: data_array}).chunk({"lat": 1000, "lon": 1000})
     return xr.Dataset({name: data_array})
 
 
