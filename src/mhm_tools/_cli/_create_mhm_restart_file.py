@@ -38,6 +38,13 @@ def add_args(parser):
         required=True,
         help=("output directory as path"),
     )
+    parser.add_argument(
+        "-w",
+        "--work_dir",
+        required=False,
+        default=None,
+        help=("work directory as path"),
+    )
     required_args.add_argument(
         "-n", "--nml_template", required=True, help=("nml_template file for mPR")
     )
@@ -254,6 +261,8 @@ def run(args):
         resolution=l1_resolution,
     )
     input_dir = Path(args.input_dir)
+    output_dir = Path(args.output_dir)
+    work_dir = Path(args.work_dir) if args.work_dir is not None else output_dir
     if not input_dir.is_dir():
         msg = f"Input dir {input_dir} is not a directory."
         with ErrorLogger(logger):
@@ -266,11 +275,11 @@ def run(args):
         l1=l1,
         land_mask_file=args.land_mask_file,
     )
-    output_dir = Path(args.output_dir)
-    grid.migrate_grid_using_systemlink(output_dir / 'full_grid')
+    grid.migrate_grid_using_systemlink(work_dir / 'full_grid')
     restart_creator = MHMRestartFile(
         grid=grid,
         output_path=output_dir,
+        work_path=work_dir,
         nml_template=args.nml_template,
         increment_l1=args.l1_increment,
         mpr=MPRRunner(

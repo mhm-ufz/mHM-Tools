@@ -264,6 +264,7 @@ class Grid:
 
     def migrate_grid_using_systemlink(self, new_path):
         """Mirgrates the file path by creating a new path and system linking all files there."""
+        logger.info(f'Creating system links in {new_path} for all files in {self.path}')
         new_path = Path(new_path)
         new_path.mkdir(parents=True, exist_ok=True)
         for file in self.path.glob('*.*'):
@@ -393,6 +394,7 @@ class MHMRestartFile:
         input_file_path (Path): The path to the input file.
         nml_template (Path): The path to the namelist template file.
         output_path (Path): The path to the output directory.
+        work_path (Path): The path to the working directory.
         l0 (LatLon): The LatLon object representing the high resolution grid.
         l1 (LatLon): The LatLon object representing the low resolution grid.
         mpr (MPRRunner): The MPRRunner object for executing the mpr executable.
@@ -439,6 +441,7 @@ class MHMRestartFile:
         grid: Grid,
         nml_template: Path,
         output_path: Path,
+        work_path: Path,
         mpr: MPRRunner,
         increment_l1=2,
         ncpus=1,
@@ -451,6 +454,7 @@ class MHMRestartFile:
         logger.debug(f"Creating MHMRestartFile object with {locals()}")
         self.nml_template = Path(nml_template)
         self.output_path = Path(output_path)
+        self.work_path = Path(work_path)
         self.grid = grid
         self.subgrids = []  # list of grid objects
         self.ncpus = ncpus
@@ -561,7 +565,7 @@ class MHMRestartFile:
                 )
             ):
                 l0, l1 = self._create_latlon(lon_min, lat_min)
-                subgrid_path = self.output_path / f"slice_{i}_{j}"
+                subgrid_path = self.work_path / f"slice_{i}_{j}"
                 logger.debug(f"Reading subgrid {subgrid_path}")
                 logger.debug(
                     f"l0: {l0.lon_min}, {l0.lon_max}, {l0.lat_min}, {l0.lat_max}"
@@ -598,7 +602,7 @@ class MHMRestartFile:
         logger.debug("Splitting grid done")
 
     def _split_cell(self, ds, file_path, i, lon_min, j, lat_min):
-        out_dir = Path(self.output_path) / f"slice_{i}_{j}"
+        out_dir = Path(self.work_path) / f"slice_{i}_{j}"
         if not out_dir.exists():
             logger.debug(f"Creating {out_dir}")
             out_dir.mkdir(parents=True, exist_ok=True)
@@ -706,12 +710,12 @@ class MHMRestartFile:
         # 2. create all coordinates in the whole grid
         # TODO: add dimensions to comments to make it more readable
 
-        self.grid.restart_file = self.output_path / "output_whole_grid_restart.nc"
+        self.grid.restart_file = self.work_path / "output_whole_grid_restart.nc"
 
         if self.merge_only:
             restart_file_paths = [
                 file
-                for dir in self.output_path.glob("slice_*")
+                for dir in self.work_path.glob("slice_*")
                 for file in dir.glob("output_*.nc")
             ]
         else:
@@ -1154,7 +1158,9 @@ class MHMRestartFile:
                 "zlib": True,
                 "complevel": 4,
             }
-        ds.to_netcdf(self.grid.restart_file, encoding=encoding)
+        output_file = self.output_path / self.grid.restart_file.name
+        ds.to_netcdf(output_file, encoding=encoding)
+        self.grid.restart_file = output_file
 
     def _delete_temp_files(self):
         logger.info("Deleting temporary files")
