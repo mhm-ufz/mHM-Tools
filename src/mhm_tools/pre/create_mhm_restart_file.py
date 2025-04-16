@@ -7,6 +7,7 @@ import shutil
 from pathlib import Path
 from subprocess import PIPE, Popen, TimeoutExpired
 
+from mhm_tools.common.xarray_utils import get_coord_key
 import numpy as np
 import xarray as xr
 from crick import TDigest
@@ -705,6 +706,16 @@ class MHMRestartFile:
             + self.grid.l1.resolution / 2,  # + since arange omits the last value
             self.grid.l1.resolution,
         )
+        if ds_whole["lon_out"][-1] >= self.grid.l1.lon_max:
+            # if last lon_out value is greater or equal to max value it is to big as it should be halve a res smaller
+            ds_whole["lon_out"] = ds_whole["lon_out"][:-1]
+        # if ds_whole["lat_out"][-1] -self.grid.l1.lat_max + self.grid.l1.resolution / 2 < self.grid.l1.resolution / 100:
+        if ds_whole["lat_out"][-1] >= self.grid.l1.lat_max:
+            ds_whole["lat_out"] = ds_whole["lat_out"][:-1]
+        logger.debug('lat_out')
+        logger.debug(ds_whole["lat_out"].shape)
+        logger.debug('lon_out')
+        logger.debug(ds_whole["lon_out"].shape)
         logger.debug(f"ds_whole: {ds_whole}")
 
         # 2. create all coordinates in the whole grid
@@ -722,12 +733,18 @@ class MHMRestartFile:
             restart_file_paths = [subgrid.restart_file for subgrid in self.subgrids]
         logger.debug(f"Restart File Paths: {restart_file_paths}")
         restart_file_paths.sort()
+        if not restart_file_paths:
+            with ErrorLogger(logger):
+                msg = "The list of restart files for merging is empty."
+                if self.merge_only:
+                    msg += "Try without merge_only flag."
+                raise ValueError(msg)
+        first_restart_file = next(iter(restart_file_paths))
+        logger.info(f"Opening {first_restart_file} als reference")
 
-        logger.info(f"Opening {restart_file_paths[0]} als reference")
-
-        if not restart_file_paths[0].is_file():
-            logger.error(f"Could not open {restart_file_paths[0]}")
-        with xr.open_dataset(restart_file_paths[0]) as cur_ds:
+        if not first_restart_file.is_file():
+            logger.error(f"Could not open reference restart file {first_restart_file}")
+        with xr.open_dataset(first_restart_file) as cur_ds:
             for coord in cur_ds.coords:
                 if coord not in ds_whole.coords:
                     ds_whole[coord] = cur_ds[coord]
@@ -867,7 +884,8 @@ class MHMRestartFile:
         # logger.debug(f'mask lon: {ds_mask['lon'].data[0]} to {ds_mask['lon'].data[-1]} with length {np.shape(ds_mask['lon'].data)}')
         # logger.debug(f'ds: {np.shape(ds["L1_SoilMoistureExponent"].data)}')
         try:
-            ds_mask = ds_mask.sortby("latitude")
+            mask_lat_key = get_coord_key(ds_mask, lat=True)
+            ds_mask = ds_mask.sortby(mask_lat_key)
         except Exception as e:
             logger.error(f"Could not sort by latitude {e}")
             ds_mask = ds_mask.sortby("lat")
@@ -1247,11 +1265,11 @@ class MHMRestartFile:
                     self._read_subgrids_from_files()
                 else:
                     self._split_grid()
+                    self._prepare_slope_emp()
                 logger.info(
                     f"The grid has been split into {len(self.subgrids)} subgrids."
                 )
                 logger.info("Creating namelists and running MPR.")
-                self._prepare_slope_emp()
                 subgrids = Parallel(n_jobs=self.ncpus, backend="loky")(
                     delayed(self._create_restart_for_grid)(subgrid)
                     for subgrid in self.subgrids
