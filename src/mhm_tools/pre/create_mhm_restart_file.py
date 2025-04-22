@@ -1176,6 +1176,8 @@ class MHMRestartFile:
                 "zlib": True,
                 "complevel": 4,
             }
+        if not self.output_path.is_dir():
+            self.output_path.mkdir(parents=True)
         output_file = self.output_path / self.grid.restart_file.name
         ds.to_netcdf(output_file, encoding=encoding)
         self.grid.restart_file = output_file
