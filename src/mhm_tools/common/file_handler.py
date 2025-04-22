@@ -81,16 +81,17 @@ def get_xarray_ds_from_file(file_path, var_name=None, chunking=False):
     if file_path.suffix == ".asc":
         ds_out = read_ascii_to_xarray(filepath=file_path, var_name=var_name, chunking=chunking)
     if file_path.suffix == ".nc":
-        if chunking:
-            ds_out = xr.open_dataset(file_path, chunks={"time": 1, "lat": 250, "lon": 250})
         ds_out = xr.open_dataset(file_path)
+        if chunking:
+            lat_key, lon_key, time_key = get_coord_key(ds_out, lat=True), get_coord_key(ds_out, lon=True), get_coord_key(ds_out, time=True)
+            chunks={lat_key: 250, lon_key: 250}
+            if time_key:
+                chunks[time_key] = 1
+            ds_out = ds_out.chunk(chunks)
     if ds_out is None:
         msg = f"File types other than asci and netcdf are not implemented. The suffix of the file was: {file_path.suffix}"
         with ErrorLogger(logger):
             raise NotImplementedError()
-    # if var_name is None:
-    #     data_var = induce_data_var_from_file_name(ds_out, file_path)
-    #     print(type(ds_out[data_var].data))
     return ds_out
 
 def write_xarray_to_file(ds, file_path, var_name=None, fmt=None):
@@ -201,7 +202,7 @@ def read_ascii_to_xarray(filepath, var_name=None, chunking=False):
     )
 
     # Convert to Dataset
-    if chunking: 
+    if chunking:
         return xr.Dataset({name: data_array}).chunk({"lat": 1000, "lon": 1000})
     return xr.Dataset({name: data_array})
 
