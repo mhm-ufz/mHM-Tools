@@ -84,7 +84,7 @@ def get_xarray_ds_from_file(file_path, var_name=None, chunking=False):
         ds_out = xr.open_dataset(file_path)
         if chunking:
             lat_key, lon_key, time_key = get_coord_key(ds_out, lat=True), get_coord_key(ds_out, lon=True), get_coord_key(ds_out, time=True)
-            chunks={lat_key: 250, lon_key: 250}
+            chunks={lat_key: 1000, lon_key: 1000}
             if time_key:
                 chunks[time_key] = 1
             ds_out = ds_out.chunk(chunks)
