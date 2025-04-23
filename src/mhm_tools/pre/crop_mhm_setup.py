@@ -447,7 +447,7 @@ def crop_mhm_setup(
     # cut and copy each file
     list_latlon_files = Parallel(n_jobs=n_jobs, backend="loky")(
         delayed(crop_file)(
-            f=f,
+            input_file=f,
             mask_da=mask_da,
             latslice=latslice,
             lonslice=lonslice,
