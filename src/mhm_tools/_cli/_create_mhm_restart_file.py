@@ -275,7 +275,7 @@ def run(args):
         l1=l1,
         land_mask_file=args.land_mask_file,
     )
-    grid.migrate_grid_using_systemlink(work_dir / 'full_grid')
+    grid.migrate_grid_using_systemlink(work_dir / "full_grid")
     restart_creator = MHMRestartFile(
         grid=grid,
         output_path=output_dir,

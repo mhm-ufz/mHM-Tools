@@ -7,13 +7,14 @@ import shutil
 from pathlib import Path
 from subprocess import PIPE, Popen, TimeoutExpired
 
-from mhm_tools.common.xarray_utils import get_coord_key
 import numpy as np
 import xarray as xr
 from crick import TDigest
 from joblib import Parallel, delayed
 
+from mhm_tools.common.file_handler import get_xarray_ds_from_file
 from mhm_tools.common.logger import ErrorLogger, log_arguments
+from mhm_tools.common.xarray_utils import get_coord_key
 
 logger = logging.getLogger(__name__)
 
@@ -265,17 +266,16 @@ class Grid:
 
     def migrate_grid_using_systemlink(self, new_path):
         """Mirgrates the file path by creating a new path and system linking all files there."""
-        logger.info(f'Creating system links in {new_path} for all files in {self.path}')
+        logger.info(f"Creating system links in {new_path} for all files in {self.path}")
         new_path = Path(new_path)
         new_path.mkdir(parents=True, exist_ok=True)
-        for file in self.path.glob('*.*'):
+        for file in self.path.glob("*.*"):
             link_loc = new_path / file.name
             if link_loc.exists():
                 link_loc.unlink()
             link_loc.symlink_to(file)
         self.path = new_path
         self.morph_files = MorphFiles(self.path)
-
 
     def read_latlon(self, latlon_file: Path):
         """
@@ -442,8 +442,8 @@ class MHMRestartFile:
         grid: Grid,
         nml_template: Path,
         output_path: Path,
-        work_path: Path,
         mpr: MPRRunner,
+        work_path=None,
         increment_l1=2,
         ncpus=1,
         run_on_whole_domain=False,
@@ -455,7 +455,7 @@ class MHMRestartFile:
         logger.debug(f"Creating MHMRestartFile object with {locals()}")
         self.nml_template = Path(nml_template)
         self.output_path = Path(output_path)
-        self.work_path = Path(work_path)
+        self.work_path = Path(work_path) if work_path is not None else self.output_path
         self.grid = grid
         self.subgrids = []  # list of grid objects
         self.ncpus = ncpus
@@ -688,12 +688,6 @@ class MHMRestartFile:
 
         # 1. create an empty file for the whole grid
         ds_whole = xr.Dataset()
-        # ds_whole["longitude"] = np.arange(
-        #     self.grid.l0.lon_min, self.grid.l0.lon_max, self.grid.l0.resolution
-        # )
-        # ds_whole["latitude"] = np.arange(
-        #     self.grid.l0.lat_min, self.grid.l0.lat_max, self.grid.l0.resolution
-        # )
         ds_whole["lon_out"] = np.arange(
             self.grid.l1.lon_min + self.grid.l1.resolution / 2,
             self.grid.l1.lon_max
@@ -706,15 +700,17 @@ class MHMRestartFile:
             + self.grid.l1.resolution / 2,  # + since arange omits the last value
             self.grid.l1.resolution,
         )
-        if ds_whole["lon_out"][-1] >= self.grid.l1.lon_max:
-            # if last lon_out value is greater or equal to max value it is to big as it should be halve a res smaller
-            ds_whole["lon_out"] = ds_whole["lon_out"][:-1]
-        # if ds_whole["lat_out"][-1] -self.grid.l1.lat_max + self.grid.l1.resolution / 2 < self.grid.l1.resolution / 100:
-        if ds_whole["lat_out"][-1] >= self.grid.l1.lat_max:
-            ds_whole["lat_out"] = ds_whole["lat_out"][:-1]
-        logger.debug('lat_out')
+        # Boolean flags: True→1 (trim), False→0 (keep)
+        lon_trim = ds_whole["lon_out"][-1] >= self.grid.l1.lon_max
+        lat_trim = ds_whole["lat_out"][-1] >= self.grid.l1.lat_max
+
+        # New lengths = old length minus {0 or 1}
+        ds_whole["lon_out"] = ds_whole["lon_out"][: len(ds_whole["lon_out"]) - lon_trim]
+        ds_whole["lat_out"] = ds_whole["lat_out"][: len(ds_whole["lat_out"]) - lat_trim]
+
+        logger.debug("lat_out")
         logger.debug(ds_whole["lat_out"].shape)
-        logger.debug('lon_out')
+        logger.debug("lon_out")
         logger.debug(ds_whole["lon_out"].shape)
         logger.debug(f"ds_whole: {ds_whole}")
 
@@ -742,9 +738,7 @@ class MHMRestartFile:
         first_restart_file = next(iter(restart_file_paths))
         logger.info(f"Opening {first_restart_file} als reference")
 
-        if not first_restart_file.is_file():
-            logger.error(f"Could not open reference restart file {first_restart_file}")
-        with xr.open_dataset(first_restart_file) as cur_ds:
+        with get_xarray_ds_from_file(first_restart_file) as cur_ds:
             for coord in cur_ds.coords:
                 if coord not in ds_whole.coords:
                     ds_whole[coord] = cur_ds[coord]
@@ -1198,7 +1192,10 @@ class MHMRestartFile:
         logger.info("Preparing slope_emp")
         td = TDigest(compression=n)
         if self.run_on_whole_domain:
-            if self.grid.morph_files.slope_emp is None or not self.grid.morph_files.slope_emp.is_file():
+            if (
+                self.grid.morph_files.slope_emp is None
+                or not self.grid.morph_files.slope_emp.is_file()
+            ):
                 with xr.open_dataset(self.grid.morph_files.slope) as ds_slope:
                     data = ds_slope["slope"]
                     flattened = data.values.flatten()

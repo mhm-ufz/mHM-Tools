@@ -121,7 +121,7 @@ class Hydrograph:
             self.sim_discharge_data = simulation
             self.obs_discharge_data = observation
         elif simulation is not None or observation is not None:
-            msg = 'Either one or none of the input must be via array.'
+            msg = "Either one or none of the input must be via array."
             raise ValueError(msg)
         self.sim_discharge_data_nonan = self.sim_discharge_data.dropna(
             dim="time", how="all"

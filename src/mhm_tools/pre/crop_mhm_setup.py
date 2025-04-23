@@ -207,7 +207,7 @@ NODATA_value         {d['NODATA_value']}
                     lon_key: slice(index_x_min, index_x_max),
                 }
             )
-            if 'time' in ds_in.dims:
+            if "time" in ds_in.dims:
                 data_array = xr.DataArray(
                     data=data,
                     dims=["time", lat_key, lon_key],
@@ -254,7 +254,7 @@ def call_create_latlon(
     """Create header dictionaries for the different resolutions and call create latlon to create a latlon file for the setup."""
     # create new latlon file
     logger.info("Creating new latlon file")
-    with get_xarray_ds_from_file(dem_output_file, chunking=False) as ds_dem:
+    with get_xarray_ds_from_file(dem_output_file, chunking=True) as ds_dem:
         l0 = create_header(ds_dem, None, write=False)
     logger.debug(f"L0: {l0}")
     l1 = l0.copy()
@@ -291,61 +291,80 @@ def call_create_latlon(
     logger.info(f"Latlon file written to {latlon_output_file}")
 
 
-def crop_file(f, mask_da, latslice, lonslice, output_path, input_path, overwrite):
+def crop_file(
+    input_file,
+    mask_da,
+    latslice,
+    lonslice,
+    output_path,
+    input_path,
+    overwrite,
+    available_mem_gib,
+):
     """Crops one file by lat and lon slice and may mask it with the mask dataarray."""
-    logger.info(f"Cropping the file {f}")
-    output_file = output_path / f.relative_to(input_path)
+    logger.info(f"Cropping the file {input_file}")
+    output_file = output_path / input_file.relative_to(input_path)
     output_file.parent.mkdir(parents=True, exist_ok=True)
     latlon_files = LatlonFiles()
     if output_file.is_file() and not overwrite:
         logger.info("Target file already exists. Cropping is scipped.")
         return latlon_files
-    if f.suffix in [".asc", ".nc"]:
-        ds = get_xarray_ds_from_file(f, chunking=False)
+    if input_file.suffix in [".asc", ".nc"]:
+        try:
+            ds = get_xarray_ds_from_file(
+                input_file, chunking=True, available_mem_gib=available_mem_gib
+            )
+        except ValueError:
+            logger.error(
+                f"File {input_file} could not be read. It probably does not have the right format."
+            )
+            return latlon_files
     else:
         # header files are not copied but recreated as they change
         # other txt and markdown files are copied as they nomaly contain description or class definitions but do not change with domain cropping
-        if "header" not in f.name.lower():
+        if "header" not in input_file.name.lower():
             try:
-                shutil.copy(f, output_file)
-                logger.debug(f"Copied file {f.name} to {output_file}")
+                shutil.copy(input_file, output_file)
+                logger.debug(f"Copied file {input_file.name} to {output_file}")
             except Exception as e:
-                logger.error(f"Can't copy {f} because of {e}")
+                logger.error(f"Can't copy {input_file} because of {e}")
         return latlon_files
     logger.debug(f"read in dataset: {ds}")
     # Handling of special cases:
     ds_croped = None
     # 1. latlon file: The latlon file is not croped but its relative location is saved and the latlon file is newly created after all files are croped
-    if "latlon" in f.name.lower():
+    if "latlon" in input_file.name.lower():
         logger.info(
             "Latlon cropping depreciated will implement new latlon creation using the mhm-tools latlon functionality."
         )
         latlon_files.set_latlon_output_file(output_file)
     # 2. Restart files are complex and are not yet implemented. mHM restart files can be croped, mRM restart files can't (?).
-    elif "restart" in f.name.lower():
+    elif "restart" in input_file.name.lower():
         logger.warning(
-            f"Restart file {f} could not be copied as that is not yet implemented."
+            f"Restart file {input_file} could not be copied as that is not yet implemented."
         )
     # 3. Files that are in the same folder as a header file. Typical examples are meteo datasets such as temperature or precipitation
-    elif list(f.parent.glob("header.txt")):
+    elif list(input_file.parent.glob("header.txt")):
         logger.debug("Cropping and writing new header file...")
         ds_croped, header_path = crop_file_with_header(
             ds,
-            f,
-            output_path / f.parent.relative_to(input_path),
+            input_file,
+            output_path / input_file.parent.relative_to(input_path),
             lonslice=lonslice,
             latslice=latslice,
         )
         if not (ds_croped is None and header_path is None):
             lat_key = get_coord_key(ds_croped, lat=True)
             lon_key = get_coord_key(ds_croped, lon=True)
-            if f.stem in ["pre", "pet", "tavg"]:
+            if input_file.stem in ["pre", "pet", "tavg"]:
                 latlon_files.set_meteo_header_path(header_path)
     # 4. All other netcdf files containing mostly morphological data.
     else:
         lat_key = get_coord_key(ds, lat=True)
         lon_key = get_coord_key(ds, lon=True)
-        logger.debug(f"Selecting {f.name} using lon:{lonslice} and lat:{latslice}")
+        logger.debug(
+            f"Selecting {input_file.name} using lon:{lonslice} and lat:{latslice}"
+        )
         ds_croped = ds.sel({lon_key: lonslice, lat_key: latslice})
         if ds_croped[lat_key].shape[0] < 2:
             ds_croped = ds.sel(
@@ -366,7 +385,7 @@ def crop_file(f, mask_da, latslice, lonslice, output_path, input_path, overwrite
         return latlon_files
 
     # only the dem file or and eventual mHM restart file are masked using the provided mask file
-    if "dem" in f.name.lower():  # or "mhm" in f.name.lower()
+    if "dem" in input_file.name.lower():  # or "mhm" in f.name.lower()
         if mask_da is not None:
             lon_key_mask = get_coord_key(mask_da, lon=True)
             lat_key_mask = get_coord_key(mask_da, lat=True)
@@ -408,13 +427,16 @@ def crop_mhm_setup(
     n_jobs=1,
     filename="*.*",
     recursive_depth=5,
+    available_mem_gib=5,
 ):
     """Cut out an existing mhm domain setup using a mask file."""
     # check if the input is correct
     output_path = Path(output_path)
     input_path = Path(input_path)
     # recusively get all the files from the input path if it is a dir
-    logger.info(f'Cropping to: longitude ({lonslice.start}, {lonslice.stop}) and latitude ({latslice.stop}, {latslice.start})')
+    logger.info(
+        f"Cropping to: longitude ({lonslice.start}, {lonslice.stop}) and latitude ({latslice.stop}, {latslice.start})"
+    )
     files = []
     if input_path.is_dir():
         for depth in range(recursive_depth):
@@ -432,6 +454,7 @@ def crop_mhm_setup(
             output_path=output_path,
             input_path=input_path,
             overwrite=overwrite,
+            available_mem_gib=available_mem_gib,
         )
         for f in files
     )

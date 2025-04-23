@@ -61,12 +61,14 @@ def add_args(parser):
         "--ncpus",
         required=False,
         default=1,
+        type=int,
         help=("Number of cores used for parallelisation."),
     )
     parser.add_argument(
         "--folder_recursion_depth",
         required=False,
         default=5,
+        type=int,
         help=("How deep in the folder structure should the file be searched?"),
     )
     parser.add_argument(
@@ -77,6 +79,13 @@ def add_args(parser):
             """coordinates in the form of 'lon_min,lon_max,lat_min,lat_max,resolution_l0'
             required unless --mask_file is provided"""
         ),
+    )
+    parser.add_argument(
+        "--available_mem",
+        required=False,
+        default=5,
+        type=int,
+        help=("""Available memory per cpu in Gb"""),
     )
 
 
@@ -130,4 +139,5 @@ def run(args):
         n_jobs=args.ncpus,
         filename=args.file_name,
         recursive_depth=args.folder_recursion_depth,
+        available_mem_gib=args.available_mem,
     )
