@@ -442,8 +442,8 @@ class MHMRestartFile:
         grid: Grid,
         nml_template: Path,
         output_path: Path,
-        work_path: Path,
         mpr: MPRRunner,
+        work_path=None,
         increment_l1=2,
         ncpus=1,
         run_on_whole_domain=False,
@@ -455,7 +455,7 @@ class MHMRestartFile:
         logger.debug(f"Creating MHMRestartFile object with {locals()}")
         self.nml_template = Path(nml_template)
         self.output_path = Path(output_path)
-        self.work_path = Path(work_path)
+        self.work_path = Path(work_path) if work_path is not None else self.output_path
         self.grid = grid
         self.subgrids = []  # list of grid objects
         self.ncpus = ncpus

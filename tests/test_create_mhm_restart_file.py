@@ -10,7 +10,10 @@ from mhm_tools.pre.create_mhm_restart_file import Grid, LatLon, MPRRunner
 
 HERE = Path(__file__).parent
 TMP = HERE / "tmp"
-TMP.mkdir(parents=True, exist_ok=True)
+TMP_WORK = TMP / "work"
+TMP_OUT = TMP / "out"
+TMP_WORK.mkdir(parents=True, exist_ok=True)
+TMP_OUT.mkdir(parents=True, exist_ok=True)
 
 
 class TestCreateRestart(unittest.TestCase):
@@ -105,7 +108,7 @@ class TestCreateRestart(unittest.TestCase):
         )
         m = mt.pre.MHMRestartFile(
             grid=grid,
-            output_path=TMP,
+            output_path=TMP_OUT,
             nml_template=morph / "mpr_mhm_template.nml",
             increment_l1=increment_l1,
             mpr=mpr_runner,
@@ -196,7 +199,8 @@ class TestCreateRestart(unittest.TestCase):
         )
         m = mt.pre.MHMRestartFile(
             grid=grid,
-            output_path=TMP,
+            output_path=TMP_OUT,
+            work_path=TMP_WORK,
             nml_template=morph / "mpr_mhm_template.nml",
             increment_l1=increment_l1,
             mpr=mpr_runner,
