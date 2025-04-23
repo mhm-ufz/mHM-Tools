@@ -290,7 +290,6 @@ def call_create_latlon(
     )
     logger.info(f"Latlon file written to {latlon_output_file}")
 
-
 def crop_file(f, mask_da, latslice, lonslice, output_path, input_path, overwrite, available_mem_gib):
     """Crops one file by lat and lon slice and may mask it with the mask dataarray."""
     logger.info(f"Cropping the file {f}")
@@ -301,7 +300,11 @@ def crop_file(f, mask_da, latslice, lonslice, output_path, input_path, overwrite
         logger.info("Target file already exists. Cropping is scipped.")
         return latlon_files
     if f.suffix in [".asc", ".nc"]:
-        ds = get_xarray_ds_from_file(f, chunking=True, available_mem_gib=available_mem_gib)
+        try:
+           ds = get_xarray_ds_from_file(f, chunking=True, available_mem_gib=available_mem_gib)
+        except ValueError:
+            logger.error(f"File {f} could not be read. It probably does not have the right format.")
+            return latlon_files
     else:
         # header files are not copied but recreated as they change
         # other txt and markdown files are copied as they nomaly contain description or class definitions but do not change with domain cropping
