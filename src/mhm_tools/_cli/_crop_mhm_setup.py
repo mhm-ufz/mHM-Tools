@@ -85,9 +85,7 @@ def add_args(parser):
         required=False,
         default=5,
         type=int,
-        help=(
-            """Available memory per cpu in Gb"""
-        ),
+        help=("""Available memory per cpu in Gb"""),
     )
 
 
@@ -141,5 +139,5 @@ def run(args):
         n_jobs=args.ncpus,
         filename=args.file_name,
         recursive_depth=args.folder_recursion_depth,
-        available_mem_gib=args.available_mem
+        available_mem_gib=args.available_mem,
     )

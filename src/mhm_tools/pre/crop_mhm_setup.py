@@ -207,7 +207,7 @@ NODATA_value         {d['NODATA_value']}
                     lon_key: slice(index_x_min, index_x_max),
                 }
             )
-            if 'time' in ds_in.dims:
+            if "time" in ds_in.dims:
                 data_array = xr.DataArray(
                     data=data,
                     dims=["time", lat_key, lon_key],
@@ -291,7 +291,16 @@ def call_create_latlon(
     logger.info(f"Latlon file written to {latlon_output_file}")
 
 
-def crop_file(f, mask_da, latslice, lonslice, output_path, input_path, overwrite, available_mem_gib):
+def crop_file(
+    f,
+    mask_da,
+    latslice,
+    lonslice,
+    output_path,
+    input_path,
+    overwrite,
+    available_mem_gib,
+):
     """Crops one file by lat and lon slice and may mask it with the mask dataarray."""
     logger.info(f"Cropping the file {f}")
     output_file = output_path / f.relative_to(input_path)
@@ -301,7 +310,9 @@ def crop_file(f, mask_da, latslice, lonslice, output_path, input_path, overwrite
         logger.info("Target file already exists. Cropping is scipped.")
         return latlon_files
     if f.suffix in [".asc", ".nc"]:
-        ds = get_xarray_ds_from_file(f, chunking=True, available_mem_gib=available_mem_gib)
+        ds = get_xarray_ds_from_file(
+            f, chunking=True, available_mem_gib=available_mem_gib
+        )
     else:
         # header files are not copied but recreated as they change
         # other txt and markdown files are copied as they nomaly contain description or class definitions but do not change with domain cropping
@@ -408,14 +419,16 @@ def crop_mhm_setup(
     n_jobs=1,
     filename="*.*",
     recursive_depth=5,
-    available_mem_gib=5
+    available_mem_gib=5,
 ):
     """Cut out an existing mhm domain setup using a mask file."""
     # check if the input is correct
     output_path = Path(output_path)
     input_path = Path(input_path)
     # recusively get all the files from the input path if it is a dir
-    logger.info(f'Cropping to: longitude ({lonslice.start}, {lonslice.stop}) and latitude ({latslice.stop}, {latslice.start})')
+    logger.info(
+        f"Cropping to: longitude ({lonslice.start}, {lonslice.stop}) and latitude ({latslice.stop}, {latslice.start})"
+    )
     files = []
     if input_path.is_dir():
         for depth in range(recursive_depth):
@@ -433,7 +446,7 @@ def crop_mhm_setup(
             output_path=output_path,
             input_path=input_path,
             overwrite=overwrite,
-            available_mem_gib=available_mem_gib
+            available_mem_gib=available_mem_gib,
         )
         for f in files
     )

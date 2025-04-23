@@ -9,7 +9,9 @@ from mhm_tools.common.logger import ErrorLogger
 logger = logging.getLogger(__name__)
 
 
-def get_coord_key(ds, lat=False, lon=False, time=False, raise_exception=True, is_retry=False):
+def get_coord_key(
+    ds, lat=False, lon=False, time=False, raise_exception=True, is_retry=False
+):
     """Return the lat or lon coordinate name used in the xarray dataset."""
     if lat + lon + time != 1:
         with ErrorLogger(logger):
@@ -19,7 +21,11 @@ def get_coord_key(ds, lat=False, lon=False, time=False, raise_exception=True, is
     # first check if there are dimensions with a fitting axis attribute
     try:
         for dim in ds_dims:
-            if (lat and ds[dim].axis == 'Y') or (lon and ds[dim].axis == 'X') or (time and ds[dim].axis == 'T'):
+            if (
+                (lat and ds[dim].axis == "Y")
+                or (lon and ds[dim].axis == "X")
+                or (time and ds[dim].axis == "T")
+            ):
                 return dim
     except AttributeError:
         pass
@@ -44,7 +50,12 @@ def get_coord_key(ds, lat=False, lon=False, time=False, raise_exception=True, is
             f"{type(ds)} does not contain fitting coordinates. Trying again looking for dimensions"
         )
         return get_coord_key(
-            ds, lat=lat, lon=lon, time=time, raise_exception=raise_exception, is_retry=True
+            ds,
+            lat=lat,
+            lon=lon,
+            time=time,
+            raise_exception=raise_exception,
+            is_retry=True,
         )
     if raise_exception:
         with ErrorLogger(logger):

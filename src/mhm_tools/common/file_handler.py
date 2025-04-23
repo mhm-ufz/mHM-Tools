@@ -68,6 +68,7 @@ def crop_file_by_mask(ds, mask_file):
             }
         )
 
+
 def chunk_dataset(ds, available_mem_gib) -> xr.Dataset:
     """
     Chunk dataset adjusting chunk size to avaiable memory.
@@ -76,43 +77,45 @@ def chunk_dataset(ds, available_mem_gib) -> xr.Dataset:
       - try to keep time chunks small (1…4)
       - make y/x chunks as square as possible
     """
-    logger.info(f'Chunking dataset with a max amount of mem of {available_mem_gib}Gb')
+    logger.info(f"Chunking dataset with a max amount of mem of {available_mem_gib}Gb")
     # ---------------- metadata only (cheap) --------------------------------
-    var_name  = next(iter(ds.data_vars))           # first data variable
-    var       = ds[var_name]                       # an xarray.Variable wrapper
-    dtype_sz  = var.dtype.itemsize                 # bytes per element
+    var_name = next(iter(ds.data_vars))  # first data variable
+    var = ds[var_name]  # an xarray.Variable wrapper
+    dtype_sz = var.dtype.itemsize  # bytes per element
 
-    lat_key   = get_coord_key(ds, lat=True)
-    lon_key   = get_coord_key(ds, lon=True)
-    time_key  = get_coord_key(ds, time=True, raise_exception=False)
+    lat_key = get_coord_key(ds, lat=True)
+    lon_key = get_coord_key(ds, lon=True)
+    time_key = get_coord_key(ds, time=True, raise_exception=False)
 
-    ny  = ds.sizes[lat_key]
-    nx  = ds.sizes[lon_key]
-    nt  = ds.sizes.get(time_key, 1)
+    ny = ds.sizes[lat_key]
+    nx = ds.sizes[lon_key]
+    nt = ds.sizes.get(time_key, 1)
 
     # ---------------- convert GiB → bytes and keep 80 % ---------------------
-    _MIN_BYTES_PER_CHUNK = 4*1024**2 # 4MB
+    _MIN_BYTES_PER_CHUNK = 4 * 1024**2  # 4MB
     work_bytes = max(int(0.8 * available_mem_gib * 1024**3), _MIN_BYTES_PER_CHUNK)
-    max_cells  = work_bytes // dtype_sz            # how many array elements fit
+    max_cells = work_bytes // dtype_sz  # how many array elements fit
 
     # ---------------- choose chunk sizes -----------------------------------
-    t_chunk = min(nt, 4) if time_key else None     # ≤4 along time
+    t_chunk = min(nt, 4) if time_key else None  # ≤4 along time
     cells_per_t = max_cells // (t_chunk or 1)
 
-    side     = max(1, int(np.sqrt(cells_per_t))) # square-ish y/x chunk
-    y_chunk  = min(ny, side)
-    x_chunk  = min(nx, side)
+    side = max(1, int(np.sqrt(cells_per_t)))  # square-ish y/x chunk
+    y_chunk = min(ny, side)
+    x_chunk = min(nx, side)
 
-    chunks   = {lat_key: y_chunk, lon_key: x_chunk}
+    chunks = {lat_key: y_chunk, lon_key: x_chunk}
     if time_key:
-        t_chunk = max_cells // (y_chunk*x_chunk)
+        t_chunk = max_cells // (y_chunk * x_chunk)
         chunks[time_key] = t_chunk
-    logger.debug(f'   The chunks used are {chunks}')
+    logger.debug(f"   The chunks used are {chunks}")
 
     return ds.chunk(chunks)
 
 
-def get_xarray_ds_from_file(file_path, var_name=None, chunking=False, available_mem_gib=None):
+def get_xarray_ds_from_file(
+    file_path, var_name=None, chunking=False, available_mem_gib=None
+):
     """Read file and return xarray dataset."""
     file_path = Path(file_path)
     logger.info(f"Reading {file_path} to xarray with chunking = {chunking}")
@@ -122,7 +125,12 @@ def get_xarray_ds_from_file(file_path, var_name=None, chunking=False, available_
         with ErrorLogger(logger):
             raise ValueError(msg)
     if file_path.suffix == ".asc":
-        ds_out = read_ascii_to_xarray(filepath=file_path, var_name=var_name, chunking=chunking, available_mem_gib=available_mem_gib)
+        ds_out = read_ascii_to_xarray(
+            filepath=file_path,
+            var_name=var_name,
+            chunking=chunking,
+            available_mem_gib=available_mem_gib,
+        )
     if file_path.suffix == ".nc":
         ds_out = xr.open_dataset(file_path)
         if chunking and available_mem_gib is not None:
@@ -132,6 +140,7 @@ def get_xarray_ds_from_file(file_path, var_name=None, chunking=False, available_
         with ErrorLogger(logger):
             raise NotImplementedError()
     return ds_out
+
 
 def write_xarray_to_file(ds, file_path, var_name=None, fmt=None):
     """Write xarray Datasets to file with file type depending on the file suffix."""
@@ -198,7 +207,9 @@ def write_xarray_to_ascii(dataset, filepath, data_var=None, fmt=None):
         logger.info(f"Writting file to {filepath}")
 
 
-def read_ascii_to_xarray(filepath, var_name=None, chunking=False, available_mem_gib=None):
+def read_ascii_to_xarray(
+    filepath, var_name=None, chunking=False, available_mem_gib=None
+):
     """Read an mHM readable asci file to an xarray dataset."""
     # Read the header from the file
     with filepath.open("r") as f:
