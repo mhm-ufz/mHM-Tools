@@ -701,8 +701,8 @@ class MHMRestartFile:
             self.grid.l1.resolution,
         )
         # Boolean flags: True→1 (trim), False→0 (keep)
-        lon_trim = ds_whole["lon_out"][-1] >= self.grid.l1.lon_max
-        lat_trim = ds_whole["lat_out"][-1] >= self.grid.l1.lat_max
+        lon_trim = int(ds_whole["lon_out"][-1] >= self.grid.l1.lon_max)
+        lat_trim = int(ds_whole["lat_out"][-1] >= self.grid.l1.lat_max)
 
         # New lengths = old length minus {0 or 1}
         ds_whole["lon_out"] = ds_whole["lon_out"][: len(ds_whole["lon_out"]) - lon_trim]
@@ -814,27 +814,32 @@ class MHMRestartFile:
                     ),
                 }
                 for data_var in data_vars:
-                    if cur_ds[data_var].shape != ds_whole[data_var][index_slice].shape:
-                        dims = cur_ds[data_var].dims
-                        ds_whole[data_var] = ds_whole[data_var].transpose(*dims)
-                        if (
-                            cur_ds[data_var].shape
-                            != ds_whole[data_var][index_slice].shape
-                        ):
-                            logger.error(
-                                f"Shape mismatch could not be resolved for {data_var} in {restart_file_path}"
-                            )
-                            logger.debug(
-                                f"shape read in ds: {cur_ds[data_var].shape}; shape in ds_whole: {ds_whole[data_var][index_slice].shape}"
-                            )
-                            logger.debug(
-                                f"index_slice: lon={ds_whole[index_slice]['lon_out'].data[0]:.3f}, {ds_whole[index_slice]['lon_out'].data[-1]:.3f}; lat={ds_whole[index_slice]['lat_out'].data[0]:.3f}, {ds_whole[index_slice]['lat_out'].data[-1]:.3f}"
-                            )
-                            logger.debug(
-                                f"extend read in ds: lon={cur_ds['lon_out'].data[0]}, {cur_ds['lon_out'].data[-1]}; lat={cur_ds['lat_out'].data[0]}, {cur_ds['lat_out'].data[-1]}"
-                            )
-                            continue
-                    ds_whole[data_var][index_slice] = cur_ds[data_var].data
+                    try: 
+                        if cur_ds[data_var].shape != ds_whole[data_var][index_slice].shape:
+                            dims = cur_ds[data_var].dims
+                            ds_whole[data_var] = ds_whole[data_var].transpose(*dims)
+                            if (
+                                cur_ds[data_var].shape
+                                != ds_whole[data_var][index_slice].shape
+                            ):
+                                logger.error(
+                                    f"Shape mismatch could not be resolved for {data_var} in {restart_file_path}"
+                                )
+                                logger.debug(
+                                    f"shape read in ds: {cur_ds[data_var].shape}; shape in ds_whole: {ds_whole[data_var][index_slice].shape}"
+                                )
+                                logger.debug(
+                                    f"index_slice: lon={ds_whole[index_slice]['lon_out'].data[0]:.3f}, {ds_whole[index_slice]['lon_out'].data[-1]:.3f}; lat={ds_whole[index_slice]['lat_out'].data[0]:.3f}, {ds_whole[index_slice]['lat_out'].data[-1]:.3f}"
+                                )
+                                logger.debug(
+                                    f"extend read in ds: lon={cur_ds['lon_out'].data[0]}, {cur_ds['lon_out'].data[-1]}; lat={cur_ds['lat_out'].data[0]}, {cur_ds['lat_out'].data[-1]}"
+                                )
+                                continue
+                        ds_whole[data_var][index_slice] = cur_ds[data_var].data
+                    except KeyError as ke:
+                        logger.error(f'Key error in file {restart_file_path}')
+                        with ErrorLogger(logger):
+                            raise ke
         logger.info("Merging restart files done")
         if "month_of_year_bnds" not in ds_whole.coords:
             logger.info("Adding month_of_year_bnds")
