@@ -83,9 +83,8 @@ def add_args(parser):
     parser.add_argument(
         "--available_mem",
         required=False,
-        default=5,
-        type=int,
-        help=("""Available memory per cpu in Gb"""),
+        default="5",
+        help=("""Available memory per cpu in Gb or Mb (default Gb)"""),
     )
 
 
@@ -127,6 +126,13 @@ def run(args):
         latslice = slice(lat_max_target_grid, lat_min_target_grid)
         lonslice = slice(lon_min_target_grid, lon_max_target_grid)
         # l0_resolution = float(args.lonlatbox.split(",")[4])
+    available_mem = args.available_mem.lower()
+    if "mb" in available_mem:
+        available_mem = int(available_mem.replace('mb', ''))*1000
+    elif "gb" in available_mem:
+        available_mem = int(available_mem.replace('gb', ''))
+    else:
+        available_mem = int(available_mem)
     crop_mhm_setup(
         mask_da,
         args.output_path,
@@ -139,5 +145,5 @@ def run(args):
         n_jobs=args.ncpus,
         filename=args.file_name,
         recursive_depth=args.folder_recursion_depth,
-        available_mem_gib=args.available_mem,
+        available_mem_gib=available_mem,
     )
