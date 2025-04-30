@@ -89,6 +89,7 @@ def get_gauge_coords(
     cell_diff=1,
     max_cell_diff=3,
     diff_percent=10,
+    id=None
 ):
     """
     Find correct gauge location.
@@ -155,7 +156,7 @@ def get_gauge_coords(
             max_cell_diff=3,
             diff_percent=10,
         )
-    logger.warning("No similar flow accumulation found nearby for gauge {id}.")
+    logger.warning(f"No similar flow accumulation found nearby for gauge {id}.")
     logger.debug("None, None, None")
     return None, None, None
 
