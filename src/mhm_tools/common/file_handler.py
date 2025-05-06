@@ -142,9 +142,11 @@ def get_xarray_ds_from_file(
     return ds_out
 
 
-def write_xarray_to_file(ds, file_path, var_name=None, fmt=None):
+def write_xarray_to_file(ds, file_path, var_name=None, fmt=None, create_folder=True):
     """Write xarray Datasets to file with file type depending on the file suffix."""
     file_path = Path(file_path)
+    if create_folder and not file_path.parent.is_dir():
+        file_path.parent.mkdir(parents=True)
     logger.info(f"Writing file to {file_path}.")
     if file_path.suffix == ".asc":
         return write_xarray_to_ascii(ds, file_path, var_name, fmt)
