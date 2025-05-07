@@ -105,54 +105,57 @@ def get_std_from_ds(ds, input_var=None, clim=None, factor=1):
 
 
 def get_file_stats(
-    file, input_var, factor=1, coordinate_slice=None, output_path=None, years=None
+    ds_in, input_var, factor=1, coordinate_slice=None, output_path=None, avaiable_years=None, direct_comp=False
 ):
     """Get statistics for one file."""
-    logger.debug(f"Get file stats {file}")
-    with xr.open_dataset(file, engine="netcdf4") as ds_in:
-        # Apply coordinate slicing if needed
-        logger.debug(f"before cropping the file {ds_in}")
-        lat_key = get_coord_key(ds_in, lat=True)
-        lon_key = get_coord_key(ds_in, lon=True)
-        # make sure that latitude order is from highest to lowest value
-        if ds_in[lat_key][1] > ds_in[lat_key][0]:
-            ds_croped = ds_in.isel(lat=slice(None, None, -1))
-        else:
-            ds_croped = ds_in
-        if coordinate_slice is not None:
-            ds_croped = ds_croped.sel(
-                {lat_key: coordinate_slice["lat"], lon_key: coordinate_slice["lon"]}
-            )
-        if years is not None:
-            ds_croped = ds_croped.sel(time=ds_croped.time.dt.year.isin(years))
+    # logger.debug(f"Get file stats {file}")
 
-        # Calculate climatology and standard deviation along the time dimension
-        clim = get_clim_from_ds(ds_croped, input_var, factor)
-        std = get_std_from_ds(ds_croped, input_var, clim, factor)
-
-        mean = ds_croped[input_var].mean(dim="time", skipna=True) * factor
-
-        # Construct the output dataset with lazy evaluations
-        output = xr.Dataset(
-            {"clim": clim, "std": std, "mean": mean},
-            coords={
-                "month": np.arange(1, 13, 1),
-                "lat": get_coord_values(ds_croped, lat=True),
-                "lon": get_coord_values(ds_croped, lon=True),
-            },
+    # Apply coordinate slicing if needed
+    logger.debug(f"before cropping the file {ds_in}")
+    lat_key = get_coord_key(ds_in, lat=True)
+    lon_key = get_coord_key(ds_in, lon=True)
+    # make sure that latitude order is from highest to lowest value
+    if ds_in[lat_key][1] > ds_in[lat_key][0]:
+        ds_croped = ds_in.isel(lat=slice(None, None, -1))
+    else:
+        ds_croped = ds_in
+    if coordinate_slice is not None:
+        ds_croped = ds_croped.sel(
+            {lat_key: coordinate_slice["lat"], lon_key: coordinate_slice["lon"]}
         )
+    if avaiable_years is not None:
+        ds_croped = ds_croped.sel(time=ds_croped.time.dt.year.isin(avaiable_years))
+
+    # Calculate climatology and standard deviation along the time dimension
+    clim = get_clim_from_ds(ds_croped, input_var, factor)
+    std = get_std_from_ds(ds_croped, input_var, clim, factor)
+
+    mean = ds_croped[input_var].mean(dim="time", skipna=True) * factor
+
+    # Construct the output dataset with lazy evaluations
+    output = xr.Dataset(
+        {"clim": clim, "std": std, "mean": mean},
+        coords={
+            "month": np.arange(1, 13, 1),
+            "lat": get_coord_values(ds_croped, lat=True),
+            "lon": get_coord_values(ds_croped, lon=True),
+        },
+    )
+    if direct_comp:
+        output.coords["time"] = ds_croped[input_var].time
+        output["time_series"] = ds_croped[input_var] * factor
     if output_path is not None:
         output.to_netcdf(output_path)
     return output
 
 
-def get_files(path, n_bootstrap_years=None, years=None):
+def get_files(path, n_bootstrap_years=None, available_years=None):
     """Recursevely find all netcdf files in directory."""
     nc_files = []
     # Search for .nc files at each depth level
     all_years = get_years_from_path(path)
-    if years is not None:
-        selectable_years = [y for y in all_years if y in years]
+    if available_years is not None:
+        selectable_years = [y for y in all_years if y in available_years]
     else:
         selectable_years = all_years
     logger.debug(
@@ -160,12 +163,10 @@ def get_files(path, n_bootstrap_years=None, years=None):
     )
     if n_bootstrap_years is not None:
         # needs fixed folder structure of y/m/file
-        selected_years = random.choices(selectable_years, k=n_bootstrap_years)
-        for year in selected_years:
-            nc_files.extend((path / year).rglob("*.nc"))
-    else:
-        for year in selectable_years:
-            nc_files.extend((path / year).rglob("*.nc"))
+        selectable_years = random.choices(selectable_years, k=n_bootstrap_years)
+    for year in selectable_years:
+        folder_path = path / str(year)
+        nc_files.extend(folder_path.rglob("*.nc"))
     return nc_files
 
 
@@ -260,12 +261,11 @@ def get_stats_one_pass(
     n_bootstrap_years=None,
     bootstrap_index=None,
     output_path=None,
-    years=None,
+    available_years=None,
 ):
     """Create dataset statistics by reading in one monthly or yearly file at a time and updating the statistics."""
-    logger.debug(years)
     if path.is_dir():
-        files = get_files(path, n_bootstrap_years=n_bootstrap_years, years=years)
+        files = get_files(path, n_bootstrap_years=n_bootstrap_years, available_years=available_years)
     logger.debug(f"List of files: {files}")
     file_subsets = split_file_list(files, ncpus) if ncpus > 1 else [files]
     logger.info("creating statistics...")
@@ -505,16 +505,13 @@ def get_stats(
     n_bootstrap_years,
     ncpus,
     output_file,
-    years=None,
+    available_years=None,
+    direct_comp=False
 ):
     """Get statistics dataset from a path to a file or directory with files."""
     logger.info(f"Get stats for {path}")
     if var is not None:
-        if path.is_file():
-            stats_ds = get_file_stats(
-                path, var, factor, coordinate_slice, output_path=output_file
-            )
-        elif path.is_dir():
+        if path.is_dir() and not direct_comp:
             stats_ds = get_stats_one_pass(
                 path,
                 var,
@@ -523,11 +520,17 @@ def get_stats(
                 n_bootstrap_years=n_bootstrap_years,
                 ncpus=ncpus,
                 output_path=output_file,
-                years=years,
+                available_years=available_years
             )
+        elif path.is_dir() or path.is_file():
+            with get_dataset_from_path(path) as ds_in:
+                stats_ds = get_file_stats(
+                    ds_in, var, factor, coordinate_slice, output_path=output_file, avaiable_years=available_years, direct_comp=direct_comp
+                )
         else:
+            msg = f"Path {path} is neither dir nor file."
             with ErrorLogger(logger):
-                raise ValueError()
+                raise ValueError(msg)
     else:
         with xr.open_dataset(path, engine="netcdf4") as ds_input:
             ds = ds_input
@@ -538,8 +541,8 @@ def get_stats(
                         get_coord_key(ds, lon=True): coordinate_slice["lon"],
                     }
                 )
-            if years is not None:
-                ds = ds.sel(time=ds_input.time.dt.year.isin(years))
+            if available_years is not None:
+                ds = ds.sel(time=ds_input.time.dt.year.isin(available_years))
             if "clim" in ds and "std" in ds and "mean" in ds:
                 stats_ds = ds
             else:
@@ -563,7 +566,8 @@ def compare_input_with_ref(
     n_bootstrap_years=None,
     bootstrap_index=None,
     ncpus=1,
-    years=None,
+    available_years=None,
+    direct_comp = False
 ):
     """Compare the two datasets."""
     if bootstrap_index is not None:
@@ -580,11 +584,13 @@ def compare_input_with_ref(
         n_bootstrap_years=n_bootstrap_years,
         ncpus=ncpus,
         output_file=input_stats_file,
-        years=years,
+        available_years=available_years,
+        direct_comp=direct_comp
+
     )
     logger.debug(f"input ds: {input}")
-    # get output statistics
 
+    # get output statistics
     ref = get_stats(
         path=ref_path,
         var=ref_var,
@@ -593,15 +599,23 @@ def compare_input_with_ref(
         n_bootstrap_years=n_bootstrap_years,
         ncpus=ncpus,
         output_file=ref_stats_file,
-        years=years,
+        available_years=available_years,
+        direct_comp=direct_comp
+
     )
     logger.debug(f"ref ds: {ref}")
 
+    # regridd to same spatial resolution
     input, ref = regridd_to_higher_spatial_resolution(input, ref)
+
     # compare and save statistics
     rel_mean = input["mean"].values / ref["mean"].values
     rel_std = input["std"].values / ref["std"].values
-    spearman, spearman_pval = spearman_spatial(input["clim"], ref["clim"])
+    if direct_comp:
+        spearman = spearman_spatial(input['time_series'], ref['time_series'])
+    else:
+        spearman = spearman_spatial(input["clim"], ref["clim"])
+
     rel_mean = xr.DataArray(
         rel_mean,
         coords={
@@ -751,12 +765,12 @@ def evaluate_boostraping_stat_files(stat_files, input_name, ref_name):
     }
 
 
-def get_dataset_from_path(path, years=None):
+def get_dataset_from_path(path, available_years=None):
     """Get a dataset from a given path whether that is a file or a directory."""
-    if path.is_file() and path.suffix == "nc":
-        return xr.open_dataset(path)
+    if path.is_file() and path.suffix == ".nc":
+        return get_xarray_ds_from_file(path)
     if path.is_dir():
-        file_list = get_files(path, years=years)
+        file_list = get_files(path, available_years=available_years)
         logger.debug(file_list)
         logger.debug("combining files by coords ...")
         return xr.open_mfdataset(
@@ -940,10 +954,10 @@ def direct_comparison(
 def get_years_from_path(path, raise_exception=True):
     """Get years for one dataset from the folder structure or the xarray dataset."""
     if path.is_dir():
-        return [p.name for p in year_structure_paths(path)]
+        return [int(p.name) for p in year_structure_paths(path)]
     if path.is_file():
         with get_xarray_ds_from_file(path) as input_ds:
-            return [str(y) for y in np.unique(input_ds.time.dt.year.data)]
+            return [int(y) for y in np.unique(input_ds.time.dt.year.data)]
     if raise_exception:
         msg = f"The provided path {path} is neither file nor directory."
         with ErrorLogger(logger):
@@ -951,8 +965,12 @@ def get_years_from_path(path, raise_exception=True):
     return []
 
 
-def get_overlapping_years(input_path, ref_path):
-    """Determine overlapping years between two datasets."""
+def get_available_years(input_path, ref_path, year_slice=None, direct_comp=True):
+    """
+    Determine available years from constrains and datasets.
+    
+    If no reference data is given it will only be the input years inside the year slice.
+    """
     logger.info("Determining overlapping years.")
     # get all years from input data
     years_in = get_years_from_path(input_path)
@@ -960,15 +978,23 @@ def get_overlapping_years(input_path, ref_path):
     logger.debug(f"Input years: {years_in}")
 
     # get all years from reference data
-    years_ref = get_years_from_path(ref_path)
+    years_ref = get_years_from_path(ref_path, raise_exception=False)
     years_ref.sort()
     logger.debug(f"Ref years: {years_ref}")
 
     # find overlapping years
     years = []
-    for year in years_in:
-        if year in years_ref:
-            years.append(year.strip())
+    possible_years = years_in
+    if not direct_comp and years_ref:
+        possible_years.extend([y for y in years_ref if y not in possible_years])
+        possible_years.sort()
+    for year in possible_years:
+        if year_slice.start is not None and year < year_slice.start:
+                continue
+        if year_slice.stop is not None and year > year_slice.stop:
+                continue
+        if not years_ref or year in years_ref:
+            years.append(year)
     return years
 
 def year_structure_paths(path: Path) -> bool:
@@ -1005,12 +1031,12 @@ def seasonality_grid_validation(
     n_bootstrap_years=None,
     n_bootstrap_selections=None,
     direct_comp=True,
+    year_slice=None
 ):
     """Validate a spatial variable from two datasets by comparing the climatology of that variable."""
     output_path = Path(output_path)
     input_path = Path(input_path)
     ref_path = Path(ref_path) if ref_path is not None else None
-    years = None
 
     if not output_path.is_dir():
         output_path.mkdir(parents=True)
@@ -1022,9 +1048,8 @@ def seasonality_grid_validation(
     if input_path.is_dir() and len(year_structure_paths(input_path)) == 0:
         # check if the input path has the right structure
         input_path = input_path / 'mHM_Fluxes_States.nc'
-    if direct_comp:
-        years = get_overlapping_years(input_path, ref_path)
-        logger.info(f"Years {years} are overlapping.")
+    available_years = get_available_years(input_path, ref_path, year_slice, direct_comp)
+    logger.info(f"Years {available_years} are available for comparison.")
 
     if ref_path is None:
         # Only create statistics do not compare
@@ -1032,14 +1057,16 @@ def seasonality_grid_validation(
         output_name = f"{input_name}_stats.nc" if input_name is not None else "stats.nc"
         if input_path.is_file():
             # Write file stats to file
-            get_file_stats(
-                input_path,
-                input_var,
-                input_factor,
-                coordinate_slice,
-                output=output_path / output_name,
-                years=years,
-            )
+            with get_xarray_ds_from_file(input_path, chunking=True, available_mem_gib=10) as ds_in:
+                get_file_stats(
+                    ds_in,
+                    input_var,
+                    input_factor,
+                    coordinate_slice,
+                    output=output_path / output_name,
+                    avaiable_years=available_years,
+                )
+
         elif (
             n_bootstrap_years is not None
             and n_bootstrap_selections > 0
@@ -1053,11 +1080,11 @@ def seasonality_grid_validation(
                     input_factor,
                     coordinate_slice,
                     n_bootstrap_years,
-                    s,
+                    bootstrap_index,
                     output_path / output_name,
-                    years=years,
+                    available_years=available_years,
                 )
-                for s in range(n_bootstrap_selections)
+                for bootstrap_index in range(n_bootstrap_selections)
             )
         elif input_path.is_dir():
             # Write file stats for one dataset read in from multiple files in a directory
@@ -1067,7 +1094,7 @@ def seasonality_grid_validation(
                 input_factor,
                 coordinate_slice,
                 output_path=output_path / output_name,
-                years=years,
+                available_years=available_years,
             )
         else:
             with ErrorLogger(logger):
@@ -1078,6 +1105,7 @@ def seasonality_grid_validation(
         and n_bootstrap_selections > 0
         and input_path.is_dir()
         and ref_path.is_dir()
+        and not direct_comp
     ):
         # Compare by bootstraping
         if only_plot:
@@ -1099,10 +1127,10 @@ def seasonality_grid_validation(
                     ref_factor,
                     coordinate_slice,
                     n_bootstrap_years,
-                    s,
-                    years=years,
+                    bootstrap_index,
+                    available_years=available_years,
                 )
-                for s in range(n_bootstrap_selections)
+                for bootstrap_index in range(n_bootstrap_selections)
             )
         stat_files = [file for file in stat_files if file is not None]
         if stat_files:
@@ -1131,5 +1159,5 @@ def seasonality_grid_validation(
             ref_factor,
             coordinate_slice,
             ncpus=n_cpus,
-            years=years,
+            available_years=available_years,
         )

@@ -102,6 +102,20 @@ def add_args(parser):
         required=False,
         help=("Use no statistics but compare timeseries directly. Needs ref_path."),
     )
+    parser.add_argument(
+        "--start_date",
+        required=False,
+        default=None,
+        type=str,
+        help=("""First year allowed in the analysis."""),
+    )
+    parser.add_argument(
+        "--end_date",
+        required=False,
+        default=None,
+        type=str,
+        help=("Lates year that is allowed in the analysis."),
+    )
 
 
 def run(args):
@@ -126,6 +140,7 @@ def run(args):
             "lat": slice(lat_max, lat_min),
             "lon": slice(lon_min, lon_max),
         }
+    year_slice = slice(args.start_date, args.end_date)
     seasonality_grid_validation(
         args.input_path,
         args.input_variable,
@@ -142,4 +157,5 @@ def run(args):
         args.n_boostrap_years,
         args.n_bootstrap_selections,
         args.direct_comparison,
+        year_slice=year_slice
     )
