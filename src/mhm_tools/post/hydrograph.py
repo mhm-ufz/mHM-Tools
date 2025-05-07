@@ -115,10 +115,14 @@ class Hydrograph:
         if simulation is not None and observation is not None:
             self.set_discharge(simulation=simulation, observation=observation)
 
-    def set_discharge(self, simulation, observation):
+    def set_discharge(self, simulation=None, observation=None):
         """Set the discharge variables and remove nan values."""
-        self.sim_discharge_data = simulation
-        self.obs_discharge_data = observation
+        if simulation is not None and observation is not None:
+            self.sim_discharge_data = simulation
+            self.obs_discharge_data = observation
+        elif simulation is not None or observation is not None:
+            msg = "Either one or none of the input must be via array."
+            raise ValueError(msg)
         self.sim_discharge_data_nonan = self.sim_discharge_data.dropna(
             dim="time", how="all"
         )
@@ -439,7 +443,7 @@ class Hydrograph:
                     if "obs" in v:
                         self.catchment.name = str(int(v.split("_")[1]))
                         self.obs_discharge_data = discharge_data[v]
-
+            self.set_discharge()
             return True
         return False
 

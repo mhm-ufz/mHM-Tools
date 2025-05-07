@@ -7,10 +7,10 @@ from mhm_tools.post.GRDC_validation import evaludate_grdc_data
 def add_args(parser):
     required_args = parser.add_argument_group("required arguments")
     required_args.add_argument(
-        "--gauge_info_path",
-        required=False,
+        "--mrm_restart",
+        required=True,
         default=None,
-        help=("Path to the gauge information file."),
+        help=("Path to the mrm restart file."),
     )
     required_args.add_argument(
         "--observed_data_path",
@@ -107,6 +107,7 @@ def run(args):
     evaludate_grdc_data(
         args.model_data_path,
         args.observed_data_path,
+        mrm_restart_file=args.mrm_restart,
         output_path=args.output_dir,
         n_jobs=int(args.ncpus),
         sim_variable=args.model_variable,

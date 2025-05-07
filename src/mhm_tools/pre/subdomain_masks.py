@@ -262,7 +262,7 @@ class CreateSubdomainMasks:
         # first process fdir
         logger.info("processing fdir")
         data_var_values = ds_sub_ref_file["flwdir"].values
-        land_mask_values = land_mask.values
+        # land_mask_values = land_mask.values
         # nan values inside the land mask are changed to sink values
         # ds_sub_ref_file[data_var] = ds_sub_ref_file[data_var].where(
         #     ~np.isnan(ds_sub_ref_file[data_var]) | np.isnan(land_mask),
@@ -274,15 +274,16 @@ class CreateSubdomainMasks:
         #     np.nan
         # )
         # Replace values where ds_sub_ref_file[data_var] is NaN and land_mask is not NaN with 0
-        sink_value = 0 if 0 in data_var_values else 5
-        # First condition: Set to sink_value where data_var is NaN and land_mask is not NaN
-        logger.debug(f"flwdir data_vars {data_var_values}")
-        data_var_values[(data_var_values == 247) & (land_mask_values != 0)] = sink_value
+        # sink_value = 0 if 0 in data_var_values else 5
+        # # First condition: Set to sink_value where data_var is NaN and land_mask is not NaN
+        # logger.debug(f"flwdir data_vars {data_var_values}")
+        # data_var_values[(data_var_values == 247) & (land_mask_values != 0)] = sink_value
 
-        # Second condition: Replace all values where land_mask is 0 with NaN unless they are sink values (0)
-        data_var_values[land_mask_values == 0 & (data_var_values != sink_value)] = (
-            sink_value
-        )
+        # # Second condition: Replace all values where land_mask is 0 with NaN unless they are sink values (0)
+        # data_var_values[land_mask_values == 0 & (data_var_values != sink_value)] = (
+        #     sink_value
+        # )
+        data_var_values[np.isnan(land_mask)] = np.nan
         # -9999.0
         ds_sub_ref_file["flwdir"].values = data_var_values
 
@@ -297,17 +298,17 @@ class CreateSubdomainMasks:
                 land_mask != 0, np.nan
             )
 
-            # for uparea_grid set all nan values where the fdir is sink_value to 0
-            if data_var == "uparea_grid":
-                logger.info(f"data_var_values dtype: {data_var_values.dtype}")
-                logger.info(f"flwdir dtype: {ds_sub_ref_file['flwdir'].values.dtype}")
-                mask_da = ds_sub_ref_file[
-                    data_var
-                ].isnull() & (  # xarray-friendly check for NaNs
-                    ds_sub_ref_file["flwdir"] == sink_value
-                )
-                ds_sub_ref_file[data_var].data[mask_da] = sink_value
-                # ds_sub_ref_file[data_var].values = data_var_values
+            # # for uparea_grid set all nan values where the fdir is sink_value to 0
+            # if data_var == "uparea_grid":
+            #     logger.info(f"data_var_values dtype: {data_var_values.dtype}")
+            #     logger.info(f"flwdir dtype: {ds_sub_ref_file['flwdir'].values.dtype}")
+            #     mask_da = ds_sub_ref_file[
+            #         data_var
+            #     ].isnull() & (  # xarray-friendly check for NaNs
+            #         ds_sub_ref_file["flwdir"] == sink_value
+            #     )
+            #     ds_sub_ref_file[data_var].data[mask_da] = sink_value
+            # ds_sub_ref_file[data_var].values = data_var_values
 
         # Write the output to a netCDF file
         fname = self.out_file_name + ".nc"

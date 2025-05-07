@@ -12,7 +12,9 @@ import xarray as xr
 from crick import TDigest
 from joblib import Parallel, delayed
 
+from mhm_tools.common.file_handler import get_xarray_ds_from_file
 from mhm_tools.common.logger import ErrorLogger, log_arguments
+from mhm_tools.common.xarray_utils import get_coord_key
 
 logger = logging.getLogger(__name__)
 
@@ -262,6 +264,19 @@ class Grid:
         ) and latlon_file is not None:
             self.read_latlon(latlon_file)
 
+    def migrate_grid_using_systemlink(self, new_path):
+        """Mirgrates the file path by creating a new path and system linking all files there."""
+        logger.info(f"Creating system links in {new_path} for all files in {self.path}")
+        new_path = Path(new_path)
+        new_path.mkdir(parents=True, exist_ok=True)
+        for file in self.path.glob("*.*"):
+            link_loc = new_path / file.name
+            if link_loc.exists():
+                link_loc.unlink()
+            link_loc.symlink_to(file)
+        self.path = new_path
+        self.morph_files = MorphFiles(self.path)
+
     def read_latlon(self, latlon_file: Path):
         """
         Read the latlon file and sets the lower-left (l0) and upper-right (l1) corners of the grid as well as the resolution.
@@ -380,6 +395,7 @@ class MHMRestartFile:
         input_file_path (Path): The path to the input file.
         nml_template (Path): The path to the namelist template file.
         output_path (Path): The path to the output directory.
+        work_path (Path): The path to the working directory.
         l0 (LatLon): The LatLon object representing the high resolution grid.
         l1 (LatLon): The LatLon object representing the low resolution grid.
         mpr (MPRRunner): The MPRRunner object for executing the mpr executable.
@@ -427,6 +443,7 @@ class MHMRestartFile:
         nml_template: Path,
         output_path: Path,
         mpr: MPRRunner,
+        work_path=None,
         increment_l1=2,
         ncpus=1,
         run_on_whole_domain=False,
@@ -438,6 +455,7 @@ class MHMRestartFile:
         logger.debug(f"Creating MHMRestartFile object with {locals()}")
         self.nml_template = Path(nml_template)
         self.output_path = Path(output_path)
+        self.work_path = Path(work_path) if work_path is not None else self.output_path
         self.grid = grid
         self.subgrids = []  # list of grid objects
         self.ncpus = ncpus
@@ -548,7 +566,7 @@ class MHMRestartFile:
                 )
             ):
                 l0, l1 = self._create_latlon(lon_min, lat_min)
-                subgrid_path = self.output_path / f"slice_{i}_{j}"
+                subgrid_path = self.work_path / f"slice_{i}_{j}"
                 logger.debug(f"Reading subgrid {subgrid_path}")
                 logger.debug(
                     f"l0: {l0.lon_min}, {l0.lon_max}, {l0.lat_min}, {l0.lat_max}"
@@ -585,7 +603,7 @@ class MHMRestartFile:
         logger.debug("Splitting grid done")
 
     def _split_cell(self, ds, file_path, i, lon_min, j, lat_min):
-        out_dir = Path(self.output_path) / f"slice_{i}_{j}"
+        out_dir = Path(self.work_path) / f"slice_{i}_{j}"
         if not out_dir.exists():
             logger.debug(f"Creating {out_dir}")
             out_dir.mkdir(parents=True, exist_ok=True)
@@ -670,12 +688,6 @@ class MHMRestartFile:
 
         # 1. create an empty file for the whole grid
         ds_whole = xr.Dataset()
-        # ds_whole["longitude"] = np.arange(
-        #     self.grid.l0.lon_min, self.grid.l0.lon_max, self.grid.l0.resolution
-        # )
-        # ds_whole["latitude"] = np.arange(
-        #     self.grid.l0.lat_min, self.grid.l0.lat_max, self.grid.l0.resolution
-        # )
         ds_whole["lon_out"] = np.arange(
             self.grid.l1.lon_min + self.grid.l1.resolution / 2,
             self.grid.l1.lon_max
@@ -688,29 +700,45 @@ class MHMRestartFile:
             + self.grid.l1.resolution / 2,  # + since arange omits the last value
             self.grid.l1.resolution,
         )
+        # Boolean flags: True→1 (trim), False→0 (keep)
+        lon_trim = int(ds_whole["lon_out"][-1] >= self.grid.l1.lon_max)
+        lat_trim = int(ds_whole["lat_out"][-1] >= self.grid.l1.lat_max)
+
+        # New lengths = old length minus {0 or 1}
+        ds_whole["lon_out"] = ds_whole["lon_out"][: len(ds_whole["lon_out"]) - lon_trim]
+        ds_whole["lat_out"] = ds_whole["lat_out"][: len(ds_whole["lat_out"]) - lat_trim]
+
+        logger.debug("lat_out")
+        logger.debug(ds_whole["lat_out"].shape)
+        logger.debug("lon_out")
+        logger.debug(ds_whole["lon_out"].shape)
         logger.debug(f"ds_whole: {ds_whole}")
 
         # 2. create all coordinates in the whole grid
         # TODO: add dimensions to comments to make it more readable
 
-        self.grid.restart_file = self.output_path / "output_whole_grid_restart.nc"
+        self.grid.restart_file = self.work_path / "output_whole_grid_restart.nc"
 
         if self.merge_only:
             restart_file_paths = [
                 file
-                for dir in self.output_path.glob("slice_*")
+                for dir in self.work_path.glob("slice_*")
                 for file in dir.glob("output_*.nc")
             ]
         else:
             restart_file_paths = [subgrid.restart_file for subgrid in self.subgrids]
         logger.debug(f"Restart File Paths: {restart_file_paths}")
         restart_file_paths.sort()
+        if not restart_file_paths:
+            with ErrorLogger(logger):
+                msg = "The list of restart files for merging is empty."
+                if self.merge_only:
+                    msg += "Try without merge_only flag."
+                raise ValueError(msg)
+        first_restart_file = next(iter(restart_file_paths))
+        logger.info(f"Opening {first_restart_file} als reference")
 
-        logger.info(f"Opening {restart_file_paths[0]} als reference")
-
-        if not restart_file_paths[0].is_file():
-            logger.error(f"Could not open {restart_file_paths[0]}")
-        with xr.open_dataset(restart_file_paths[0]) as cur_ds:
+        with get_xarray_ds_from_file(first_restart_file) as cur_ds:
             for coord in cur_ds.coords:
                 if coord not in ds_whole.coords:
                     ds_whole[coord] = cur_ds[coord]
@@ -786,27 +814,32 @@ class MHMRestartFile:
                     ),
                 }
                 for data_var in data_vars:
-                    if cur_ds[data_var].shape != ds_whole[data_var][index_slice].shape:
-                        dims = cur_ds[data_var].dims
-                        ds_whole[data_var] = ds_whole[data_var].transpose(*dims)
-                        if (
-                            cur_ds[data_var].shape
-                            != ds_whole[data_var][index_slice].shape
-                        ):
-                            logger.error(
-                                f"Shape mismatch could not be resolved for {data_var} in {restart_file_path}"
-                            )
-                            logger.debug(
-                                f"shape read in ds: {cur_ds[data_var].shape}; shape in ds_whole: {ds_whole[data_var][index_slice].shape}"
-                            )
-                            logger.debug(
-                                f"index_slice: lon={ds_whole[index_slice]['lon_out'].data[0]:.3f}, {ds_whole[index_slice]['lon_out'].data[-1]:.3f}; lat={ds_whole[index_slice]['lat_out'].data[0]:.3f}, {ds_whole[index_slice]['lat_out'].data[-1]:.3f}"
-                            )
-                            logger.debug(
-                                f"extend read in ds: lon={cur_ds['lon_out'].data[0]}, {cur_ds['lon_out'].data[-1]}; lat={cur_ds['lat_out'].data[0]}, {cur_ds['lat_out'].data[-1]}"
-                            )
-                            continue
-                    ds_whole[data_var][index_slice] = cur_ds[data_var].data
+                    try: 
+                        if cur_ds[data_var].shape != ds_whole[data_var][index_slice].shape:
+                            dims = cur_ds[data_var].dims
+                            ds_whole[data_var] = ds_whole[data_var].transpose(*dims)
+                            if (
+                                cur_ds[data_var].shape
+                                != ds_whole[data_var][index_slice].shape
+                            ):
+                                logger.error(
+                                    f"Shape mismatch could not be resolved for {data_var} in {restart_file_path}"
+                                )
+                                logger.debug(
+                                    f"shape read in ds: {cur_ds[data_var].shape}; shape in ds_whole: {ds_whole[data_var][index_slice].shape}"
+                                )
+                                logger.debug(
+                                    f"index_slice: lon={ds_whole[index_slice]['lon_out'].data[0]:.3f}, {ds_whole[index_slice]['lon_out'].data[-1]:.3f}; lat={ds_whole[index_slice]['lat_out'].data[0]:.3f}, {ds_whole[index_slice]['lat_out'].data[-1]:.3f}"
+                                )
+                                logger.debug(
+                                    f"extend read in ds: lon={cur_ds['lon_out'].data[0]}, {cur_ds['lon_out'].data[-1]}; lat={cur_ds['lat_out'].data[0]}, {cur_ds['lat_out'].data[-1]}"
+                                )
+                                continue
+                        ds_whole[data_var][index_slice] = cur_ds[data_var].data
+                    except KeyError as ke:
+                        logger.error(f'Key error in file {restart_file_path}')
+                        with ErrorLogger(logger):
+                            raise ke
         logger.info("Merging restart files done")
         if "month_of_year_bnds" not in ds_whole.coords:
             logger.info("Adding month_of_year_bnds")
@@ -830,7 +863,9 @@ class MHMRestartFile:
                 ds = ds.drop(arg)
         return ds
 
-    def _correct_restart_file(self, ds):
+    def _correct_restart_file(self, ds=None):
+        if ds is None:
+            ds = xr.open_dataset(self.grid.restart_file)
         ds_mask = xr.open_dataset(self.grid.land_mask_file)
         logger.debug(
             f"land mask shape before sel: {ds_mask.land_mask.shape} lat_min: {ds_mask.land_mask.lat.min()}, lat_max: {ds_mask.land_mask.lat.max()}"
@@ -848,7 +883,8 @@ class MHMRestartFile:
         # logger.debug(f'mask lon: {ds_mask['lon'].data[0]} to {ds_mask['lon'].data[-1]} with length {np.shape(ds_mask['lon'].data)}')
         # logger.debug(f'ds: {np.shape(ds["L1_SoilMoistureExponent"].data)}')
         try:
-            ds_mask = ds_mask.sortby("latitude")
+            mask_lat_key = get_coord_key(ds_mask, lat=True)
+            ds_mask = ds_mask.sortby(mask_lat_key)
         except Exception as e:
             logger.error(f"Could not sort by latitude {e}")
             ds_mask = ds_mask.sortby("lat")
@@ -1139,7 +1175,11 @@ class MHMRestartFile:
                 "zlib": True,
                 "complevel": 4,
             }
-        ds.to_netcdf(self.grid.restart_file, encoding=encoding)
+        if not self.output_path.is_dir():
+            self.output_path.mkdir(parents=True)
+        output_file = self.output_path / self.grid.restart_file.name
+        ds.to_netcdf(output_file, encoding=encoding)
+        self.grid.restart_file = output_file
 
     def _delete_temp_files(self):
         logger.info("Deleting temporary files")
@@ -1157,7 +1197,10 @@ class MHMRestartFile:
         logger.info("Preparing slope_emp")
         td = TDigest(compression=n)
         if self.run_on_whole_domain:
-            if not self.grid.morph_files.slope_emp.is_file():
+            if (
+                self.grid.morph_files.slope_emp is None
+                or not self.grid.morph_files.slope_emp.is_file()
+            ):
                 with xr.open_dataset(self.grid.morph_files.slope) as ds_slope:
                     data = ds_slope["slope"]
                     flattened = data.values.flatten()
@@ -1216,6 +1259,7 @@ class MHMRestartFile:
             logger.info("grid will be processed as a whole")
             self._prepare_slope_emp()
             self._create_restart_for_grid(self.grid)
+            self._correct_restart_file()
         else:
             logger.info(
                 f"grid will be split and processed in parallel on {self.ncpus} cores"
@@ -1225,11 +1269,11 @@ class MHMRestartFile:
                     self._read_subgrids_from_files()
                 else:
                     self._split_grid()
+                    self._prepare_slope_emp()
                 logger.info(
                     f"The grid has been split into {len(self.subgrids)} subgrids."
                 )
                 logger.info("Creating namelists and running MPR.")
-                self._prepare_slope_emp()
                 subgrids = Parallel(n_jobs=self.ncpus, backend="loky")(
                     delayed(self._create_restart_for_grid)(subgrid)
                     for subgrid in self.subgrids

@@ -6,6 +6,7 @@ A restart file contains all the static information to run mHM on a specific grid
 """
 
 import logging
+from pathlib import Path
 
 from mhm_tools.common.cli_utils import get_coords
 from mhm_tools.common.logger import ErrorLogger
@@ -36,6 +37,13 @@ def add_args(parser):
         "--output_dir",
         required=True,
         help=("output directory as path"),
+    )
+    parser.add_argument(
+        "-w",
+        "--work_dir",
+        required=False,
+        default=None,
+        help=("work directory as path"),
     )
     required_args.add_argument(
         "-n", "--nml_template", required=True, help=("nml_template file for mPR")
@@ -252,18 +260,26 @@ def run(args):
         lat_max=float(lat_max_target_grid),
         resolution=l1_resolution,
     )
-
+    input_dir = Path(args.input_dir)
+    output_dir = Path(args.output_dir)
+    work_dir = Path(args.work_dir) if args.work_dir is not None else output_dir
+    if not input_dir.is_dir():
+        msg = f"Input dir {input_dir} is not a directory."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
     grid = Grid(
-        file_path=args.input_dir,
+        file_path=input_dir,
         name="whole_grid",
         latlon_file=None,
         l0=l0,
         l1=l1,
         land_mask_file=args.land_mask_file,
     )
+    grid.migrate_grid_using_systemlink(work_dir / "full_grid")
     restart_creator = MHMRestartFile(
         grid=grid,
-        output_path=args.output_dir,
+        output_path=output_dir,
+        work_path=work_dir,
         nml_template=args.nml_template,
         increment_l1=args.l1_increment,
         mpr=MPRRunner(
