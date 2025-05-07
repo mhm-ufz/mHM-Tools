@@ -4,6 +4,7 @@ import array
 import logging
 import random
 from pathlib import Path
+import re
 from typing import Iterable
 
 import matplotlib.pyplot as plt
@@ -147,9 +148,9 @@ def get_files(path, n_bootstrap_years=None, years=None):
     """Recursevely find all netcdf files in directory."""
     nc_files = []
     # Search for .nc files at each depth level
-    all_years = [y for y in path.glob("*/") if y.is_dir()]
+    all_years = get_years_from_path(path)
     if years is not None:
-        selectable_years = [y for y in all_years if y.name in years]
+        selectable_years = [y for y in all_years if y in years]
     else:
         selectable_years = all_years
     logger.debug(
@@ -159,20 +160,20 @@ def get_files(path, n_bootstrap_years=None, years=None):
         # needs fixed folder structure of y/m/file
         selected_years = random.choices(selectable_years, k=n_bootstrap_years)
         for year in selected_years:
-            for depth in range(3):  # Depth 0 to 2
-                nc_files.extend(year.glob("*/" * depth + "*.nc"))
+            nc_files.extend((path / year).rglob("*.nc"))
     else:
         for year in selectable_years:
-            for depth in range(3):  # Depth 0 to 2
-                nc_files.extend(year.glob("*/" * depth + "*.nc"))
-        # for depth in range(1, 4):  # Depth 1 to 3
-        #     nc_files.extend(path.glob("*/" * depth + "*.nc"))
+            nc_files.extend((path / year).rglob("*.nc"))
     return nc_files
 
 
 def combine_results(results):
     """Combine the statistics calculated for subsets into one."""
     total_count = sum(count for _, _, count, _, _ in results)
+    if total_count == 0:
+        msg = "Total count of number of results is 0"
+        with ErrorLogger(logger):
+            raise ValueError(msg)
     total_mean = sum(mean * count for mean, _, count, _, _ in results) / total_count
     total_M2 = sum(M2 for _, M2, _, _, _ in results)
     total_M2 += sum(
@@ -250,8 +251,8 @@ def split_file_list(file_list, n_processes):
 
 
 def get_stats_one_pass(
-    input_path,
-    input_var,
+    path,
+    var,
     factor=1,
     coordinate_slice=None,
     ncpus=1,
@@ -262,13 +263,14 @@ def get_stats_one_pass(
 ):
     """Create dataset statistics by reading in one monthly or yearly file at a time and updating the statistics."""
     logger.debug(years)
-    files = get_files(input_path, n_bootstrap_years=n_bootstrap_years, years=years)
+    if path.is_dir():
+        files = get_files(path, n_bootstrap_years=n_bootstrap_years, years=years)
     logger.debug(f"List of files: {files}")
     file_subsets = split_file_list(files, ncpus)
     logger.info("creating statistics...")
     subset_results = Parallel(n_jobs=ncpus, backend="loky")(
         delayed(get_stats_one_pass_subset)(
-            file_subset, input_var, factor, coordinate_slice
+            file_subset, var, factor, coordinate_slice
         )
         for file_subset in file_subsets
     )
@@ -914,13 +916,13 @@ def direct_comparison(
         output_path,
     )
 
-def get_years_from_path(path, raise_exception=True): 
+def get_years_from_path(path, raise_exception=True):
     """Get years for one dataset from the folder structure or the xarray dataset."""
     if path.is_dir():
-        return [p.name for p in path.glob("*") if p.is_dir()]
+        return [p.name for p in year_structure_paths(path)]
     if path.is_file():
         with get_xarray_ds_from_file(path) as input_ds:
-            return input_ds.time.dt.year.unique()
+            return [str(y) for y in np.unique(input_ds.time.dt.year.data)]
     if raise_exception:
         msg = f"The provided path {path} is neither file nor directory."
         with ErrorLogger(logger):
@@ -948,6 +950,22 @@ def get_overlapping_years(input_path, ref_path):
             years.append(year.strip())
     return years
 
+def year_structure_paths(path: Path) -> bool:
+    """
+    Return any subdirectory of `path` with year structur.
+
+    That means any subdirectory whose name is exactly four digits (a valid “year”),
+    and that subdirectory contains at least one entry.
+    """
+    if not path.is_dir():
+        return False
+    year_paths = []
+    year_re = re.compile(r'^\d{4}$')
+    for sub in path.iterdir():
+        # check that sub is dir, has a year as name and contains one dir or file
+        if sub.is_dir() and year_re.fullmatch(sub.name) and any(sub.iterdir()):
+            year_paths.append(sub)
+    return year_paths
 
 @log_arguments()
 def seasonality_grid_validation(
@@ -980,24 +998,16 @@ def seasonality_grid_validation(
             output_path=output_path, input_name=input_name, ref_name=ref_name
         )
         return
+    if input_path.is_dir() and len(year_structure_paths(input_path)) == 0:
+        # check if the input path has the right structure
+        input_path = input_path / 'mHM_Fluxes_States.nc'
     if direct_comp:
-        # return direct_comparison(
-        #     input_path,
-        #     ref_path,
-        #     input_var,
-        #     ref_var,
-        #     input_name,
-        #     ref_name,
-        #     input_factor,
-        #     ref_factor,
-        #     coordinate_slice,
-        #     output_path,
-        # )
         years = get_overlapping_years(input_path, ref_path)
         logger.info(f"Years {years} are overlapping.")
 
     if ref_path is None:
         # Only create statistics do not compare
+        logger.info(f'No ref file provided. Only creating a stat file for {input_name}.')
         output_name = f"{input_name}_stats.nc" if input_name is not None else "stats.nc"
         if input_path.is_file():
             # Write file stats to file
@@ -1017,9 +1027,9 @@ def seasonality_grid_validation(
             # Write file stats for each bootstrap selection
             stat_files = Parallel(n_jobs=n_cpus)(
                 delayed(get_stats_one_pass)(
-                    ref_path,
-                    ref_var,
-                    ref_factor,
+                    input_path,
+                    input_var,
+                    input_factor,
                     coordinate_slice,
                     n_bootstrap_years,
                     s,
