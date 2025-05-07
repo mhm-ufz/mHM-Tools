@@ -14,7 +14,7 @@ from matplotlib.colors import BoundaryNorm
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from scipy.stats import spearmanr
 
-from mhm_tools.common.file_handler import get_coord_values
+from mhm_tools.common.file_handler import get_coord_values, get_xarray_ds_from_file
 from mhm_tools.common.logger import ErrorLogger, log_arguments, log_errors
 from mhm_tools.common.xarray_utils import get_coord_key
 
@@ -105,13 +105,19 @@ def get_file_stats(
     file, input_var, factor=1, coordinate_slice=None, output_path=None, years=None
 ):
     """Get statistics for one file."""
+    logger.debug(f"Get file stats {file}")
     with xr.open_dataset(file, engine="netcdf4") as ds_in:
         # Apply coordinate slicing if needed
-        ds_croped = ds_in
+        logger.debug(f"before cropping the file {ds_in}")
+        lat_key = get_coord_key(ds_in, lat=True)
+        lon_key = get_coord_key(ds_in, lon=True)
+        # make sure that latitude order is from highest to lowest value
+        if ds_in[lat_key][1] > ds_in[lat_key][0]:
+            ds_croped = ds_in.isel(lat=slice(None, None, -1))
+        else:
+            ds_croped = ds_in
         if coordinate_slice is not None:
-            lat_key = get_coord_key(ds_in, lat=True)
-            lon_key = get_coord_key(ds_in, lon=True)
-            ds_croped = ds_in.sel(
+            ds_croped = ds_croped.sel(
                 {lat_key: coordinate_slice["lat"], lon_key: coordinate_slice["lon"]}
             )
         if years is not None:
@@ -573,6 +579,7 @@ def compare_input_with_ref(
         output_file=input_stats_file,
         years=years,
     )
+    logger.debug(f"input ds: {input}")
     # get output statistics
 
     ref = get_stats(
@@ -585,6 +592,7 @@ def compare_input_with_ref(
         output_file=ref_stats_file,
         years=years,
     )
+    logger.debug(f"ref ds: {ref}")
 
     input, ref = regridd_to_higher_spatial_resolution(input, ref)
     # compare and save statistics
@@ -906,31 +914,38 @@ def direct_comparison(
         output_path,
     )
 
+def get_years_from_path(path, raise_exception=True): 
+    """Get years for one dataset from the folder structure or the xarray dataset."""
+    if path.is_dir():
+        return [p.name for p in path.glob("*") if p.is_dir()]
+    if path.is_file():
+        with get_xarray_ds_from_file(path) as input_ds:
+            return input_ds.time.dt.year.unique()
+    if raise_exception:
+        msg = f"The provided path {path} is neither file nor directory."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    return []
+
 
 def get_overlapping_years(input_path, ref_path):
     """Determine overlapping years between two datasets."""
     logger.info("Determining overlapping years.")
-    years_in = []
-    years_ref = []
-    if input_path.is_dir():
-        years_in.extend([p.name for p in input_path.glob("*") if p.is_dir()])
+    # get all years from input data
+    years_in = get_years_from_path(input_path)
     years_in.sort()
     logger.debug(f"Input years: {years_in}")
-    # elif input_path.is_file():
-    #     with xr.open_dataset(input_path) as ds:
-    #         years = ds['time'].year.unique()
-    if ref_path.is_dir():
-        years_ref.extend([p.name for p in ref_path.glob("*") if p.is_dir() and p.name])
+
+    # get all years from reference data
+    years_ref = get_years_from_path(ref_path)
     years_ref.sort()
     logger.debug(f"Ref years: {years_ref}")
+
+    # find overlapping years
     years = []
     for year in years_in:
         if year in years_ref:
             years.append(year.strip())
-            # try:
-            #     years.append(int(year))
-            # except:
-            #     logger.debug(f"{year} can not be converted to `int`")
     return years
 
 
