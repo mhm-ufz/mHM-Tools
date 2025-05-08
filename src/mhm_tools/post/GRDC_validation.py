@@ -283,6 +283,8 @@ def Q_data_to_xarray(
                 # also slice to overlapping time
                 obs_discharge_data = obs_discharge_data.sel(time=overlapping_time_slice)
                 sim_data_cropped = sim_data_cropped.sel(time=overlapping_time_slice)
+                logger.debug(f"obs croped resampled data: {obs_discharge_data}")
+                logger.debug(f"sim croped resampled data: {sim_data_cropped}")
     if not obs_output_file.is_file() or overwrite:
         # observed_data = observed_data.rename({observed_variable: "discharge"})
         obs_discharge_data = obs_discharge_data.sel(id=gauge_ids.values)

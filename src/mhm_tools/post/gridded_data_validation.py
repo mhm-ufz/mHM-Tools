@@ -483,6 +483,7 @@ def resample_to_coarser_calendar(
 
 
 def crop_data_to_overlapping_time(input_ds, ref_ds):
+    """Crop data to overlapping time."""
     time_slice = get_overlapping_time_slice(input_ds, ref_ds)
     # Slice both datasets to that time range
     input_ds = input_ds.sel(time=time_slice)
