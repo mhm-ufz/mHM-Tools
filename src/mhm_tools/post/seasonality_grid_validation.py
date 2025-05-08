@@ -357,6 +357,85 @@ def plot_single_map(
     return im, bounds
 
 
+def _to_alias(median_delta: np.timedelta64) -> str:
+    """
+    Map a median timedelta to a pandas frequency alias.
+    - ~1 day  → 'D'
+    - ~7 days → 'W'
+    - ~28–31 days → 'M'
+    - otherwise: fall back to '<N>H'
+    """
+    days = median_delta / np.timedelta64(1, 'D')
+    hours = int(median_delta / np.timedelta64(1, 'h'))
+    if abs(days - 1) < 0.5:
+        return hours, 'D'
+    if abs(days - 7) < 1:
+        return hours, 'W'
+    if 27 < days < 32:
+        return hours, 'ME'
+    # fallback: integer hours
+    hours = int(median_delta / np.timedelta64(1, 'h'))
+    return hours, f"{hours}H"
+
+def resample_to_coarser_calendar(ds_input: xr.Dataset,
+                                 ds_ref:   xr.Dataset) -> tuple[xr.Dataset, xr.Dataset]:
+    """
+    Compare the two datasets’ median time‐steps, turn them into pandas/xarray
+    freq aliases, and then resample the *finer* one up to the *coarser* one
+    using calendar‐aware frequencies (e.g. 'M' not '720H').
+    """
+    dt_in  = ds_input.time.diff('time').median()
+    dt_ref = ds_ref.time.diff('time').median()
+    hours_in, alias_in  = _to_alias(dt_in)
+    hours_ref, alias_ref = _to_alias(dt_ref)
+
+    if hours_in > hours_ref:
+        # input is coarser (e.g. monthly) → bring ref up to that
+        logger.info(f"Resampling ref from {alias_ref} to {alias_in}")
+        ds_ref = ds_ref.resample(time=alias_in).mean()
+    elif hours_ref > hours_in:
+        # ref is coarser → bring input up to that
+        logger.info(f"Resampling input from {alias_in} to {alias_ref}")
+        ds_input = ds_input.resample(time=alias_ref).mean()
+    else:
+        # same resolution, nothing to do
+        logger.info(f"Both are already {alias_in}")
+
+    # finally, force them onto exactly the same time‐axis
+    ds_input, ds_ref = xr.align(ds_input, ds_ref)
+    return ds_input, ds_ref
+
+def crop_data_to_overlapping_time(input_ds, ref_ds):
+        """Crop data to overlapping time."""
+        t1 = input_ds.dropna(dim="time", how="all").time.data
+        t2 = ref_ds.dropna(dim="time", how="all").time.data
+
+        # Find overlapping range
+        only_nan_msg = "No non nan value data."
+        if t1.any() and t2.any():
+            start = max(t1[0], t2[0])
+            end = min(t1[-1], t2[-1])
+            if end <= start:
+                logger.warning(
+                    f"The two datasets are not overlapping. Sim data hass non nan data from {t1[0]} to {t1[-1]} and obs from {t2[0]} to {t2[-1]}."
+                )
+            logger.info(f"Cropping data to timeframe {start} to {end}")
+            # Slice both datasets to that time range
+            input_ds = input_ds.sel(
+                time=slice(start, end)
+            )
+            ref_ds = ref_ds.sel(
+                time=slice(start, end)
+            )
+            # if np.all(np.isnan(input_ds)) or np.all(
+            #     np.isnan(input_ds)
+            # ):
+            #     raise ValueError(only_nan_msg)
+        else:
+            with ErrorLogger:
+                raise ValueError(only_nan_msg)
+        return input_ds, ref_ds
+
 @log_errors()
 def plot_map(
     rel_mean, rel_std, spearman, ref_clim, input_clim, input_name, ref_name, output_path
@@ -612,9 +691,20 @@ def compare_input_with_ref(
     rel_mean = input["mean"].values / ref["mean"].values
     rel_std = input["std"].values / ref["std"].values
     if direct_comp:
-        spearman = spearman_spatial(input['time_series'], ref['time_series'])
+        input, ref = resample_to_coarser_calendar(input, ref)
+        input, ref = crop_data_to_overlapping_time(input, ref)
+        input_ts, ref_ts = input['time_series'], ref['time_series']
+        logger.info(f'Creating data from timeseries with shape {input_ts.shape} and {ref_ts.shape}')
+        try:
+            spearman, spearman_pval = spearman_spatial(input_ts, ref_ts)
+        except ValueError as ve:
+            logger.error('Input and ref do not have the same temporal extend.')
+            logger.info(input_ts.time)
+            logger.info(ref_ts.time)
+            raise(ve)
     else:
-        spearman = spearman_spatial(input["clim"], ref["clim"])
+        logger.info('Calculating spearman correlation from seasonalities.')
+        spearman, spearman_pval = spearman_spatial(input["clim"], ref["clim"])
 
     rel_mean = xr.DataArray(
         rel_mean,
@@ -633,7 +723,7 @@ def compare_input_with_ref(
         dims=["lat", "lon"],
     )
     spearman = xr.DataArray(
-        spearman,
+        spearman.data,
         coords={
             "lat": get_coord_values(input, lat=True),
             "lon": get_coord_values(input, lon=True),
@@ -641,7 +731,7 @@ def compare_input_with_ref(
         dims=["lat", "lon"],
     )    
     spearman_pval = xr.DataArray(
-        spearman_pval,
+        spearman_pval.data,
         coords={
             "lat": get_coord_values(input, lat=True),
             "lon": get_coord_values(input, lon=True),
@@ -649,7 +739,7 @@ def compare_input_with_ref(
         dims=["lat", "lon"],
     )
     input_clim = xr.DataArray(
-        input["clim"].values,
+        input["clim"].data,
         coords={
             "month": np.arange(1, 13, 1),
             "lat": get_coord_values(input, lat=True),
@@ -658,7 +748,7 @@ def compare_input_with_ref(
         dims=["month", "lat", "lon"],
     )
     ref_clim = xr.DataArray(
-        ref["clim"].values,
+        ref["clim"].data,
         coords={
             "month": np.arange(1, 13, 1),
             "lat": get_coord_values(input, lat=True),
@@ -691,18 +781,17 @@ def compare_input_with_ref(
         file_name = output_path / f"{file_name}.nc"
     output.to_netcdf(file_name)
     logger.info(f"Written output to {file_name}")
+    plot_map(
+        rel_std=rel_std,
+        rel_mean=rel_mean,
+        spearman=spearman,
+        ref_clim=ref["clim"],
+        input_clim=input["clim"],
+        input_name=input_name,
+        ref_name=ref_name,
+        output_path=output_path,
+    )
     return file_name
-    # plot_map(
-    #     rel_std=rel_std,
-    #     rel_mean=rel_mean,
-    #     spearman=spearman,
-    #     ref_clim=ref["clim"],
-    #     input_clim=input["clim"],
-    #     input_name=input_name,
-    #     ref_name=ref_name,
-    #     output_path=output_path,
-    # )
-
 
 def get_rel_stat_file(output_path, input_name, ref_name):
     """Create the file name for the file  contatining relative statistics of the two datasets."""
@@ -823,133 +912,6 @@ def regridd_to_higher_spatial_resolution(ds1, ds2):
     if coarse_ds is ds1:
         return regridded_ds, ds2
     return ds1, regridded_ds
-
-
-def direct_comparison(
-    input_path,
-    ref_path,
-    input_var,
-    ref_var,
-    input_name,
-    ref_name,
-    input_factor,
-    ref_factor,
-    coordinate_slice,
-    output_path,
-):
-    """Directly compare the two datasets without bootstraping."""
-    if ref_path is None:
-        with ErrorLogger(logger):
-            msg = "ref_path must be given for direct comparison."
-            raise ValueError(msg)
-    logger.info("Start direct comparison.")
-    input = get_dataset_from_path(input_path)
-    ref = get_dataset_from_path(ref_path)
-    logger.info("crop the data spatially")
-    input = input.sel(
-        {
-            get_coord_key(input, lat=True): coordinate_slice["lat"],
-            get_coord_key(input, lon=True): coordinate_slice["lon"],
-        }
-    )
-    ref = ref.sel(
-        {
-            get_coord_key(ref, lat=True): coordinate_slice["lat"],
-            get_coord_key(ref, lon=True): coordinate_slice["lon"],
-        }
-    )
-    logger.info("crop to overlapping time")
-    start_time = max(input.time.min(), ref.time.min())
-    end_time = min(input.time.max(), ref.time.max())
-    if start_time >= end_time:
-        with ErrorLogger(logger):
-            msg = "The timeframes of the two datasets are not overlapping."
-            raise ValueError(msg)
-    logger.info(f"start_time {start_time}; end_time {end_time}")
-    input = input.sel(time=slice(start_time, end_time))
-    ref = ref.sel(time=slice(start_time, end_time))
-
-    logger.info("regridd to the lower temporal resolution using average")
-    if len(ref.time) < len(input.time):
-        low_res_time = ref.time
-        input = input.groupby_bins("time", bins=low_res_time).mean(dim="time")
-    elif len(input.time) > len(ref.time):
-        low_res_time = input.time
-        ref = ref.groupby_bins("time", bins=low_res_time).mean(dim="time")
-    logger.info("calculate climatologies")
-    input_clim = get_clim_from_ds(input, input_var, input_factor)
-    ref_clim = get_clim_from_ds(ref, ref_var, ref_factor)
-
-    logger.info("calculate relative standard deviation")
-    # with clim given here the seasonality is removed from the data
-    input_std = get_std_from_ds(input, input_var, input_clim, input_factor)
-    ref_std = get_std_from_ds(ref, ref_var, ref_clim, ref_factor)
-    rel_std = (input_std / ref_std).values
-
-    input = input[input_var] * input_factor
-    ref = ref[ref_var] * ref_factor
-
-    logger.info("calculate rel mean")
-    rel_mean = (
-        input.mean(dim="time", skipna=True).values
-        / ref.mean(dim="time", skipna=True).values
-    )
-    logger.info("calculate spearman spatial ")
-    spearman, spearman_pval = spearman_spatial(input, ref).values
-
-    rel_mean = xr.DataArray(
-        rel_mean,
-        coords={
-            "lat": get_coord_values(input, lat=True),
-            "lon": get_coord_values(input, lon=True),
-        },
-        dims=["lat", "lon"],
-    )
-    rel_std = xr.DataArray(
-        rel_std,
-        coords={
-            "lat": get_coord_values(input, lat=True),
-            "lon": get_coord_values(input, lon=True),
-        },
-        dims=["lat", "lon"],
-    )
-    spearman = xr.DataArray(
-        spearman,
-        coords={
-            "lat": get_coord_values(input, lat=True),
-            "lon": get_coord_values(input, lon=True),
-        },
-        dims=["lat", "lon"],
-    )    
-    spearman_pval = xr.DataArray( 
-        spearman_pval,
-        coords={
-            "lat": get_coord_values(input, lat=True),
-            "lon": get_coord_values(input, lon=True),
-        },
-        dims=["lat", "lon"],
-    )
-    output = xr.Dataset(
-        {"spearman": spearman, "rel_std": rel_std, "rel_mean": rel_mean, "spearman_pval": spearman_pval},
-        coords={
-            "lat": get_coord_values(input, lat=True),
-            "lon": get_coord_values(input, lon=True),
-        },
-    )
-    logger.info(
-        f"Save the results to {output_path/ f'{input_name}_{ref_name}_direct_comp.nc'}"
-    )
-    output.to_netcdf(output_path / f"{input_name}_{ref_name}_direct_comp.nc")
-    plot_map(
-        rel_mean,
-        rel_std,
-        spearman,
-        ref_clim,
-        input_clim,
-        input_name,
-        ref_name,
-        output_path,
-    )
 
 def get_years_from_path(path, raise_exception=True):
     """Get years for one dataset from the folder structure or the xarray dataset."""
@@ -1146,7 +1108,7 @@ def seasonality_grid_validation(
         else: 
             logger.error('There are no statfiles created from the evaluation.')
     else:
-        # compare without bootstraping
+        logger.info("compare without bootstraping")
         compare_input_with_ref(
             input_path,
             input_var,
@@ -1160,4 +1122,5 @@ def seasonality_grid_validation(
             coordinate_slice,
             ncpus=n_cpus,
             available_years=available_years,
+            direct_comp=direct_comp,
         )

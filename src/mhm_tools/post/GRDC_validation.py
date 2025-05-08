@@ -253,8 +253,8 @@ def Q_data_to_xarray(
         with xr.open_dataset(observed_data_path) as observed_data_in:
             if res_sim > res_obs:
                 # resample the datasets for them to have the same temporal resolution
-                logger.info(f'The observation dataset is resampled to fit the simulation dataset with a temporal resolution of {target_freq}')
                 target_freq = f"{int(res_sim / np.timedelta64(1, 'h'))}h"  # Convert to '24H' for daily, etc.
+                logger.info(f'The observation dataset is resampled to fit the simulation dataset with a temporal resolution of {target_freq}')
                 sim_data_in = sim_data_in.resample(time=target_freq).mean()
             obs_discharge_data = observed_data_in[observed_variable]
             obs_discharge_data = obs_discharge_data.sel(time=date_slice)
