@@ -8,8 +8,7 @@ from pathlib import Path
 from typing import Iterable
 
 import matplotlib.pyplot as plt
-from mhm_tools.common.xarray_utils import timedelta_to_alias
-from mhm_tools.common.xarray_utils import get_overlapping_time_slice
+from mhm_tools.common.xarray_utils import get_overlapping_time_slice, timedelta_to_alias
 import numpy as np
 import xarray as xr
 from joblib import Parallel, delayed

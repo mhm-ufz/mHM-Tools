@@ -109,7 +109,6 @@ def timedelta_to_alias(ds: xr.DataArray) -> str:
     if 27 < days < 32:
         return hours, "ME"
     # fallback: integer hours
-    hours = int(median_delta / np.timedelta64(1, "h"))
     return hours, f"{hours}H"
 
 
