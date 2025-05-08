@@ -33,11 +33,6 @@ def spearman_correlation(data1, data2):
         with ErrorLogger(logger):
             msg = "Both DataArrays must have the same shape"
             raise ValueError(msg)
-    # try:
-    #     data1 = data1.flatten()
-    #     data2 = data2.flatten()
-    # except Exception as e:
-    # logger.warning(e)
     data1 = data1.values.flatten()
     data2 = data2.values.flatten()
     # Calculate Spearman rank correlation using scipy
@@ -45,52 +40,115 @@ def spearman_correlation(data1, data2):
     return corr, p_value
 
 
-def _spearman_1d(a: np.ndarray, b: np.ndarray):
-    """Compute Spearman’s ρ and p-value for two 1D arrays."""
-    # nan_policy='omit' will drop NaNs in the calculation
-    rho, p = spearmanr(a, b, nan_policy="omit")
-    return np.float32(rho), np.float32(p)
+# def _spearman_1d(a: np.ndarray, b: np.ndarray):
+#     """Compute Spearman’s ρ and p-value for two 1D arrays."""
+#     # nan_policy='omit' will drop NaNs in the calculation
+#     rho, p = spearmanr(a, b, nan_policy="omit")
+#     return np.float32(rho), np.float32(p)
 
 
-def spearman_spatial(
-    ds1: xr.DataArray, ds2: xr.DataArray
-) -> tuple[xr.DataArray, xr.DataArray]:
+# def spearman_spatial(
+#     ds1: xr.DataArray, ds2: xr.DataArray
+# ) -> tuple[xr.DataArray, xr.DataArray]:
+#     """
+#     Compute a per-pixel Spearman correlation map between two DataArrays
+#     of shape (time, y, x), leveraging Dask & xarray chunking.
+#     Returns (rho, pvalue) each with dims (y, x).
+#     """
+#     # make sure they align on time
+#     ds1, ds2 = xr.align(ds1, ds2)
+
+#     rho, p = xr.apply_ufunc(
+#         _spearman_1d,  # the 1D function
+#         ds1,
+#         ds2,  # inputs
+#         input_core_dims=[["time"], ["time"]],
+#         output_core_dims=[[], []],
+#         vectorize=True,  # vectorize over y, x
+#         dask="parallelized",  # dispatch one Dask task per chunk
+#         output_dtypes=[np.float32, np.float32],
+#     )
+#     # give them nice names
+#     rho.name = "spearman_rho"
+#     p.name = "spearman_p"
+#     return rho, p
+
+def spearman_spatial(data1, data2):
+    """Calculate maps of Spearman rank correlation between two xarray DataArrays of shape(12,n,m)."""
+    if len(np.shape(data1)) != len(np.shape(data2)) or len(np.shape(data1)) != 3:
+        with ErrorLogger(logger):
+            msg = "Wrong shape for spatial spearman correlation!"
+            raise ValueError(msg)
+    res = np.full(np.shape(data1[0]), np.nan)
+    pval = np.full(np.shape(data1[0]), np.nan)
+    for i, row in enumerate(data1[0]):
+        for j, _col in enumerate(row):
+            sp_corr, sp_pval = spearman_correlation(data1[:, i, j], data2[:, i, j])
+            res[i, j] = sp_corr
+            pval[i, j] = sp_pval
+    return res, pval
+
+def spearman_spatial_joblib(data1: np.ndarray,
+                            data2: np.ndarray,
+                            spearman_correlation,
+                            n_jobs: int = -1) -> tuple[np.ndarray, np.ndarray]:
     """
-    Compute a per-pixel Spearman correlation map between two DataArrays
-    of shape (time, y, x), leveraging Dask & xarray chunking.
-    Returns (rho, pvalue) each with dims (y, x).
+    Parallel pixel‐wise Spearman correlation over two arrays of shape (T, Y, X).
+    
+    Parameters
+    ----------
+    data1, data2 : ndarray, shape (T, Y, X)
+        The two time‐series stacks to correlate.
+    spearman_correlation : Callable
+        A function f(a: 1D, b: 1D) -> (rho, pval).
+    n_jobs : int
+        Number of parallel workers (−1 = all CPUs).
+    
+    Returns
+    -------
+    res : ndarray, shape (Y, X)
+        Spearman ρ for each pixel.
+    pval : ndarray, shape (Y, X)
+        Two‐tailed p‐value for each pixel.
     """
-    # make sure they align on time
-    ds1, ds2 = xr.align(ds1, ds2)
+    # get spatial shape
+    _, ny, nx = data1.shape
 
-    rho, p = xr.apply_ufunc(
-        _spearman_1d,  # the 1D function
-        ds1,
-        ds2,  # inputs
-        input_core_dims=[["time"], ["time"]],
-        output_core_dims=[[], []],
-        vectorize=True,  # vectorize over y, x
-        dask="parallelized",  # dispatch one Dask task per chunk
-        output_dtypes=[np.float32, np.float32],
+    # pre‐allocate outputs
+    res  = np.full((ny, nx), np.nan, dtype=np.float32)
+    pval = np.full((ny, nx), np.nan, dtype=np.float32)
+
+    # list of all pixel indices
+    indices = [(i, j) for i in range(ny) for j in range(nx)]
+
+    # worker for a single pixel
+    def _worker(i, j):
+        rho, p = spearman_correlation(data1[:, i, j],
+                                      data2[:, i, j])
+        return i, j, rho, p
+
+    # dispatch in parallel
+    results = Parallel(n_jobs=n_jobs)(
+        delayed(_worker)(i, j) for i, j in indices
     )
-    # give them nice names
-    rho.name = "spearman_rho"
-    p.name = "spearman_p"
-    return rho, p
 
+    # scatter results back
+    for i, j, rho, p in results:
+        res[i, j]  = rho
+        pval[i, j] = p
+
+    return res, pval
 
 def climatology(data):
     """Calculate the climatology from a xarray DataArray."""
-    if "time" in data.dims and data["time"].size > 0:
-        data_clim = data.groupby("time.month").mean(dim="time", skipna=True)
-    else:
+    if "time" not in data.dims or data.sizes["time"] == 0:
+        msg = "Input data for climatology calculation has no valid time dimension."
         with ErrorLogger(logger):
-            msg = "Input data for climatology calculation has no valid time dimension."
             raise ValueError(msg)
-    # data_clim = data.groupby("time.month").mean(dim="time", skipna=True)
+    # group into monthly mean data
+    data_clim = data.groupby("time.month").mean(dim="time", skipna=True)
     # Ensure the climatology has all 12 months, filling missing months with NaNs
     return data_clim.reindex(month=np.arange(1, 13), fill_value=np.nan)
-
 
 def get_clim_from_ds(ds, input_var=None, factor=1):
     """Calculate climatology from DataSet with variable or DataArray while mulitplying with a provided factor."""
@@ -170,8 +228,9 @@ def get_file_stats(
         },
     )
     if direct_comp:
-        output.coords["time"] = ds_croped[input_var].time
-        output["time_series"] = ds_croped[input_var] * factor
+        ts = ds_croped[input_var] * factor
+        ts.name = "time_series"
+        output = xr.merge([output, ts])
     if output_path is not None:
         output.to_netcdf(output_path)
     return output
@@ -221,6 +280,7 @@ def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None)
     if not isinstance(files, Iterable):
         # logger.warning(f"Files not a list of files but one file {files}.")
         files = [files]
+    logger.debug(files)
     with xr.open_dataset(files[0], engine="netcdf4") as ds:
         # Apply coordinate slicing if needed
         if coordinate_slice is not None:
@@ -278,7 +338,6 @@ def split_file_list(file_list, n_processes):
     if n_processes > 1:
         return [file_list[i::n_processes] for i in range(n_processes)]
     return file_list
-
 
 def get_stats_one_pass(
     path,
@@ -372,22 +431,29 @@ def plot_single_map(
         vmax = 1 + diff_to_mean
     if bounds_type == "quantiles":
         vmin, vmax = (
-            np.nanquantile(values, 0.05).data,
-            np.nanquantile(values, 0.95).data,
+            np.nanquantile(values, 0.05),
+            np.nanquantile(values, 0.95),
         )
     if bounds_type == "fixed":
         vmin, vmax = 0.5, 1.5
     bounds = np.linspace(vmin, vmax, n_bins + 1)
     bounds = [np.round(b, 2) for b in bounds]
-    norm = BoundaryNorm(bounds, cmap.N)
 
+    extent = 'neither'
+    if np.nanquantile(values, 0.75) > vmax:
+        extent = 'max'
+    if np.nanquantile(values, 0.25) < vmin:
+        extent = 'min' if extent == 'neither' else 'both'
+
+    norm = BoundaryNorm(bounds, cmap.N)
     im = ax.imshow(values, cmap=cmap, norm=norm)
-    return im, bounds
+    return im, bounds, extent
 
 
 def _to_alias(median_delta: np.timedelta64) -> str:
     """
     Map a median timedelta to a pandas frequency alias.
+
     - ~1 day  → 'D'
     - ~7 days → 'W'
     - ~28–31 days → 'M'
@@ -410,6 +476,8 @@ def resample_to_coarser_calendar(
     ds_input: xr.Dataset, ds_ref: xr.Dataset
 ) -> tuple[xr.Dataset, xr.Dataset]:
     """
+    Resampler the dataset with higher temporal resolution to the resolution of the other.
+
     Compare the two datasets’ median time‐steps, turn them into pandas/xarray
     freq aliases, and then resample the *finer* one up to the *coarser* one
     using calendar‐aware frequencies (e.g. 'M' not '720H').
@@ -477,20 +545,20 @@ def plot_map(
 
     # Set common colormap and normalization limits for mean_et and mean_aet
     mean_diff_1 = max(np.abs(1 - np.nanmin(rel_mean)), np.abs(1 - np.nanmax(rel_mean)))
-    im0, bounds0 = plot_single_map(
+    im0, bounds0, extend0 = plot_single_map(
         axes[0, 0], rel_mean, mean_diff_1, bounds_type="fixed"
     )
     axes[0, 0].set_title(
         f"Relative temporal Mean (median={np.nanmedian(rel_mean):.2f})"
     )
     std_diff_1 = max(np.abs(1 - np.nanmin(rel_std)), np.abs(1 - np.nanmax(rel_std)))
-    im1, bounds1 = plot_single_map(axes[0, 1], rel_std, std_diff_1, bounds_type="fixed")
+    im1, bounds1, extend1 = plot_single_map(axes[0, 1], rel_std, std_diff_1, bounds_type="max")
     axes[0, 1].set_title(
         f"Relative temporal Standarddeviation (median={np.nanmedian(rel_std):.2f})"
     )
 
     im2 = axes[1, 0].imshow(spearman, vmin=np.nanmin(spearman), vmax=1)
-    im2, bounds2 = plot_single_map(
+    im2, bounds2, extend2 = plot_single_map(
         axes[1, 0],
         spearman,
         vmin=np.nanmin(spearman),
@@ -552,19 +620,16 @@ def plot_map(
 
     divider0 = make_axes_locatable(axes[0, 0])
     cax = divider0.append_axes("right", size="5%", pad=0.1)
-    fig.colorbar(im0, cax=cax, label="", boundaries=bounds0)
+    fig.colorbar(im0, cax=cax, label="", boundaries=bounds0, extend=extend0)
 
     divider1 = make_axes_locatable(axes[0, 1])
     cax2 = divider1.append_axes("right", size="5%", pad=0.1)
-    fig.colorbar(im1, cax=cax2, label="", boundaries=bounds1)
+    fig.colorbar(im1, cax=cax2, label="", boundaries=bounds1, extend=extend1)
 
-    print(spearman)
-    try:
-        divider2 = make_axes_locatable(axes[1, 0])
-        cax = divider2.append_axes("right", size="5%", pad=0.1)
-        fig.colorbar(im2, cax=cax, label="", boundaries=bounds2)
-    except:
-        print(bounds2)
+    divider2 = make_axes_locatable(axes[1, 0])
+    cax = divider2.append_axes("right", size="5%", pad=0.1)
+    fig.colorbar(im2, cax=cax, label="", boundaries=bounds2, extend=extend2)
+
     for ax in axes.flat:
         for spine in ax.spines.values():
             spine.set_linewidth(0.5)
@@ -730,14 +795,14 @@ def compare_input_with_ref(
     rel_mean = input["mean"].values / ref["mean"].values
     rel_std = input["std"].values / ref["std"].values
     if direct_comp:
-        input, ref = resample_to_coarser_calendar(input, ref)
-        input, ref = crop_data_to_overlapping_time(input, ref)
         input_ts, ref_ts = input["time_series"], ref["time_series"]
+        input_ts, ref_ts = resample_to_coarser_calendar(input_ts, ref_ts)
+        input_ts, ref_ts = crop_data_to_overlapping_time(input_ts, ref_ts)
         logger.info(
             f"Creating data from timeseries with shape {input_ts.shape} and {ref_ts.shape}"
         )
         try:
-            spearman, spearman_pval = spearman_spatial(input_ts, ref_ts)
+            spearman, spearman_pval = spearman_spatial_joblib(input_ts, ref_ts, spearman_correlation, ncpus)
         except ValueError as ve:
             logger.error("Input and ref do not have the same temporal extend.")
             logger.info(input_ts.time)
@@ -745,7 +810,7 @@ def compare_input_with_ref(
             raise (ve)
     else:
         logger.info("Calculating spearman correlation from seasonalities.")
-        spearman, spearman_pval = spearman_spatial(input["clim"], ref["clim"])
+        spearman, spearman_pval = spearman_spatial_joblib(input["clim"], ref["clim"], spearman_correlation, ncpus)
 
     rel_mean = xr.DataArray(
         rel_mean,
@@ -779,7 +844,6 @@ def compare_input_with_ref(
         },
         dims=["lat", "lon"],
     )
-    logger.info(f'input clim {input["clim"].shape}')
     input_clim = xr.DataArray(
         input["clim"].data,
         coords={
