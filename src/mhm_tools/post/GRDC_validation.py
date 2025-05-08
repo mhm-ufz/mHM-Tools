@@ -246,7 +246,7 @@ def Q_data_to_xarray(
             y = y.where(slicing_condition, drop=True)
             facc = facc.where(slicing_condition, drop=True)
             gauge_ids = gauge_ids.where(slicing_condition, drop=True)
-    logger.info(f"There are {len(gauge_ids.values)} gauges")
+    logger.info(f"There are {len(gauge_ids.values)} gauges in total.")
 
     # prepare for later resampling
     with xr.open_dataset(model_data_path) as sim_data_in:

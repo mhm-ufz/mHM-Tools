@@ -1003,8 +1003,8 @@ def gen_hydrograph_by_data_sets(
         raise_exceptions: Raise or only log exceptions
         plot_code: code indicating which plots to create
     """
+    hydro = Hydrograph(calc_stats=calc_stats)
     try:
-        hydro = Hydrograph(calc_stats=calc_stats)
         missing_data_error_msg = f"For {id} the hydrograph could not be created."
         if hydro.set_discharge(simulation=simulations, observation=observation):
             hydro.pre = precipitation
@@ -1018,9 +1018,8 @@ def gen_hydrograph_by_data_sets(
                 logger.error(missing_data_error_msg)
         else:
             logger.error(missing_data_error_msg)
-        return {**hydro.objectives.__dict__, "id": id}
     except Exception as e:
         logger.error(e)
         if raise_exceptions:
             raise e
-    return {"id": id}
+    return {**hydro.objectives.__dict__, "id": id}
