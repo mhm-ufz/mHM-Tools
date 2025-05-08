@@ -122,7 +122,7 @@ def get_gauge_coords(
         except ValueError as ve:
             logger.error(str(ve))
             logger.info(abs_diff)
-            logger.info(ds_cut)
+            logger.info(ds_cut.L11_fAcc)
             logger.info(facc)
             return None, None, None
         if lonlat:
@@ -488,6 +488,7 @@ def evaludate_grdc_data(  # noqa: PLR0913
             area=model_ds["facc"].sel(id=id).data,
             id=id,
             calc_stats=direct_comparison,
+            raise_exceptions=False
         )
         for id in observed_ds.id.values
         if id in model_ds.id.values
