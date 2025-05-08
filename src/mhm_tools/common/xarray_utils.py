@@ -3,6 +3,7 @@
 import logging
 
 import xarray as xr
+import numpy as np
 
 from mhm_tools.common.logger import ErrorLogger
 
@@ -86,3 +87,26 @@ def induce_data_var_from_file_name(ds, file_path):
         if name in dv:
             return dv
     return None
+
+
+def timedelta_to_alias(ds: xr.DataArray) -> str:
+    """
+    Map a median timedelta to a pandas frequency alias.
+
+    - ~1 day  → 'D'
+    - ~7 days → 'W'
+    - ~28–31 days → 'M'
+    - otherwise: fall back to '<N>H'
+    """
+    median_delta = ds.time.diff("time").median()
+    days = median_delta / np.timedelta64(1, "D")
+    hours = int(median_delta / np.timedelta64(1, "h"))
+    if abs(days - 1) < 0.5:
+        return hours, "D"
+    if abs(days - 7) < 1:
+        return hours, "W"
+    if 27 < days < 32:
+        return hours, "ME"
+    # fallback: integer hours
+    hours = int(median_delta / np.timedelta64(1, "h"))
+    return hours, f"{hours}H"

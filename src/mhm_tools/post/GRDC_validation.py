@@ -13,7 +13,7 @@ from joblib import Parallel, delayed
 
 from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_to_file
 from mhm_tools.common.logger import log_arguments, log_errors
-from mhm_tools.common.xarray_utils import get_coord_key
+from mhm_tools.common.xarray_utils import get_coord_key, timedelta_to_alias
 from mhm_tools.post.hydrograph import gen_hydrograph_by_data_sets
 from mhm_tools.post.gridded_data_validation import (
     get_clim_from_ds,
@@ -249,19 +249,18 @@ def Q_data_to_xarray(
 
     # prepare for later resampling
     with xr.open_dataset(model_data_path) as sim_data_in:
-        res_sim = sim_data_in.time.diff("time").median()
+        hours_sim, alias_sim = timedelta_to_alias(sim_data_in)
     with xr.open_dataset(observed_data_path) as observed_data_in:
-        res_obs = observed_data_in.time.diff("time").median()
+        hours_obs, alias_obs = timedelta_to_alias(observed_data_in)
 
     if not obs_output_file.is_file() or overwrite:
         with xr.open_dataset(observed_data_path) as observed_data_in:
-            if res_sim > res_obs:
+            if hours_sim > hours_obs:
                 # resample the datasets for them to have the same temporal resolution
-                target_freq = f"{int(res_sim / np.timedelta64(1, 'h'))}h"  # Convert to '24H' for daily, etc.
                 logger.info(
-                    f"The observation dataset is resampled to fit the simulation dataset with a temporal resolution of {target_freq}"
+                    f"The observation dataset is resampled to fit the simulation dataset with a temporal resolution of {alias_sim}"
                 )
-                sim_data_in = sim_data_in.resample(time=target_freq).mean()
+                observed_data_in = observed_data_in.resample(time=alias_sim).mean()
             obs_discharge_data = observed_data_in[observed_variable]
             obs_discharge_data = obs_discharge_data.sel(time=date_slice)
             # observed_data = observed_data.rename({observed_variable: "discharge"})
@@ -305,13 +304,12 @@ def Q_data_to_xarray(
         logger.info(f"There are {len(x_new)} gauges")
         logger.info("creating sim dataset")
         with xr.open_dataset(model_data_path) as sim_data_in:
-            if res_obs > res_sim:
+            if hours_obs > hours_sim:
                 # resample the datasets for them to have the same temporal resolution
-                target_freq = f"{int(res_obs / np.timedelta64(1, 'h'))}h"  # Convert to '24H' for daily, etc.
                 logger.info(
-                    f"The simulation dataset is resampled to fit the observation dataset with a temporal resolution of {target_freq}"
+                    f"The simulation dataset is resampled to fit the observation dataset with a temporal resolution of {alias_obs}"
                 )
-                sim_data_in = sim_data_in.resample(time=target_freq).mean()
+                sim_data_in = sim_data_in.resample(time=alias_obs).mean()
             if slicing_condition is not None:
                 sim_data_cropped = sim_data_in.sel(
                     {

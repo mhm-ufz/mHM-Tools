@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Iterable
 
 import matplotlib.pyplot as plt
+from mhm_tools.common.xarray_utils import timedelta_to_alias
 import numpy as np
 import xarray as xr
 from joblib import Parallel, delayed
@@ -450,28 +451,6 @@ def plot_single_map(
     return im, bounds, extent
 
 
-def _to_alias(median_delta: np.timedelta64) -> str:
-    """
-    Map a median timedelta to a pandas frequency alias.
-
-    - ~1 day  → 'D'
-    - ~7 days → 'W'
-    - ~28–31 days → 'M'
-    - otherwise: fall back to '<N>H'
-    """
-    days = median_delta / np.timedelta64(1, "D")
-    hours = int(median_delta / np.timedelta64(1, "h"))
-    if abs(days - 1) < 0.5:
-        return hours, "D"
-    if abs(days - 7) < 1:
-        return hours, "W"
-    if 27 < days < 32:
-        return hours, "ME"
-    # fallback: integer hours
-    hours = int(median_delta / np.timedelta64(1, "h"))
-    return hours, f"{hours}H"
-
-
 def resample_to_coarser_calendar(
     ds_input: xr.Dataset, ds_ref: xr.Dataset
 ) -> tuple[xr.Dataset, xr.Dataset]:
@@ -482,10 +461,9 @@ def resample_to_coarser_calendar(
     freq aliases, and then resample the *finer* one up to the *coarser* one
     using calendar‐aware frequencies (e.g. 'M' not '720H').
     """
-    dt_in = ds_input.time.diff("time").median()
-    dt_ref = ds_ref.time.diff("time").median()
-    hours_in, alias_in = _to_alias(dt_in)
-    hours_ref, alias_ref = _to_alias(dt_ref)
+    
+    hours_in, alias_in = timedelta_to_alias(ds_input)
+    hours_ref, alias_ref = timedelta_to_alias(ds_ref)
 
     if hours_in > hours_ref:
         # input is coarser (e.g. monthly) → bring ref up to that
