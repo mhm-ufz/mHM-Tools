@@ -117,7 +117,14 @@ def get_gauge_coords(
             ncols11=slice(lon_col - cell_diff, lon_col + cell_diff),
         )
         abs_diff = np.abs(ds_cut.L11_fAcc - facc)
-        min_index = np.unravel_index(np.argmin(abs_diff.values), ds_cut.L11_fAcc.shape)
+        try:
+            min_index = np.unravel_index(np.argmin(abs_diff.values), ds_cut.L11_fAcc.shape)
+        except ValueError as ve:
+            logger.error(str(ve))
+            logger.info(abs_diff)
+            logger.info(ds_cut)
+            logger.info(facc)
+            return None, None, None
         if lonlat:
             lon_x = ds_cut.L1_domain_lon.data[min_index[0], 0]
             lat_y = ds_cut.L1_domain_lat.data[0, min_index[1]]
