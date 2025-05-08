@@ -115,7 +115,8 @@ def get_overlapping_time_slice(input_ds, ref_ds):
     """Crop data to overlapping time."""
     t1 = input_ds.dropna(dim="time", how="all").time.data
     t2 = ref_ds.dropna(dim="time", how="all").time.data
-
+    logger.debug(f"input {t1[0]} till {t1[-1]}")
+    logger.debug(f"ref {t2[0]} till {t2[-1]}")
     # Find overlapping range
     only_nan_msg = "No non nan value data."
     if t1.any() and t2.any():
