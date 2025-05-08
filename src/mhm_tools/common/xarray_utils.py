@@ -2,7 +2,6 @@
 
 import logging
 
-from mhm_tools.post.gridded_data_validation import logger
 import xarray as xr
 import numpy as np
 
