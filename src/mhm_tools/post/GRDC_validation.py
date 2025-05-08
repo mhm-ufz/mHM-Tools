@@ -250,13 +250,9 @@ def Q_data_to_xarray(
 
     # prepare for later resampling
     with xr.open_dataset(model_data_path) as sim_data_in:
-        hours_sim, alias_sim = timedelta_to_alias(sim_data_in)
         with xr.open_dataset(observed_data_path) as observed_data_in:
+            hours_sim, alias_sim = timedelta_to_alias(sim_data_in)
             hours_obs, alias_obs = timedelta_to_alias(observed_data_in)
-            if direct_comparison:
-                overlapping_time_slice = get_overlapping_time_slice(sim_data_in, observed_data_in)
-    if not obs_output_file.is_file() or overwrite:
-        with xr.open_dataset(observed_data_path) as observed_data_in:
             if hours_sim > hours_obs:
                 # resample the datasets for them to have the same temporal resolution
                 logger.info(
@@ -265,22 +261,41 @@ def Q_data_to_xarray(
                 observed_data_in = observed_data_in.resample(time=alias_sim).mean()
             obs_discharge_data = observed_data_in[observed_variable]
             obs_discharge_data = obs_discharge_data.sel(time=date_slice)
+
+            if hours_obs > hours_sim:
+                # resample the datasets for them to have the same temporal resolution
+                logger.info(
+                    f"The simulation dataset is resampled to fit the observation dataset with a temporal resolution of {alias_obs}"
+                )
+                sim_data_in = sim_data_in.resample(time=alias_obs).mean()
+            if slicing_condition is not None:
+                sim_data_cropped = sim_data_in.sel(
+                    {
+                        get_coord_key(sim_data_in, lat=True): slice(lat_max, lat_min),
+                        get_coord_key(sim_data_in, lon=True): slice(lon_min, lon_max),
+                    }
+                ).sel(time=date_slice)
+            else:
+                sim_data_cropped = sim_data_in.sel(time=date_slice)
             if direct_comparison:
+                overlapping_time_slice = get_overlapping_time_slice(sim_data_in, observed_data_in)
+                logger.info(f'Overlapping time is form {overlapping_time_slice.start} to {overlapping_time_slice.stop}')
                 # also slice to overlapping time
                 obs_discharge_data = obs_discharge_data.sel(time=overlapping_time_slice)
+                sim_data_cropped = sim_data_cropped.sel(time=overlapping_time_slice)
+    if not obs_output_file.is_file() or overwrite:
+        # observed_data = observed_data.rename({observed_variable: "discharge"})
+        obs_discharge_data = obs_discharge_data.sel(id=gauge_ids.values)
+        obs_discharge_data = obs_discharge_data.reindex(id=gauge_ids.values)
+        facc_da = xr.DataArray(
+            facc, name="facc", dims=["id"], coords={"id": gauge_ids.values}
+        )
+        observed_data = xr.Dataset(
+            {"facc": facc_da, "discharge": obs_discharge_data}
+        )
 
-            # observed_data = observed_data.rename({observed_variable: "discharge"})
-            obs_discharge_data = obs_discharge_data.sel(id=gauge_ids.values)
-            obs_discharge_data = obs_discharge_data.reindex(id=gauge_ids.values)
-            facc_da = xr.DataArray(
-                facc, name="facc", dims=["id"], coords={"id": gauge_ids.values}
-            )
-            observed_data = xr.Dataset(
-                {"facc": facc_da, "discharge": obs_discharge_data}
-            )
-
-            logger.info(f"Saving obs data to {obs_output_file}...")
-            write_xarray_to_file(observed_data, obs_output_file)
+        logger.info(f"Saving obs data to {obs_output_file}...")
+        write_xarray_to_file(observed_data, obs_output_file)
 
     if not sim_output_file.is_file() or overwrite:
         with xr.open_dataset(mrm_restart_file) as ds:
@@ -309,35 +324,17 @@ def Q_data_to_xarray(
                 gauge_ids_with_values.append(gauge_ids.values[i])
         logger.info(f"There are {len(x_new)} gauges")
         logger.info("creating sim dataset")
-        with xr.open_dataset(model_data_path) as sim_data_in:
-            if hours_obs > hours_sim:
-                # resample the datasets for them to have the same temporal resolution
-                logger.info(
-                    f"The simulation dataset is resampled to fit the observation dataset with a temporal resolution of {alias_obs}"
-                )
-                sim_data_in = sim_data_in.resample(time=alias_obs).mean()
-            if slicing_condition is not None:
-                sim_data_cropped = sim_data_in.sel(
-                    {
-                        get_coord_key(sim_data_in, lat=True): slice(lat_max, lat_min),
-                        get_coord_key(sim_data_in, lon=True): slice(lon_min, lon_max),
-                    }
-                ).sel(time=date_slice)
-            else:
-                sim_data_cropped = sim_data_in.sel(time=date_slice)
-            if direct_comparison:
-                sim_data_cropped = sim_data_in.sel(time=overlapping_time_slice)
-            sim = Parallel(n_jobs=n_jobs, backend="loky")(
-                delayed(get_sim_data_for_one_gauge)(
-                    id=id,
-                    index=i,
-                    sim_data=sim_data_cropped[sim_variable],
-                    yarr=y_new,
-                    xarr=x_new,
-                    resolution=resolution,
-                )
-                for i, id in enumerate(gauge_ids_with_values)
+        sim = Parallel(n_jobs=n_jobs, backend="loky")(
+            delayed(get_sim_data_for_one_gauge)(
+                id=id,
+                index=i,
+                sim_data=sim_data_cropped[sim_variable],
+                yarr=y_new,
+                xarr=x_new,
+                resolution=resolution,
             )
+            for i, id in enumerate(gauge_ids_with_values)
+        )
         simulation_discharge = xr.concat(sim, dim="id").drop_vars(["lat", "lon"])
         facc_ids = xr.DataArray(
             data=np.array(facc_new), dims=["id"], coords={"id": gauge_ids_with_values}
