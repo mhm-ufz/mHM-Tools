@@ -487,6 +487,7 @@ def crop_data_to_overlapping_time(input_ds, ref_ds):
     # Slice both datasets to that time range
     input_ds = input_ds.sel(time=time_slice)
     ref_ds = ref_ds.sel(time=time_slice)
+    return input_ds, ref_ds
 
 @log_errors()
 def plot_map(
