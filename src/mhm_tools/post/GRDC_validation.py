@@ -385,8 +385,9 @@ def boostap_statistics(
                 f"results for index {index} and gauge {id}: alpha={alpha:.3f}, beta={beta:.3f}, gamma={gamma:.3f}"
             )
             if np.isnan(alpha):
-                logger.debug("sim: {sim_id} and clim {clim_sim}")
-                logger.debug("obs: {obs_id} and clim {clim_obs}")
+                logger.debug('Alpha is none for:')
+                logger.debug(f"sim: {sim_id} and clim {clim_sim}")
+                logger.debug(f"obs: {obs_id} and clim {clim_obs}")
         except Exception as e:
             logger.error(f"Error for index {index} and id {id} with error {e}")
     else:
