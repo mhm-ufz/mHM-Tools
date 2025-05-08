@@ -21,6 +21,15 @@ def parse_coords(coords_str):
                 "Coordinates must be two comma-separated floats."
             )
 
+def get_available_mem_in_unit(available_mem):
+    if available_mem is None:
+        return None
+    available_mem = available_mem.lower()
+    if "mb" in available_mem:
+        return int(available_mem.replace('mb', ''))*1000
+    if "gb" in available_mem:
+        return int(available_mem.replace('gb', ''))
+    return int(available_mem)
 
 def get_coords_from_mask(mask):
     """Get the coordinates from a mask file.

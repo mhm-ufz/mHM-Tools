@@ -15,7 +15,7 @@ from matplotlib.colors import BoundaryNorm
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from scipy.stats import spearmanr
 
-from mhm_tools.common.file_handler import get_coord_values, get_xarray_ds_from_file
+from mhm_tools.common.file_handler import ChunkType, get_coord_values, get_xarray_ds_from_file
 from mhm_tools.common.logger import ErrorLogger, log_arguments, log_errors
 from mhm_tools.common.xarray_utils import get_coord_key
 
@@ -41,21 +41,35 @@ def spearman_correlation(data1, data2):
     return corr, p_value
 
 
-def spearman_spatial(data1, data2):
-    """Calculate maps of Spearman rank correlation between two xarray DataArrays of shape(12,n,m)."""
-    if len(np.shape(data1)) != len(np.shape(data2)) or len(np.shape(data1)) != 3:
-        with ErrorLogger(logger):
-            msg = "Wrong shape for spatial spearman correlation!"
-            raise ValueError(msg)
-    res = np.full(np.shape(data1[0]), np.nan)
-    pval = np.full(np.shape(data1[0]), np.nan)
-    for i, row in enumerate(data1[0]):
-        for j, _col in enumerate(row):
-            sp_corr, sp_pval = spearman_correlation(data1[:, i, j], data2[:, i, j])
-            res[i, j] = sp_corr
-            pval[i, j] = sp_pval
-    return res, pval
+def _spearman_1d(a: np.ndarray, b: np.ndarray):
+    """Compute Spearman’s ρ and p-value for two 1D arrays."""
+    # nan_policy='omit' will drop NaNs in the calculation
+    rho, p = spearmanr(a, b, nan_policy='omit')
+    return np.float32(rho), np.float32(p)
 
+def spearman_spatial(ds1: xr.DataArray,
+                     ds2: xr.DataArray) -> tuple[xr.DataArray, xr.DataArray]:
+    """
+    Compute a per-pixel Spearman correlation map between two DataArrays
+    of shape (time, y, x), leveraging Dask & xarray chunking.
+    Returns (rho, pvalue) each with dims (y, x).
+    """
+    # make sure they align on time
+    ds1, ds2 = xr.align(ds1, ds2)
+
+    rho, p = xr.apply_ufunc(
+        _spearman_1d,           # the 1D function
+        ds1, ds2,               # inputs
+        input_core_dims=[['time'], ['time']],
+        output_core_dims=[[], []],
+        vectorize=True,         # vectorize over y, x
+        dask='parallelized',    # dispatch one Dask task per chunk
+        output_dtypes=[np.float32, np.float32],
+    )
+    # give them nice names
+    rho.name = 'spearman_rho'
+    p.name   = 'spearman_p'
+    return rho, p
 
 def climatology(data):
     """Calculate the climatology from a xarray DataArray."""
@@ -530,10 +544,14 @@ def plot_map(
     cax2 = divider1.append_axes("right", size="5%", pad=0.1)
     fig.colorbar(im1, cax=cax2, label="", boundaries=bounds1)
 
-    divider2 = make_axes_locatable(axes[1, 0])
-    cax = divider2.append_axes("right", size="5%", pad=0.1)
-    fig.colorbar(im2, cax=cax, label="", boundaries=bounds2)
-
+    print(spearman)
+    try:
+        divider2 = make_axes_locatable(axes[1, 0])
+        cax = divider2.append_axes("right", size="5%", pad=0.1)
+        fig.colorbar(im2, cax=cax, label="", boundaries=bounds2)
+    except:
+        print(bounds2)
+        pass
     for ax in axes.flat:
         for spine in ax.spines.values():
             spine.set_linewidth(0.5)
@@ -585,7 +603,8 @@ def get_stats(
     ncpus,
     output_file,
     available_years=None,
-    direct_comp=False
+    direct_comp=False,
+    available_mem=None
 ):
     """Get statistics dataset from a path to a file or directory with files."""
     logger.info(f"Get stats for {path}")
@@ -602,7 +621,7 @@ def get_stats(
                 available_years=available_years
             )
         elif path.is_dir() or path.is_file():
-            with get_dataset_from_path(path) as ds_in:
+            with get_dataset_from_path(path, available_mem=available_mem) as ds_in:
                 stats_ds = get_file_stats(
                     ds_in, var, factor, coordinate_slice, output_path=output_file, avaiable_years=available_years, direct_comp=direct_comp
                 )
@@ -646,7 +665,8 @@ def compare_input_with_ref(
     bootstrap_index=None,
     ncpus=1,
     available_years=None,
-    direct_comp = False
+    direct_comp = False,
+    available_mem=None
 ):
     """Compare the two datasets."""
     if bootstrap_index is not None:
@@ -664,7 +684,8 @@ def compare_input_with_ref(
         ncpus=ncpus,
         output_file=input_stats_file,
         available_years=available_years,
-        direct_comp=direct_comp
+        direct_comp=direct_comp,
+        available_mem=available_mem
 
     )
     logger.debug(f"input ds: {input}")
@@ -679,8 +700,8 @@ def compare_input_with_ref(
         ncpus=ncpus,
         output_file=ref_stats_file,
         available_years=available_years,
-        direct_comp=direct_comp
-
+        direct_comp=direct_comp,
+        available_mem=available_mem
     )
     logger.debug(f"ref ds: {ref}")
 
@@ -729,7 +750,7 @@ def compare_input_with_ref(
             "lon": get_coord_values(input, lon=True),
         },
         dims=["lat", "lon"],
-    )    
+    )
     spearman_pval = xr.DataArray(
         spearman_pval.data,
         coords={
@@ -738,6 +759,7 @@ def compare_input_with_ref(
         },
         dims=["lat", "lon"],
     )
+    logger.info(f'input clim {input["clim"].shape}')
     input_clim = xr.DataArray(
         input["clim"].data,
         coords={
@@ -854,10 +876,11 @@ def evaluate_boostraping_stat_files(stat_files, input_name, ref_name):
     }
 
 
-def get_dataset_from_path(path, available_years=None):
+def get_dataset_from_path(path, available_years=None, available_mem=None):
     """Get a dataset from a given path whether that is a file or a directory."""
     if path.is_file() and path.suffix == ".nc":
-        return get_xarray_ds_from_file(path)
+        chunking = available_mem is not None
+        return get_xarray_ds_from_file(path, chunking=chunking, available_mem_gib=available_mem, chunk_type=ChunkType.SPACE)
     if path.is_dir():
         file_list = get_files(path, available_years=available_years)
         logger.debug(file_list)
@@ -993,7 +1016,8 @@ def seasonality_grid_validation(
     n_bootstrap_years=None,
     n_bootstrap_selections=None,
     direct_comp=True,
-    year_slice=None
+    year_slice=None,
+    avaiable_mem=None
 ):
     """Validate a spatial variable from two datasets by comparing the climatology of that variable."""
     output_path = Path(output_path)
@@ -1123,4 +1147,5 @@ def seasonality_grid_validation(
             ncpus=n_cpus,
             available_years=available_years,
             direct_comp=direct_comp,
+            available_mem=avaiable_mem
         )

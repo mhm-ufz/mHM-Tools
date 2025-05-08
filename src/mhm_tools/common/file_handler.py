@@ -1,5 +1,6 @@
 """File handling utils."""
 
+from enum import Enum
 import logging
 from pathlib import Path
 
@@ -8,6 +9,7 @@ import xarray as xr
 
 from mhm_tools.common.logger import ErrorLogger
 from mhm_tools.common.xarray_utils import get_coord_key, get_single_data_var
+import contextlib
 
 logger = logging.getLogger(__name__)
 
@@ -68,13 +70,59 @@ def crop_file_by_mask(ds, mask_file):
             }
         )
 
+def chunk_dataset_space_only(ds: xr.Dataset,
+                             available_mem_gib: float) -> xr.Dataset:
+    """
+    Chunk only in space (lat/lon), leaving time whole, sized to available memory.
 
-def chunk_dataset(ds, available_mem_gib) -> xr.Dataset:
+    - Uses 80% of available_mem_gib for a single chunk
+    - Computes how many total cells (t × y × x) fit, then allocates all t,
+      and splits y/x so that t·y·x·bytes_per_cell ≤ work_bytes.
+    - If no time dimension, behaves similarly with t=1.
+    """
+    logger.info(f"Chunking spatial dims to fit ≈{available_mem_gib} GiB (time unchunked)")
+    # --- pick one variable to get dtype size ---
+    var = next(iter(ds.data_vars.values()))
+    dtype_sz = var.dtype.itemsize  # bytes per element
+
+    # --- find coordinate names ---
+    lat_key  = get_coord_key(ds, lat=True)
+    lon_key  = get_coord_key(ds, lon=True)
+    time_key = None
+    with contextlib.suppress(ValueError):
+        time_key = get_coord_key(ds, time=True)
+
+    ny = ds.sizes[lat_key]
+    nx = ds.sizes[lon_key]
+    nt = ds.sizes.get(time_key, 1)
+
+    # --- memory budget in bytes (80%) ---
+    work_bytes = max(int(0.1 * available_mem_gib * 1024**3), 4 * 1024**2)
+    # how many total cells fit
+    max_cells = work_bytes // dtype_sz
+    # allocate all time steps
+    cells_per_slice = max_cells // nt
+
+    # square-ish spatial block
+    side = max(1, int(np.sqrt(cells_per_slice)))
+    y_chunk = min(ny, side)
+    x_chunk = min(nx, side)
+
+    chunks = {lat_key: y_chunk, lon_key: x_chunk}
+    if time_key:
+        # -1 means “take all” for that dim
+        chunks[time_key] = -1
+
+    logger.debug(f"Chunk sizes → time: {chunks.get(time_key,'—')}, "
+                 f"{lat_key}: {y_chunk}, {lon_key}: {x_chunk}")
+    return ds.chunk(chunks)
+
+def chunk_dataset_space_and_time(ds, available_mem_gib) -> xr.Dataset:
     """
     Chunk dataset adjusting chunk size to avaiable memory.
 
     Simple heuristic:
-      - try to keep time chunks small (1…4)
+      - try to keep time chunks small (1…4)vi
       - make y/x chunks as square as possible
     """
     logger.info(f"Chunking dataset with a max amount of mem of {available_mem_gib}Gb")
@@ -112,9 +160,19 @@ def chunk_dataset(ds, available_mem_gib) -> xr.Dataset:
 
     return ds.chunk(chunks)
 
+class ChunkType(Enum):
+    """
+    Define Types of chunking.
+
+    SPACE: Only chunking in space. Time dimension is conserved.
+    TIME: Chunking predominately in time. If necessary also in space. 
+    """
+
+    SPACE = 1
+    TIME = 2
 
 def get_xarray_ds_from_file(
-    file_path, var_name=None, chunking=False, available_mem_gib=None
+    file_path, var_name=None, chunking=False, available_mem_gib=None, chunk_type=ChunkType.TIME
 ):
     """Read file and return xarray dataset."""
     file_path = Path(file_path)
@@ -134,7 +192,10 @@ def get_xarray_ds_from_file(
     if file_path.suffix == ".nc":
         ds_out = xr.open_dataset(file_path)
         if chunking and available_mem_gib is not None:
-            ds_out = chunk_dataset(ds_out, available_mem_gib)
+            if chunk_type == ChunkType.TIME:
+                ds_out = chunk_dataset_space_and_time(ds_out, available_mem_gib)
+            if chunk_type == ChunkType.SPACE:
+                ds_out = chunk_dataset_space_only(ds_out, available_mem_gib)
     if ds_out is None:
         msg = f"File types other than asci and netcdf are not implemented. The suffix of the file was: {file_path.suffix}"
         with ErrorLogger(logger):

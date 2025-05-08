@@ -1,6 +1,6 @@
 """Cut domains out of an existing mHM setup."""
 
-from mhm_tools.common.cli_utils import get_coords
+from mhm_tools.common.cli_utils import get_available_mem_in_unit, get_coords
 from mhm_tools.common.xarray_utils import get_coord_key
 from mhm_tools.pre.crop_mhm_setup import crop_mhm_setup
 
@@ -126,13 +126,7 @@ def run(args):
         latslice = slice(lat_max_target_grid, lat_min_target_grid)
         lonslice = slice(lon_min_target_grid, lon_max_target_grid)
         # l0_resolution = float(args.lonlatbox.split(",")[4])
-    available_mem = args.available_mem.lower()
-    if "mb" in available_mem:
-        available_mem = int(available_mem.replace('mb', ''))*1000
-    elif "gb" in available_mem:
-        available_mem = int(available_mem.replace('gb', ''))
-    else:
-        available_mem = int(available_mem)
+    available_mem = get_available_mem_in_unit(args.available_mem)
     crop_mhm_setup(
         mask_da,
         args.output_path,

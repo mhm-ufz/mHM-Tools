@@ -1,6 +1,6 @@
 """Validation of spatially distributed data based on their climatology."""
 
-from mhm_tools.common.cli_utils import get_coords
+from mhm_tools.common.cli_utils import get_available_mem_in_unit, get_coords
 from mhm_tools.post.seasonality_grid_validation import seasonality_grid_validation
 
 
@@ -116,7 +116,12 @@ def add_args(parser):
         type=str,
         help=("Lates year that is allowed in the analysis."),
     )
-
+    parser.add_argument(
+        "--available_mem",
+        required=False,
+        default=None,
+        help=("""Available memory per cpu in Gb or Mb (default Gb)"""),
+    )
 
 def run(args):
     """Calculate the validation.
@@ -141,6 +146,7 @@ def run(args):
             "lon": slice(lon_min, lon_max),
         }
     year_slice = slice(args.start_date, args.end_date)
+    available_mem = get_available_mem_in_unit(args.available_mem)
     seasonality_grid_validation(
         args.input_path,
         args.input_variable,
@@ -157,5 +163,6 @@ def run(args):
         args.n_boostrap_years,
         args.n_bootstrap_selections,
         args.direct_comparison,
-        year_slice=year_slice
+        year_slice=year_slice,
+        avaiable_mem=available_mem
     )
