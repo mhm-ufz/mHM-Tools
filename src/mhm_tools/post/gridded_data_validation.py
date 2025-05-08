@@ -1036,7 +1036,7 @@ def year_structure_paths(path: Path) -> bool:
 
 
 @log_arguments()
-def seasonality_grid_validation(
+def gridded_data_validation(
     input_path,
     input_var,
     output_path,

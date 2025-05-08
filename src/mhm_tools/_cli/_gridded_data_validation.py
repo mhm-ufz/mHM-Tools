@@ -1,11 +1,11 @@
-"""Validation of spatially distributed data based on their climatology."""
+"""Validation of spatially distributed data based on their climatology or timeseries."""
 
 from mhm_tools.common.cli_utils import get_available_mem_in_unit, get_coords
-from mhm_tools.post.seasonality_grid_validation import seasonality_grid_validation
+from mhm_tools.post.gridded_data_validation import gridded_data_validation
 
 
 def add_args(parser):
-    """Add cli arguments for the seasonality validation.
+    """Add cli arguments for the gridded validation.
 
     Parameters
     ----------
@@ -148,7 +148,7 @@ def run(args):
         }
     year_slice = slice(args.start_date, args.end_date)
     available_mem = get_available_mem_in_unit(args.available_mem)
-    seasonality_grid_validation(
+    gridded_data_validation(
         args.input_path,
         args.input_variable,
         args.output_dir,

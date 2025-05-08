@@ -13,9 +13,9 @@ from . import (
     _create_subdomain_masks,
     _crop_mhm_setup,
     _grdc_validation,
+    _gridded_data_validation,
     _hydrograph,
     _latlon,
-    _seasonality_validation,
 )
 
 
@@ -78,7 +78,7 @@ def _get_parser():
 
     add_command_from_module(subparsers, "hydrograph", _hydrograph)
     add_command_from_module(
-        subparsers, "seasonality_validation", _seasonality_validation
+        subparsers, "gridded_data_validation", _gridded_data_validation
     )
     add_command_from_module(subparsers, "grdc_validation", _grdc_validation)
     add_command_from_module(subparsers, "latlon", _latlon)
