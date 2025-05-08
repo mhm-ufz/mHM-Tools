@@ -2,6 +2,7 @@
 
 import logging
 
+from mhm_tools.post.gridded_data_validation import logger
 import xarray as xr
 import numpy as np
 
@@ -110,3 +111,24 @@ def timedelta_to_alias(ds: xr.DataArray) -> str:
     # fallback: integer hours
     hours = int(median_delta / np.timedelta64(1, "h"))
     return hours, f"{hours}H"
+
+
+def get_overlapping_time_slice(input_ds, ref_ds):
+    """Crop data to overlapping time."""
+    t1 = input_ds.dropna(dim="time", how="all").time.data
+    t2 = ref_ds.dropna(dim="time", how="all").time.data
+
+    # Find overlapping range
+    only_nan_msg = "No non nan value data."
+    if t1.any() and t2.any():
+        start = max(t1[0], t2[0])
+        end = min(t1[-1], t2[-1])
+        if end <= start:
+            logger.warning(
+                f"The two datasets are not overlapping. Sim data hass non nan data from {t1[0]} to {t1[-1]} and obs from {t2[0]} to {t2[-1]}."
+            )
+        logger.info(f"Cropping data to timeframe {start} to {end}")
+    else:
+        with ErrorLogger:
+            raise ValueError(only_nan_msg)
+    return slice(start, end)

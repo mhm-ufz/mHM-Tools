@@ -9,6 +9,7 @@ from typing import Iterable
 
 import matplotlib.pyplot as plt
 from mhm_tools.common.xarray_utils import timedelta_to_alias
+from mhm_tools.common.xarray_utils import get_overlapping_time_slice
 import numpy as np
 import xarray as xr
 from joblib import Parallel, delayed
@@ -483,32 +484,10 @@ def resample_to_coarser_calendar(
 
 
 def crop_data_to_overlapping_time(input_ds, ref_ds):
-    """Crop data to overlapping time."""
-    t1 = input_ds.dropna(dim="time", how="all").time.data
-    t2 = ref_ds.dropna(dim="time", how="all").time.data
-
-    # Find overlapping range
-    only_nan_msg = "No non nan value data."
-    if t1.any() and t2.any():
-        start = max(t1[0], t2[0])
-        end = min(t1[-1], t2[-1])
-        if end <= start:
-            logger.warning(
-                f"The two datasets are not overlapping. Sim data hass non nan data from {t1[0]} to {t1[-1]} and obs from {t2[0]} to {t2[-1]}."
-            )
-        logger.info(f"Cropping data to timeframe {start} to {end}")
-        # Slice both datasets to that time range
-        input_ds = input_ds.sel(time=slice(start, end))
-        ref_ds = ref_ds.sel(time=slice(start, end))
-        # if np.all(np.isnan(input_ds)) or np.all(
-        #     np.isnan(input_ds)
-        # ):
-        #     raise ValueError(only_nan_msg)
-    else:
-        with ErrorLogger:
-            raise ValueError(only_nan_msg)
-    return input_ds, ref_ds
-
+    time_slice = get_overlapping_time_slice(input_ds, ref_ds)
+    # Slice both datasets to that time range
+    input_ds = input_ds.sel(time=time_slice)
+    ref_ds = ref_ds.sel(time=time_slice)
 
 @log_errors()
 def plot_map(

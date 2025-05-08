@@ -13,7 +13,7 @@ from joblib import Parallel, delayed
 
 from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_to_file
 from mhm_tools.common.logger import log_arguments, log_errors
-from mhm_tools.common.xarray_utils import get_coord_key, timedelta_to_alias
+from mhm_tools.common.xarray_utils import get_coord_key, get_overlapping_time_slice, timedelta_to_alias
 from mhm_tools.post.hydrograph import gen_hydrograph_by_data_sets
 from mhm_tools.post.gridded_data_validation import (
     get_clim_from_ds,
@@ -185,6 +185,7 @@ def Q_data_to_xarray(
     n_jobs=1,
     date_slice=None,
     overwrite=False,
+    direct_comparison=False
 ):
     """
     Get observed and model Q data and save it as CSV files to be opened later.
@@ -250,9 +251,10 @@ def Q_data_to_xarray(
     # prepare for later resampling
     with xr.open_dataset(model_data_path) as sim_data_in:
         hours_sim, alias_sim = timedelta_to_alias(sim_data_in)
-    with xr.open_dataset(observed_data_path) as observed_data_in:
-        hours_obs, alias_obs = timedelta_to_alias(observed_data_in)
-
+        with xr.open_dataset(observed_data_path) as observed_data_in:
+            hours_obs, alias_obs = timedelta_to_alias(observed_data_in)
+            if direct_comparison:
+                overlapping_time_slice = get_overlapping_time_slice(sim_data_in, observed_data_in)
     if not obs_output_file.is_file() or overwrite:
         with xr.open_dataset(observed_data_path) as observed_data_in:
             if hours_sim > hours_obs:
@@ -263,6 +265,10 @@ def Q_data_to_xarray(
                 observed_data_in = observed_data_in.resample(time=alias_sim).mean()
             obs_discharge_data = observed_data_in[observed_variable]
             obs_discharge_data = obs_discharge_data.sel(time=date_slice)
+            if direct_comparison:
+                # also slice to overlapping time
+                obs_discharge_data = obs_discharge_data.sel(time=overlapping_time_slice)
+
             # observed_data = observed_data.rename({observed_variable: "discharge"})
             obs_discharge_data = obs_discharge_data.sel(id=gauge_ids.values)
             obs_discharge_data = obs_discharge_data.reindex(id=gauge_ids.values)
@@ -319,6 +325,8 @@ def Q_data_to_xarray(
                 ).sel(time=date_slice)
             else:
                 sim_data_cropped = sim_data_in.sel(time=date_slice)
+            if direct_comparison:
+                sim_data_cropped = sim_data_in.sel(time=overlapping_time_slice)
             sim = Parallel(n_jobs=n_jobs, backend="loky")(
                 delayed(get_sim_data_for_one_gauge)(
                     id=id,
@@ -440,6 +448,7 @@ def evaludate_grdc_data(  # noqa: PLR0913
         n_jobs=n_jobs,
         date_slice=slice(start_date, end_date),
         overwrite=overwrite,
+        direct_comparison=direct_comparison
     )
     model_da = model_ds["discharge"]
     observed_da = observed_ds["discharge"]
