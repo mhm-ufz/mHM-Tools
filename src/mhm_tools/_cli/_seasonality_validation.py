@@ -123,6 +123,7 @@ def add_args(parser):
         help=("""Available memory per cpu in Gb or Mb (default Gb)"""),
     )
 
+
 def run(args):
     """Calculate the validation.
 
@@ -164,5 +165,5 @@ def run(args):
         args.n_bootstrap_selections,
         args.direct_comparison,
         year_slice=year_slice,
-        avaiable_mem=available_mem
+        avaiable_mem=available_mem,
     )

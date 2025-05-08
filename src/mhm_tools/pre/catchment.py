@@ -107,7 +107,7 @@ class Catchment:
             self.transform = tuple(transform)
 
         self.input_da = data
-              
+
         self.input_da = data
 
         if var == "fdir":

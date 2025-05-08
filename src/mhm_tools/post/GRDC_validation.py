@@ -89,7 +89,7 @@ def get_gauge_coords(
     cell_diff=1,
     max_cell_diff=3,
     diff_percent=10,
-    id=None
+    id=None,
 ):
     """
     Find correct gauge location.
@@ -155,7 +155,7 @@ def get_gauge_coords(
             cell_diff=cell_diff + 1,
             max_cell_diff=3,
             diff_percent=10,
-            id=id
+            id=id,
         )
     logger.warning(f"No similar flow accumulation found nearby for gauge {id}.")
     logger.debug("None, None, None")
@@ -217,7 +217,7 @@ def Q_data_to_xarray(
     saving_path = Path(saving_path)
     if not saving_path.is_dir():
         saving_path.mkdir(parents=True)
-    
+
     # getting gauge infos
     with xr.open_dataset(observed_data_path) as gauge_info:
         gauge_ids = gauge_info["id"]
@@ -240,21 +240,20 @@ def Q_data_to_xarray(
             gauge_ids = gauge_ids.where(slicing_condition, drop=True)
     logger.info(f"There are {len(gauge_ids.values)} gauges")
 
-    # prepare for later resampling 
+    # prepare for later resampling
     with xr.open_dataset(model_data_path) as sim_data_in:
-        res_sim = sim_data_in.time.diff('time').median()
+        res_sim = sim_data_in.time.diff("time").median()
     with xr.open_dataset(observed_data_path) as observed_data_in:
-        res_obs = observed_data_in.time.diff('time').median()
-
-
-
+        res_obs = observed_data_in.time.diff("time").median()
 
     if not obs_output_file.is_file() or overwrite:
         with xr.open_dataset(observed_data_path) as observed_data_in:
             if res_sim > res_obs:
                 # resample the datasets for them to have the same temporal resolution
                 target_freq = f"{int(res_sim / np.timedelta64(1, 'h'))}h"  # Convert to '24H' for daily, etc.
-                logger.info(f'The observation dataset is resampled to fit the simulation dataset with a temporal resolution of {target_freq}')
+                logger.info(
+                    f"The observation dataset is resampled to fit the simulation dataset with a temporal resolution of {target_freq}"
+                )
                 sim_data_in = sim_data_in.resample(time=target_freq).mean()
             obs_discharge_data = observed_data_in[observed_variable]
             obs_discharge_data = obs_discharge_data.sel(time=date_slice)
@@ -302,7 +301,9 @@ def Q_data_to_xarray(
             if res_obs > res_sim:
                 # resample the datasets for them to have the same temporal resolution
                 target_freq = f"{int(res_obs / np.timedelta64(1, 'h'))}h"  # Convert to '24H' for daily, etc.
-                logger.info(f'The simulation dataset is resampled to fit the observation dataset with a temporal resolution of {target_freq}')
+                logger.info(
+                    f"The simulation dataset is resampled to fit the observation dataset with a temporal resolution of {target_freq}"
+                )
                 sim_data_in = sim_data_in.resample(time=target_freq).mean()
             if slicing_condition is not None:
                 sim_data_cropped = sim_data_in.sel(
@@ -377,8 +378,8 @@ def boostap_statistics(
                 f"results for index {index} and gauge {id}: alpha={alpha:.3f}, beta={beta:.3f}, gamma={gamma:.3f}"
             )
             if np.isnan(alpha):
-                logger.debug('sim: {sim_id} and clim {clim_sim}')
-                logger.debug('obs: {obs_id} and clim {clim_obs}')
+                logger.debug("sim: {sim_id} and clim {clim_sim}")
+                logger.debug("obs: {obs_id} and clim {clim_obs}")
         except Exception as e:
             logger.error(f"Error for index {index} and id {id} with error {e}")
     else:
@@ -436,8 +437,8 @@ def evaludate_grdc_data(  # noqa: PLR0913
     )
     model_da = model_ds["discharge"]
     observed_da = observed_ds["discharge"]
-    logger.debug(f'Model dataarray: {model_da}')
-    logger.debug(f'Observed dataarray: {observed_da}')
+    logger.debug(f"Model dataarray: {model_da}")
+    logger.debug(f"Observed dataarray: {observed_da}")
     results = []
     if (
         n_bootstrap_years is not None
@@ -451,14 +452,10 @@ def evaludate_grdc_data(  # noqa: PLR0913
         results = []
         model_da = model_da.dropna(dim="time", how="all")
         observed_da = observed_da.dropna(dim="time", how="all")
-        total_years_sim = np.unique(
-            model_da.time.dt.year.data
-        )
-        total_years_obs = np.unique(
-            observed_da.time.dt.year.data
-        )
-        logger.info(f'Observed years with non nan values: {total_years_obs}')
-        logger.info(f'Simulated years with non nan values: {total_years_obs}')
+        total_years_sim = np.unique(model_da.time.dt.year.data)
+        total_years_obs = np.unique(observed_da.time.dt.year.data)
+        logger.info(f"Observed years with non nan values: {total_years_obs}")
+        logger.info(f"Simulated years with non nan values: {total_years_obs}")
         # for index in range(n_boostrap_selections):
         ids_sim = np.unique(model_da.id.values)
         ids_obs = np.unique(observed_da.id.values)
@@ -489,10 +486,10 @@ def evaludate_grdc_data(  # noqa: PLR0913
         if id in model_ds.id.values
     )
     if not results:
-        logger.info('Using the results from direct comparison.')
+        logger.info("Using the results from direct comparison.")
         results_df = pd.DataFrame(results_direct)
     else:
-        logger.info('Using the results from bootstraping.')
+        logger.info("Using the results from bootstraping.")
         results_df = pd.DataFrame(results)
     results_df = pd.DataFrame(results)
     results_df.to_csv(output_path / "results.csv")
@@ -585,10 +582,18 @@ def plot_cdf(df, output_path, boostrap_iterations=None, mask_any=True):
     #     output_path.mkdir()
     # The variables to plot
     logger.info(f'In total there are {len(df["id"].unique())} catchments of which ')
-    logger.info(f'   {len(df.dropna(subset=["alpha"], how="any")["id"].unique())} have all alpha values')
-    logger.info(f'   {len(df.dropna(subset=["beta"], how="any")["id"].unique())} have beta values ')
-    logger.info(f'   {len(df.dropna(subset=["gamma"], how="any")["id"].unique())} have all gamma values ')
-    logger.info(f'   {len(df.dropna(subset=["alpha", "beta", "gamma"], how="any")["id"].unique())} have all values ')
+    logger.info(
+        f'   {len(df.dropna(subset=["alpha"], how="any")["id"].unique())} have all alpha values'
+    )
+    logger.info(
+        f'   {len(df.dropna(subset=["beta"], how="any")["id"].unique())} have beta values '
+    )
+    logger.info(
+        f'   {len(df.dropna(subset=["gamma"], how="any")["id"].unique())} have all gamma values '
+    )
+    logger.info(
+        f'   {len(df.dropna(subset=["alpha", "beta", "gamma"], how="any")["id"].unique())} have all values '
+    )
     df = df.dropna(subset=["alpha", "beta", "gamma"], how="any")
     logger.info(df.head())
     variables = ["alpha", "beta", "gamma"]

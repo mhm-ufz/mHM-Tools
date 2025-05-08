@@ -1,7 +1,8 @@
 """File handling utils."""
 
-from enum import Enum
+import contextlib
 import logging
+from enum import Enum
 from pathlib import Path
 
 import numpy as np
@@ -9,7 +10,6 @@ import xarray as xr
 
 from mhm_tools.common.logger import ErrorLogger
 from mhm_tools.common.xarray_utils import get_coord_key, get_single_data_var
-import contextlib
 
 logger = logging.getLogger(__name__)
 
@@ -70,8 +70,8 @@ def crop_file_by_mask(ds, mask_file):
             }
         )
 
-def chunk_dataset_space_only(ds: xr.Dataset,
-                             available_mem_gib: float) -> xr.Dataset:
+
+def chunk_dataset_space_only(ds: xr.Dataset, available_mem_gib: float) -> xr.Dataset:
     """
     Chunk only in space (lat/lon), leaving time whole, sized to available memory.
 
@@ -80,14 +80,16 @@ def chunk_dataset_space_only(ds: xr.Dataset,
       and splits y/x so that t·y·x·bytes_per_cell ≤ work_bytes.
     - If no time dimension, behaves similarly with t=1.
     """
-    logger.info(f"Chunking spatial dims to fit ≈{available_mem_gib} GiB (time unchunked)")
+    logger.info(
+        f"Chunking spatial dims to fit ≈{available_mem_gib} GiB (time unchunked)"
+    )
     # --- pick one variable to get dtype size ---
     var = next(iter(ds.data_vars.values()))
     dtype_sz = var.dtype.itemsize  # bytes per element
 
     # --- find coordinate names ---
-    lat_key  = get_coord_key(ds, lat=True)
-    lon_key  = get_coord_key(ds, lon=True)
+    lat_key = get_coord_key(ds, lat=True)
+    lon_key = get_coord_key(ds, lon=True)
     time_key = None
     with contextlib.suppress(ValueError):
         time_key = get_coord_key(ds, time=True)
@@ -113,9 +115,12 @@ def chunk_dataset_space_only(ds: xr.Dataset,
         # -1 means “take all” for that dim
         chunks[time_key] = -1
 
-    logger.debug(f"Chunk sizes → time: {chunks.get(time_key,'—')}, "
-                 f"{lat_key}: {y_chunk}, {lon_key}: {x_chunk}")
+    logger.debug(
+        f"Chunk sizes → time: {chunks.get(time_key,'—')}, "
+        f"{lat_key}: {y_chunk}, {lon_key}: {x_chunk}"
+    )
     return ds.chunk(chunks)
+
 
 def chunk_dataset_space_and_time(ds, available_mem_gib) -> xr.Dataset:
     """
@@ -160,19 +165,25 @@ def chunk_dataset_space_and_time(ds, available_mem_gib) -> xr.Dataset:
 
     return ds.chunk(chunks)
 
+
 class ChunkType(Enum):
     """
     Define Types of chunking.
 
     SPACE: Only chunking in space. Time dimension is conserved.
-    TIME: Chunking predominately in time. If necessary also in space. 
+    TIME: Chunking predominately in time. If necessary also in space.
     """
 
     SPACE = 1
     TIME = 2
 
+
 def get_xarray_ds_from_file(
-    file_path, var_name=None, chunking=False, available_mem_gib=None, chunk_type=ChunkType.TIME
+    file_path,
+    var_name=None,
+    chunking=False,
+    available_mem_gib=None,
+    chunk_type=ChunkType.TIME,
 ):
     """Read file and return xarray dataset."""
     file_path = Path(file_path)

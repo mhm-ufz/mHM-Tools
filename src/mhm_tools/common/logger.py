@@ -186,8 +186,6 @@ def log_errors(raise_exceptions=True):
     return decorator
 
 
-
-
 class ErrorLogger(AbstractContextManager):
     """
     Context manager to log Exceptions.
