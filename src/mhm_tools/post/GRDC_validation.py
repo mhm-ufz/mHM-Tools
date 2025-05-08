@@ -15,7 +15,7 @@ from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_
 from mhm_tools.common.logger import log_arguments, log_errors
 from mhm_tools.common.xarray_utils import get_coord_key
 from mhm_tools.post.hydrograph import gen_hydrograph_by_data_sets
-from mhm_tools.post.seasonality_grid_validation import (
+from mhm_tools.post.gridded_data_validation import (
     get_clim_from_ds,
     spearman_correlation,
 )
