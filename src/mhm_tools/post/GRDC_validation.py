@@ -506,7 +506,6 @@ def evaludate_grdc_data(  # noqa: PLR0913
     else:
         logger.info("Using the results from bootstraping.")
         results_df = pd.DataFrame(results)
-    results_df = pd.DataFrame(results)
     results_df.to_csv(output_path / "results.csv")
     if results:
         plot_cdf(results_df, output_path, boostrap_iterations=n_boostrap_selections)
