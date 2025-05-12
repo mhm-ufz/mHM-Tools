@@ -86,6 +86,46 @@ def add_args(parser):
         default="5",
         help=("""Available memory per cpu in Gb or Mb (default Gb)"""),
     )
+    parser.add_argument(
+        "--lon_min",
+        required=False,
+        default=None,
+        help=(
+            """minimum longitude of the target grid
+            required unless --mask_file is provided"""
+        ),
+    )
+
+    parser.add_argument(
+        "--lon_max",
+        required=False,
+        default=None,
+        help=(
+            """maximum longitude of the target grid
+            required unless --mask_file is provided"""
+        ),
+    )
+
+    parser.add_argument(
+        "--lat_min",
+        required=False,
+        default=None,
+        help=(
+            """minimum latitude of the target grid
+            required unless --mask_file is provided"""
+        ),
+    )
+
+    parser.add_argument(
+        "--lat_max",
+        required=False,
+        default=None,
+        help=(
+            """maximum latitude of the target grid
+            required unless --mask_file is provided"""
+        ),
+    )
+
 
 
 def run(args):
@@ -101,34 +141,20 @@ def run(args):
         lon_max_target_grid,
         lat_min_target_grid,
         lat_max_target_grid,
-        mask,
+        mask_da,
     ) = get_coords(
-        lonlatbox=args.lonlatbox,
-        mask_file=args.mask_file,
+        args.lonlatbox,
+        args.mask_file,
+        args.lon_min,
+        args.lon_max,
+        args.lat_min,
+        args.lat_max,
     )
-    if mask is not None:
-        mask_da = mask.astype(float)
-        lon_key_mask = get_coord_key(mask_da, lon=True)
-        lat_key_mask = get_coord_key(mask_da, lat=True)
-        pres = 1e-5
-        l0_resolution = round(
-            mask_da[lon_key_mask].data[1] - mask_da[lon_key_mask].data[0], 6
-        )
-        latslice = slice(
-            mask_da[lat_key_mask].data[0] + l0_resolution / 2 + pres,
-            mask_da[lat_key_mask].data[-1] - l0_resolution / 2 - pres,
-        )
-        lonslice = slice(
-            mask_da[lon_key_mask].data[0] - l0_resolution / 2 - pres,
-            mask_da[lon_key_mask].data[-1] + l0_resolution / 2 + pres,
-        )
-    elif args.lonlatbox is not None:
-        latslice = slice(lat_max_target_grid, lat_min_target_grid)
-        lonslice = slice(lon_min_target_grid, lon_max_target_grid)
-        # l0_resolution = float(args.lonlatbox.split(",")[4])
+    latslice = slice(lat_max_target_grid, lat_min_target_grid)
+    lonslice = slice(lon_min_target_grid, lon_max_target_grid)
+    # l0_resolution = float(args.lonlatbox.split(",")[4])
     available_mem = get_available_mem_in_unit(args.available_mem)
     crop_mhm_setup(
-        mask_da,
         args.output_path,
         args.input_path,
         l1_resolution=args.l1_resolution,
