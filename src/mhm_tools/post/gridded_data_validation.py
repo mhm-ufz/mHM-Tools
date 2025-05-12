@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Iterable
 
 import matplotlib.pyplot as plt
-from mhm_tools.common.xarray_utils import get_overlapping_time_slice, timedelta_to_alias
 import numpy as np
 import xarray as xr
 from joblib import Parallel, delayed
@@ -22,7 +21,11 @@ from mhm_tools.common.file_handler import (
     get_xarray_ds_from_file,
 )
 from mhm_tools.common.logger import ErrorLogger, log_arguments, log_errors
-from mhm_tools.common.xarray_utils import get_coord_key
+from mhm_tools.common.xarray_utils import (
+    get_coord_key,
+    get_overlapping_time_slice,
+    timedelta_to_alias,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +77,7 @@ def spearman_correlation(data1, data2):
 #     p.name = "spearman_p"
 #     return rho, p
 
+
 def spearman_spatial(data1, data2):
     """Calculate maps of Spearman rank correlation between two xarray DataArrays of shape(12,n,m)."""
     if len(np.shape(data1)) != len(np.shape(data2)) or len(np.shape(data1)) != 3:
@@ -89,13 +93,13 @@ def spearman_spatial(data1, data2):
             pval[i, j] = sp_pval
     return res, pval
 
-def spearman_spatial_joblib(data1: np.ndarray,
-                            data2: np.ndarray,
-                            spearman_correlation,
-                            n_jobs: int = -1) -> tuple[np.ndarray, np.ndarray]:
+
+def spearman_spatial_joblib(
+    data1: np.ndarray, data2: np.ndarray, spearman_correlation, n_jobs: int = -1
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Parallel pixel‐wise Spearman correlation over two arrays of shape (T, Y, X).
-    
+
     Parameters
     ----------
     data1, data2 : ndarray, shape (T, Y, X)
@@ -104,7 +108,7 @@ def spearman_spatial_joblib(data1: np.ndarray,
         A function f(a: 1D, b: 1D) -> (rho, pval).
     n_jobs : int
         Number of parallel workers (−1 = all CPUs).
-    
+
     Returns
     -------
     res : ndarray, shape (Y, X)
@@ -116,7 +120,7 @@ def spearman_spatial_joblib(data1: np.ndarray,
     _, ny, nx = data1.shape
 
     # pre‐allocate outputs
-    res  = np.full((ny, nx), np.nan, dtype=np.float32)
+    res = np.full((ny, nx), np.nan, dtype=np.float32)
     pval = np.full((ny, nx), np.nan, dtype=np.float32)
 
     # list of all pixel indices
@@ -124,21 +128,19 @@ def spearman_spatial_joblib(data1: np.ndarray,
 
     # worker for a single pixel
     def _worker(i, j):
-        rho, p = spearman_correlation(data1[:, i, j],
-                                      data2[:, i, j])
+        rho, p = spearman_correlation(data1[:, i, j], data2[:, i, j])
         return i, j, rho, p
 
     # dispatch in parallel
-    results = Parallel(n_jobs=n_jobs)(
-        delayed(_worker)(i, j) for i, j in indices
-    )
+    results = Parallel(n_jobs=n_jobs)(delayed(_worker)(i, j) for i, j in indices)
 
     # scatter results back
     for i, j, rho, p in results:
-        res[i, j]  = rho
+        res[i, j] = rho
         pval[i, j] = p
 
     return res, pval
+
 
 def climatology(data):
     """Calculate the climatology from a xarray DataArray."""
@@ -150,6 +152,7 @@ def climatology(data):
     data_clim = data.groupby("time.month").mean(dim="time", skipna=True)
     # Ensure the climatology has all 12 months, filling missing months with NaNs
     return data_clim.reindex(month=np.arange(1, 13), fill_value=np.nan)
+
 
 def get_clim_from_ds(ds, input_var=None, factor=1):
     """Calculate climatology from DataSet with variable or DataArray while mulitplying with a provided factor."""
@@ -340,6 +343,7 @@ def split_file_list(file_list, n_processes):
         return [file_list[i::n_processes] for i in range(n_processes)]
     return file_list
 
+
 def get_stats_one_pass(
     path,
     var,
@@ -440,11 +444,11 @@ def plot_single_map(
     bounds = np.linspace(vmin, vmax, n_bins + 1)
     bounds = [np.round(b, 2) for b in bounds]
 
-    extent = 'neither'
+    extent = "neither"
     if np.nanquantile(values, 0.75) > vmax:
-        extent = 'max'
+        extent = "max"
     if np.nanquantile(values, 0.25) < vmin:
-        extent = 'min' if extent == 'neither' else 'both'
+        extent = "min" if extent == "neither" else "both"
 
     norm = BoundaryNorm(bounds, cmap.N)
     im = ax.imshow(values, cmap=cmap, norm=norm)
@@ -461,7 +465,6 @@ def resample_to_coarser_calendar(
     freq aliases, and then resample the *finer* one up to the *coarser* one
     using calendar‐aware frequencies (e.g. 'M' not '720H').
     """
-    
     hours_in, alias_in = timedelta_to_alias(ds_input)
     hours_ref, alias_ref = timedelta_to_alias(ds_ref)
 
@@ -490,6 +493,7 @@ def crop_data_to_overlapping_time(input_ds, ref_ds):
     ref_ds = ref_ds.sel(time=time_slice)
     return input_ds, ref_ds
 
+
 @log_errors()
 def plot_map(
     rel_mean, rel_std, spearman, ref_clim, input_clim, input_name, ref_name, output_path
@@ -510,7 +514,9 @@ def plot_map(
         f"Relative temporal Mean (median={np.nanmedian(rel_mean):.2f})"
     )
     std_diff_1 = max(np.abs(1 - np.nanmin(rel_std)), np.abs(1 - np.nanmax(rel_std)))
-    im1, bounds1, extend1 = plot_single_map(axes[0, 1], rel_std, std_diff_1, bounds_type="max")
+    im1, bounds1, extend1 = plot_single_map(
+        axes[0, 1], rel_std, std_diff_1, bounds_type="max"
+    )
     axes[0, 1].set_title(
         f"Relative temporal Standarddeviation (median={np.nanmedian(rel_std):.2f})"
     )
@@ -760,7 +766,9 @@ def compare_input_with_ref(
             f"Creating data from timeseries with shape {input_ts.shape} and {ref_ts.shape}"
         )
         try:
-            spearman, spearman_pval = spearman_spatial_joblib(input_ts, ref_ts, spearman_correlation, ncpus)
+            spearman, spearman_pval = spearman_spatial_joblib(
+                input_ts, ref_ts, spearman_correlation, ncpus
+            )
         except ValueError as ve:
             logger.error("Input and ref do not have the same temporal extend.")
             logger.info(input_ts.time)
@@ -768,7 +776,9 @@ def compare_input_with_ref(
             raise (ve)
     else:
         logger.info("Calculating spearman correlation from seasonalities.")
-        spearman, spearman_pval = spearman_spatial_joblib(input["clim"], ref["clim"], spearman_correlation, ncpus)
+        spearman, spearman_pval = spearman_spatial_joblib(
+            input["clim"], ref["clim"], spearman_correlation, ncpus
+        )
 
     rel_mean = xr.DataArray(
         rel_mean,

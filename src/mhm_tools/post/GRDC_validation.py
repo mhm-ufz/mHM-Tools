@@ -13,12 +13,16 @@ from joblib import Parallel, delayed
 
 from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_to_file
 from mhm_tools.common.logger import log_arguments, log_errors
-from mhm_tools.common.xarray_utils import get_coord_key, get_overlapping_time_slice, timedelta_to_alias
-from mhm_tools.post.hydrograph import gen_hydrograph_by_data_sets
+from mhm_tools.common.xarray_utils import (
+    get_coord_key,
+    get_overlapping_time_slice,
+    timedelta_to_alias,
+)
 from mhm_tools.post.gridded_data_validation import (
     get_clim_from_ds,
     spearman_correlation,
 )
+from mhm_tools.post.hydrograph import gen_hydrograph_by_data_sets
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +122,9 @@ def get_gauge_coords(
         )
         abs_diff = np.abs(ds_cut.L11_fAcc - facc)
         try:
-            min_index = np.unravel_index(np.argmin(abs_diff.values), ds_cut.L11_fAcc.shape)
+            min_index = np.unravel_index(
+                np.argmin(abs_diff.values), ds_cut.L11_fAcc.shape
+            )
         except ValueError as ve:
             logger.error(str(ve))
             logger.info(abs_diff)
@@ -185,7 +191,7 @@ def Q_data_to_xarray(
     n_jobs=1,
     date_slice=None,
     overwrite=False,
-    direct_comparison=False
+    direct_comparison=False,
 ):
     """
     Get observed and model Q data and save it as CSV files to be opened later.
@@ -278,8 +284,12 @@ def Q_data_to_xarray(
             else:
                 sim_data_cropped = sim_data_in.sel(time=date_slice)
             if direct_comparison:
-                overlapping_time_slice = get_overlapping_time_slice(sim_data_in, observed_data_in)
-                logger.info(f'Overlapping time is form {overlapping_time_slice.start} to {overlapping_time_slice.stop}')
+                overlapping_time_slice = get_overlapping_time_slice(
+                    sim_data_in, observed_data_in
+                )
+                logger.info(
+                    f"Overlapping time is form {overlapping_time_slice.start} to {overlapping_time_slice.stop}"
+                )
                 # also slice to overlapping time
                 obs_discharge_data = obs_discharge_data.sel(time=overlapping_time_slice)
                 sim_data_cropped = sim_data_cropped.sel(time=overlapping_time_slice)
@@ -292,9 +302,7 @@ def Q_data_to_xarray(
         facc_da = xr.DataArray(
             facc, name="facc", dims=["id"], coords={"id": gauge_ids.values}
         )
-        observed_data = xr.Dataset(
-            {"facc": facc_da, "discharge": obs_discharge_data}
-        )
+        observed_data = xr.Dataset({"facc": facc_da, "discharge": obs_discharge_data})
 
         logger.info(f"Saving obs data to {obs_output_file}...")
         write_xarray_to_file(observed_data, obs_output_file)
@@ -390,7 +398,7 @@ def boostap_statistics(
                 f"results for index {index} and gauge {id}: alpha={alpha:.3f}, beta={beta:.3f}, gamma={gamma:.3f}"
             )
             if np.isnan(alpha):
-                logger.debug('Alpha is none for:')
+                logger.debug("Alpha is none for:")
                 logger.debug(f"sim: {sim_id} and clim {clim_sim}")
                 logger.debug(f"obs: {obs_id} and clim {clim_obs}")
         except Exception as e:
@@ -447,7 +455,7 @@ def evaludate_grdc_data(  # noqa: PLR0913
         n_jobs=n_jobs,
         date_slice=slice(start_date, end_date),
         overwrite=overwrite,
-        direct_comparison=direct_comparison
+        direct_comparison=direct_comparison,
     )
     model_da = model_ds["discharge"]
     observed_da = observed_ds["discharge"]
@@ -495,7 +503,7 @@ def evaludate_grdc_data(  # noqa: PLR0913
             area=model_ds["facc"].sel(id=id).data,
             id=id,
             calc_stats=direct_comparison,
-            raise_exceptions=False
+            raise_exceptions=False,
         )
         for id in observed_ds.id.values
         if id in model_ds.id.values

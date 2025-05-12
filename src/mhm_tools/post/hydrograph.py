@@ -123,8 +123,8 @@ class Hydrograph:
         elif simulation is not None or observation is not None:
             msg = "Either one or none of the input must be via array."
             raise ValueError(msg)
-        logger.debug(f'Simulation input data: {simulation}')
-        logger.debug(f'Observation input data: {observation}')
+        logger.debug(f"Simulation input data: {simulation}")
+        logger.debug(f"Observation input data: {observation}")
         self.sim_discharge_data_nonan = self.sim_discharge_data.dropna(
             dim="time", how="all"
         )
@@ -983,7 +983,7 @@ def gen_hydrograph_by_data_sets(
     save=True,
     id=None,
     calc_stats=False,
-    raise_exceptions=True
+    raise_exceptions=True,
 ):
     """
     Use discharge and precipitation data provided as xarrays to produce a hydrograph with different analysises.

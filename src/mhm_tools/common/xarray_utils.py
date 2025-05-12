@@ -2,8 +2,8 @@
 
 import logging
 
-import xarray as xr
 import numpy as np
+import xarray as xr
 
 from mhm_tools.common.logger import ErrorLogger
 
@@ -122,8 +122,8 @@ def get_overlapping_time_slice(input_ds, ref_ds):
     if t1.any() and t2.any():
         start = str(max(t1[0], t2[0]))
         end = str(min(t1[-1], t2[-1]))
-        start = start.split('T')[0] if 'T' in start else start
-        end = end.split('T')[0] if 'T' in end else end
+        start = start.split("T")[0] if "T" in start else start
+        end = end.split("T")[0] if "T" in end else end
         if end <= start:
             logger.warning(
                 f"The two datasets are not overlapping. Sim data hass non nan data from {t1[0]} to {t1[-1]} and obs from {t2[0]} to {t2[-1]}."

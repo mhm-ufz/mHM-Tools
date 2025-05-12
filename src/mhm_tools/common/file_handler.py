@@ -327,7 +327,9 @@ def read_ascii_to_xarray(
 
     # Convert to Dataset
     if chunking and available_mem_gib is not None:
-        return chunk_dataset_space_and_time(xr.Dataset({name: data_array}), available_mem_gib)
+        return chunk_dataset_space_and_time(
+            xr.Dataset({name: data_array}), available_mem_gib
+        )
     return xr.Dataset({name: data_array})
 
 
