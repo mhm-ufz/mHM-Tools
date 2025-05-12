@@ -12,6 +12,7 @@ from . import (
     _create_mhm_restart_file,
     _create_subdomain_masks,
     _crop_mhm_setup,
+    _prepare_mhm_forcings,
     _grdc_validation,
     _gridded_data_validation,
     _hydrograph,
@@ -84,6 +85,7 @@ def _get_parser():
     add_command_from_module(subparsers, "latlon", _latlon)
     add_command_from_module(subparsers, "create_catchment", _create_catchment)
     add_command_from_module(subparsers, "crop_mhm_setup", _crop_mhm_setup)
+    add_command_from_module(subparsers, "prepare_mhm_forcings", _prepare_mhm_forcings)
     add_command_from_module(subparsers, "create_id_gauges", _create_idgauges)
     add_command_from_module(
         subparsers, "create_subdomain_masks", _create_subdomain_masks
