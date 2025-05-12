@@ -240,11 +240,11 @@ def get_file_stats(
     return output
 
 
-def get_files(path, n_bootstrap_years=None, available_years=None):
+def get_files(path, n_bootstrap_years=None, available_years=None, file_name='*.*'):
     """Recursevely find all netcdf files in directory."""
     nc_files = []
     # Search for .nc files at each depth level
-    all_years = get_years_from_path(path)
+    all_years = get_years_from_path(path, file_name=file_name)
     if available_years is not None:
         selectable_years = [y for y in all_years if y in available_years]
     else:
@@ -257,7 +257,7 @@ def get_files(path, n_bootstrap_years=None, available_years=None):
         selectable_years = random.choices(selectable_years, k=n_bootstrap_years)
     for year in selectable_years:
         folder_path = path / str(year)
-        nc_files.extend(folder_path.rglob("*.nc"))
+        nc_files.extend(folder_path.rglob(file_name))
     return nc_files
 
 
@@ -354,11 +354,12 @@ def get_stats_one_pass(
     bootstrap_index=None,
     output_path=None,
     available_years=None,
+    file_name='*,*'
 ):
     """Create dataset statistics by reading in one monthly or yearly file at a time and updating the statistics."""
     if path.is_dir():
         files = get_files(
-            path, n_bootstrap_years=n_bootstrap_years, available_years=available_years
+            path, n_bootstrap_years=n_bootstrap_years, available_years=available_years, file_name=file_name
         )
     logger.debug(f"List of files: {files}")
     file_subsets = split_file_list(files, ncpus) if ncpus > 1 else [files]
@@ -647,6 +648,7 @@ def get_stats(
     available_years=None,
     direct_comp=False,
     available_mem=None,
+    file_name='*.*'
 ):
     """Get statistics dataset from a path to a file or directory with files."""
     logger.info(f"Get stats for {path}")
@@ -661,9 +663,10 @@ def get_stats(
                 ncpus=ncpus,
                 output_path=output_file,
                 available_years=available_years,
+                file_name=file_name
             )
         elif path.is_dir() or path.is_file():
-            with get_dataset_from_path(path, available_mem=available_mem) as ds_in:
+            with get_dataset_from_path(path, available_mem=available_mem, file_name=file_name) as ds_in:
                 stats_ds = get_file_stats(
                     ds_in,
                     var,
@@ -715,6 +718,8 @@ def compare_input_with_ref(
     available_years=None,
     direct_comp=False,
     available_mem=None,
+    input_file_name='*.*',
+    ref_file_name='*.*',
 ):
     """Compare the two datasets."""
     if bootstrap_index is not None:
@@ -734,6 +739,7 @@ def compare_input_with_ref(
         available_years=available_years,
         direct_comp=direct_comp,
         available_mem=available_mem,
+        file_name=input_file_name
     )
     logger.debug(f"input ds: {input}")
 
@@ -749,6 +755,7 @@ def compare_input_with_ref(
         available_years=available_years,
         direct_comp=direct_comp,
         available_mem=available_mem,
+        file_name=ref_file_name
     )
     logger.debug(f"ref ds: {ref}")
 
@@ -936,7 +943,7 @@ def evaluate_boostraping_stat_files(stat_files, input_name, ref_name):
     }
 
 
-def get_dataset_from_path(path, available_years=None, available_mem=None):
+def get_dataset_from_path(path, available_years=None, available_mem=None, file_name='*.*'):
     """Get a dataset from a given path whether that is a file or a directory."""
     if path.is_file() and path.suffix == ".nc":
         chunking = available_mem is not None
@@ -947,7 +954,7 @@ def get_dataset_from_path(path, available_years=None, available_mem=None):
             chunk_type=ChunkType.SPACE,
         )
     if path.is_dir():
-        file_list = get_files(path, available_years=available_years)
+        file_list = get_files(path, available_years=available_years, file_name=file_name)
         logger.debug(file_list)
         logger.debug("combining files by coords ...")
         return xr.open_mfdataset(
@@ -1002,10 +1009,10 @@ def regridd_to_higher_spatial_resolution(ds1, ds2):
     return ds1, regridded_ds
 
 
-def get_years_from_path(path, raise_exception=True):
+def get_years_from_path(path, raise_exception=True, file_name='*.*'):
     """Get years for one dataset from the folder structure or the xarray dataset."""
     if path.is_dir():
-        return [int(p.name) for p in year_structure_paths(path)]
+        return [int(p.name) for p in year_structure_paths(path, file_name=file_name)]
     if path.is_file():
         with get_xarray_ds_from_file(path) as input_ds:
             return [int(y) for y in np.unique(input_ds.time.dt.year.data)]
@@ -1049,7 +1056,7 @@ def get_available_years(input_path, ref_path, year_slice=None, direct_comp=True)
     return years
 
 
-def year_structure_paths(path: Path) -> bool:
+def year_structure_paths(path: Path, file_name='*.*') -> bool:
     """
     Return any subdirectory of `path` with year structur.
 
@@ -1062,7 +1069,7 @@ def year_structure_paths(path: Path) -> bool:
     year_re = re.compile(r"^\d{4}$")
     for sub in path.iterdir():
         # check that sub is dir, has a year as name and contains one dir or file
-        if sub.is_dir() and year_re.fullmatch(sub.name) and any(sub.iterdir()):
+        if sub.is_dir() and year_re.fullmatch(sub.name) and any(list(sub.rglob(file_name))):
             year_paths.append(sub)
     return year_paths
 
@@ -1086,6 +1093,8 @@ def gridded_data_validation(
     direct_comp=True,
     year_slice=None,
     avaiable_mem=None,
+    input_file_name='*.*',
+    ref_file_name='*.*',
 ):
     """Validate a spatial variable from two datasets by comparing the climatology of that variable."""
     output_path = Path(output_path)
@@ -1141,6 +1150,7 @@ def gridded_data_validation(
                     bootstrap_index,
                     output_path / output_name,
                     available_years=available_years,
+                    input_file_name=input_file_name
                 )
                 for bootstrap_index in range(n_bootstrap_selections)
             )
@@ -1153,6 +1163,7 @@ def gridded_data_validation(
                 coordinate_slice,
                 output_path=output_path / output_name,
                 available_years=available_years,
+                file_name=input_file_name
             )
         else:
             with ErrorLogger(logger):
@@ -1187,6 +1198,8 @@ def gridded_data_validation(
                     n_bootstrap_years,
                     bootstrap_index,
                     available_years=available_years,
+                    input_file_name=input_file_name,
+                    ref_file_name=ref_file_name
                 )
                 for bootstrap_index in range(n_bootstrap_selections)
             )
@@ -1220,4 +1233,6 @@ def gridded_data_validation(
             available_years=available_years,
             direct_comp=direct_comp,
             available_mem=avaiable_mem,
+            input_file_name=input_file_name,
+            ref_file_name=ref_file_name
         )

@@ -122,7 +122,20 @@ def add_args(parser):
         default=None,
         help=("""Available memory per cpu in Gb or Mb (default Gb)"""),
     )
-
+    parser.add_argument(
+        "-f",
+        "--input_file_name",
+        required=False,
+        default="*.*",
+        help="Input file name. E.g. '*.nc' to copy only nc files or 'pre*' to copy only precipitation files. If the file has a header in it's folder the header is reproduced regardless of wether nor not it fits the filename.",
+    )
+    parser.add_argument(
+        "-f",
+        "--ref_file_name",
+        required=False,
+        default="*.*",
+        help="Ref file name. E.g. '*.nc' to copy only nc files or 'pre*' to copy only precipitation files. If the file has a header in it's folder the header is reproduced regardless of wether nor not it fits the filename.",
+    )
 
 def run(args):
     """Calculate the validation.
@@ -166,4 +179,6 @@ def run(args):
         args.direct_comparison,
         year_slice=year_slice,
         avaiable_mem=available_mem,
+        input_file_name=args.input_file_name,
+        ref_file_name=args.ref_file_name,
     )
