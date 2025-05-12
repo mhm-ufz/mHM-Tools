@@ -76,8 +76,8 @@ def get_sim_data_for_one_gauge(id, index, sim_data, yarr, xarr, resolution):
         return None
     # This will ensure that x & y values always match lat and lon in mRM dataset
     try:
-        x = np.round(xarr[index], 5)
-        y = np.round(yarr[index], 5)
+        x = np.round(xarr[index], 9)
+        y = np.round(yarr[index], 9)
     except KeyError:
         logger.error(f"index {index} not found")
         return None
@@ -350,8 +350,15 @@ def Q_data_to_xarray(
             data=np.array(facc_new), dims=["id"], coords={"id": gauge_ids_with_values}
         )
 
+        x_ids = xr.DataArray(
+            data=np.array(x_new), dims=["id"], coords={"id": gauge_ids_with_values}
+        )
+        y_ids = xr.DataArray(
+            data=np.array(y_new), dims=["id"], coords={"id": gauge_ids_with_values}
+        )
+
         # 4) Build a new Dataset from this 2D DataArray
-        sim_data = xr.Dataset({"discharge": simulation_discharge, "facc": facc_ids})
+        sim_data = xr.Dataset({"discharge": simulation_discharge, "facc": facc_ids, "x": x_ids, "y": y_ids})
         logger.info(f"Saving sim data to {sim_output_file}...")
         write_xarray_to_file(sim_data, sim_output_file)
     return observed_data, sim_data
@@ -504,6 +511,9 @@ def evaludate_grdc_data(  # noqa: PLR0913
             id=id,
             calc_stats=direct_comparison,
             raise_exceptions=False,
+            title=f'{id} at {model_ds["x"].sel(id=id).data} - {model_ds["y"].sel(id=id).data}',
+            x = model_ds["x"].sel(id=id).data,
+            y = model_ds["y"].sel(id=id).data
         )
         for id in observed_ds.id.values
         if id in model_ds.id.values
