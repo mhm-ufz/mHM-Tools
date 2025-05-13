@@ -311,9 +311,10 @@ def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None)
                 )[input_var]
             else:
                 da = ds[input_var]
-            for _time_value, data_slice in da.groupby("time"):
+            for _time_value, sub in da.groupby("time", squeeze=False):
+                data_slice = sub.isel(time=0)
                 try:
-                    data_values = data_slice.values[0] * factor
+                    data_values = data_slice.values * factor
                     # logger.debug(f"{count} - {np.shape(data_values)}")
                     count += 1
                     delta = data_values - mean
@@ -321,14 +322,15 @@ def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None)
                     delta2 = data_values - mean
                     sum_square_diff += delta * delta2
                     # climatology
-                    month = int(data_slice["time.month"].values[0] - 1)
+                    month = int(data_slice.time.dt.month.item()) - 1
                     monthly_sums[month] += (
-                        data_slice.fillna(0).squeeze(dim="time").values * factor
+                        data_slice.fillna(0).values * factor
                     )
                     monthly_counts[month] += ~np.isnan(
-                        data_slice.squeeze(dim="time").values
+                        data_slice.values
                     )
                 except Exception as e:
+                    logger.error(data_slice)
                     with ErrorLogger(logger):
                         raise e
     logger.debug(

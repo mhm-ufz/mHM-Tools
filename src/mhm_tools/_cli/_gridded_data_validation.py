@@ -134,6 +134,49 @@ def add_args(parser):
         default="*.*",
         help="Ref file name. E.g. '*.nc' to copy only nc files or 'pre*' to copy only precipitation files. If the file has a header in it's folder the header is reproduced regardless of wether nor not it fits the filename.",
     )
+    parser.add_argument(
+        "--lon_min",
+        required=False,
+        default=None,
+        type=float,
+        help=(
+            """minimum longitude of the target grid
+            required unless --mask_file is provided"""
+        ),
+    )
+
+    parser.add_argument(
+        "--lon_max",
+        required=False,
+        default=None,
+        type=float,
+        help=(
+            """maximum longitude of the target grid
+            required unless --mask_file is provided"""
+        ),
+    )
+
+    parser.add_argument(
+        "--lat_min",
+        required=False,
+        default=None,
+        type=float,
+        help=(
+            """minimum latitude of the target grid
+            required unless --mask_file is provided"""
+        ),
+    )
+
+    parser.add_argument(
+        "--lat_max",
+        required=False,
+        default=None,
+        type=float,
+        help=(
+            """maximum latitude of the target grid
+            required unless --mask_file is provided"""
+        ),
+    )
 
 def run(args):
     """Calculate the validation.
@@ -143,8 +186,20 @@ def run(args):
     args : argparse.Namespace
         parsed command line arguments
     """
-    lon_min, lon_max, lat_min, lat_max, mask = get_coords(
-        args.lonlatbox, args.mask_file, raise_exception=False
+    (
+        lon_min,
+        lon_max,
+        lat_min,
+        lat_max,
+        mask_da,
+    ) = get_coords(
+        args.lonlatbox,
+        args.mask_file,
+        args.lon_min,
+        args.lon_max,
+        args.lat_min,
+        args.lat_max,
+        raise_exception=False,
     )
     coordinate_slice = None
     if (
