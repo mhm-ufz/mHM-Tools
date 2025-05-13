@@ -123,14 +123,12 @@ def add_args(parser):
         help=("""Available memory per cpu in Gb or Mb (default Gb)"""),
     )
     parser.add_argument(
-        "-f",
         "--input_file_name",
         required=False,
         default="*.*",
         help="Input file name. E.g. '*.nc' to copy only nc files or 'pre*' to copy only precipitation files. If the file has a header in it's folder the header is reproduced regardless of wether nor not it fits the filename.",
     )
     parser.add_argument(
-        "-f",
         "--ref_file_name",
         required=False,
         default="*.*",
