@@ -103,17 +103,17 @@ def add_args(parser):
         help=("Use no statistics but compare timeseries directly. Needs ref_path."),
     )
     parser.add_argument(
-        "--start_date",
+        "--start_year",
         required=False,
         default=None,
-        type=str,
+        type=int,
         help=("""First year allowed in the analysis."""),
     )
     parser.add_argument(
-        "--end_date",
+        "--end_year",
         required=False,
         default=None,
-        type=str,
+        type=int,
         help=("Lates year that is allowed in the analysis."),
     )
     parser.add_argument(
@@ -157,7 +157,7 @@ def run(args):
             "lat": slice(lat_max, lat_min),
             "lon": slice(lon_min, lon_max),
         }
-    year_slice = slice(args.start_date, args.end_date)
+    year_slice = slice(args.start_year, args.end_year)
     available_mem = get_available_mem_in_unit(args.available_mem)
     gridded_data_validation(
         args.input_path,
