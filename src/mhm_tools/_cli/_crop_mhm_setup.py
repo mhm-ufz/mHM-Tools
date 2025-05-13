@@ -17,7 +17,7 @@ def add_args(parser):
     required_args.add_argument(
         "-m",
         "--mask_file",
-        required=True,
+        required=False,
         help="The path the the mask file. Mask files can be created using the catchment command with the --mask flag.",
     )
     required_args.add_argument(
