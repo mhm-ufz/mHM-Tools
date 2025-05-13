@@ -21,28 +21,55 @@ def add_args(parser):
         "  mhm-tools prepare_mhm_forcings -i in/data -f input_*.nc -o out/data -u processed.nc -v 2t --crop "
         "--lon-min 0 --lon-max 10 --lat-min -5 --lat-max 5"
     )
-    # Positional and optional arguments
-    parser.add_argument('-i', '--in-dir', required=True,
-                        help='Input directory containing forcing NetCDF files')
-    parser.add_argument('-f', '--in-file', required=True,
-                        help='Input filename or glob pattern (e.g. "data_*.nc")')
-    parser.add_argument('-o', '--out-dir', required=True,
-                        help='Output directory for processed files')
-    parser.add_argument('-u', '--out-file', default='*',
-                        help=('Output filename or pattern. Use "*" to retain ' \
-                              'input basename; otherwise literal name for single file.'))
-    parser.add_argument('-v', '--var', required=True,
-                        help='Variable name to convert (e.g. 2t, tp, tprate)')
-    parser.add_argument('--crop', action='store_true',
-                        help='Enable spatial cropping of the dataset')
-    parser.add_argument('--lon-min', type=float,
-                        help='Minimum longitude for cropping')
-    parser.add_argument('--lon-max', type=float,
-                        help='Maximum longitude for cropping')
-    parser.add_argument('--lat-min', type=float,
-                        help='Minimum latitude for cropping')
-    parser.add_argument('--lat-max', type=float,
-                        help='Maximum latitude for cropping')
+    
+    #Required arguments group
+    required = parser.add_argument_group("required arguments")
+    required.add_argument(
+        '-i', '--in-dir', required=True,
+        help='Input directory containing forcing NetCDF files'
+    )
+    required.add_argument(
+        '-f', '--in-file', required=True,
+        help='Input filename or glob pattern (e.g. "data_*.nc")'
+    )
+    required.add_argument(
+        '-o', '--out-dir', required=True,
+        help='Output directory for processed files'
+    )
+    required.add_argument(
+        '-v', '--var', required=True,
+        help='Variable name to convert (e.g. 2t, tp, tprate)'
+    )
+
+    # Optional arguments
+    parser.add_argument(
+        '-u', '--out-file', default='*',
+        help=(
+            "Output filename or pattern. Use '*' to retain input basename; "
+            "otherwise literal name for single file."
+        )
+    )
+    parser.add_argument(
+        '--crop', action='store_true',
+        help='Enable spatial cropping of the dataset'
+    )
+    parser.add_argument(
+        '--lon-min', type=float,
+        help='Minimum longitude for cropping'
+    )
+    parser.add_argument(
+        '--lon-max', type=float,
+        help='Maximum longitude for cropping'
+    )
+    parser.add_argument(
+        '--lat-min', type=float,
+        help='Minimum latitude for cropping'
+    )
+    parser.add_argument(
+        '--lat-max', type=float,
+        help='Maximum latitude for cropping'
+    )
+
 
 
 def run(args):

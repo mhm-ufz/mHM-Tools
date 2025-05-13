@@ -17,6 +17,7 @@ from . import (
     _gridded_data_validation,
     _hydrograph,
     _latlon,
+    _long_term_mean_validation,
 )
 
 
@@ -93,6 +94,7 @@ def _get_parser():
     add_command_from_module(
         subparsers, "create_mhm_restart_file", _create_mhm_restart_file
     )
+    add_command_from_module(subparsers, "long_term_mean_validation", _long_term_mean_validation)
 
     # add logging
     # option 1 explicit log levels by name
