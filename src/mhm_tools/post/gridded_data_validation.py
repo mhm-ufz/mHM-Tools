@@ -571,7 +571,7 @@ def plot_map(
             labels.append(label)
 
     axes[1, 1].legend(handles, labels, loc="upper right")
-    axes[1, 1].set_title("Seasonality of evapotranspiration")
+    axes[1, 1].set_title("Seasonality")
     axes[1, 1].set_ylabel("ET [mm/day]")
     axes[1, 1].tick_params(axis="y", labelcolor="black")
     axes[1, 1].set_xlim(1 - (1.1 * bar_width), 12 + (1.1 * bar_width))
