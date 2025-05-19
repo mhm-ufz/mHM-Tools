@@ -2,6 +2,7 @@
 
 import os
 from typing import Optional
+from pathlib import Path
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -83,23 +84,23 @@ def long_term_mean_diff(
 ) -> None:
 
     # read the two DataArrays
+    ref_pattern = str(Path(ref_input_dir) / reference_pattern)
     ds_ref = read_dataset(
-        input_dir=ref_input_dir,
-        file_name=reference_pattern,
-        var=ref_var
+        file_path=ref_pattern,
     )
+    mod_pattern = str(Path(mod_input_dir) / model_pattern)
     ds_mod = read_dataset(
-        input_dir=mod_input_dir,
-        file_name=model_pattern,
-        var=mod_var
+        file_path=mod_pattern,
     )
+    da_ref = da_ref[ref_var]
+    da_mod = ds_mod[mod_var]
 
     # drop singleton time dim so we have 2D arrays
-    arr_ref = np.squeeze(ds_ref.values)
-    arr_mod = np.squeeze(ds_mod.values)
+    arr_ref = np.squeeze(da_ref.values)
+    arr_mod = np.squeeze(da_mod.values)
 
-    lon = ds_mod['lon'].values
-    lat = ds_mod['lat'].values
+    lon = da_mod['lon'].values
+    lat = da_mod['lat'].values
 
     diff = compute_difference(arr_mod, arr_ref)
 

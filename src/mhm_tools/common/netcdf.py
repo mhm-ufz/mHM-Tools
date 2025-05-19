@@ -35,92 +35,117 @@ def _fallback_open(open_func: Any, *args: Any, **kwargs: Any) -> xr.Dataset:
         logger.error("Error opening dataset: %s", exc)
         raise
 
-def _normalize_lat_lon(ds: xr.Dataset) -> xr.Dataset:
-    """
-    Ensure Latitude and Longitude coordinates exist and normalize names for latitude/longitude.
-    """
-    coords = ds.variables
-    if "latitude" in coords:
-        ds = ds.rename_vars({"latitude": "lat"})
-    elif "lat" not in coords:
-        msg = "Dataset must contain 'lat' or 'latitude' variable"
-        logger.error(msg)
-        raise ValueError(msg)
-    if "longitude" in coords:
-        ds = ds.rename_vars({"longitude": "lon"})
-    elif "lon" not in coords:
-        msg = "Dataset must contain 'lon' or 'longitude' variable"
-        logger.error(msg)
-        raise ValueError(msg)
-    return ds
-
-def _assert_var(ds: xr.Dataset, var: str) -> None:
-    """
-    Verify that the specified variable exists in the dataset.
-    """
-    if var not in ds.variables:
-        msg = f"Variable '{var}' not found in dataset"
-        logger.error(msg)
-        raise ValueError(msg)
 
 def read_dataset(
-    input_dir: Union[str, Path],
-    file_name: str,
-    var: str,
+    file_path: Union[str, Path, List[Union[str, Path]]],
     use_mfdataset: bool = False,
     engine: str = "h5netcdf",
-) -> xr.DataArray:
+) -> xr.Dataset:
     """
-    Read specified variable from one or more NetCDF files within the given directory,
-    using file_name pattern (including wildcards) and engine fallback.
-    Searches both the top-level input_dir and any subdirectories for matching files.
-    """
-    dir_path = Path(input_dir)
-    pattern_path = dir_path / file_name
-    path_str = str(pattern_path)
+    Load one or more NetCDF files into a single xarray.Dataset.
 
-    if _has_wildcards(path_str):
-        logger.debug(f"Reading NetCDF file(s) with pattern: {pattern_path}")
-        # Find matches in top-level and subdirectories
-        top_paths = sorted(dir_path.glob(file_name))
-        sub_paths = sorted(p for p in dir_path.rglob(file_name) if p.parent != dir_path)
-        combined = top_paths + sub_paths
-        paths = [str(p) for p in sorted(combined, key=lambda x: str(x))]
-        if not paths:
-            msg = f"No files match pattern: {pattern_path}"
-            logger.error(msg)
-            raise FileNotFoundError(msg)
-        if sub_paths:
-            logger.debug(f"Found {len(sub_paths)} files in subdirectories of {dir_path}")
+    This function accepts either a single path (possibly containing 
+    shell-style wildcards), or a list of paths, and handles both:
+    
+      - Single-file case: opens it directly.
+      - Multi-file case:
+        * If `use_mfdataset=True`, uses xarray.open_mfdataset for 
+          contiguous datasets.
+        * Otherwise, opens each file individually and then combines 
+          them via coords (attributes overridden).
+
+    Parameters
+    ----------
+    file_path : str or Path or list thereof
+        A file path (can include wildcards), or a list of explicit 
+        file paths.
+    use_mfdataset : bool, default False
+        If True and multiple files are found, open them with 
+        `xr.open_mfdataset`. Otherwise, open each with 
+        `xr.open_dataset` and combine.
+    engine : str, default "h5netcdf"
+        The backend engine to use for opening NetCDF files.
+
+    Returns
+    -------
+    xr.Dataset
+        An xarray Dataset containing the data from the specified file(s).
+
+    Raises
+    ------
+    FileNotFoundError
+        If a wildcard pattern is provided but no files match.
+    Exception
+        Any exception raised by xarray when opening files is propagated 
+        after being logged.
+
+    Examples
+    --------
+    Read a single file:
+    
+    >>> ds = read_dataset("data/single_file.nc")
+
+    Read all files in a directory (recursively):
+
+    >>> ds = read_dataset("data/**/*.nc", use_mfdataset=True)
+
+    Read a fixed list of files:
+
+    >>> paths = ["data/part1.nc", "data/part2.nc"]
+    >>> ds = read_dataset(paths)
+    """
+    # Normalize to list of string paths
+    if isinstance(file_path, (list, tuple)):
+        paths = [str(p) for p in file_path]
+        logger.debug(f"Received explicit list of {len(paths)} paths")
+    else:
+        pattern = str(file_path)
+        if _has_wildcards(pattern):
+            logger.debug(f"Globbing for pattern: {pattern} (recursive=True)")
+            # recursive=True will match any number of subdir levels
+            matches = glob.glob(pattern, recursive=True)
+            paths = sorted(matches)
+            if not paths:
+                msg = f"No files match pattern: {pattern}"
+                logger.error(msg)
+                raise FileNotFoundError(msg)
+            logger.debug(f"Found {len(paths)} files via glob")
+        else:
+            paths = [pattern]
+            logger.debug(f"No wildcards: using single file path {pattern}")
+
+    # Multi-file
+    if len(paths) > 1:
+        logger.debug(f"{len(paths)} files to open; use_mfdataset={use_mfdataset}")
         if use_mfdataset:
-            logger.debug("Using xr.open_mfdataset for multiple files")
-            ds = _fallback_open(xr.open_mfdataset, paths=paths, engine=engine)
-            ds = _normalize_lat_lon(ds)
-            _assert_var(ds, var)
-            return ds[var]
-        arrays: List[xr.DataArray] = []
-        logger.debug("Opening files individually with xr.open_dataset")
-        for p in paths:
             try:
-                ds_tmp = _fallback_open(xr.open_dataset, filename_or_obj=p, engine=engine)
+                ds = _fallback_open(xr.open_mfdataset, paths=paths, engine=engine)
             except Exception as exc:
-                logger.error("Failed opening %s: %s", p, exc)
+                logger.error(f"open_mfdataset failed on {paths!r}: {exc}")
                 raise
-            ds_tmp = _normalize_lat_lon(ds_tmp)
-            _assert_var(ds_tmp, var)
-            arrays.append(ds_tmp[var])
-        return xr.combine_by_coords(arrays, combine_attrs="override")
+            return ds
+        else:
+            arrays = []
+            for p in paths:
+                logger.debug(f"Opening (single) {p}")
+                try:
+                    ds_tmp = _fallback_open(xr.open_dataset, filename_or_obj=p, engine=engine)
+                except Exception as exc:
+                    logger.error(f"Failed opening {p}: {exc}")
+                    raise
+                arrays.append(ds_tmp)
+            return xr.combine_by_coords(arrays, combine_attrs="override")
 
-    # Single file case
-    logger.debug(f"Reading single NetCDF file: {pattern_path}")
+    # Single-file case
+    single = paths[0]
+    logger.debug(f"Reading single NetCDF file: {single}")
     try:
-        ds = _fallback_open(xr.open_dataset, filename_or_obj=path_str, engine=engine)
+        ds = _fallback_open(xr.open_dataset, filename_or_obj=single, engine=engine)
     except Exception as exc:
-        logger.error(f"Failed opening {path_str}: {exc}")
+        logger.error(f"Failed opening {single}: {exc}")
         raise
-    ds = _normalize_lat_lon(ds)
-    _assert_var(ds, var)
-    return ds[var]
+    return ds
+
 
 def set_netcdf_encoding(
     ds: xr.Dataset,

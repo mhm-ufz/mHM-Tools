@@ -1,28 +1,29 @@
 """mHM processing netCDF precipitation and temperature forcings"""
 
-from ..pre.prepare_mhm_forcings import prepare_forcings
+from mhm_tools.pre.prepare_mhm_forcings import prepare_forcings
 
 def add_args(parser):
-    """Add cli arguments for prepare_mhm_forcings subcommand.
+    """Add CLI arguments for prepare_mhm_forcings subcommand.
 
-    Parameters
-    ----------
-    parser : argparse.ArgumentParser
-        the main argument parser
+    Utility functions for mHM processing of netCDF precipitation and temperature forcings,
+    including unit conversion, coordinate ordering, cropping, and setting correct metadata.
+
+    Example:
+      mhm-tools prepare_mhm_forcings \
+        -i in/data -f input_*.nc -o out/data -v 2t --out-file processed.nc \
+        --crop --lon-min 0 --lon-max 10 --lat-min -5 --lat-max 5
     """
-    # Description and help for the subcommand
+    # Description and epilog
     parser.description = (
         "Utility functions for mHM processing netCDF precipitation and temperature forcings, "
-        "including unit conversion, coordinate ordering, setting correct variable name and " 
-        "units as well as missing and fill vaules, and it also includes spatial cropping."
+        "including unit conversion, coordinate ordering, setting correct variable name and "
+        "units as well as missing and fill values, and spatial cropping."
     )
     parser.epilog = (
-        "Example:"
-        "  mhm-tools prepare_mhm_forcings -i in/data -f input_*.nc -o out/data -u processed.nc -v 2t --crop "
-        "--lon-min 0 --lon-max 10 --lat-min -5 --lat-max 5"
+        "See mhm-tools documentation for detailed examples and usage."
     )
-    
-    #Required arguments group
+
+    # Required arguments
     required = parser.add_argument_group("required arguments")
     required.add_argument(
         '-i', '--in-dir', required=True,
@@ -38,7 +39,7 @@ def add_args(parser):
     )
     required.add_argument(
         '-v', '--var', required=True,
-        help='Variable name to convert (e.g. 2t, tp, tprate)'
+        help='Variable name to convert: 2t (temperature), tp (total precipitation), tprate (precipitation rate)'
     )
 
     # Optional arguments
@@ -46,30 +47,21 @@ def add_args(parser):
         '-u', '--out-file', default='*',
         help=(
             "Output filename or pattern. Use '*' to retain input basename; "
-            "otherwise literal name for single file."
+            "otherwise literal name for each output file."
         )
     )
     parser.add_argument(
         '--crop', action='store_true',
         help='Enable spatial cropping of the dataset'
     )
+    parser.add_argument('--lon-min', type=float, help='Minimum longitude for cropping')
+    parser.add_argument('--lon-max', type=float, help='Maximum longitude for cropping')
+    parser.add_argument('--lat-min', type=float, help='Minimum latitude for cropping')
+    parser.add_argument('--lat-max', type=float, help='Maximum latitude for cropping')
     parser.add_argument(
-        '--lon-min', type=float,
-        help='Minimum longitude for cropping'
+        '--use-mfdataset',  type=bool, default=False,
+        help='Use xarray.open_mfdataset for multi-file datasets'
     )
-    parser.add_argument(
-        '--lon-max', type=float,
-        help='Maximum longitude for cropping'
-    )
-    parser.add_argument(
-        '--lat-min', type=float,
-        help='Minimum latitude for cropping'
-    )
-    parser.add_argument(
-        '--lat-max', type=float,
-        help='Maximum latitude for cropping'
-    )
-
 
 
 def run(args):
@@ -92,5 +84,6 @@ def run(args):
         lon_min=args.lon_min,
         lon_max=args.lon_max,
         lat_min=args.lat_min,
-        lat_max=args.lat_max
+        lat_max=args.lat_max,
+        use_mfdataset=args.use_mfdataset,
     )

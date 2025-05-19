@@ -356,7 +356,7 @@ def get_stats_one_pass(
     bootstrap_index=None,
     output_path=None,
     available_years=None,
-    file_name='*,*'
+    file_name='*.*'
 ):
     """Create dataset statistics by reading in one monthly or yearly file at a time and updating the statistics."""
     if path.is_dir():
@@ -761,8 +761,8 @@ def compare_input_with_ref(
     )
     logger.debug(f"ref ds: {ref}")
 
-    # regridd to same spatial resolution
     input, ref = regridd_to_higher_spatial_resolution(input, ref)
+    # regridd to same spatial resolution
 
     # compare and save statistics
     rel_mean = input["mean"].values / ref["mean"].values

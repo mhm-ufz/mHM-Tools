@@ -15,12 +15,6 @@ def add_args(parser):
     """
     required_args = parser.add_argument_group("required arguments")
     required_args.add_argument(
-        "-m",
-        "--mask_file",
-        required=False,
-        help="The path the the mask file. Mask files can be created using the catchment command with the --mask flag.",
-    )
-    required_args.add_argument(
         "-i",
         "--input_path",
         required=True,
@@ -33,12 +27,18 @@ def add_args(parser):
         required=True,
         help="Path of the directory where the new domain setup should be saved.",
     )
-    required_args.add_argument(
+    parser.add_argument(
         "-f",
         "--file_name",
         required=False,
         default="*.*",
         help="Input file name. E.g. '*.nc' to copy only nc files or 'pre*' to copy only precipitation files. If the file has a header in it's folder the header is reproduced regardless of wether nor not it fits the filename.",
+    )
+    parser.add_argument(
+        "-m",
+        "--mask_file",
+        required=False,
+        help="The path the the mask file. Mask files can be created using the catchment command with the --mask flag.",
     )
     parser.add_argument(
         "--l1_resolution",
