@@ -153,8 +153,9 @@ def run(args):
     # l0_resolution = float(args.lonlatbox.split(",")[4])
     available_mem = get_available_mem_in_unit(args.available_mem)
     crop_mhm_setup(
-        args.output_path,
-        args.input_path,
+        input_path=args.input_path,
+        output_path=args.output_path,
+        mask_da=mask_da,
         l1_resolution=args.l1_resolution,
         l11_resolution=args.l11_resolution,
         lonslice=lonslice,
