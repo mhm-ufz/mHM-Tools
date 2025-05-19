@@ -2,12 +2,14 @@
 """
 Common NetCDF/xarray routines and utilities for reading, encoding, and bounds generation.
 """
+
+import glob
 import logging
 from pathlib import Path
-import glob
 from typing import Any, List, Optional, Union
 
 import xarray as xr
+
 from .constants import NC_ENCODE_DEFAULTS, WILDCARDS
 
 logger = logging.getLogger(__name__)
@@ -15,11 +17,13 @@ logger = logging.getLogger(__name__)
 # Preserve original dataset attributes throughout processing
 xr.set_options(keep_attrs=True)
 
+
 def _has_wildcards(path: Union[str, Path]) -> bool:
     """
     Determine if the given path string contains any wildcard characters.
     """
     return any(w in str(path) for w in WILDCARDS)
+
 
 def _fallback_open(open_func: Any, *args: Any, **kwargs: Any) -> xr.Dataset:
     """
@@ -44,24 +48,24 @@ def read_dataset(
     """
     Load one or more NetCDF files into a single xarray.Dataset.
 
-    This function accepts either a single path (possibly containing 
+    This function accepts either a single path (possibly containing
     shell-style wildcards), or a list of paths, and handles both:
-    
+
       - Single-file case: opens it directly.
       - Multi-file case:
-        * If `use_mfdataset=True`, uses xarray.open_mfdataset for 
+        * If `use_mfdataset=True`, uses xarray.open_mfdataset for
           contiguous datasets.
-        * Otherwise, opens each file individually and then combines 
+        * Otherwise, opens each file individually and then combines
           them via coords (attributes overridden).
 
     Parameters
     ----------
     file_path : str or Path or list thereof
-        A file path (can include wildcards), or a list of explicit 
+        A file path (can include wildcards), or a list of explicit
         file paths.
     use_mfdataset : bool, default False
-        If True and multiple files are found, open them with 
-        `xr.open_mfdataset`. Otherwise, open each with 
+        If True and multiple files are found, open them with
+        `xr.open_mfdataset`. Otherwise, open each with
         `xr.open_dataset` and combine.
     engine : str, default "h5netcdf"
         The backend engine to use for opening NetCDF files.
@@ -76,13 +80,13 @@ def read_dataset(
     FileNotFoundError
         If a wildcard pattern is provided but no files match.
     Exception
-        Any exception raised by xarray when opening files is propagated 
+        Any exception raised by xarray when opening files is propagated
         after being logged.
 
     Examples
     --------
     Read a single file:
-    
+
     >>> ds = read_dataset("data/single_file.nc")
 
     Read all files in a directory (recursively):
@@ -129,7 +133,9 @@ def read_dataset(
             for p in paths:
                 logger.debug(f"Opening (single) {p}")
                 try:
-                    ds_tmp = _fallback_open(xr.open_dataset, filename_or_obj=p, engine=engine)
+                    ds_tmp = _fallback_open(
+                        xr.open_dataset, filename_or_obj=p, engine=engine
+                    )
                 except Exception as exc:
                     logger.error(f"Failed opening {p}: {exc}")
                     raise
@@ -159,16 +165,13 @@ def set_netcdf_encoding(
     coords = set(ds.coords)
     dim_coords = coords & dims
     aux_coords = coords - dims
-    bnds = {
-        ds[c].attrs.get("bounds")
-        for c in coords
-        if "bounds" in ds[c].attrs
-    }
+    bnds = {ds[c].attrs.get("bounds") for c in coords if "bounds" in ds[c].attrs}
     data_vars = set(ds.data_vars) - bnds
     for name in aux_coords | data_vars:
         ds[name].encoding = encoding
     for name in dim_coords | bnds:
         ds[name].encoding = {"_FillValue": None}
+
 
 def generate_bounds(
     da: xr.DataArray,

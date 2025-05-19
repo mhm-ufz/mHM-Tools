@@ -9,6 +9,7 @@ from mhm_tools.common.logger import ErrorLogger
 
 logger = logging.getLogger(__name__)
 
+
 def normalize_lat_lon(ds: xr.Dataset, lat: str, lon: float) -> xr.Dataset:
     """
     Normalize names for latitude/longitude.
@@ -144,25 +145,22 @@ def get_overlapping_time_slice(input_ds, ref_ds):
             raise ValueError(only_nan_msg)
     return slice(start, end)
 
+
 def crop_ds(
-    ds: xr.Dataset,
-    lon_min: float,
-    lon_max: float,
-    lat_min: float,
-    lat_max: float
+    ds: xr.Dataset, lon_min: float, lon_max: float, lat_min: float, lat_max: float
 ) -> xr.Dataset:
     """
     Crop an xarray.Dataset to the given lon/lat bounds, handling coordinate order.
     """
     # longitude
-    lon_vals = ds['lon'].values
+    lon_vals = ds["lon"].values
     if lon_vals[0] <= lon_vals[-1]:
         lon_slice = slice(lon_min, lon_max)
     else:
         lon_slice = slice(lon_max, lon_min)
 
     # latitude
-    lat_vals = ds['lat'].values
+    lat_vals = ds["lat"].values
     if lat_vals[0] <= lat_vals[-1]:
         lat_slice = slice(lat_min, lat_max)
     else:

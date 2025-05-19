@@ -178,6 +178,7 @@ def add_args(parser):
         ),
     )
 
+
 def run(args):
     """Calculate the validation.
 

@@ -1,7 +1,6 @@
 """Cut domains out of an existing mHM setup."""
 
 from mhm_tools.common.cli_utils import get_available_mem_in_unit, get_coords
-from mhm_tools.common.xarray_utils import get_coord_key
 from mhm_tools.pre.crop_mhm_setup import crop_mhm_setup
 
 
@@ -125,7 +124,6 @@ def add_args(parser):
             required unless --mask_file is provided"""
         ),
     )
-
 
 
 def run(args):

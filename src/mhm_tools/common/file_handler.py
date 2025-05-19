@@ -9,8 +9,12 @@ import numpy as np
 import xarray as xr
 
 from mhm_tools.common.logger import ErrorLogger
-from mhm_tools.common.xarray_utils import get_coord_key, get_single_data_var, normalize_lat_lon
 from mhm_tools.common.netcdf import read_dataset
+from mhm_tools.common.xarray_utils import (
+    get_coord_key,
+    get_single_data_var,
+    normalize_lat_lon,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -185,9 +189,9 @@ def get_xarray_ds_from_file(
     chunking=False,
     available_mem_gib=None,
     chunk_type=ChunkType.SPACE,
-    use_mfdataset = False,
-    engine = "h5netcdf",
-    normalize_latlon_coords = False,
+    use_mfdataset=False,
+    engine="h5netcdf",
+    normalize_latlon_coords=False,
 ):
     """Read file and return xarray dataset."""
     file_path = Path(file_path)
@@ -206,9 +210,9 @@ def get_xarray_ds_from_file(
         )
     if file_path.suffix == ".nc":
         ds_out = read_dataset(
-            file_path = file_path,
-            use_mfdataset = use_mfdataset,
-            engine = engine,
+            file_path=file_path,
+            use_mfdataset=use_mfdataset,
+            engine=engine,
         )
 
         # re-name input coords to lat and lon

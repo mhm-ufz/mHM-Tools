@@ -1,17 +1,29 @@
-from pathlib import Path
-from typing import Optional, Tuple
 import glob
+from pathlib import Path
+from typing import Optional
 
 import pandas as pd
 import xarray as xr
 
-from mhm_tools.common.file_handler import get_xarray_ds_from_file, ChunkType
+from mhm_tools.common.file_handler import get_xarray_ds_from_file
 from mhm_tools.common.xarray_utils import crop_ds
 
 logger = logging.getLogger(__name__)
 
 # Define acceptable input unit lists for detection
-TEMPERATURE_UNITS = ["K", "Kelvin", "kelvin", "C", "°C", "degC", "celsius", "F", "°F", "degF", "fahrenheit"]
+TEMPERATURE_UNITS = [
+    "K",
+    "Kelvin",
+    "kelvin",
+    "C",
+    "°C",
+    "degC",
+    "celsius",
+    "F",
+    "°F",
+    "degF",
+    "fahrenheit",
+]
 PRECIPITATION_UNITS = ["m", "kg m-2", "mm"]
 PRECIPITATION_RATE_UNITS = ["kg m-2 s-1"]
 
@@ -23,35 +35,35 @@ def convert_units(ds: xr.Dataset, var: str) -> xr.Dataset:
 
     # Temperature
     if units in TEMPERATURE_UNITS:
-        new_var = 'tavg'
+        new_var = "tavg"
         ds = ds.rename({var: new_var})
         if units in ["K", "Kelvin", "kelvin"]:
             ds[new_var] = ds[new_var] - 273.15
         elif units in ["F", "°F", "degF", "fahrenheit"]:
-            ds[new_var] = (ds[new_var] - 32) * (5/9)
-        ds[new_var].attrs['units'] = 'degC'
+            ds[new_var] = (ds[new_var] - 32) * (5 / 9)
+        ds[new_var].attrs["units"] = "degC"
 
     # Total precipitation
     elif units in PRECIPITATION_UNITS:
-        new_var = 'pre'
+        new_var = "pre"
         ds = ds.rename({var: new_var})
         if units in ["m", "kg m-2"]:
             ds[new_var] = ds[new_var] * 1000
-        ds[new_var].attrs['units'] = 'mm'
+        ds[new_var].attrs["units"] = "mm"
 
     # Precipitation rate
     elif units in PRECIPITATION_RATE_UNITS:
-        new_var = 'pre'
+        new_var = "pre"
         ds = ds.rename({var: new_var})
-        freq = pd.infer_freq(ds.indexes['time'])
-        if freq and freq.startswith('D'):
+        freq = pd.infer_freq(ds.indexes["time"])
+        if freq and freq.startswith("D"):
             factor = 86400
-        elif freq and freq.startswith('H'):
+        elif freq and freq.startswith("H"):
             factor = 3600
         else:
             factor = 1
         ds[new_var] = ds[new_var] * factor
-        ds[new_var].attrs['units'] = 'mm'
+        ds[new_var].attrs["units"] = "mm"
     else:
         raise ValueError(f"Unexpected units '{units}' for variable '{var}'.")
 
@@ -100,7 +112,7 @@ def prepare_forcings(
             use_mfdataset=use_mfdataset,
             normalize_latlon_coords=True,
         )
-        
+
         # Sort lat/lon if needed
         ds = ensure_lat_lon_order(ds)
         # Convert units and return da
@@ -113,6 +125,6 @@ def prepare_forcings(
                     raise ValueError(msg)
             da = crop_ds(da, lon_min, lon_max, lat_min, lat_max)
         # Determine output name
-        name = Path(path).name if out_file == '*' else out_file
+        name = Path(path).name if out_file == "*" else out_file
         # Write output
         da.to_netcdf(Path(out_dir) / name)

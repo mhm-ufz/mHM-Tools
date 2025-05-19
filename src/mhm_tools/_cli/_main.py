@@ -12,12 +12,12 @@ from . import (
     _create_mhm_restart_file,
     _create_subdomain_masks,
     _crop_mhm_setup,
-    _prepare_mhm_forcings,
     _grdc_validation,
     _gridded_data_validation,
     _hydrograph,
     _latlon,
     _long_term_mean_validation,
+    _prepare_mhm_forcings,
 )
 
 
@@ -94,7 +94,9 @@ def _get_parser():
     add_command_from_module(
         subparsers, "create_mhm_restart_file", _create_mhm_restart_file
     )
-    add_command_from_module(subparsers, "long_term_mean_validation", _long_term_mean_validation)
+    add_command_from_module(
+        subparsers, "long_term_mean_validation", _long_term_mean_validation
+    )
 
     # add logging
     # option 1 explicit log levels by name

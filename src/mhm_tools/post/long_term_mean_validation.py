@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 
 import os
-from typing import Optional
 from pathlib import Path
+from typing import Optional
 
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
+
 from mhm_tools.common.netcdf import read_dataset
 
 
@@ -20,25 +21,25 @@ def plot_diff(
     cb_label: str,
     title: str,
     out_path: str,
-    cmap: str = 'coolwarm',
+    cmap: str = "coolwarm",
     x_min: Optional[float] = None,
     x_max: Optional[float] = None,
     y_min: Optional[float] = None,
     y_max: Optional[float] = None,
     vmin: Optional[float] = None,
-    vmax: Optional[float] = None
+    vmax: Optional[float] = None,
 ) -> None:
     plt.figure(figsize=(12, 6))
 
     # create the image with optional fixed vmin/vmax
     img = plt.imshow(
         diff,
-        origin='upper',
+        origin="upper",
         extent=[lon.min(), lon.max(), lat.min(), lat.max()],
-        aspect='auto',
+        aspect="auto",
         cmap=cmap,
         vmin=vmin,
-        vmax=vmax
+        vmax=vmax,
     )
 
     # apply axis limits if provided
@@ -55,8 +56,8 @@ def plot_diff(
         cb.set_label(cb_label)
 
     plt.title(title)
-    plt.xlabel('Longitude')
-    plt.ylabel('Latitude')
+    plt.xlabel("Longitude")
+    plt.ylabel("Latitude")
     plt.tight_layout()
     plt.savefig(out_path, dpi=300)
     plt.show()
@@ -78,11 +79,10 @@ def long_term_mean_diff(
     x_max: Optional[float] = None,
     y_min: Optional[float] = None,
     y_max: Optional[float] = None,
-    cmap: str = 'coolwarm',
+    cmap: str = "coolwarm",
     vmin: Optional[float] = None,
-    vmax: Optional[float] = None
+    vmax: Optional[float] = None,
 ) -> None:
-
     # read the two DataArrays
     ref_pattern = str(Path(ref_input_dir) / reference_pattern)
     ds_ref = read_dataset(
@@ -99,8 +99,8 @@ def long_term_mean_diff(
     arr_ref = np.squeeze(da_ref.values)
     arr_mod = np.squeeze(da_mod.values)
 
-    lon = da_mod['lon'].values
-    lat = da_mod['lat'].values
+    lon = da_mod["lon"].values
+    lat = da_mod["lat"].values
 
     diff = compute_difference(arr_mod, arr_ref)
 
@@ -120,5 +120,5 @@ def long_term_mean_diff(
         y_min=y_min,
         y_max=y_max,
         vmin=vmin,
-        vmax=vmax
+        vmax=vmax,
     )
