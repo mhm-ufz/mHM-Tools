@@ -516,7 +516,7 @@ def plot_map(
     )
     std_diff_1 = max(np.abs(1 - np.nanmin(rel_std)), np.abs(1 - np.nanmax(rel_std)))
     im1, bounds1, extend1 = plot_single_map(
-        axes[0, 1], rel_std, std_diff_1, bounds_type="max"
+        axes[0, 1], rel_std, std_diff_1, bounds_type="quantiles"
     )
     axes[0, 1].set_title(
         f"Relative temporal Standarddeviation (median={np.nanmedian(rel_std):.2f})"
