@@ -128,19 +128,18 @@ def read_dataset(
                 logger.error(f"open_mfdataset failed on {paths!r}: {exc}")
                 raise
             return ds
-        else:
-            arrays = []
-            for p in paths:
-                logger.debug(f"Opening (single) {p}")
-                try:
-                    ds_tmp = _fallback_open(
-                        xr.open_dataset, filename_or_obj=p, engine=engine
-                    )
-                except Exception as exc:
-                    logger.error(f"Failed opening {p}: {exc}")
-                    raise
-                arrays.append(ds_tmp)
-            return xr.combine_by_coords(arrays, combine_attrs="override")
+        arrays = []
+        for p in paths:
+            logger.debug(f"Opening (single) {p}")
+            try:
+                ds_tmp = _fallback_open(
+                    xr.open_dataset, filename_or_obj=p, engine=engine
+                )
+            except Exception as exc:
+                logger.error(f"Failed opening {p}: {exc}")
+                raise
+            arrays.append(ds_tmp)
+        return xr.combine_by_coords(arrays, combine_attrs="override")
 
     # Single-file case
     single = paths[0]
