@@ -721,8 +721,9 @@ def compare_input_with_ref(
     available_years=None,
     direct_comp=False,
     available_mem=None,
-    input_file_name="*.*",
-    ref_file_name="*.*",
+    input_file_name='*.*',
+    ref_file_name='*.*',
+    target_freq=None
 ):
     """Compare the two datasets."""
     if bootstrap_index is not None:
@@ -731,6 +732,7 @@ def compare_input_with_ref(
     input_stats_file = None  # output_path / f"{input_name}_stats.nc" if input_name is not None else "input_stats.nc"
     ref_stats_file = None  # output_path / f"{ref_name}_stats.nc" if ref_name is not None else "ref_stats.nc"
     # TODO: Add index to file names
+    # TODO If direct comparison load all files in mem to calculate spearman correlation. FOr this use target_freq to resample the times
     input = get_stats(
         path=input_path,
         var=input_var,
@@ -761,7 +763,8 @@ def compare_input_with_ref(
         file_name=ref_file_name,
     )
     logger.debug(f"ref ds: {ref}")
-
+    # regrid spatial resoution
+    # regridd to same spatial resolution
     input, ref = regridd_to_higher_spatial_resolution(input, ref)
     # regridd to same spatial resolution
 
@@ -1084,6 +1087,25 @@ def year_structure_paths(path: Path, file_name="*.*") -> bool:
             year_paths.append(sub)
     return year_paths
 
+def get_target_time_res_from_files(input_file, ref_file):
+    """Get time resolution for resampling from two files."""
+    with xr.open_dataset(input_file) as input_in:
+        res_sim = input_in.time.diff('time').median()
+    with xr.open_dataset(ref_file) as ref_in:
+        res_obs = ref_in.time.diff('time').median()
+    target_res = res_obs if res_obs > res_sim else res_sim
+    return f"{int(target_res / np.timedelta64(1, 'h'))}h"
+
+
+
+def get_target_time_res(input_path, ref_path, folder_name=''):
+    """Get coarser time resolution from two datasets with files in folder structur."""
+    input_files = (Path(input_path) / folder_name).glob('*nc')
+    ref_files = (Path(ref_path) / folder_name).glob('*nc')
+    if not list(input_files) or not list(ref_files):
+        logger.error("One of the datasets has no files.")
+        return None
+    return get_target_time_res_from_files(next(input_files), next(ref_files))
 
 @log_arguments()
 def gridded_data_validation(
@@ -1124,6 +1146,10 @@ def gridded_data_validation(
         input_path = input_path / "mHM_Fluxes_States.nc"
     available_years = get_available_years(input_path, ref_path, year_slice, direct_comp)
     logger.info(f"Years {available_years} are available for comparison.")
+    if direct_comp: 
+        target_time_res = get_target_time_res(input_path, ref_path, next(iter(years)))
+        logger.info(f"Years {years} are overlapping. Data should be resampled to {target_time_res}")
+
 
     if ref_path is None:
         # Only create statistics do not compare
@@ -1210,7 +1236,8 @@ def gridded_data_validation(
                     bootstrap_index,
                     available_years=available_years,
                     input_file_name=input_file_name,
-                    ref_file_name=ref_file_name,
+                    ref_file_name=ref_file_name
+                    target_freq=target_time_res
                 )
                 for bootstrap_index in range(n_bootstrap_selections)
             )
@@ -1245,5 +1272,6 @@ def gridded_data_validation(
             direct_comp=direct_comp,
             available_mem=avaiable_mem,
             input_file_name=input_file_name,
-            ref_file_name=ref_file_name,
+            ref_file_name=ref_file_name
+            target_freq=target_time_res
         )
