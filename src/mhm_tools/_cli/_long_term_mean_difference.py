@@ -1,6 +1,6 @@
-"""Compute and plot the spatial difference between a model dataset and a reference dataset"""
+"""Computes and plots the spatial difference between a model dataset and a reference dataset"""
 
-from ..post.long_term_mean_validation import long_term_mean_diff
+from ..post.long_term_mean_difference import long_term_mean_diff
 
 
 def str2float(value):
