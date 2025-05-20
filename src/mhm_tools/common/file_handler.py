@@ -5,7 +5,7 @@ from pathlib import Path
 
 import numpy as np
 import xarray as xr
-
+import rioxarray 
 from mhm_tools.common.logger import ErrorLogger
 from mhm_tools.common.xarray_utils import get_coord_key, get_single_data_var
 
@@ -214,45 +214,8 @@ def read_ascii_to_xarray(
 ):
     """Read an mHM readable asci file to an xarray dataset."""
     # Read the header from the file
-    with filepath.open("r") as f:
-        header = {}
-        for i in range(6):
-            line = f.readline().strip()
-            logger.debug(f"File {filepath.name} line {i}: {line}")
-            key, value = line.split()
-            header[key.lower()] = float(value) if "." in value else int(value)
-
-        # Extract header information
-        ncols = header["ncols"]
-        nrows = header["nrows"]
-        xllcorner = header["xllcorner"]
-        yllcorner = header["yllcorner"]
-        cellsize = header["cellsize"]
-        nodata_value = header["nodata_value"]
-
-    # Load the data values
-    data_values = np.loadtxt(filepath, skiprows=6)
-
-    # Calculate latitude and longitude coordinates
-    lon = np.arange(
-        xllcorner + cellsize / 2, xllcorner + (ncols + 0.5) * cellsize, cellsize
-    )
-    lat = np.arange(
-        yllcorner + (nrows - 0.5) * cellsize, yllcorner - cellsize / 2, -cellsize
-    )
-    logger.debug(lon)
-    logger.debug(lat)
-
-    # Create DataArray with lat/lon dimensions and nodata value
     name = "data" if var_name is None else var_name
-    data_array = xr.DataArray(
-        data=data_values,
-        dims=["lat", "lon"],
-        coords={"lon": ("lon", lon, {"axis": "X"}), "lat": ("lat", lat, {"axis": "Y"})},
-        name=name,
-        attrs={"nodata_value": nodata_value, "_FillValue": nodata_value},
-    )
-
+    data_array = rioxarray.open_rasterio(filepath, default_name=name)
     # Convert to Dataset
     if chunking and available_mem_gib is not None:
         return chunk_dataset(xr.Dataset({name: data_array}), available_mem_gib)

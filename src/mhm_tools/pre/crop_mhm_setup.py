@@ -4,6 +4,7 @@ import logging
 import shutil
 from pathlib import Path
 
+from mhm_tools.common.esri_grid import read_header, write_header
 import numpy as np
 import xarray as xr
 from joblib import Parallel, delayed
@@ -138,8 +139,12 @@ def write_to_file(ds, output_file: Path):
 
 def crop_file_with_header(ds_in, file_path, output_path, lonslice, latslice):
     """Crop the nc file and create a new header file for the new coordinates."""
-    pres = 1e-5
+    pres = 1e-9
     header = file_path.parent / "header.txt"
+    # read header
+    header_information = read_header(header)
+
+    # obtain data variable from dataset
     data_var = get_single_data_var(ds_in)
     if data_var is None:
         data_var = induce_data_var_from_file_name(ds_in, file_path)
@@ -149,97 +154,78 @@ def crop_file_with_header(ds_in, file_path, output_path, lonslice, latslice):
             )
             return None, None
         logger.debug(f"Found data_var={data_var}")
-    logger.debug(type(ds_in[data_var].data))
-    with header.open("r") as h:
-        d = {}
-        logger.debug(f"Reading out header.txt file {header}")
-        for line in h.readlines():
-            if not line.strip():
-                continue
-            line_content = line.strip().split(" ")
-            logger.debug(f"{line_content[0].strip()} = {line_content[-1].strip()}")
-            d[line_content[0].strip()] = float(line_content[-1].strip())
-        # lon = np.arange(
-        #     d["xllcorner"], d["xllcorner"] + d["cellsize"] * d["ncols"], d["cellsize"]
-        # )
-        # reverse order for lat (TODO: Make this resistant input with south north ordering)
-        # lat = np.arange(
-        #     d["yllcorner"] + d["cellsize"] * (d["nrows"] - 1),
-        #     d["yllcorner"] - d["cellsize"],
-        #     -d["cellsize"],
-        # )
-        logger.info(ds_in[data_var].shape)
-        lon_key = get_coord_key(ds_in, lon=True, raise_exception=True)
-        lat_key = get_coord_key(ds_in, lat=True, raise_exception=True)
-        # x values
-        index_x_min = int(
-            (lonslice.start - pres - d["xllcorner"]) / d["cellsize"] + 0.5
+    logger.info(ds_in[data_var].shape)
+    lon_key = get_coord_key(ds_in, lon=True, raise_exception=True)
+    lat_key = get_coord_key(ds_in, lat=True, raise_exception=True)
+    # x values
+    index_x_min = int(
+        (lonslice.start - pres - header_information["xllcorner"]) / header_information["cellsize"] + 0.5
+    )
+    index_x_max = int((lonslice.stop + pres - header_information["xllcorner"]) / header_information["cellsize"])
+    # index_y_min = int((latslice.stop - pres - d["yllcorner"]) / d["cellsize"] + 0.5)
+    # index_y_max = int((latslice.start + pres - d["yllcorner"]) / d["cellsize"])
+    ymax = header_information["yllcorner"] + header_information["cellsize"] * header_information["nrows"]
+    index_y_min = int((ymax - latslice.start - pres) / header_information["cellsize"] + 0.5)
+    index_y_max = int((ymax - latslice.stop + pres) / header_information["cellsize"])
+    logger.debug(f"x: {index_x_min}, {index_x_max}")
+    logger.debug(f"y: {index_y_min}, {index_y_max}")
+    # write header file
+    header_out_path = output_path / header.name
+    xll = header_information["xllcorner"] + header_information["cellsize"] * index_x_min
+    yll = header_information["yllcorner"] + header_information["cellsize"] * (header_information["nrows"] - index_y_max)
+
+    new_header_information = {
+"ncols": index_x_max-index_x_min,
+"nrows": index_y_max-index_y_min,
+"xllcorner": xll,
+"yllcorner": yll,
+"cellsize": header_information['cellsize'],
+"NODATA_value": header_information['NODATA_value']
+    }
+    logger.info(
+        f"Writing header file to {header_out_path} with header: {new_header_information}"
+    )
+    write_header(new_header_information)
+    try:
+        data = ds_in[data_var].isel(
+            {
+                lat_key: slice(index_y_min, index_y_max),
+                lon_key: slice(index_x_min, index_x_max),
+            }
         )
-        index_x_max = int((lonslice.stop + pres - d["xllcorner"]) / d["cellsize"])
-        # index_y_min = int((latslice.stop - pres - d["yllcorner"]) / d["cellsize"] + 0.5)
-        # index_y_max = int((latslice.start + pres - d["yllcorner"]) / d["cellsize"])
-        ymax = d["yllcorner"] + d["cellsize"] * d["nrows"]
-        index_y_min = int((ymax - latslice.start - pres) / d["cellsize"] + 0.5)
-        index_y_max = int((ymax - latslice.stop + pres) / d["cellsize"])
-        logger.debug(f"x: {index_x_min}, {index_x_max}")
-        logger.debug(f"y: {index_y_min}, {index_y_max}")
-        # write header file
-        header_out_path = output_path / header.name
-        xll = d["xllcorner"] + d["cellsize"] * index_x_min
-        yll = d["yllcorner"] + d["cellsize"] * (d["nrows"] - index_y_max)
-        header_str = f"""
-ncols                {index_x_max-index_x_min}
-nrows                {index_y_max-index_y_min}
-xllcorner            {xll}
-yllcorner            {yll}
-cellsize             {d['cellsize']}
-NODATA_value         {d['NODATA_value']}
-            """
-        logger.info(
-            f"Writing header file to {header_out_path} with header str: {header_str}"
+        if "time" in ds_in.dims:
+            data_array = xr.DataArray(
+                data=data,
+                dims=["time", lat_key, lon_key],
+                coords={
+                    "time": ds_in.time,
+                    lat_key: data[lat_key],
+                    lon_key: data[lon_key],
+                },
+                name=data_var,
+                attrs=data.attrs,
+            )
+        else:
+            data_array = xr.DataArray(
+                data=data,
+                dims=[lat_key, lon_key],
+                coords={
+                    lat_key: data[lat_key],
+                    lon_key: data[lon_key],
+                },
+                name=data_var,
+                attrs=data.attrs,
+            )
+        data_array.attrs.update(
+            {"_FillValue": header_information["NODATA_value"], "missing_value": header_information["NODATA_value"]}
         )
-        with (header_out_path).open("w") as nh:
-            nh.write(header_str)
-        try:
-            data = ds_in[data_var].isel(
-                {
-                    lat_key: slice(index_y_min, index_y_max),
-                    lon_key: slice(index_x_min, index_x_max),
-                }
-            )
-            if "time" in ds_in.dims:
-                data_array = xr.DataArray(
-                    data=data,
-                    dims=["time", lat_key, lon_key],
-                    coords={
-                        "time": ds_in.time,
-                        lat_key: data[lat_key],
-                        lon_key: data[lon_key],
-                    },
-                    name=data_var,
-                    attrs=data.attrs,
-                )
-            else:
-                data_array = xr.DataArray(
-                    data=data,
-                    dims=[lat_key, lon_key],
-                    coords={
-                        lat_key: data[lat_key],
-                        lon_key: data[lon_key],
-                    },
-                    name=data_var,
-                    attrs=data.attrs,
-                )
-            data_array.attrs.update(
-                {"_FillValue": d["NODATA_value"], "missing_value": d["NODATA_value"]}
-            )
-            # Convert to Dataset
-            ds_out = xr.Dataset({data_var: data_array})
-            ds_out.attrs.update(ds_in.attrs)
-            return ds_out, header_out_path
-        except IndexError as e:
-            with ErrorLogger(logger):
-                raise e
+        # Convert to Dataset
+        ds_out = xr.Dataset({data_var: data_array})
+        ds_out.attrs.update(ds_in.attrs)
+        return ds_out, header_out_path
+    except IndexError as e:
+        with ErrorLogger(logger):
+            raise e
 
 
 @log_arguments()
