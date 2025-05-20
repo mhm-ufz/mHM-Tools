@@ -1236,8 +1236,8 @@ def gridded_data_validation(
                     bootstrap_index,
                     available_years=available_years,
                     input_file_name=input_file_name,
-                    ref_file_name=ref_file_name
-                    target_freq=target_time_res
+                    ref_file_name=ref_file_name,
+                    target_freq=target_time_res,
                 )
                 for bootstrap_index in range(n_bootstrap_selections)
             )
@@ -1272,6 +1272,6 @@ def gridded_data_validation(
             direct_comp=direct_comp,
             available_mem=avaiable_mem,
             input_file_name=input_file_name,
-            ref_file_name=ref_file_name
-            target_freq=target_time_res
+            ref_file_name=ref_file_name,
+            target_freq=target_time_res,
         )
