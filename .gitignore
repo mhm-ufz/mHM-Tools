@@ -149,3 +149,6 @@ work/peterca/ecflow_work/gdm_calibration/output/6335671_4000deg/mhm_setup/morph/
 work/peterca/ecflow_work/gdm_calibration/output/6335671_4000deg/mhm_setup/morph/slope.asc
 work/peterca/ecflow_work/gdm_calibration/output/6335671_4000deg/mhm_setup/morph/soil_class.asc
 work/peterca/ecflow_work/gdm_calibration/output/6335671_4000deg/mhm_setup/morph/soil_classdefinition.txt
+
+# files created when using mount
+**/._*

@@ -983,8 +983,8 @@ def gen_hydrograph_by_data_sets(
     save=True,
     id=None,
     calc_stats=False,
-    raise_exceptions=True, 
-    **kwargs
+    raise_exceptions=True,
+    **kwargs,
 ):
     """
     Use discharge and precipitation data provided as xarrays to produce a hydrograph with different analysises.

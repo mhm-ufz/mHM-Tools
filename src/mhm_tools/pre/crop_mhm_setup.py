@@ -16,6 +16,7 @@ from mhm_tools.common.file_handler import (
 )
 from mhm_tools.common.logger import ErrorLogger, log_arguments
 from mhm_tools.common.xarray_utils import (
+    crop_ds,
     get_coord_key,
     get_single_data_var,
     induce_data_var_from_file_name,
@@ -293,7 +294,7 @@ def crop_file(
     output_file.parent.mkdir(parents=True, exist_ok=True)
     latlon_files = LatlonFiles()
     if output_file.is_file() and not overwrite:
-        logger.info("Target file already exists. Cropping is scipped.")
+        logger.info("Target file already exists. Cropping is skipped.")
         return latlon_files
     if input_file.suffix in [".asc", ".nc"]:
         try:
@@ -317,7 +318,7 @@ def crop_file(
         return latlon_files
     logger.debug(f"read in dataset: {ds}")
     # Handling of special cases:
-    ds_croped = None
+    ds_cropped = None
     # 1. latlon file: The latlon file is not croped but its relative location is saved and the latlon file is newly created after all files are croped
     if "latlon" in input_file.name.lower():
         logger.info(
@@ -332,42 +333,49 @@ def crop_file(
     # 3. Files that are in the same folder as a header file. Typical examples are meteo datasets such as temperature or precipitation
     elif list(input_file.parent.glob("header.txt")):
         logger.debug("Cropping and writing new header file...")
-        ds_croped, header_path = crop_file_with_header(
+        ds_cropped, header_path = crop_file_with_header(
             ds,
             input_file,
             output_path / input_file.parent.relative_to(input_path),
             lonslice=lonslice,
             latslice=latslice,
         )
-        if not (ds_croped is None and header_path is None):
-            lat_key = get_coord_key(ds_croped, lat=True)
-            lon_key = get_coord_key(ds_croped, lon=True)
+        if not (ds_cropped is None and header_path is None):
+            lat_key = get_coord_key(ds_cropped, lat=True)
+            lon_key = get_coord_key(ds_cropped, lon=True)
             if input_file.stem in ["pre", "pet", "tavg"]:
                 latlon_files.set_meteo_header_path(header_path)
     # 4. All other netcdf files containing mostly morphological data.
     else:
         lat_key = get_coord_key(ds, lat=True)
         lon_key = get_coord_key(ds, lon=True)
+
+        # extract lon-lat bounds
+        lon_start, lon_stop =  float(lonslice.start),  float(lonslice.stop)
+        lat_start, lat_stop =  float(latslice.start),  float(latslice.stop)
+
         logger.debug(
             f"Selecting {input_file.name} using lon:{lonslice} and lat:{latslice}"
         )
-        ds_croped = ds.sel({lon_key: lonslice, lat_key: latslice})
-        if ds_croped[lat_key].shape[0] < 2:
-            ds_croped = ds.sel(
-                {
-                    lon_key: lonslice,
-                    lat_key: slice(latslice.stop, latslice.start),
-                }
-            )
+        ds_cropped = crop_ds(
+            ds=ds,
+            lon_min=lon_start,
+            lon_max=lon_stop,
+            lat_min=lat_start,
+            lat_max=lat_stop,
+            lon_name=lon_key,
+            lat_name=lat_key,
+        )
+
+    # check for emptiness or insufficient grid points
     if (
-        ds_croped is None
-        or ds_croped[lat_key].shape[0] < 2
-        or ds_croped[lon_key].shape[0] < 2
+        ds_cropped.sizes[lat_key] < 2
+        or ds_cropped.sizes[lon_key] < 2
     ):
-        if ds_croped is not None:
-            logger.warning(
-                "Copying of the file is not possible because after cropping the file is empty."
-            )
+        logger.warning(
+            "Cropping resulted in insufficient grid size "
+            f"(lat={ds_cropped.sizes[lat_key]}, lon={ds_cropped.sizes[lon_key]})."
+        )
         return latlon_files
 
     # only the dem file or and eventual mHM restart file are masked using the provided mask file
@@ -381,20 +389,20 @@ def crop_file(
                 mask_ds=mask_da,
                 lon_key_mask=lon_key_mask,
                 lat_key_mask=lat_key_mask,
-                target_lon=ds_croped[lon_key].data,
-                target_lat=ds_croped[lat_key].data,
+                target_lon=ds_cropped[lon_key].data,
+                target_lat=ds_cropped[lat_key].data,
             )
-            ds_croped = ds_croped.where(mask_regridded == 1, np.nan)
+            ds_cropped = ds_cropped.where(mask_regridded == 1, np.nan)
         else:
             logger.info("Can't mask dem file because no mask was provided.")
     try:
-        write_to_file(ds_croped, output_file)
+        write_to_file(ds_cropped, output_file)
     except Exception as e:
         logger.warning(f"First try writing the file failed: {e}")
         logger.info("Changing datatype to float")
-        for var_name in ds_croped.data_vars:
-            ds_croped[var_name] = ds_croped[var_name].astype(float)
-        write_to_file(ds_croped, output_file)
+        for var_name in ds_cropped.data_vars:
+            ds_cropped[var_name] = ds_cropped[var_name].astype(float)
+        write_to_file(ds_cropped, output_file)
     logger.info(f"Written to {output_file}")
     return latlon_files
 

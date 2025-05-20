@@ -9,7 +9,12 @@ import numpy as np
 import xarray as xr
 import rioxarray 
 from mhm_tools.common.logger import ErrorLogger
-from mhm_tools.common.xarray_utils import get_coord_key, get_single_data_var
+from mhm_tools.common.netcdf import read_dataset
+from mhm_tools.common.xarray_utils import (
+    get_coord_key,
+    get_single_data_var,
+    normalize_lat_lon,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -183,7 +188,10 @@ def get_xarray_ds_from_file(
     var_name=None,
     chunking=False,
     available_mem_gib=None,
-    chunk_type=ChunkType.TIME,
+    chunk_type=ChunkType.SPACE,
+    use_mfdataset=False,
+    engine="h5netcdf",
+    normalize_latlon_coords=False,
 ):
     """Read file and return xarray dataset."""
     file_path = Path(file_path)
@@ -201,7 +209,18 @@ def get_xarray_ds_from_file(
             available_mem_gib=available_mem_gib,
         )
     if file_path.suffix == ".nc":
-        ds_out = xr.open_dataset(file_path)
+        ds_out = read_dataset(
+            file_path=file_path,
+            use_mfdataset=use_mfdataset,
+            engine=engine,
+        )
+
+        # re-name input coords to lat and lon
+        if normalize_latlon_coords:
+            lat_key = get_coord_key(ds_out, lat=True)
+            lon_key = get_coord_key(ds_out, lon=True)
+            ds_out = normalize_lat_lon(ds_out, lat_key, lon_key)
+
         if chunking and available_mem_gib is not None:
             if chunk_type == ChunkType.TIME:
                 ds_out = chunk_dataset_space_and_time(ds_out, available_mem_gib)
