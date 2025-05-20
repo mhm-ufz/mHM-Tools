@@ -3,8 +3,8 @@
 import array
 import logging
 import random
-from pathlib import Path
 import re
+from pathlib import Path
 from typing import Iterable
 
 import matplotlib.pyplot as plt
@@ -15,9 +15,17 @@ from matplotlib.colors import BoundaryNorm
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from scipy.stats import spearmanr
 
-from mhm_tools.common.file_handler import get_coord_values, get_xarray_ds_from_file
+from mhm_tools.common.file_handler import (
+    ChunkType,
+    get_coord_values,
+    get_xarray_ds_from_file,
+)
 from mhm_tools.common.logger import ErrorLogger, log_arguments, log_errors
-from mhm_tools.common.xarray_utils import get_coord_key
+from mhm_tools.common.xarray_utils import (
+    get_coord_key,
+    get_overlapping_time_slice,
+    timedelta_to_alias,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,16 +37,45 @@ def spearman_correlation(data1, data2):
         with ErrorLogger(logger):
             msg = "Both DataArrays must have the same shape"
             raise ValueError(msg)
-    # try:
-    #     data1 = data1.flatten()
-    #     data2 = data2.flatten()
-    # except Exception as e:
-    # logger.warning(e)
     data1 = data1.values.flatten()
     data2 = data2.values.flatten()
     # Calculate Spearman rank correlation using scipy
     corr, p_value = spearmanr(data1, data2)
     return corr, p_value
+
+
+# def _spearman_1d(a: np.ndarray, b: np.ndarray):
+#     """Compute Spearman’s ρ and p-value for two 1D arrays."""
+#     # nan_policy='omit' will drop NaNs in the calculation
+#     rho, p = spearmanr(a, b, nan_policy="omit")
+#     return np.float32(rho), np.float32(p)
+
+
+# def spearman_spatial(
+#     ds1: xr.DataArray, ds2: xr.DataArray
+# ) -> tuple[xr.DataArray, xr.DataArray]:
+#     """
+#     Compute a per-pixel Spearman correlation map between two DataArrays
+#     of shape (time, y, x), leveraging Dask & xarray chunking.
+#     Returns (rho, pvalue) each with dims (y, x).
+#     """
+#     # make sure they align on time
+#     ds1, ds2 = xr.align(ds1, ds2)
+
+#     rho, p = xr.apply_ufunc(
+#         _spearman_1d,  # the 1D function
+#         ds1,
+#         ds2,  # inputs
+#         input_core_dims=[["time"], ["time"]],
+#         output_core_dims=[[], []],
+#         vectorize=True,  # vectorize over y, x
+#         dask="parallelized",  # dispatch one Dask task per chunk
+#         output_dtypes=[np.float32, np.float32],
+#     )
+#     # give them nice names
+#     rho.name = "spearman_rho"
+#     p.name = "spearman_p"
+#     return rho, p
 
 
 def spearman_spatial(data1, data2):
@@ -48,22 +85,71 @@ def spearman_spatial(data1, data2):
             msg = "Wrong shape for spatial spearman correlation!"
             raise ValueError(msg)
     res = np.full(np.shape(data1[0]), np.nan)
+    pval = np.full(np.shape(data1[0]), np.nan)
     for i, row in enumerate(data1[0]):
         for j, _col in enumerate(row):
             sp_corr, sp_pval = spearman_correlation(data1[:, i, j], data2[:, i, j])
             res[i, j] = sp_corr
-    return res
+            pval[i, j] = sp_pval
+    return res, pval
+
+
+def spearman_spatial_joblib(
+    data1: np.ndarray, data2: np.ndarray, spearman_correlation, n_jobs: int = -1
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Parallel pixel‐wise Spearman correlation over two arrays of shape (T, Y, X).
+
+    Parameters
+    ----------
+    data1, data2 : ndarray, shape (T, Y, X)
+        The two time‐series stacks to correlate.
+    spearman_correlation : Callable
+        A function f(a: 1D, b: 1D) -> (rho, pval).
+    n_jobs : int
+        Number of parallel workers (−1 = all CPUs).
+
+    Returns
+    -------
+    res : ndarray, shape (Y, X)
+        Spearman ρ for each pixel.
+    pval : ndarray, shape (Y, X)
+        Two‐tailed p‐value for each pixel.
+    """
+    # get spatial shape
+    _, ny, nx = data1.shape
+
+    # pre‐allocate outputs
+    res = np.full((ny, nx), np.nan, dtype=np.float32)
+    pval = np.full((ny, nx), np.nan, dtype=np.float32)
+
+    # list of all pixel indices
+    indices = [(i, j) for i in range(ny) for j in range(nx)]
+
+    # worker for a single pixel
+    def _worker(i, j):
+        rho, p = spearman_correlation(data1[:, i, j], data2[:, i, j])
+        return i, j, rho, p
+
+    # dispatch in parallel
+    results = Parallel(n_jobs=n_jobs)(delayed(_worker)(i, j) for i, j in indices)
+
+    # scatter results back
+    for i, j, rho, p in results:
+        res[i, j] = rho
+        pval[i, j] = p
+
+    return res, pval
 
 
 def climatology(data):
     """Calculate the climatology from a xarray DataArray."""
-    if "time" in data.dims and data["time"].size > 0:
-        data_clim = data.groupby("time.month").mean(dim="time", skipna=True)
-    else:
+    if "time" not in data.dims or data.sizes["time"] == 0:
+        msg = "Input data for climatology calculation has no valid time dimension."
         with ErrorLogger(logger):
-            msg = "Input data for climatology calculation has no valid time dimension."
             raise ValueError(msg)
-    # data_clim = data.groupby("time.month").mean(dim="time", skipna=True)
+    # group into monthly mean data
+    data_clim = data.groupby("time.month").mean(dim="time", skipna=True)
     # Ensure the climatology has all 12 months, filling missing months with NaNs
     return data_clim.reindex(month=np.arange(1, 13), fill_value=np.nan)
 
@@ -103,54 +189,64 @@ def get_std_from_ds(ds, input_var=None, clim=None, factor=1):
 
 
 def get_file_stats(
-    file, input_var, factor=1, coordinate_slice=None, output_path=None, years=None
+    ds_in,
+    input_var,
+    factor=1,
+    coordinate_slice=None,
+    output_path=None,
+    avaiable_years=None,
+    direct_comp=False,
 ):
     """Get statistics for one file."""
-    logger.debug(f"Get file stats {file}")
-    with xr.open_dataset(file, engine="netcdf4") as ds_in:
-        # Apply coordinate slicing if needed
-        logger.debug(f"before cropping the file {ds_in}")
-        lat_key = get_coord_key(ds_in, lat=True)
-        lon_key = get_coord_key(ds_in, lon=True)
-        # make sure that latitude order is from highest to lowest value
-        if ds_in[lat_key][1] > ds_in[lat_key][0]:
-            ds_croped = ds_in.isel(lat=slice(None, None, -1))
-        else:
-            ds_croped = ds_in
-        if coordinate_slice is not None:
-            ds_croped = ds_croped.sel(
-                {lat_key: coordinate_slice["lat"], lon_key: coordinate_slice["lon"]}
-            )
-        if years is not None:
-            ds_croped = ds_croped.sel(time=ds_croped.time.dt.year.isin(years))
+    # logger.debug(f"Get file stats {file}")
 
-        # Calculate climatology and standard deviation along the time dimension
-        clim = get_clim_from_ds(ds_croped, input_var, factor)
-        std = get_std_from_ds(ds_croped, input_var, clim, factor)
-
-        mean = ds_croped[input_var].mean(dim="time", skipna=True) * factor
-
-        # Construct the output dataset with lazy evaluations
-        output = xr.Dataset(
-            {"clim": clim, "std": std, "mean": mean},
-            coords={
-                "month": np.arange(1, 13, 1),
-                "lat": get_coord_values(ds_croped, lat=True),
-                "lon": get_coord_values(ds_croped, lon=True),
-            },
+    # Apply coordinate slicing if needed
+    logger.debug(f"before cropping the file {ds_in}")
+    lat_key = get_coord_key(ds_in, lat=True)
+    lon_key = get_coord_key(ds_in, lon=True)
+    # make sure that latitude order is from highest to lowest value
+    if ds_in[lat_key][1] > ds_in[lat_key][0]:
+        ds_croped = ds_in.isel(lat=slice(None, None, -1))
+    else:
+        ds_croped = ds_in
+    if coordinate_slice is not None:
+        ds_croped = ds_croped.sel(
+            {lat_key: coordinate_slice["lat"], lon_key: coordinate_slice["lon"]}
         )
+    if avaiable_years is not None:
+        ds_croped = ds_croped.sel(time=ds_croped.time.dt.year.isin(avaiable_years))
+
+    # Calculate climatology and standard deviation along the time dimension
+    clim = get_clim_from_ds(ds_croped, input_var, factor)
+    std = get_std_from_ds(ds_croped, input_var, clim, factor)
+
+    mean = ds_croped[input_var].mean(dim="time", skipna=True) * factor
+
+    # Construct the output dataset with lazy evaluations
+    output = xr.Dataset(
+        {"clim": clim, "std": std, "mean": mean},
+        coords={
+            "month": np.arange(1, 13, 1),
+            "lat": get_coord_values(ds_croped, lat=True),
+            "lon": get_coord_values(ds_croped, lon=True),
+        },
+    )
+    if direct_comp:
+        ts = ds_croped[input_var] * factor
+        ts.name = "time_series"
+        output = xr.merge([output, ts])
     if output_path is not None:
         output.to_netcdf(output_path)
     return output
 
 
-def get_files(path, n_bootstrap_years=None, years=None):
+def get_files(path, n_bootstrap_years=None, available_years=None, file_name='*.*'):
     """Recursevely find all netcdf files in directory."""
     nc_files = []
     # Search for .nc files at each depth level
-    all_years = get_years_from_path(path)
-    if years is not None:
-        selectable_years = [y for y in all_years if y in years]
+    all_years = get_years_from_path(path, file_name=file_name)
+    if available_years is not None:
+        selectable_years = [y for y in all_years if y in available_years]
     else:
         selectable_years = all_years
     logger.debug(
@@ -158,12 +254,10 @@ def get_files(path, n_bootstrap_years=None, years=None):
     )
     if n_bootstrap_years is not None:
         # needs fixed folder structure of y/m/file
-        selected_years = random.choices(selectable_years, k=n_bootstrap_years)
-        for year in selected_years:
-            nc_files.extend((path / year).rglob("*.nc"))
-    else:
-        for year in selectable_years:
-            nc_files.extend((path / year).rglob("*.nc"))
+        selectable_years = random.choices(selectable_years, k=n_bootstrap_years)
+    for year in selectable_years:
+        folder_path = path / str(year)
+        nc_files.extend(folder_path.rglob(file_name))
     return nc_files
 
 
@@ -187,10 +281,10 @@ def combine_results(results):
 def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None):
     """Take a list of files with all containing data for one month and creating statisitcs while reading them one by one."""
     da = None
-    logger.debug(f"{type(files)}, {files}")
     if not isinstance(files, Iterable):
-        logger.warning(f"Files not a list of files but one file {files}.")
+        # logger.warning(f"Files not a list of files but one file {files}.")
         files = [files]
+    logger.debug(files)
     with xr.open_dataset(files[0], engine="netcdf4") as ds:
         # Apply coordinate slicing if needed
         if coordinate_slice is not None:
@@ -259,19 +353,19 @@ def get_stats_one_pass(
     n_bootstrap_years=None,
     bootstrap_index=None,
     output_path=None,
-    years=None,
+    available_years=None,
+    file_name='*,*'
 ):
     """Create dataset statistics by reading in one monthly or yearly file at a time and updating the statistics."""
-    logger.debug(years)
     if path.is_dir():
-        files = get_files(path, n_bootstrap_years=n_bootstrap_years, years=years)
+        files = get_files(
+            path, n_bootstrap_years=n_bootstrap_years, available_years=available_years, file_name=file_name
+        )
     logger.debug(f"List of files: {files}")
-    file_subsets = split_file_list(files, ncpus)
+    file_subsets = split_file_list(files, ncpus) if ncpus > 1 else [files]
     logger.info("creating statistics...")
     subset_results = Parallel(n_jobs=ncpus, backend="loky")(
-        delayed(get_stats_one_pass_subset)(
-            file_subset, var, factor, coordinate_slice
-        )
+        delayed(get_stats_one_pass_subset)(file_subset, var, factor, coordinate_slice)
         for file_subset in file_subsets
     )
     logger.info("combining results...")
@@ -343,17 +437,62 @@ def plot_single_map(
         vmax = 1 + diff_to_mean
     if bounds_type == "quantiles":
         vmin, vmax = (
-            np.nanquantile(values, 0.05).data,
-            np.nanquantile(values, 0.95).data,
+            np.nanquantile(values, 0.05),
+            np.nanquantile(values, 0.95),
         )
     if bounds_type == "fixed":
         vmin, vmax = 0.5, 1.5
     bounds = np.linspace(vmin, vmax, n_bins + 1)
     bounds = [np.round(b, 2) for b in bounds]
-    norm = BoundaryNorm(bounds, cmap.N)
 
+    extent = "neither"
+    if np.nanquantile(values, 0.75) > vmax:
+        extent = "max"
+    if np.nanquantile(values, 0.25) < vmin:
+        extent = "min" if extent == "neither" else "both"
+
+    norm = BoundaryNorm(bounds, cmap.N)
     im = ax.imshow(values, cmap=cmap, norm=norm)
-    return im, bounds
+    return im, bounds, extent
+
+
+def resample_to_coarser_calendar(
+    ds_input: xr.Dataset, ds_ref: xr.Dataset
+) -> tuple[xr.Dataset, xr.Dataset]:
+    """
+    Resampler the dataset with higher temporal resolution to the resolution of the other.
+
+    Compare the two datasets’ median time‐steps, turn them into pandas/xarray
+    freq aliases, and then resample the *finer* one up to the *coarser* one
+    using calendar‐aware frequencies (e.g. 'M' not '720H').
+    """
+    hours_in, alias_in = timedelta_to_alias(ds_input)
+    hours_ref, alias_ref = timedelta_to_alias(ds_ref)
+
+    if hours_in > hours_ref:
+        # input is coarser (e.g. monthly) → bring ref up to that
+        logger.info(f"Resampling ref from {alias_ref} to {alias_in}")
+        ds_ref = ds_ref.resample(time=alias_in).mean()
+    elif hours_ref > hours_in:
+        # ref is coarser → bring input up to that
+        logger.info(f"Resampling input from {alias_in} to {alias_ref}")
+        ds_input = ds_input.resample(time=alias_ref).mean()
+    else:
+        # same resolution, nothing to do
+        logger.info(f"Both are already {alias_in}")
+
+    # finally, force them onto exactly the same time‐axis
+    ds_input, ds_ref = xr.align(ds_input, ds_ref)
+    return ds_input, ds_ref
+
+
+def crop_data_to_overlapping_time(input_ds, ref_ds):
+    """Crop data to overlapping time."""
+    time_slice = get_overlapping_time_slice(input_ds, ref_ds)
+    # Slice both datasets to that time range
+    input_ds = input_ds.sel(time=time_slice)
+    ref_ds = ref_ds.sel(time=time_slice)
+    return input_ds, ref_ds
 
 
 @log_errors()
@@ -369,20 +508,22 @@ def plot_map(
 
     # Set common colormap and normalization limits for mean_et and mean_aet
     mean_diff_1 = max(np.abs(1 - np.nanmin(rel_mean)), np.abs(1 - np.nanmax(rel_mean)))
-    im0, bounds0 = plot_single_map(
+    im0, bounds0, extend0 = plot_single_map(
         axes[0, 0], rel_mean, mean_diff_1, bounds_type="fixed"
     )
     axes[0, 0].set_title(
         f"Relative temporal Mean (median={np.nanmedian(rel_mean):.2f})"
     )
     std_diff_1 = max(np.abs(1 - np.nanmin(rel_std)), np.abs(1 - np.nanmax(rel_std)))
-    im1, bounds1 = plot_single_map(axes[0, 1], rel_std, std_diff_1, bounds_type="fixed")
+    im1, bounds1, extend1 = plot_single_map(
+        axes[0, 1], rel_std, std_diff_1, bounds_type="quantiles"
+    )
     axes[0, 1].set_title(
         f"Relative temporal Standarddeviation (median={np.nanmedian(rel_std):.2f})"
     )
 
     im2 = axes[1, 0].imshow(spearman, vmin=np.nanmin(spearman), vmax=1)
-    im2, bounds2 = plot_single_map(
+    im2, bounds2, extend2 = plot_single_map(
         axes[1, 0],
         spearman,
         vmin=np.nanmin(spearman),
@@ -430,7 +571,7 @@ def plot_map(
             labels.append(label)
 
     axes[1, 1].legend(handles, labels, loc="upper right")
-    axes[1, 1].set_title("Seasonality of evapotranspiration")
+    axes[1, 1].set_title("Seasonality")
     axes[1, 1].set_ylabel("ET [mm/day]")
     axes[1, 1].tick_params(axis="y", labelcolor="black")
     axes[1, 1].set_xlim(1 - (1.1 * bar_width), 12 + (1.1 * bar_width))
@@ -444,15 +585,15 @@ def plot_map(
 
     divider0 = make_axes_locatable(axes[0, 0])
     cax = divider0.append_axes("right", size="5%", pad=0.1)
-    fig.colorbar(im0, cax=cax, label="", boundaries=bounds0)
+    fig.colorbar(im0, cax=cax, label="", boundaries=bounds0, extend=extend0)
 
     divider1 = make_axes_locatable(axes[0, 1])
     cax2 = divider1.append_axes("right", size="5%", pad=0.1)
-    fig.colorbar(im1, cax=cax2, label="", boundaries=bounds1)
+    fig.colorbar(im1, cax=cax2, label="", boundaries=bounds1, extend=extend1)
 
     divider2 = make_axes_locatable(axes[1, 0])
     cax = divider2.append_axes("right", size="5%", pad=0.1)
-    fig.colorbar(im2, cax=cax, label="", boundaries=bounds2)
+    fig.colorbar(im2, cax=cax, label="", boundaries=bounds2, extend=extend2)
 
     for ax in axes.flat:
         for spine in ax.spines.values():
@@ -504,16 +645,15 @@ def get_stats(
     n_bootstrap_years,
     ncpus,
     output_file,
-    years=None,
+    available_years=None,
+    direct_comp=False,
+    available_mem=None,
+    file_name='*.*'
 ):
     """Get statistics dataset from a path to a file or directory with files."""
     logger.info(f"Get stats for {path}")
     if var is not None:
-        if path.is_file():
-            stats_ds = get_file_stats(
-                path, var, factor, coordinate_slice, output_path=output_file
-            )
-        elif path.is_dir():
+        if path.is_dir() and not direct_comp:
             stats_ds = get_stats_one_pass(
                 path,
                 var,
@@ -522,11 +662,24 @@ def get_stats(
                 n_bootstrap_years=n_bootstrap_years,
                 ncpus=ncpus,
                 output_path=output_file,
-                years=years,
+                available_years=available_years,
+                file_name=file_name
             )
+        elif path.is_dir() or path.is_file():
+            with get_dataset_from_path(path, available_mem=available_mem, file_name=file_name) as ds_in:
+                stats_ds = get_file_stats(
+                    ds_in,
+                    var,
+                    factor,
+                    coordinate_slice,
+                    output_path=output_file,
+                    avaiable_years=available_years,
+                    direct_comp=direct_comp,
+                )
         else:
+            msg = f"Path {path} is neither dir nor file."
             with ErrorLogger(logger):
-                raise ValueError()
+                raise ValueError(msg)
     else:
         with xr.open_dataset(path, engine="netcdf4") as ds_input:
             ds = ds_input
@@ -537,8 +690,8 @@ def get_stats(
                         get_coord_key(ds, lon=True): coordinate_slice["lon"],
                     }
                 )
-            if years is not None:
-                ds = ds.sel(time=ds_input.time.dt.year.isin(years))
+            if available_years is not None:
+                ds = ds.sel(time=ds_input.time.dt.year.isin(available_years))
             if "clim" in ds and "std" in ds and "mean" in ds:
                 stats_ds = ds
             else:
@@ -562,7 +715,12 @@ def compare_input_with_ref(
     n_bootstrap_years=None,
     bootstrap_index=None,
     ncpus=1,
-    years=None,
+    available_years=None,
+    direct_comp=False,
+    available_mem=None,
+    input_file_name='*.*',
+    ref_file_name='*.*',
+    target_freq=None
 ):
     """Compare the two datasets."""
     if bootstrap_index is not None:
@@ -571,6 +729,7 @@ def compare_input_with_ref(
     input_stats_file = None  # output_path / f"{input_name}_stats.nc" if input_name is not None else "input_stats.nc"
     ref_stats_file = None  # output_path / f"{ref_name}_stats.nc" if ref_name is not None else "ref_stats.nc"
     # TODO: Add index to file names
+    # TODO If direct comparison load all files in mem to calculate spearman correlation. FOr this use target_freq to resample the times
     input = get_stats(
         path=input_path,
         var=input_var,
@@ -579,11 +738,14 @@ def compare_input_with_ref(
         n_bootstrap_years=n_bootstrap_years,
         ncpus=ncpus,
         output_file=input_stats_file,
-        years=years,
+        available_years=available_years,
+        direct_comp=direct_comp,
+        available_mem=available_mem,
+        file_name=input_file_name
     )
     logger.debug(f"input ds: {input}")
-    # get output statistics
 
+    # get output statistics
     ref = get_stats(
         path=ref_path,
         var=ref_var,
@@ -592,15 +754,41 @@ def compare_input_with_ref(
         n_bootstrap_years=n_bootstrap_years,
         ncpus=ncpus,
         output_file=ref_stats_file,
-        years=years,
+        available_years=available_years,
+        direct_comp=direct_comp,
+        available_mem=available_mem,
+        file_name=ref_file_name
     )
     logger.debug(f"ref ds: {ref}")
-
+    # regrid spatial resoution
+    # regridd to same spatial resolution
     input, ref = regridd_to_higher_spatial_resolution(input, ref)
+
     # compare and save statistics
     rel_mean = input["mean"].values / ref["mean"].values
     rel_std = input["std"].values / ref["std"].values
-    spearman = spearman_spatial(input["clim"], ref["clim"])
+    if direct_comp:
+        input_ts, ref_ts = input["time_series"], ref["time_series"]
+        input_ts, ref_ts = resample_to_coarser_calendar(input_ts, ref_ts)
+        input_ts, ref_ts = crop_data_to_overlapping_time(input_ts, ref_ts)
+        logger.info(
+            f"Creating data from timeseries with shape {input_ts.shape} and {ref_ts.shape}"
+        )
+        try:
+            spearman, spearman_pval = spearman_spatial_joblib(
+                input_ts, ref_ts, spearman_correlation, ncpus
+            )
+        except ValueError as ve:
+            logger.error("Input and ref do not have the same temporal extend.")
+            logger.info(input_ts.time)
+            logger.info(ref_ts.time)
+            raise (ve)
+    else:
+        logger.info("Calculating spearman correlation from seasonalities.")
+        spearman, spearman_pval = spearman_spatial_joblib(
+            input["clim"], ref["clim"], spearman_correlation, ncpus
+        )
+
     rel_mean = xr.DataArray(
         rel_mean,
         coords={
@@ -618,7 +806,15 @@ def compare_input_with_ref(
         dims=["lat", "lon"],
     )
     spearman = xr.DataArray(
-        spearman,
+        spearman.data,
+        coords={
+            "lat": get_coord_values(input, lat=True),
+            "lon": get_coord_values(input, lon=True),
+        },
+        dims=["lat", "lon"],
+    )
+    spearman_pval = xr.DataArray(
+        spearman_pval.data,
         coords={
             "lat": get_coord_values(input, lat=True),
             "lon": get_coord_values(input, lon=True),
@@ -626,7 +822,7 @@ def compare_input_with_ref(
         dims=["lat", "lon"],
     )
     input_clim = xr.DataArray(
-        input["clim"].values,
+        input["clim"].data,
         coords={
             "month": np.arange(1, 13, 1),
             "lat": get_coord_values(input, lat=True),
@@ -635,7 +831,7 @@ def compare_input_with_ref(
         dims=["month", "lat", "lon"],
     )
     ref_clim = xr.DataArray(
-        ref["clim"].values,
+        ref["clim"].data,
         coords={
             "month": np.arange(1, 13, 1),
             "lat": get_coord_values(input, lat=True),
@@ -644,7 +840,12 @@ def compare_input_with_ref(
         dims=["month", "lat", "lon"],
     )
     output = xr.Dataset(
-        {"spearman": spearman, "rel_std": rel_std, "rel_mean": rel_mean},
+        {
+            "spearman": spearman,
+            "rel_std": rel_std,
+            "rel_mean": rel_mean,
+            "spearman_pval": spearman_pval,
+        },
         coords={
             "month": np.arange(1, 13, 1),
             "lat": get_coord_values(input, lat=True),
@@ -678,6 +879,7 @@ def compare_input_with_ref(
         ref_name=ref_name,
         output_path=output_path,
     )
+    return file_name
 
 
 def get_rel_stat_file(output_path, input_name, ref_name):
@@ -693,25 +895,30 @@ def get_rel_stat_file(output_path, input_name, ref_name):
 def evaluate_boostraping_stat_files(stat_files, input_name, ref_name):
     """Evaluate bootstrapped statistics and compute median across bootstrap iterations."""
     # Open the first file to initialize dimensions and weights
-    with xr.open_dataset(stat_files[0]) as first_file:
-        shape = first_file["rel_mean"].shape
-        n_bootstrap = len(stat_files)
+    try:
+        with xr.open_dataset(stat_files[0]) as first_file:
+            shape = first_file["rel_mean"].shape
+            n_bootstrap = len(stat_files)
 
-        # Determine keys for climatology fields
-        input_clim_key = (
-            f"{input_name}_clim" if f"{input_name}_clim" in first_file else "input_clim"
-        )
-        ref_clim_key = (
-            f"{ref_name}_clim" if f"{ref_name}_clim" in first_file else "ref_clim"
-        )
+            # Determine keys for climatology fields
+            input_clim_key = (
+                f"{input_name}_clim"
+                if f"{input_name}_clim" in first_file
+                else "input_clim"
+            )
+            ref_clim_key = (
+                f"{ref_name}_clim" if f"{ref_name}_clim" in first_file else "ref_clim"
+            )
 
-        # Preallocate arrays for all variables
-        mean = np.empty((n_bootstrap, *shape))
-        std = np.empty((n_bootstrap, *shape))
-        spearman = np.empty((n_bootstrap, *shape))
-        input_clim = np.empty((n_bootstrap, 12, *shape))  # Month x lat x lon
-        ref_clim = np.empty((n_bootstrap, 12, *shape))  # Month x lat x lon
-
+            # Preallocate arrays for all variables
+            mean = np.empty((n_bootstrap, *shape))
+            std = np.empty((n_bootstrap, *shape))
+            spearman = np.empty((n_bootstrap, *shape))
+            input_clim = np.empty((n_bootstrap, 12, *shape))  # Month x lat x lon
+            ref_clim = np.empty((n_bootstrap, 12, *shape))  # Month x lat x lon
+    except ValueError as ve:
+        logger.error(f"opening file {stat_files[0]} as first file failed.")
+        raise ve
     # Fill the preallocated arrays with bootstrap data
     for i, file in enumerate(stat_files):
         with xr.open_dataset(file) as ds:
@@ -738,12 +945,18 @@ def evaluate_boostraping_stat_files(stat_files, input_name, ref_name):
     }
 
 
-def get_dataset_from_path(path, years=None):
+def get_dataset_from_path(path, available_years=None, available_mem=None, file_name='*.*'):
     """Get a dataset from a given path whether that is a file or a directory."""
-    if path.is_file() and path.suffix == "nc":
-        return xr.open_dataset(path)
+    if path.is_file() and path.suffix == ".nc":
+        chunking = available_mem is not None
+        return get_xarray_ds_from_file(
+            path,
+            chunking=chunking,
+            available_mem_gib=available_mem,
+            chunk_type=ChunkType.SPACE,
+        )
     if path.is_dir():
-        file_list = get_files(path, years=years)
+        file_list = get_files(path, available_years=available_years, file_name=file_name)
         logger.debug(file_list)
         logger.debug("combining files by coords ...")
         return xr.open_mfdataset(
@@ -798,131 +1011,13 @@ def regridd_to_higher_spatial_resolution(ds1, ds2):
     return ds1, regridded_ds
 
 
-def direct_comparison(
-    input_path,
-    ref_path,
-    input_var,
-    ref_var,
-    input_name,
-    ref_name,
-    input_factor,
-    ref_factor,
-    coordinate_slice,
-    output_path,
-):
-    """Directly compare the two datasets without bootstraping."""
-    if ref_path is None:
-        with ErrorLogger(logger):
-            msg = "ref_path must be given for direct comparison."
-            raise ValueError(msg)
-    logger.info("Start direct comparison.")
-    input = get_dataset_from_path(input_path)
-    ref = get_dataset_from_path(ref_path)
-    logger.info("crop the data spatially")
-    input = input.sel(
-        {
-            get_coord_key(input, lat=True): coordinate_slice["lat"],
-            get_coord_key(input, lon=True): coordinate_slice["lon"],
-        }
-    )
-    ref = ref.sel(
-        {
-            get_coord_key(ref, lat=True): coordinate_slice["lat"],
-            get_coord_key(ref, lon=True): coordinate_slice["lon"],
-        }
-    )
-    logger.info("crop to overlapping time")
-    start_time = max(input.time.min(), ref.time.min())
-    end_time = min(input.time.max(), ref.time.max())
-    if start_time >= end_time:
-        with ErrorLogger(logger):
-            msg = "The timeframes of the two datasets are not overlapping."
-            raise ValueError(msg)
-    logger.info(f"start_time {start_time}; end_time {end_time}")
-    input = input.sel(time=slice(start_time, end_time))
-    ref = ref.sel(time=slice(start_time, end_time))
-
-    logger.info("regridd to the lower temporal resolution using average")
-    if len(ref.time) < len(input.time):
-        low_res_time = ref.time
-        input = input.groupby_bins("time", bins=low_res_time).mean(dim="time")
-    elif len(input.time) > len(ref.time):
-        low_res_time = input.time
-        ref = ref.groupby_bins("time", bins=low_res_time).mean(dim="time")
-    logger.info("calculate climatologies")
-    input_clim = get_clim_from_ds(input, input_var, input_factor)
-    ref_clim = get_clim_from_ds(ref, ref_var, ref_factor)
-
-    logger.info("calculate relative standard deviation")
-    # with clim given here the seasonality is removed from the data
-    input_std = get_std_from_ds(input, input_var, input_clim, input_factor)
-    ref_std = get_std_from_ds(ref, ref_var, ref_clim, ref_factor)
-    rel_std = (input_std / ref_std).values
-
-    input = input[input_var] * input_factor
-    ref = ref[ref_var] * ref_factor
-
-    logger.info("calculate rel mean")
-    rel_mean = (
-        input.mean(dim="time", skipna=True).values
-        / ref.mean(dim="time", skipna=True).values
-    )
-    logger.info("calculate spearman spatial ")
-    spearman = spearman_spatial(input, ref).values
-
-    rel_mean = xr.DataArray(
-        rel_mean,
-        coords={
-            "lat": get_coord_values(input, lat=True),
-            "lon": get_coord_values(input, lon=True),
-        },
-        dims=["lat", "lon"],
-    )
-    rel_std = xr.DataArray(
-        rel_std,
-        coords={
-            "lat": get_coord_values(input, lat=True),
-            "lon": get_coord_values(input, lon=True),
-        },
-        dims=["lat", "lon"],
-    )
-    spearman = xr.DataArray(
-        spearman,
-        coords={
-            "lat": get_coord_values(input, lat=True),
-            "lon": get_coord_values(input, lon=True),
-        },
-        dims=["lat", "lon"],
-    )
-    output = xr.Dataset(
-        {"spearman": spearman, "rel_std": rel_std, "rel_mean": rel_mean},
-        coords={
-            "lat": get_coord_values(input, lat=True),
-            "lon": get_coord_values(input, lon=True),
-        },
-    )
-    logger.info(
-        f"Save the results to {output_path/ f'{input_name}_{ref_name}_direct_comp.nc'}"
-    )
-    output.to_netcdf(output_path / f"{input_name}_{ref_name}_direct_comp.nc")
-    plot_map(
-        rel_mean,
-        rel_std,
-        spearman,
-        ref_clim,
-        input_clim,
-        input_name,
-        ref_name,
-        output_path,
-    )
-
-def get_years_from_path(path, raise_exception=True):
+def get_years_from_path(path, raise_exception=True, file_name='*.*'):
     """Get years for one dataset from the folder structure or the xarray dataset."""
     if path.is_dir():
-        return [p.name for p in year_structure_paths(path)]
+        return [int(p.name) for p in year_structure_paths(path, file_name=file_name)]
     if path.is_file():
         with get_xarray_ds_from_file(path) as input_ds:
-            return [str(y) for y in np.unique(input_ds.time.dt.year.data)]
+            return [int(y) for y in np.unique(input_ds.time.dt.year.data)]
     if raise_exception:
         msg = f"The provided path {path} is neither file nor directory."
         with ErrorLogger(logger):
@@ -930,8 +1025,12 @@ def get_years_from_path(path, raise_exception=True):
     return []
 
 
-def get_overlapping_years(input_path, ref_path):
-    """Determine overlapping years between two datasets."""
+def get_available_years(input_path, ref_path, year_slice=None, direct_comp=True):
+    """
+    Determine available years from constrains and datasets.
+
+    If no reference data is given it will only be the input years inside the year slice.
+    """
     logger.info("Determining overlapping years.")
     # get all years from input data
     years_in = get_years_from_path(input_path)
@@ -939,18 +1038,27 @@ def get_overlapping_years(input_path, ref_path):
     logger.debug(f"Input years: {years_in}")
 
     # get all years from reference data
-    years_ref = get_years_from_path(ref_path)
+    years_ref = get_years_from_path(ref_path, raise_exception=False)
     years_ref.sort()
     logger.debug(f"Ref years: {years_ref}")
 
     # find overlapping years
     years = []
-    for year in years_in:
-        if year in years_ref:
-            years.append(year.strip())
+    possible_years = years_in
+    if not direct_comp and years_ref:
+        possible_years.extend([y for y in years_ref if y not in possible_years])
+        possible_years.sort()
+    for year in possible_years:
+        if year_slice.start is not None and year < year_slice.start:
+            continue
+        if year_slice.stop is not None and year > year_slice.stop:
+            continue
+        if not years_ref or year in years_ref:
+            years.append(year)
     return years
 
-def year_structure_paths(path: Path) -> bool:
+
+def year_structure_paths(path: Path, file_name='*.*') -> bool:
     """
     Return any subdirectory of `path` with year structur.
 
@@ -960,15 +1068,35 @@ def year_structure_paths(path: Path) -> bool:
     if not path.is_dir():
         return False
     year_paths = []
-    year_re = re.compile(r'^\d{4}$')
+    year_re = re.compile(r"^\d{4}$")
     for sub in path.iterdir():
         # check that sub is dir, has a year as name and contains one dir or file
-        if sub.is_dir() and year_re.fullmatch(sub.name) and any(sub.iterdir()):
+        if sub.is_dir() and year_re.fullmatch(sub.name) and any(list(sub.rglob(file_name))):
             year_paths.append(sub)
     return year_paths
 
+def get_target_time_res_from_files(input_file, ref_file):
+    """Get time resolution for resampling from two files."""
+    with xr.open_dataset(input_file) as input_in:
+        res_sim = input_in.time.diff('time').median()
+    with xr.open_dataset(ref_file) as ref_in:
+        res_obs = ref_in.time.diff('time').median()
+    target_res = res_obs if res_obs > res_sim else res_sim
+    return f"{int(target_res / np.timedelta64(1, 'h'))}h"
+
+
+
+def get_target_time_res(input_path, ref_path, folder_name=''):
+    """Get coarser time resolution from two datasets with files in folder structur."""
+    input_files = (Path(input_path) / folder_name).glob('*nc')
+    ref_files = (Path(ref_path) / folder_name).glob('*nc')
+    if not list(input_files) or not list(ref_files):
+        logger.error("One of the datasets has no files.")
+        return None
+    return get_target_time_res_from_files(next(input_files), next(ref_files))
+
 @log_arguments()
-def seasonality_grid_validation(
+def gridded_data_validation(
     input_path,
     input_var,
     output_path,
@@ -984,12 +1112,15 @@ def seasonality_grid_validation(
     n_bootstrap_years=None,
     n_bootstrap_selections=None,
     direct_comp=True,
+    year_slice=None,
+    avaiable_mem=None,
+    input_file_name='*.*',
+    ref_file_name='*.*',
 ):
     """Validate a spatial variable from two datasets by comparing the climatology of that variable."""
     output_path = Path(output_path)
     input_path = Path(input_path)
     ref_path = Path(ref_path) if ref_path is not None else None
-    years = None
 
     if not output_path.is_dir():
         output_path.mkdir(parents=True)
@@ -1000,25 +1131,34 @@ def seasonality_grid_validation(
         return
     if input_path.is_dir() and len(year_structure_paths(input_path)) == 0:
         # check if the input path has the right structure
-        input_path = input_path / 'mHM_Fluxes_States.nc'
-    if direct_comp:
-        years = get_overlapping_years(input_path, ref_path)
-        logger.info(f"Years {years} are overlapping.")
+        input_path = input_path / "mHM_Fluxes_States.nc"
+    available_years = get_available_years(input_path, ref_path, year_slice, direct_comp)
+    logger.info(f"Years {available_years} are available for comparison.")
+    if direct_comp: 
+        target_time_res = get_target_time_res(input_path, ref_path, next(iter(years)))
+        logger.info(f"Years {years} are overlapping. Data should be resampled to {target_time_res}")
+
 
     if ref_path is None:
         # Only create statistics do not compare
-        logger.info(f'No ref file provided. Only creating a stat file for {input_name}.')
+        logger.info(
+            f"No ref file provided. Only creating a stat file for {input_name}."
+        )
         output_name = f"{input_name}_stats.nc" if input_name is not None else "stats.nc"
         if input_path.is_file():
             # Write file stats to file
-            get_file_stats(
-                input_path,
-                input_var,
-                input_factor,
-                coordinate_slice,
-                output=output_path / output_name,
-                years=years,
-            )
+            with get_xarray_ds_from_file(
+                input_path, chunking=True, available_mem_gib=10
+            ) as ds_in:
+                get_file_stats(
+                    ds_in,
+                    input_var,
+                    input_factor,
+                    coordinate_slice,
+                    output=output_path / output_name,
+                    avaiable_years=available_years,
+                )
+
         elif (
             n_bootstrap_years is not None
             and n_bootstrap_selections > 0
@@ -1032,11 +1172,12 @@ def seasonality_grid_validation(
                     input_factor,
                     coordinate_slice,
                     n_bootstrap_years,
-                    s,
+                    bootstrap_index,
                     output_path / output_name,
-                    years=years,
+                    available_years=available_years,
+                    input_file_name=input_file_name
                 )
-                for s in range(n_bootstrap_selections)
+                for bootstrap_index in range(n_bootstrap_selections)
             )
         elif input_path.is_dir():
             # Write file stats for one dataset read in from multiple files in a directory
@@ -1046,7 +1187,8 @@ def seasonality_grid_validation(
                 input_factor,
                 coordinate_slice,
                 output_path=output_path / output_name,
-                years=years,
+                available_years=available_years,
+                file_name=input_file_name
             )
         else:
             with ErrorLogger(logger):
@@ -1057,6 +1199,7 @@ def seasonality_grid_validation(
         and n_bootstrap_selections > 0
         and input_path.is_dir()
         and ref_path.is_dir()
+        and not direct_comp
     ):
         # Compare by bootstraping
         if only_plot:
@@ -1078,22 +1221,29 @@ def seasonality_grid_validation(
                     ref_factor,
                     coordinate_slice,
                     n_bootstrap_years,
-                    s,
-                    years=years,
+                    bootstrap_index,
+                    available_years=available_years,
+                    input_file_name=input_file_name,
+                    ref_file_name=ref_file_name
+                    target_freq=target_time_res
                 )
-                for s in range(n_bootstrap_selections)
+                for bootstrap_index in range(n_bootstrap_selections)
             )
-        results = evaluate_boostraping_stat_files(
-            stat_files, input_name=input_name, ref_name=ref_name
-        )
-        plot_map(
-            **results,
-            output_path=output_path,
-            input_name=input_name,
-            ref_name=ref_name,
-        )
+        stat_files = [file for file in stat_files if file is not None]
+        if stat_files:
+            results = evaluate_boostraping_stat_files(
+                stat_files, input_name=input_name, ref_name=ref_name
+            )
+            plot_map(
+                **results,
+                output_path=output_path,
+                input_name=input_name,
+                ref_name=ref_name,
+            )
+        else:
+            logger.error("There are no statfiles created from the evaluation.")
     else:
-        # compare without bootstraping
+        logger.info("compare without bootstraping")
         compare_input_with_ref(
             input_path,
             input_var,
@@ -1106,5 +1256,10 @@ def seasonality_grid_validation(
             ref_factor,
             coordinate_slice,
             ncpus=n_cpus,
-            years=years,
+            available_years=available_years,
+            direct_comp=direct_comp,
+            available_mem=avaiable_mem,
+            input_file_name=input_file_name,
+            ref_file_name=ref_file_name
+            target_freq=target_time_res
         )

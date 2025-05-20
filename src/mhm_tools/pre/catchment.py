@@ -108,6 +108,8 @@ class Catchment:
 
         self.input_da = data
 
+        self.input_da = data
+
         if var == "fdir":
             if "nodata_value" in self.input_da.attrs:
                 old_no_data_val = self.input_da.attrs["nodata_value"]

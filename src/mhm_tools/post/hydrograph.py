@@ -123,6 +123,8 @@ class Hydrograph:
         elif simulation is not None or observation is not None:
             msg = "Either one or none of the input must be via array."
             raise ValueError(msg)
+        logger.debug(f"Simulation input data: {simulation}")
+        logger.debug(f"Observation input data: {observation}")
         self.sim_discharge_data_nonan = self.sim_discharge_data.dropna(
             dim="time", how="all"
         )
@@ -160,7 +162,7 @@ class Hydrograph:
         arr1 = np.array(arr1)
         arr2 = np.array(arr2)
         if len(arr1) != len(arr2):
-            exeption = "The two timeseries do not have the same length."
+            exeption = f"The two timeseries do not have the same length. {arr1.shape} and {arr2.shape}"
             raise ValueError(exeption)
         data = np.transpose(np.array([arr1.flatten(), arr2.flatten()]))
         try:
@@ -981,6 +983,8 @@ def gen_hydrograph_by_data_sets(
     save=True,
     id=None,
     calc_stats=False,
+    raise_exceptions=True, 
+    **kwargs
 ):
     """
     Use discharge and precipitation data provided as xarrays to produce a hydrograph with different analysises.
@@ -997,20 +1001,26 @@ def gen_hydrograph_by_data_sets(
         show: bool if plots should be shown or not
         save: bool if plots should be saved or not
         title: title given to the hydrograph
+        raise_exceptions: Raise or only log exceptions
         plot_code: code indicating which plots to create
     """
     hydro = Hydrograph(calc_stats=calc_stats)
-    missing_data_error_msg = f"For {id} the hydrograph could not be created."
-    if hydro.set_discharge(simulation=simulations, observation=observation):
-        hydro.pre = precipitation
-        hydro.output_file = output_file
-        hydro.title = str(id) if not title and id is not None else title
-        hydro.show = show
-        hydro.save = save
-        hydro.catchment.area = area
-        hydro.check_which_plots_to_create(plot_code)
-        if not hydro.get_hydrograph():
+    try:
+        missing_data_error_msg = f"For {id} the hydrograph could not be created."
+        if hydro.set_discharge(simulation=simulations, observation=observation):
+            hydro.pre = precipitation
+            hydro.output_file = output_file
+            hydro.title = str(id) if not title and id is not None else title
+            hydro.show = show
+            hydro.save = save
+            hydro.catchment.area = area
+            hydro.check_which_plots_to_create(plot_code)
+            if not hydro.get_hydrograph():
+                logger.error(missing_data_error_msg)
+        else:
             logger.error(missing_data_error_msg)
-    else:
-        logger.error(missing_data_error_msg)
-    return {**hydro.objectives.__dict__, "id": id}
+    except Exception as e:
+        logger.error(e)
+        if raise_exceptions:
+            raise e
+    return {**hydro.objectives.__dict__, "id": id, **kwargs}

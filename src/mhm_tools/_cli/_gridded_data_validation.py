@@ -1,11 +1,11 @@
-"""Validation of spatially distributed data based on their climatology."""
+"""Validation of spatially distributed data based on their climatology or timeseries."""
 
-from mhm_tools.common.cli_utils import get_coords
-from mhm_tools.post.seasonality_grid_validation import seasonality_grid_validation
+from mhm_tools.common.cli_utils import get_available_mem_in_unit, get_coords
+from mhm_tools.post.gridded_data_validation import gridded_data_validation
 
 
 def add_args(parser):
-    """Add cli arguments for the seasonality validation.
+    """Add cli arguments for the gridded validation.
 
     Parameters
     ----------
@@ -102,7 +102,38 @@ def add_args(parser):
         required=False,
         help=("Use no statistics but compare timeseries directly. Needs ref_path."),
     )
-
+    parser.add_argument(
+        "--start_year",
+        required=False,
+        default=None,
+        type=int,
+        help=("""First year allowed in the analysis."""),
+    )
+    parser.add_argument(
+        "--end_year",
+        required=False,
+        default=None,
+        type=int,
+        help=("Lates year that is allowed in the analysis."),
+    )
+    parser.add_argument(
+        "--available_mem",
+        required=False,
+        default=None,
+        help=("""Available memory per cpu in Gb or Mb (default Gb)"""),
+    )
+    parser.add_argument(
+        "--input_file_name",
+        required=False,
+        default="*.*",
+        help="Input file name. E.g. '*.nc' to copy only nc files or 'pre*' to copy only precipitation files. If the file has a header in it's folder the header is reproduced regardless of wether nor not it fits the filename.",
+    )
+    parser.add_argument(
+        "--ref_file_name",
+        required=False,
+        default="*.*",
+        help="Ref file name. E.g. '*.nc' to copy only nc files or 'pre*' to copy only precipitation files. If the file has a header in it's folder the header is reproduced regardless of wether nor not it fits the filename.",
+    )
 
 def run(args):
     """Calculate the validation.
@@ -126,7 +157,9 @@ def run(args):
             "lat": slice(lat_max, lat_min),
             "lon": slice(lon_min, lon_max),
         }
-    seasonality_grid_validation(
+    year_slice = slice(args.start_year, args.end_year)
+    available_mem = get_available_mem_in_unit(args.available_mem)
+    gridded_data_validation(
         args.input_path,
         args.input_variable,
         args.output_dir,
@@ -142,4 +175,8 @@ def run(args):
         args.n_boostrap_years,
         args.n_bootstrap_selections,
         args.direct_comparison,
+        year_slice=year_slice,
+        avaiable_mem=available_mem,
+        input_file_name=args.input_file_name,
+        ref_file_name=args.ref_file_name,
     )

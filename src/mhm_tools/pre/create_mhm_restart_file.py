@@ -814,8 +814,11 @@ class MHMRestartFile:
                     ),
                 }
                 for data_var in data_vars:
-                    try: 
-                        if cur_ds[data_var].shape != ds_whole[data_var][index_slice].shape:
+                    try:
+                        if (
+                            cur_ds[data_var].shape
+                            != ds_whole[data_var][index_slice].shape
+                        ):
                             dims = cur_ds[data_var].dims
                             ds_whole[data_var] = ds_whole[data_var].transpose(*dims)
                             if (
@@ -837,7 +840,7 @@ class MHMRestartFile:
                                 continue
                         ds_whole[data_var][index_slice] = cur_ds[data_var].data
                     except KeyError as ke:
-                        logger.error(f'Key error in file {restart_file_path}')
+                        logger.error(f"Key error in file {restart_file_path}")
                         with ErrorLogger(logger):
                             raise ke
         logger.info("Merging restart files done")
