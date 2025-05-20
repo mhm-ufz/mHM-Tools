@@ -147,23 +147,35 @@ def get_overlapping_time_slice(input_ds, ref_ds):
 
 
 def crop_ds(
-    ds: xr.Dataset, lon_min: float, lon_max: float, lat_min: float, lat_max: float
+    ds: xr.Dataset,
+    lon_min: float,
+    lon_max: float,
+    lat_min: float,
+    lat_max: float,
+    lon_name: str = "lon",
+    lat_name: str = "lat",
 ) -> xr.Dataset:
     """
     Crop an xarray.Dataset to the given lon/lat bounds, handling coordinate order.
     """
-    # longitude
-    lon_vals = ds["lon"].values
+    # ensure min < max
+    lon_low, lon_high = sorted([lon_min, lon_max])
+    lat_low, lat_high = sorted([lat_min, lat_max])
+
+    # grab the coordinate arrays by name
+    lon_vals = ds[lon_name].values
+    lat_vals = ds[lat_name].values
+
+    # if the coordinate axis is ascending, slice low→high; else high→low
     if lon_vals[0] <= lon_vals[-1]:
-        lon_slice = slice(lon_min, lon_max)
+        lon_slice = slice(lon_low, lon_high)
     else:
-        lon_slice = slice(lon_max, lon_min)
+        lon_slice = slice(lon_high, lon_low)
 
-    # latitude
-    lat_vals = ds["lat"].values
     if lat_vals[0] <= lat_vals[-1]:
-        lat_slice = slice(lat_min, lat_max)
+        lat_slice = slice(lat_low, lat_high)
     else:
-        lat_slice = slice(lat_max, lat_min)
+        lat_slice = slice(lat_high, lat_low)
 
-    return ds.sel(lon=lon_slice, lat=lat_slice)
+    # select using a dict so named dims are respected
+    return ds.sel({lon_name: lon_slice, lat_name: lat_slice})
