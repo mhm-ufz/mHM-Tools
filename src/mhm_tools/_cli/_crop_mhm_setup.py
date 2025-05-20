@@ -1,7 +1,6 @@
 """Cut domains out of an existing mHM setup."""
 
 from mhm_tools.common.cli_utils import get_available_mem_in_unit, get_coords
-from mhm_tools.common.xarray_utils import get_coord_key
 from mhm_tools.pre.crop_mhm_setup import crop_mhm_setup
 
 
@@ -15,12 +14,6 @@ def add_args(parser):
     """
     required_args = parser.add_argument_group("required arguments")
     required_args.add_argument(
-        "-m",
-        "--mask_file",
-        required=False,
-        help="The path the the mask file. Mask files can be created using the catchment command with the --mask flag.",
-    )
-    required_args.add_argument(
         "-i",
         "--input_path",
         required=True,
@@ -33,12 +26,18 @@ def add_args(parser):
         required=True,
         help="Path of the directory where the new domain setup should be saved.",
     )
-    required_args.add_argument(
+    parser.add_argument(
         "-f",
         "--file_name",
         required=False,
         default="*.*",
         help="Input file name. E.g. '*.nc' to copy only nc files or 'pre*' to copy only precipitation files. If the file has a header in it's folder the header is reproduced regardless of wether nor not it fits the filename.",
+    )
+    parser.add_argument(
+        "-m",
+        "--mask_file",
+        required=False,
+        help="The path the the mask file. Mask files can be created using the catchment command with the --mask flag.",
     )
     parser.add_argument(
         "--l1_resolution",
@@ -127,7 +126,6 @@ def add_args(parser):
     )
 
 
-
 def run(args):
     """Cut out a domain setup out of an existing mHM setup..
 
@@ -155,8 +153,9 @@ def run(args):
     # l0_resolution = float(args.lonlatbox.split(",")[4])
     available_mem = get_available_mem_in_unit(args.available_mem)
     crop_mhm_setup(
-        args.output_path,
-        args.input_path,
+        input_path=args.input_path,
+        output_path=args.output_path,
+        mask_da=mask_da,
         l1_resolution=args.l1_resolution,
         l11_resolution=args.l11_resolution,
         lonslice=lonslice,

@@ -358,7 +358,14 @@ def Q_data_to_xarray(
         )
 
         # 4) Build a new Dataset from this 2D DataArray
-        sim_data = xr.Dataset({"discharge": simulation_discharge, "facc": facc_ids, "x": x_ids, "y": y_ids})
+        sim_data = xr.Dataset(
+            {
+                "discharge": simulation_discharge,
+                "facc": facc_ids,
+                "x": x_ids,
+                "y": y_ids,
+            }
+        )
         logger.info(f"Saving sim data to {sim_output_file}...")
         write_xarray_to_file(sim_data, sim_output_file)
     return observed_data, sim_data
@@ -512,8 +519,8 @@ def evaludate_grdc_data(  # noqa: PLR0913
             calc_stats=direct_comparison,
             raise_exceptions=False,
             title=f'{id} at {model_ds["x"].sel(id=id).data} - {model_ds["y"].sel(id=id).data}',
-            x = model_ds["x"].sel(id=id).data,
-            y = model_ds["y"].sel(id=id).data
+            x=model_ds["x"].sel(id=id).data,
+            y=model_ds["y"].sel(id=id).data,
         )
         for id in observed_ds.id.values
         if id in model_ds.id.values

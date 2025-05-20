@@ -218,7 +218,6 @@ class CreateSubdomainMasks:
 
         logger.info("writing output files")
         for i, basin_id in enumerate(basin_ids, 1):
-
             logger.info(f"processing subdomain {i}")
 
             sub_mask = (new_ids_remapped.values == basin_id) & ~np.isnan(land_mask)
