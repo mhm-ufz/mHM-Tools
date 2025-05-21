@@ -95,9 +95,7 @@ def _get_parser():
     add_command_from_module(
         subparsers, "create_mhm_restart_file", _create_mhm_restart_file
     )
-    add_command_from_module(
-        subparsers, "long_term_mean", _long_term_mean
-    )
+    add_command_from_module(subparsers, "long_term_mean", _long_term_mean)
     add_command_from_module(
         subparsers, "long_term_mean_difference", _long_term_mean_difference
     )

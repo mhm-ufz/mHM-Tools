@@ -5,11 +5,13 @@ Authors
 -------
 - Jeisson Leal (refactored to remove var_name dependency)
 """
-import logging
+
 import glob
+import logging
 import os
 from pathlib import Path
 from typing import Optional
+
 from cdo import Cdo
 
 from mhm_tools.common.logger import ErrorLogger
@@ -19,11 +21,12 @@ logger = logging.getLogger(__name__)
 
 # shared mapping for CDO operations
 OP_MAP = {
-    "hourly":  ("hourmean", "hoursum"),
-    "daily":   ("daymean",  "daysum"),
-    "monthly": ("monmean",  "monsum"),
-    "yearly":  ("yearmean", "yearsum"),
+    "hourly": ("hourmean", "hoursum"),
+    "daily": ("daymean", "daysum"),
+    "monthly": ("monmean", "monsum"),
+    "yearly": ("yearmean", "yearsum"),
 }
+
 
 def aggregate_files(
     input_path: Path,
@@ -64,6 +67,7 @@ def aggregate_files(
             raise RuntimeError(
                 f"CDO operation '{cdo_op}' failed on file '{input_file}': {e}"
             ) from e
+
 
 def cal_long_term_mean(
     in_dir: str,
@@ -145,10 +149,7 @@ def cal_long_term_mean(
                 aggregation_type=aggregation_type,
                 long_term_mean_type=long_term_mean_type,
             )
-        merge_pattern = os.path.join(
-            aggregation_dir,
-            f"{cdo_op}_{Path(in_file).name}"
-        )
+        merge_pattern = os.path.join(aggregation_dir, f"{cdo_op}_{Path(in_file).name}")
     else:
         merge_pattern = os.path.join(p_input_dir, Path(in_file).name)
 

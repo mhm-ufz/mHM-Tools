@@ -1,9 +1,12 @@
 """
 Computes and stores long term mean for a given NetCDF file(s)
 """
-from typing import Optional
+
 import argparse
+from typing import Optional
+
 from mhm_tools.post.long_term_mean import cal_long_term_mean
+
 
 def add_args(parser):
     """Add CLI arguments for cal_long_term_mean subcommand."""
@@ -15,17 +18,20 @@ def add_args(parser):
 
     required = parser.add_argument_group("required arguments")
     required.add_argument(
-        "-i", "--in-dir",
+        "-i",
+        "--in-dir",
         required=True,
         help="Input directory containing forcing NetCDF files",
     )
     required.add_argument(
-        "-f", "--in-file",
+        "-f",
+        "--in-file",
         required=True,
         help='Input filename or glob pattern (e.g. "data_*.nc")',
     )
     required.add_argument(
-        "-o", "--out-dir",
+        "-o",
+        "--out-dir",
         required=True,
         help="Output directory for processed files",
     )
