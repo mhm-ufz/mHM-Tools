@@ -117,6 +117,7 @@ def regrid_mask(
         results /= np.nanmax(results)
         mask = results > 1e-3
     elif target_res == mask_res:
+        logger.debug('Target resolution equals mask resolution.')
         return mask_ds
     else:
         msg = "mask coarser than file not yet implemented"
@@ -134,6 +135,7 @@ def write_to_file(ds, output_file: Path):
     suffix = output_file.suffix
     if suffix == ".asc":
         write_xarray_to_ascii(ds, output_file)
+        # ds.to_netcdf(output_file.with_suffix('.nc'))
     elif suffix == ".nc":
         ds.to_netcdf(output_file)
 
@@ -144,7 +146,7 @@ def crop_file_with_header(ds_in, file_path, output_path, lonslice, latslice):
     header = file_path.parent / "header.txt"
     # read header
     header_information = read_header(header)
-
+    logger.info(header_information)
     # obtain data variable from dataset
     data_var = get_single_data_var(ds_in)
     if data_var is None:
@@ -163,8 +165,6 @@ def crop_file_with_header(ds_in, file_path, output_path, lonslice, latslice):
         (lonslice.start - pres - header_information["xllcorner"]) / header_information["cellsize"] + 0.5
     )
     index_x_max = int((lonslice.stop + pres - header_information["xllcorner"]) / header_information["cellsize"])
-    # index_y_min = int((latslice.stop - pres - d["yllcorner"]) / d["cellsize"] + 0.5)
-    # index_y_max = int((latslice.start + pres - d["yllcorner"]) / d["cellsize"])
     ymax = header_information["yllcorner"] + header_information["cellsize"] * header_information["nrows"]
     index_y_min = int((ymax - latslice.start - pres) / header_information["cellsize"] + 0.5)
     index_y_max = int((ymax - latslice.stop + pres) / header_information["cellsize"])
@@ -181,12 +181,12 @@ def crop_file_with_header(ds_in, file_path, output_path, lonslice, latslice):
 "xllcorner": xll,
 "yllcorner": yll,
 "cellsize": header_information['cellsize'],
-"NODATA_value": header_information['NODATA_value']
+"nodata_value": header_information['nodata_value']
     }
     logger.info(
         f"Writing header file to {header_out_path} with header: {new_header_information}"
     )
-    write_header(new_header_information)
+    write_header(header_out_path, new_header_information)
     try:
         data = ds_in[data_var].isel(
             {
@@ -218,11 +218,12 @@ def crop_file_with_header(ds_in, file_path, output_path, lonslice, latslice):
                 attrs=data.attrs,
             )
         data_array.attrs.update(
-            {"_FillValue": header_information["NODATA_value"], "missing_value": header_information["NODATA_value"]}
+            {"_FillValue": header_information["nodata_value"], "missing_value": header_information["nodata_value"]}
         )
         # Convert to Dataset
-        ds_out = xr.Dataset({data_var: data_array})
+        ds_out = data_array.to_dataset()
         ds_out.attrs.update(ds_in.attrs)
+        logger.debug(f'cropped ds {ds_out}')
         return ds_out, header_out_path
     except IndexError as e:
         with ErrorLogger(logger):
@@ -325,13 +326,15 @@ def crop_file(
             "Latlon cropping depreciated will implement new latlon creation using the mhm-tools latlon functionality."
         )
         latlon_files.set_latlon_output_file(output_file)
+        return latlon_files
     # 2. Restart files are complex and are not yet implemented. mHM restart files can be croped, mRM restart files can't (?).
-    elif "restart" in input_file.name.lower():
+    if "restart" in input_file.name.lower():
         logger.warning(
             f"Restart file {input_file} could not be copied as that is not yet implemented."
         )
+        return latlon_files
     # 3. Files that are in the same folder as a header file. Typical examples are meteo datasets such as temperature or precipitation
-    elif list(input_file.parent.glob("header.txt")):
+    if list(input_file.parent.glob("header.txt")):
         logger.debug("Cropping and writing new header file...")
         ds_cropped, header_path = crop_file_with_header(
             ds,
@@ -372,11 +375,10 @@ def crop_file(
         ds_cropped.sizes[lat_key] < 2
         or ds_cropped.sizes[lon_key] < 2
     ):
-        logger.warning(
-            "Cropping resulted in insufficient grid size "
-            f"(lat={ds_cropped.sizes[lat_key]}, lon={ds_cropped.sizes[lon_key]})."
-        )
-        return latlon_files
+        msg = f"Cropping resulted in insufficient grid size \
+            (lat={ds_cropped.sizes[lat_key]}, lon={ds_cropped.sizes[lon_key]})."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
 
     # only the dem file or and eventual mHM restart file are masked using the provided mask file
     if "dem" in input_file.name.lower():  # or "mhm" in f.name.lower()

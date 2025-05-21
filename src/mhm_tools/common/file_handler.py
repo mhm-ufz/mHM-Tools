@@ -5,6 +5,7 @@ import logging
 from enum import Enum
 from pathlib import Path
 
+from mhm_tools.common.esri_grid import write_header
 import numpy as np
 import xarray as xr
 import rioxarray 
@@ -35,23 +36,7 @@ def create_header(ds, output_path=None, no_data_value="-9999", write=True):
 
     ncols = len(x)
     nrows = len(y)
-    if write:
-        header_out_path = output_path / "header.txt"
-        header_str = f"""
-ncols                {ncols}
-nrows                {nrows}
-xllcorner            {xllcorner:.6f}
-yllcorner            {yllcorner:.6f}
-cellsize             {cellsize:.6f}
-NODATA_value         {no_data_value}
-            """
-        logger.info(
-            f"Writing header file to {header_out_path} with header str: {header_str}"
-        )
-        with header_out_path.open("w") as hf:
-            hf.write(header_str)
-        return header_out_path
-    return {
+    header = {
         "ncols": ncols,
         "nrows": nrows,
         "xllcorner": xllcorner,
@@ -59,6 +44,14 @@ NODATA_value         {no_data_value}
         "cellsize": cellsize,
         "NODATA_value": no_data_value,
     }
+    if write:
+        header_out_path = output_path / "header.txt"
+        logger.info(
+            f"Writing header file to {header_out_path} with header: {header}"
+        )
+        write_header(header_out_path, header)
+        return header_out_path
+    return header
 
 
 def crop_file_by_mask(ds, mask_file):
@@ -76,7 +69,7 @@ def crop_file_by_mask(ds, mask_file):
         )
 
 
-def chunk_dataset_space_only(ds: xr.Dataset, available_mem_gib: float) -> xr.Dataset:
+def get_chunks_space_only(ds: xr.Dataset, available_mem_gib: float) -> xr.Dataset:
     """
     Chunk only in space (lat/lon), leaving time whole, sized to available memory.
 
@@ -95,10 +88,7 @@ def chunk_dataset_space_only(ds: xr.Dataset, available_mem_gib: float) -> xr.Dat
     # --- find coordinate names ---
     lat_key = get_coord_key(ds, lat=True)
     lon_key = get_coord_key(ds, lon=True)
-    time_key = None
-    with contextlib.suppress(ValueError):
-        time_key = get_coord_key(ds, time=True)
-
+    time_key = get_coord_key(ds, time=True, raise_exception=False)
     ny = ds.sizes[lat_key]
     nx = ds.sizes[lon_key]
     nt = ds.sizes.get(time_key, 1)
@@ -124,10 +114,10 @@ def chunk_dataset_space_only(ds: xr.Dataset, available_mem_gib: float) -> xr.Dat
         f"Chunk sizes → time: {chunks.get(time_key,'—')}, "
         f"{lat_key}: {y_chunk}, {lon_key}: {x_chunk}"
     )
-    return ds.chunk(chunks)
+    return chunks
 
 
-def chunk_dataset_space_and_time(ds, available_mem_gib) -> xr.Dataset:
+def get_chunks_space_and_time(ds, available_mem_gib) -> xr.Dataset:
     """
     Chunk dataset adjusting chunk size to avaiable memory.
 
@@ -168,7 +158,7 @@ def chunk_dataset_space_and_time(ds, available_mem_gib) -> xr.Dataset:
         chunks[time_key] = t_chunk
     logger.debug(f"   The chunks used are {chunks}")
 
-    return ds.chunk(chunks)
+    return chunks
 
 
 class ChunkType(Enum):
@@ -205,9 +195,8 @@ def get_xarray_ds_from_file(
         ds_out = read_ascii_to_xarray(
             filepath=file_path,
             var_name=var_name,
-            chunking=chunking,
-            available_mem_gib=available_mem_gib,
         )
+        chunk_type = ChunkType.SPACE
     if file_path.suffix == ".nc":
         ds_out = read_dataset(
             file_path=file_path,
@@ -216,22 +205,27 @@ def get_xarray_ds_from_file(
         )
 
         # re-name input coords to lat and lon
-        if normalize_latlon_coords:
-            lat_key = get_coord_key(ds_out, lat=True)
-            lon_key = get_coord_key(ds_out, lon=True)
-            ds_out = normalize_lat_lon(ds_out, lat_key, lon_key)
+    if normalize_latlon_coords:
+        lat_key = get_coord_key(ds_out, lat=True)
+        lon_key = get_coord_key(ds_out, lon=True)
+        ds_out = normalize_lat_lon(ds_out, lat_key, lon_key)
 
-        if chunking and available_mem_gib is not None:
-            if chunk_type == ChunkType.TIME:
-                ds_out = chunk_dataset_space_and_time(ds_out, available_mem_gib)
-            if chunk_type == ChunkType.SPACE:
-                ds_out = chunk_dataset_space_only(ds_out, available_mem_gib)
+    if chunking and available_mem_gib is not None:
+        ds_out = chunk_dataset(ds_out, chunk_type, available_mem_gib)
     if ds_out is None:
         msg = f"File types other than asci and netcdf are not implemented. The suffix of the file was: {file_path.suffix}"
         with ErrorLogger(logger):
             raise NotImplementedError()
+    logger.info(f"ds_out: {ds_out}")
     return ds_out
 
+def chunk_dataset(ds, chunk_type, available_mem_gib):
+    """Chunk xarray.DataSet depending on chunk_type and available memory."""
+    if chunk_type == ChunkType.TIME:
+        chunks = get_chunks_space_and_time(ds, available_mem_gib)
+    if chunk_type == ChunkType.SPACE:
+        chunks = get_chunks_space_only(ds, available_mem_gib)
+    return ds.chunk(chunks)
 
 def write_xarray_to_file(ds, file_path, var_name=None, fmt=None, create_folder=True):
     """Write xarray Datasets to file with file type depending on the file suffix."""
@@ -259,8 +253,10 @@ def write_xarray_to_ascii(dataset, filepath, data_var=None, fmt=None):
             )
             return
     data = dataset[data_var]
-    lat = dataset["lat"].values
-    lon = dataset["lon"].values
+    lat_key = get_coord_key(dataset, lat=True)
+    lon_key = get_coord_key(dataset, lon=True)
+    lat = dataset[lat_key].values
+    lon = dataset[lon_key].values
     nodata_value = dataset[data_var].attrs.get("nodata_value", -9999)
 
     # Calculate header information
@@ -301,18 +297,18 @@ def write_xarray_to_ascii(dataset, filepath, data_var=None, fmt=None):
 
 
 def read_ascii_to_xarray(
-    filepath, var_name=None, chunking=False, available_mem_gib=None
+    filepath, var_name=None
 ):
     """Read an mHM readable asci file to an xarray dataset."""
     # Read the header from the file
     name = "data" if var_name is None else var_name
-    data_array = rioxarray.open_rasterio(filepath, default_name=name)
+    da = rioxarray.open_rasterio(filepath, default_name=name)
     # Convert to Dataset
-    if chunking and available_mem_gib is not None:
-        return chunk_dataset_space_and_time(
-            xr.Dataset({name: data_array}), available_mem_gib
-        )
-    return xr.Dataset({name: data_array})
+    da = da.sel(band=1, drop=True)
+    ds = da.to_dataset()
+    logger.error(ds)
+    # 4. (Optional) drop the spatial_ref coordinate if you don’t need it
+    return ds.reset_coords("spatial_ref", drop=True)
 
 
 def get_coord_values(ds, lat=False, lon=False):

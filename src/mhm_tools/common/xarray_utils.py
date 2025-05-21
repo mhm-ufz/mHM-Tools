@@ -14,12 +14,7 @@ def normalize_lat_lon(ds: xr.Dataset, lat: str, lon: float) -> xr.Dataset:
     """
     Normalize names for latitude/longitude.
     """
-    if "lat" not in ds.coords:
-        ds = ds.rename_vars({lat: "lat"})
-    if "lon" not in ds.coords:
-        ds = ds.rename_vars({lon: "lon"})
-    return ds
-
+    return ds.rename({lat: "lat", lon: "lon"})
 
 def get_coord_key(
     ds, lat=False, lon=False, time=False, raise_exception=True, is_retry=False
@@ -73,7 +68,7 @@ def get_coord_key(
         with ErrorLogger(logger):
             msg = f"None of {keys} in {type(ds).__name__} keys {ds_dims}."
             raise ValueError(msg)
-    return ""
+    return None
 
 
 def get_single_data_var(ds):
