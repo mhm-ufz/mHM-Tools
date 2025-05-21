@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 from matplotlib import gridspec
-
+from mhm_tools.common.file_handler import get_xarray_ds_from_file
 from mhm_tools.common.logger import ErrorLogger, log_arguments
 
 logger = logging.getLogger(__name__)
@@ -433,7 +433,7 @@ class Hydrograph:
         path = Path(path)
         discharge_file = path / "discharge.nc"
         if discharge_file.is_file():
-            with xr.open_dataset(path / "discharge.nc") as ds:
+            with get_xarray_ds_from_file(path / "discharge.nc") as ds:
                 discharge_data = ds.load()
                 for v in discharge_data.variables:
                     if not isinstance(v, str):
@@ -477,7 +477,7 @@ class Hydrograph:
             msg = f"{path} is neither a directory nor a file"
             self.logger.warning(msg)
             return
-        with xr.open_dataset(path) as ds:
+        with get_xarray_ds_from_file(path) as ds:
             self.pre = ds.load()
 
     def create_plot_at_timestep(self, fig, gs):

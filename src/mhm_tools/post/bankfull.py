@@ -9,6 +9,7 @@ Authors
 
 import logging
 
+from mhm_tools.common.file_handler import get_xarray_ds_from_file
 import numpy as np
 import xarray as xr
 
@@ -107,7 +108,7 @@ def bankfull_discharge(
        Toward a Better Understanding of Recurrence Intervals, Bankfull, and Their Importance.
        J. Contemp. Water Res. Educ., 166, 35-45, https://doi.org/10.1111/j.1936-704X.2019.03300.x, 2019.
     """
-    ds = xr.open_dataset(in_file)
+    ds = get_xarray_ds_from_file(in_file)
     var_encode = {
         key: ds[var].encoding.get(key, val) for key, val in NC_ENCODE_DEFAULTS.items()
     }

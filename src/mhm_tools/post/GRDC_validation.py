@@ -233,7 +233,7 @@ def Q_data_to_xarray(
         saving_path.mkdir(parents=True)
 
     # getting gauge infos
-    with xr.open_dataset(observed_data_path) as gauge_info:
+    with get_xarray_ds_from_file(observed_data_path) as gauge_info:
         gauge_ids = gauge_info["id"]
         x = gauge_info["geo_x"]
         y = gauge_info["geo_y"]
@@ -255,8 +255,8 @@ def Q_data_to_xarray(
     logger.info(f"There are {len(gauge_ids.values)} gauges in total.")
 
     # prepare for later resampling
-    with xr.open_dataset(model_data_path) as sim_data_in:
-        with xr.open_dataset(observed_data_path) as observed_data_in:
+    with get_xarray_ds_from_file(model_data_path) as sim_data_in:
+        with get_xarray_ds_from_file(observed_data_path) as observed_data_in:
             hours_sim, alias_sim = timedelta_to_alias(sim_data_in)
             hours_obs, alias_obs = timedelta_to_alias(observed_data_in)
             if hours_sim > hours_obs:
@@ -308,7 +308,7 @@ def Q_data_to_xarray(
         write_xarray_to_file(observed_data, obs_output_file)
 
     if not sim_output_file.is_file() or overwrite:
-        with xr.open_dataset(mrm_restart_file) as ds:
+        with get_xarray_ds_from_file(mrm_restart_file) as ds:
             # get the gauge coordinates by matching coordinates and flow accumulation
             out = Parallel(n_jobs=n_jobs, backend="loky")(
                 delayed(get_gauge_coords)(

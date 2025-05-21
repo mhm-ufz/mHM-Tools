@@ -285,7 +285,7 @@ def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None)
         # logger.warning(f"Files not a list of files but one file {files}.")
         files = [files]
     logger.debug(files)
-    with xr.open_dataset(files[0], engine="netcdf4") as ds:
+    with get_xarray_ds_from_file(files[0], engine="netcdf4") as ds:
         # Apply coordinate slicing if needed
         if coordinate_slice is not None:
             lat_key = get_coord_key(ds, lat=True)
@@ -301,7 +301,7 @@ def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None)
     monthly_sums = np.zeros((12, *da.shape[1:]))
     monthly_counts = np.zeros((12, *da.shape[1:]))
     for f, file in enumerate(files):
-        with xr.open_dataset(file, engine="netcdf4") as ds:
+        with get_xarray_ds_from_file(file, engine="netcdf4") as ds:
             logger.info(f"timestep {count} in file {f+1} / {len(files)} from {file}")
             if coordinate_slice is not None:
                 lat_key = get_coord_key(ds, lat=True)
@@ -382,7 +382,7 @@ def get_stats_one_pass(
     monthly_counts = np.where(monthly_counts > 0, monthly_counts, np.nan)
     climatology = monthly_sums / monthly_counts
     climatology = np.where(monthly_counts > 0, climatology, np.nan)
-    with xr.open_dataset(files[0], engine="netcdf4") as ds_in:
+    with get_xarray_ds_from_file(files[0], engine="netcdf4") as ds_in:
         lat_key = get_coord_key(ds_in, lat=True)
         lon_key = get_coord_key(ds_in, lon=True)
         # Apply coordinate slicing if needed
@@ -616,7 +616,7 @@ def create_map_from_output(output_path, input_name, ref_name):
     """Read in statistics netcdf and create a map plots from it."""
     file = get_rel_stat_file(output_path, input_name, ref_name)
     logger.info(f"Plotting data from {file}")
-    with xr.open_dataset(file) as ds:
+    with get_xarray_ds_from_file(file) as ds:
         rel_std = ds["rel_std"]
         rel_mean = ds["rel_mean"]
         spearman = ds["spearman"]
@@ -684,7 +684,7 @@ def get_stats(
             with ErrorLogger(logger):
                 raise ValueError(msg)
     else:
-        with xr.open_dataset(path, engine="netcdf4") as ds_input:
+        with get_xarray_ds_from_filerom_file(path, engine="netcdf4") as ds_input:
             ds = ds_input
             if coordinate_slice is not None:
                 ds = ds.sel(
@@ -900,7 +900,7 @@ def evaluate_boostraping_stat_files(stat_files, input_name, ref_name):
     """Evaluate bootstrapped statistics and compute median across bootstrap iterations."""
     # Open the first file to initialize dimensions and weights
     try:
-        with xr.open_dataset(stat_files[0]) as first_file:
+        with get_xarray_ds_from_filerom_file(stat_files[0]) as first_file:
             shape = first_file["rel_mean"].shape
             n_bootstrap = len(stat_files)
 
@@ -925,7 +925,7 @@ def evaluate_boostraping_stat_files(stat_files, input_name, ref_name):
         raise ve
     # Fill the preallocated arrays with bootstrap data
     for i, file in enumerate(stat_files):
-        with xr.open_dataset(file) as ds:
+        with get_xarray_ds_from_filerom_file(file) as ds:
             mean[i] = ds["rel_mean"].values
             std[i] = ds["rel_std"].values
             spearman[i] = ds["spearman"].values
@@ -1089,9 +1089,9 @@ def year_structure_paths(path: Path, file_name="*.*") -> bool:
 
 def get_target_time_res_from_files(input_file, ref_file):
     """Get time resolution for resampling from two files."""
-    with xr.open_dataset(input_file) as input_in:
+    with get_xarray_ds_from_file(input_file) as input_in:
         res_sim = input_in.time.diff('time').median()
-    with xr.open_dataset(ref_file) as ref_in:
+    with get_xarray_ds_from_file(ref_file) as ref_in:
         res_obs = ref_in.time.diff('time').median()
     target_res = res_obs if res_obs > res_sim else res_sim
     return f"{int(target_res / np.timedelta64(1, 'h'))}h"

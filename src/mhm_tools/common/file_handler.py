@@ -63,15 +63,15 @@ NODATA_value         {no_data_value}
 
 def crop_file_by_mask(ds, mask_file):
     """Crop file by mask."""
-    with xr.open_dataset(mask_file) as mask:
-        lat_key_mask = get_coord_key(mask, lat=True)
-        lon_key_mask = get_coord_key(mask, lon=True)
+    with get_xarray_ds_from_file(mask_file) as mask_ds:
+        lat_key_mask = get_coord_key(mask_ds, lat=True)
+        lon_key_mask = get_coord_key(mask_ds, lon=True)
         lat_key = get_coord_key(ds, lat=True)
         lon_key = get_coord_key(ds, lon=True)
         return ds.sel(
             {
-                lat_key: slice(mask[lat_key_mask].max(), mask[lat_key_mask].min()),
-                lon_key: slice(mask[lon_key_mask].min(), mask[lon_key_mask].max()),
+                lat_key: slice(mask_ds[lat_key_mask].max(), mask_ds[lat_key_mask].min()),
+                lon_key: slice(mask_ds[lon_key_mask].min(), mask_ds[lon_key_mask].max()),
             }
         )
 

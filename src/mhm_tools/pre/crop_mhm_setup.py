@@ -241,7 +241,7 @@ def call_create_latlon(
     """Create header dictionaries for the different resolutions and call create latlon to create a latlon file for the setup."""
     # create new latlon file
     logger.info("Creating new latlon file")
-    with get_xarray_ds_from_file(dem_output_file, chunking=True) as ds_dem:
+    with get_xarray_ds_from_file(dem_output_file, chunking=True, normalize_latlon_coords=True) as ds_dem:
         l0 = create_header(ds_dem, None, write=False)
     logger.debug(f"L0: {l0}")
     l1 = l0.copy()
@@ -299,7 +299,7 @@ def crop_file(
     if input_file.suffix in [".asc", ".nc"]:
         try:
             ds = get_xarray_ds_from_file(
-                input_file, chunking=True, available_mem_gib=available_mem_gib
+                input_file, chunking=True, available_mem_gib=available_mem_gib, normalize_latlon_coords=True
             )
         except ValueError:
             logger.error(

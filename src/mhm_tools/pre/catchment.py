@@ -584,8 +584,8 @@ class Catchment:
 def merge_catchment(path1, path2, out_path):
     """Merge the rolled and non-rolled file."""
     # read the rolled and non-rolled files
-    ds1 = xr.open_dataset(path1, engine="netcdf4")
-    ds2 = xr.open_dataset(path2, engine="netcdf4")
+    ds1 = get_xarray_ds_from_file(path1, engine="netcdf4")
+    ds2 = get_xarray_ds_from_file(path2, engine="netcdf4")
 
     # select all the basins in the border area
     mask_ids = np.unique(
@@ -673,7 +673,7 @@ def create_catchment(
             msg = f"Unexpected value for var={var}, must be 'fdir' or 'dem'"
             raise ValueError(msg)
 
-    with get_xarray_ds_from_file(input_file, var_name) as input_ds:
+    with get_xarray_ds_from_file(input_file, var_name, normalize_latlon_coords=True) as input_ds:
         # transform
         transform = get_transformation_matrix_nc(input_ds, var_name)
 
