@@ -77,8 +77,8 @@ def crop_file_by_mask(ds, mask_file):
 
 
 def chunk_dataset_space_only(ds: xr.Dataset, available_mem_gib: float) -> xr.Dataset:
-    """
-    Chunk only in space (lat/lon), leaving time whole, sized to available memory.
+    """Chunk only in space (lat/lon), leaving time whole, sized to available
+    memory.
 
     - Uses 80% of available_mem_gib for a single chunk
     - Computes how many total cells (t × y × x) fit, then allocates all t,
@@ -128,8 +128,7 @@ def chunk_dataset_space_only(ds: xr.Dataset, available_mem_gib: float) -> xr.Dat
 
 
 def chunk_dataset_space_and_time(ds, available_mem_gib) -> xr.Dataset:
-    """
-    Chunk dataset adjusting chunk size to avaiable memory.
+    """Chunk dataset adjusting chunk size to avaiable memory.
 
     Simple heuristic:
       - try to keep time chunks small (1…4)vi
@@ -172,8 +171,7 @@ def chunk_dataset_space_and_time(ds, available_mem_gib) -> xr.Dataset:
 
 
 class ChunkType(Enum):
-    """
-    Define Types of chunking.
+    """Define Types of chunking.
 
     SPACE: Only chunking in space. Time dimension is conserved.
     TIME: Chunking predominately in time. If necessary also in space.
@@ -234,7 +232,8 @@ def get_xarray_ds_from_file(
 
 
 def write_xarray_to_file(ds, file_path, var_name=None, fmt=None, create_folder=True):
-    """Write xarray Datasets to file with file type depending on the file suffix."""
+    """Write xarray Datasets to file with file type depending on the file
+    suffix."""
     file_path = Path(file_path)
     if create_folder and not file_path.parent.is_dir():
         file_path.parent.mkdir(parents=True)
@@ -249,7 +248,8 @@ def write_xarray_to_file(ds, file_path, var_name=None, fmt=None, create_folder=T
 
 
 def write_xarray_to_ascii(dataset, filepath, data_var=None, fmt=None):
-    """Take xarray dataset and writes it to an asci file that can by read by mHM."""
+    """Take xarray dataset and writes it to an asci file that can by read by
+    mHM."""
     # Extract the data, coordinates, and nodata value from the Dataset
     if data_var is None:
         data_var = get_single_data_var(dataset)

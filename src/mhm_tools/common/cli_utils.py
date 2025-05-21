@@ -11,7 +11,8 @@ logger = logging.getLogger(__name__)
 
 
 def parse_coords(coords_str):
-    """Split the input string of 'lat,lon' by comma and convert each part to a float."""
+    """Split the input string of 'lat,lon' by comma and convert each part to a
+    float."""
     try:
         lat, lon = map(float, coords_str.split(","))
         return lat, lon

@@ -11,9 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 def normalize_lat_lon(ds: xr.Dataset, lat: str, lon: float) -> xr.Dataset:
-    """
-    Normalize names for latitude/longitude.
-    """
+    """Normalize names for latitude/longitude."""
     if "lat" not in ds.coords:
         ds = ds.rename_vars({lat: "lat"})
     if "lon" not in ds.coords:
@@ -77,7 +75,8 @@ def get_coord_key(
 
 
 def get_single_data_var(ds):
-    """Get the data var name from da dataset that only contains one data variable."""
+    """Get the data var name from da dataset that only contains one data
+    variable."""
     data_vars = list(ds.data_vars)
     if len(data_vars) > 1:
         logger.error("Only single data_var allowed")
@@ -87,7 +86,8 @@ def get_single_data_var(ds):
 
 
 def induce_data_var_from_file_name(ds, file_path):
-    """Check if one of the data_vars is part of the file name and select it as most probable data_var."""
+    """Check if one of the data_vars is part of the file name and select it as
+    most probable data_var."""
     logger.info("Searching for more than one datavar by comparing with file name.")
     name = file_path.stem
     data_vars = list(ds.data_vars)
@@ -101,8 +101,7 @@ def induce_data_var_from_file_name(ds, file_path):
 
 
 def timedelta_to_alias(ds: xr.DataArray) -> str:
-    """
-    Map a median timedelta to a pandas frequency alias.
+    """Map a median timedelta to a pandas frequency alias.
 
     - ~1 day  → 'D'
     - ~7 days → 'W'
@@ -155,9 +154,8 @@ def crop_ds(
     lon_name: str = "lon",
     lat_name: str = "lat",
 ) -> xr.Dataset:
-    """
-    Crop an xarray.Dataset to the given lon/lat bounds, handling coordinate order.
-    """
+    """Crop an xarray.Dataset to the given lon/lat bounds, handling coordinate
+    order."""
     # ensure min < max
     lon_low, lon_high = sorted([lon_min, lon_max])
     lat_low, lat_high = sorted([lat_min, lat_max])

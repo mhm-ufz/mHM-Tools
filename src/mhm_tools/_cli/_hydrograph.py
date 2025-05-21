@@ -10,7 +10,6 @@ def add_args(parser):
     ----------
     parser : argparse.ArgumentParser
         the main argument parser
-
     """
     parser.add_argument(
         "-i",
@@ -75,14 +74,12 @@ def add_args(parser):
 
 
 def run(args):
-    """
-    Create the hydrograph plots.
+    """Create the hydrograph plots.
 
     Parameters
     ----------
     args : argparse.Namespace
         parsed command line arguments
-
     """
     get_hydrograph_from_path(
         input_path=args.in_dir,

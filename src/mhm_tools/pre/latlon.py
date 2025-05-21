@@ -1,5 +1,4 @@
-"""
-Create the latlon file for mHM.
+"""Create the latlon file for mHM.
 
 Authors
 -------
@@ -30,8 +29,7 @@ logger = logging.getLogger(__name__)
 
 
 def xy_to_latlon(x, y, crs=None):
-    """
-    Convert cartesian coordinates to lat-lon.
+    """Convert cartesian coordinates to lat-lon.
 
     Parameters
     ----------
@@ -85,8 +83,7 @@ def create_latlon(
     compression=9,
     add_bounds=False,
 ):
-    """
-    Create the latlon.nc file from given ASCII headers.
+    """Create the latlon.nc file from given ASCII headers.
 
     Parameters
     ----------

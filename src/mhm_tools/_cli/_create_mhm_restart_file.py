@@ -1,8 +1,7 @@
-"""
-Create restart files for the mHM model.
+"""Create restart files for the mHM model.
 
-A restart file contains all the static information to run mHM on a specific grid.
-
+A restart file contains all the static information to run mHM on a
+specific grid.
 """
 
 import logging

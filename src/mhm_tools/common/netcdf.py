@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-"""
-Common NetCDF/xarray routines and utilities for reading, encoding, and bounds generation.
-"""
+"""Common NetCDF/xarray routines and utilities for reading, encoding, and
+bounds generation."""
 
 import glob
 import logging
@@ -19,17 +18,13 @@ xr.set_options(keep_attrs=True)
 
 
 def _has_wildcards(path: Union[str, Path]) -> bool:
-    """
-    Determine if the given path string contains any wildcard characters.
-    """
+    """Determine if the given path string contains any wildcard characters."""
     return any(w in str(path) for w in WILDCARDS)
 
 
 def _fallback_open(open_func: Any, *args: Any, **kwargs: Any) -> xr.Dataset:
-    """
-    Open a dataset with the provided xarray function,
-    falling back from h5netcdf to netcdf4 engine if necessary.
-    """
+    """Open a dataset with the provided xarray function, falling back from
+    h5netcdf to netcdf4 engine if necessary."""
     try:
         return open_func(*args, **kwargs)
     except ValueError as exc:
@@ -45,8 +40,7 @@ def read_dataset(
     use_mfdataset: bool = False,
     engine: str = "h5netcdf",
 ) -> xr.Dataset:
-    """
-    Load one or more NetCDF files into a single xarray.Dataset.
+    """Load one or more NetCDF files into a single xarray.Dataset.
 
     This function accepts either a single path (possibly containing
     shell-style wildcards), or a list of paths, and handles both:
@@ -156,9 +150,7 @@ def set_netcdf_encoding(
     ds: xr.Dataset,
     var_encoding: Optional[dict] = None,
 ) -> None:
-    """
-    Set default NetCDF encoding settings on an xarray Dataset.
-    """
+    """Set default NetCDF encoding settings on an xarray Dataset."""
     encoding = var_encoding or NC_ENCODE_DEFAULTS
     dims = set(ds.dims)
     coords = set(ds.coords)
@@ -176,9 +168,7 @@ def generate_bounds(
     da: xr.DataArray,
     bounds_dim: str = "bnds",
 ) -> xr.DataArray:
-    """
-    Generate CF-compliant bounds for a coordinate DataArray.
-    """
+    """Generate CF-compliant bounds for a coordinate DataArray."""
     (dim,) = da.dims
     diff = da.diff(dim)
     lower = da - diff / 2

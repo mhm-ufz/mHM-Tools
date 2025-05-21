@@ -39,7 +39,6 @@ def add_command_from_module(subparsers, name, module):
         Name of the command to add.
     module : module
         Module containing the `add_args` and `run` functions defining the command.
-
     """
     desc = module.__doc__
     kwargs = {"description": desc}
@@ -150,7 +149,6 @@ def main(argv=None):
     Returns
     -------
         result of the called sub-argument routine
-
     """
     args = _get_parser().parse_args(argv)
     configure_mhm_tools_logger(

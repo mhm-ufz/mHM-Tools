@@ -1,8 +1,9 @@
-"""
-Create files containing subsets of the river network based on the provided input files.
+"""Create files containing subsets of the river network based on the provided
+input files.
 
-The river network, provied as nc file containing basin ids, is split into subdomains based on the provided basin clusters.
-These subdomains of the global network are independent and can be run in parallel.
+The river network, provied as nc file containing basin ids, is split
+into subdomains based on the provided basin clusters. These subdomains
+of the global network are independent and can be run in parallel.
 """
 
 from ..pre import create_subdomain_masks

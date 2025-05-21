@@ -1,4 +1,5 @@
-"""Compare a spatial variable between two datasets using the climatology of that variable."""
+"""Compare a spatial variable between two datasets using the climatology of
+that variable."""
 
 import array
 import logging
@@ -79,7 +80,8 @@ def spearman_correlation(data1, data2):
 
 
 def spearman_spatial(data1, data2):
-    """Calculate maps of Spearman rank correlation between two xarray DataArrays of shape(12,n,m)."""
+    """Calculate maps of Spearman rank correlation between two xarray
+    DataArrays of shape(12,n,m)."""
     if len(np.shape(data1)) != len(np.shape(data2)) or len(np.shape(data1)) != 3:
         with ErrorLogger(logger):
             msg = "Wrong shape for spatial spearman correlation!"
@@ -97,8 +99,8 @@ def spearman_spatial(data1, data2):
 def spearman_spatial_joblib(
     data1: np.ndarray, data2: np.ndarray, spearman_correlation, n_jobs: int = -1
 ) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Parallel pixel‐wise Spearman correlation over two arrays of shape (T, Y, X).
+    """Parallel pixel‐wise Spearman correlation over two arrays of shape (T, Y,
+    X).
 
     Parameters
     ----------
@@ -155,7 +157,8 @@ def climatology(data):
 
 
 def get_clim_from_ds(ds, input_var=None, factor=1):
-    """Calculate climatology from DataSet with variable or DataArray while mulitplying with a provided factor."""
+    """Calculate climatology from DataSet with variable or DataArray while
+    mulitplying with a provided factor."""
     data = ds * factor if input_var is None else ds[input_var] * factor
     return climatology(data)
 
@@ -163,7 +166,8 @@ def get_clim_from_ds(ds, input_var=None, factor=1):
 def get_std_from_ds(ds, input_var=None, clim=None, factor=1):
     """Calculate maps of temporal standard deviation from an DataArray.
 
-    If a climatology is provided the timeseries can be detrended by seasonality.
+    If a climatology is provided the timeseries can be detrended by
+    seasonality.
     """
     # Retrieve data and apply factor
     data = ds * factor if input_var is None else ds[input_var] * factor
@@ -279,7 +283,8 @@ def combine_results(results):
 
 
 def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None):
-    """Take a list of files with all containing data for one month and creating statisitcs while reading them one by one."""
+    """Take a list of files with all containing data for one month and creating
+    statisitcs while reading them one by one."""
     da = None
     if not isinstance(files, Iterable):
         # logger.warning(f"Files not a list of files but one file {files}.")
@@ -354,7 +359,8 @@ def get_stats_one_pass(
     available_years=None,
     file_name="*.*",
 ):
-    """Create dataset statistics by reading in one monthly or yearly file at a time and updating the statistics."""
+    """Create dataset statistics by reading in one monthly or yearly file at a
+    time and updating the statistics."""
     if path.is_dir():
         files = get_files(
             path,
@@ -431,7 +437,8 @@ def plot_single_map(
     cmap=plt.cm.coolwarm,
     bounds_type="fixed",
 ):
-    """Plot one map to an matplotlib axis, taking care of the bounds and colormap."""
+    """Plot one map to an matplotlib axis, taking care of the bounds and
+    colormap."""
     n_bins = 10
     if bounds_type == "max" and diff_to_mean is not None:
         vmin = 1 - diff_to_mean
@@ -460,12 +467,13 @@ def plot_single_map(
 def resample_to_coarser_calendar(
     ds_input: xr.Dataset, ds_ref: xr.Dataset
 ) -> tuple[xr.Dataset, xr.Dataset]:
-    """
-    Resampler the dataset with higher temporal resolution to the resolution of the other.
+    """Resampler the dataset with higher temporal resolution to the resolution
+    of the other.
 
-    Compare the two datasets’ median time‐steps, turn them into pandas/xarray
-    freq aliases, and then resample the *finer* one up to the *coarser* one
-    using calendar‐aware frequencies (e.g. 'M' not '720H').
+    Compare the two datasets’ median time‐steps, turn them into
+    pandas/xarray freq aliases, and then resample the *finer* one up to
+    the *coarser* one using calendar‐aware frequencies (e.g. 'M' not
+    '720H').
     """
     hours_in, alias_in = timedelta_to_alias(ds_input)
     hours_ref, alias_ref = timedelta_to_alias(ds_ref)
@@ -500,7 +508,9 @@ def crop_data_to_overlapping_time(input_ds, ref_ds):
 def plot_map(
     rel_mean, rel_std, spearman, ref_clim, input_clim, input_name, ref_name, output_path
 ):
-    """Create a plot with four subplots showing relative mean, standard deviation, the spearman correlation of the climatologies and the seasonal mean of both datasets."""
+    """Create a plot with four subplots showing relative mean, standard
+    deviation, the spearman correlation of the climatologies and the seasonal
+    mean of both datasets."""
     rel_mean = np.where(rel_mean == np.inf, np.nan, rel_mean)
     rel_std = np.where(rel_std == np.inf, np.nan, rel_std)
     fig, axes = plt.subplots(2, 2, figsize=(10.5, 4.68))
@@ -887,7 +897,8 @@ def compare_input_with_ref(
 
 
 def get_rel_stat_file(output_path, input_name, ref_name):
-    """Create the file name for the file  contatining relative statistics of the two datasets."""
+    """Create the file name for the file  contatining relative statistics of
+    the two datasets."""
     file_name = "relative_stats"
     if input_name is not None:
         file_name += f"_{input_name}"
@@ -897,7 +908,8 @@ def get_rel_stat_file(output_path, input_name, ref_name):
 
 
 def evaluate_boostraping_stat_files(stat_files, input_name, ref_name):
-    """Evaluate bootstrapped statistics and compute median across bootstrap iterations."""
+    """Evaluate bootstrapped statistics and compute median across bootstrap
+    iterations."""
     # Open the first file to initialize dimensions and weights
     try:
         with xr.open_dataset(stat_files[0]) as first_file:
@@ -952,7 +964,8 @@ def evaluate_boostraping_stat_files(stat_files, input_name, ref_name):
 def get_dataset_from_path(
     path, available_years=None, available_mem=None, file_name="*.*"
 ):
-    """Get a dataset from a given path whether that is a file or a directory."""
+    """Get a dataset from a given path whether that is a file or a
+    directory."""
     if path.is_file() and path.suffix == ".nc":
         chunking = available_mem is not None
         return get_xarray_ds_from_file(
@@ -977,8 +990,8 @@ def get_dataset_from_path(
 
 
 def regridd_to_higher_spatial_resolution(ds1, ds2):
-    """
-    Regrids the coarser dataset to the resolution of the finer dataset using nearest-neighbor method.
+    """Regrids the coarser dataset to the resolution of the finer dataset using
+    nearest-neighbor method.
 
     Parameters
     ----------
@@ -1020,7 +1033,8 @@ def regridd_to_higher_spatial_resolution(ds1, ds2):
 
 
 def get_years_from_path(path, raise_exception=True, file_name="*.*"):
-    """Get years for one dataset from the folder structure or the xarray dataset."""
+    """Get years for one dataset from the folder structure or the xarray
+    dataset."""
     if path.is_dir():
         return [int(p.name) for p in year_structure_paths(path, file_name=file_name)]
     if path.is_file():
@@ -1034,10 +1048,10 @@ def get_years_from_path(path, raise_exception=True, file_name="*.*"):
 
 
 def get_available_years(input_path, ref_path, year_slice=None, direct_comp=True):
-    """
-    Determine available years from constrains and datasets.
+    """Determine available years from constrains and datasets.
 
-    If no reference data is given it will only be the input years inside the year slice.
+    If no reference data is given it will only be the input years inside
+    the year slice.
     """
     logger.info("Determining overlapping years.")
     # get all years from input data
@@ -1067,11 +1081,10 @@ def get_available_years(input_path, ref_path, year_slice=None, direct_comp=True)
 
 
 def year_structure_paths(path: Path, file_name="*.*") -> bool:
-    """
-    Return any subdirectory of `path` with year structur.
+    """Return any subdirectory of `path` with year structur.
 
-    That means any subdirectory whose name is exactly four digits (a valid “year”),
-    and that subdirectory contains at least one entry.
+    That means any subdirectory whose name is exactly four digits (a
+    valid “year”), and that subdirectory contains at least one entry.
     """
     if not path.is_dir():
         return False
@@ -1099,7 +1112,8 @@ def get_target_time_res_from_files(input_file, ref_file):
 
 
 def get_target_time_res(input_path, ref_path, folder_name=""):
-    """Get coarser time resolution from two datasets with files in folder structur."""
+    """Get coarser time resolution from two datasets with files in folder
+    structur."""
     input_files = (Path(input_path) / folder_name).glob("*nc")
     ref_files = (Path(ref_path) / folder_name).glob("*nc")
     if not list(input_files) or not list(ref_files):
@@ -1130,7 +1144,8 @@ def gridded_data_validation(
     input_file_name="*.*",
     ref_file_name="*.*",
 ):
-    """Validate a spatial variable from two datasets by comparing the climatology of that variable."""
+    """Validate a spatial variable from two datasets by comparing the
+    climatology of that variable."""
     output_path = Path(output_path)
     input_path = Path(input_path)
     ref_path = Path(ref_path) if ref_path is not None else None

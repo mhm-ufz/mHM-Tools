@@ -30,8 +30,7 @@ def _extract_header(file):
 
 
 def standardize_header(header):
-    """
-    Standardize an ASCII grid header dictionary.
+    """Standardize an ASCII grid header dictionary.
 
     Parameters
     ----------
@@ -72,8 +71,7 @@ def standardize_header(header):
 
 
 def read_header(file):
-    """
-    Read an ASCII grid header from file.
+    """Read an ASCII grid header from file.
 
     Parameters
     ----------
@@ -95,8 +93,7 @@ def read_header(file):
 
 
 def read_grid(file, dtype=None):
-    """
-    Read an ASCII grid from file.
+    """Read an ASCII grid from file.
 
     Parameters
     ----------
@@ -137,8 +134,7 @@ def read_grid(file, dtype=None):
 
 
 def write_header(file, header, dtype="f4"):
-    """
-    Write an ascii header to file.
+    """Write an ascii header to file.
 
     Parameters
     ----------
@@ -155,8 +151,7 @@ def write_header(file, header, dtype="f4"):
 
 
 def write_grid(file, header, data=None, dtype="f4"):
-    """
-    Write an ascii grid to file.
+    """Write an ascii grid to file.
 
     Parameters
     ----------
@@ -216,8 +211,7 @@ def write_grid(file, header, data=None, dtype="f4"):
 def check_resolutions(
     cellsize_1, cellsize_2, first_finer=False, name_1="LA", name_2="LB"
 ):
-    """
-    Check two resolutions for compatibility.
+    """Check two resolutions for compatibility.
 
     Parameters
     ----------
@@ -285,8 +279,8 @@ def _get_extends(in_size, out_size, nrows, ncols, in_name, out_name):
 
 
 def rescale_grid(header, cellsize, in_name="LA", out_name="LB"):
-    """
-    Rescale grid from given header to a coarser cell-size with matching extend.
+    """Rescale grid from given header to a coarser cell-size with matching
+    extend.
 
     Parameters
     ----------
@@ -325,8 +319,7 @@ def rescale_grid(header, cellsize, in_name="LA", out_name="LB"):
 
 
 def check_grid_compatibility(header_1, header_2, name_1="LA", name_2="LB"):
-    """
-    Check grids for compatibility.
+    """Check grids for compatibility.
 
     Parameters
     ----------

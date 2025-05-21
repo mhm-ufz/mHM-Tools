@@ -1,5 +1,5 @@
-"""
-Plot a hydrograph with different time resolutions and a seasonality as well as plotting simulated against observed discharge.
+"""Plot a hydrograph with different time resolutions and a seasonality as well
+as plotting simulated against observed discharge.
 
 Authors
 -------
@@ -21,8 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 class Catchment:
-    """
-    Represents a catchment.
+    """Represents a catchment.
 
     Attributes
     ----------
@@ -35,8 +34,7 @@ class Catchment:
 
 
 class Objectives:
-    """
-    A class representing the objectives for evaluating river discharge data.
+    """A class representing the objectives for evaluating river discharge data.
 
     Attributes
     ----------
@@ -59,8 +57,8 @@ class Objectives:
 
 
 class Hydrograph:
-    """
-    Represents a hydrograph and provides methods for calculating metrics and generating plots.
+    """Represents a hydrograph and provides methods for calculating metrics and
+    generating plots.
 
     Attributes
     ----------
@@ -145,8 +143,7 @@ class Hydrograph:
         return True
 
     def remove_empty_values(self, arr1, arr2, recursive=True):
-        """
-        Remove empty values from two arrays and return the cleaned data.
+        """Remove empty values from two arrays and return the cleaned data.
 
         Args:
             arr1 : list
@@ -179,8 +176,8 @@ class Hydrograph:
             raise TypeError(msg) from te
 
     def calc_kling_gupta_efficiency(self, observed, simulated):
-        """
-        Calculate the kling-gupta efficiency metric and saves it as well as its components in the objectives.
+        """Calculate the kling-gupta efficiency metric and saves it as well as
+        its components in the objectives.
 
         Args:
             observed : list
@@ -203,8 +200,8 @@ class Hydrograph:
         self.objectives.gamma = gamma
 
     def calc_nash_sutcliff_efficiency(self, observed, simulated):
-        """
-        Calculate the Nash-Sutcliffe efficiency metric and save it in the objectives.
+        """Calculate the Nash-Sutcliffe efficiency metric and save it in the
+        objectives.
 
         Args:
             observed : list
@@ -222,8 +219,8 @@ class Hydrograph:
         )
 
     def calc_objectives(self, observed, simulated):
-        """
-        Remove empty values from the data arrays and calculate the objectives.
+        """Remove empty values from the data arrays and calculate the
+        objectives.
 
         Args:
         observed : list
@@ -267,8 +264,7 @@ class Hydrograph:
         return True
 
     def get_row_col(self):
-        """
-        Find the first unused gridcell for the next plot.
+        """Find the first unused gridcell for the next plot.
 
         Returns
         -------
@@ -286,8 +282,7 @@ class Hydrograph:
         raise ValueError(msg)
 
     def is_last_plot(self, n):
-        """
-        Check if the given plot index is the last plot.
+        """Check if the given plot index is the last plot.
 
         Args:
         - n (int): The plot index to check.
@@ -301,8 +296,7 @@ class Hydrograph:
         return np.sum(self.plots[n:]) == 1
 
     def get_catchment_area(self, path, ndecimal=0):
-        """
-        Retrieve the catchment area from the given mHM ConfigFile.log.
+        """Retrieve the catchment area from the given mHM ConfigFile.log.
 
         Args:
             path (str): The path to the file.
@@ -329,8 +323,8 @@ class Hydrograph:
 
     @staticmethod
     def get_long_time_monthly_mean(variable, long=False):
-        """
-        Calculate the long-term average value for every month of the year for a given variable.
+        """Calculate the long-term average value for every month of the year
+        for a given variable.
 
         Args:
             variable: xarray with a variable and a time
@@ -349,8 +343,7 @@ class Hydrograph:
     def plot_on_axis(
         function, yvalues: list, xvalues=None, colors=None, labels=None, **arguments
     ):
-        """
-        Plot multiple graphs for specified function.
+        """Plot multiple graphs for specified function.
 
         Args:
             function: matplotlib plot function e.g. ax.plot, plt.plot, ax.scatter, ax.errorbar, ...
@@ -376,8 +369,7 @@ class Hydrograph:
                 function(xvalues, yvalue, **arguments)
 
     def check_which_plots_to_create(self, code):
-        """
-        Determine which plots to create based on the given code.
+        """Determine which plots to create based on the given code.
 
         A tuple is produced and saved as member variable. It has a one at the index of the selected plots and a zero otherwise.
         The indices of the plots are:
@@ -403,8 +395,7 @@ class Hydrograph:
 
     @staticmethod
     def raise_if_not_directory(path):
-        """
-        Raise a NotADirectoryError if the given path is not a directory.
+        """Raise a NotADirectoryError if the given path is not a directory.
 
         Args:
             path (str): The path to check.
@@ -419,8 +410,7 @@ class Hydrograph:
             raise NotADirectoryError(msg)
 
     def load_data_from_discharge_nc(self, path):
-        """
-        Load discharge data from the specified path.
+        """Load discharge data from the specified path.
 
         Args:
             path (str): The path to the directory containing the discharge data.
@@ -428,7 +418,6 @@ class Hydrograph:
         Raises
         ------
             TypeError: If the variable name in the discharge dataset is not a string.
-
         """
         path = Path(path)
         discharge_file = path / "discharge.nc"
@@ -450,8 +439,7 @@ class Hydrograph:
         return False
 
     def load_precipiation_data(self, path):
-        """
-        Load precipitation data from a given file or directory path.
+        """Load precipitation data from a given file or directory path.
 
         Args:
             path (str): The path to the file or directory containing the precipitation data.
@@ -481,8 +469,8 @@ class Hydrograph:
             self.pre = ds.load()
 
     def create_plot_at_timestep(self, fig, gs):
-        """
-        Create a discharge plot temporal resolution of the discharge output (daily or hourly).
+        """Create a discharge plot temporal resolution of the discharge output
+        (daily or hourly).
 
         Args:
             fig (matplotlib.figure.Figure): The figure object to add the plot to.
@@ -541,8 +529,7 @@ class Hydrograph:
         )
 
     def create_plot_yearly(self, fig, gs, pre):
-        """
-        Generate a yearly discharge plot.
+        """Generate a yearly discharge plot.
 
         Args:
             fig (matplotlib.figure.Figure): The figure object to add the plot to.
@@ -656,8 +643,7 @@ class Hydrograph:
         )
 
     def create_plot_seasonality(self, fig, gs, pre):
-        """
-        Generate a discharge seasonality plot.
+        """Generate a discharge seasonality plot.
 
         Args:
             fig (matplotlib.figure.Figure): The figure object to add the plot to.
@@ -747,8 +733,8 @@ class Hydrograph:
         ax3.set_ylabel(r"Q $[m^3 s^{-1}]$")
 
     def create_plot_scatter(self, fig, gs):
-        """
-        Create a scatter plot, plotting the simulated against the observed discharge data.
+        """Create a scatter plot, plotting the simulated against the observed
+        discharge data.
 
         Args:
             fig (matplotlib.figure.Figure): The figure object to add the scatter plot to.
@@ -939,8 +925,8 @@ class Hydrograph:
 def get_hydrograph_from_path(
     input_path, output_file, show, save, title, plot_code, prec_path
 ):
-    """
-    Read in discharge data and produce a hydrograph with different analysises.
+    """Read in discharge data and produce a hydrograph with different
+    analysises.
 
     Simulated and observed discharge are plotted for different temporal resolutions.
     Additionally a seasonality as well as a scatter-plot simulated against observed discharge are produced.
@@ -986,8 +972,8 @@ def gen_hydrograph_by_data_sets(
     raise_exceptions=True,
     **kwargs,
 ):
-    """
-    Use discharge and precipitation data provided as xarrays to produce a hydrograph with different analysises.
+    """Use discharge and precipitation data provided as xarrays to produce a
+    hydrograph with different analysises.
 
     Simulated and observed discharge are plotted for different temporal resolutions.
     Additionally a seasonality as well as a scatter-plot simulated against observed discharge are produced.

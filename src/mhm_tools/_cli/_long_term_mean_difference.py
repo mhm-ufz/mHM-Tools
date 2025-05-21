@@ -1,4 +1,5 @@
-"""Computes and plots the spatial difference between a model dataset and a reference dataset"""
+"""Computes and plots the spatial difference between a model dataset and a
+reference dataset."""
 
 from ..post.long_term_mean_difference import long_term_mean_diff
 

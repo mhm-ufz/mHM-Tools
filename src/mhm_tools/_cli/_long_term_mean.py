@@ -1,9 +1,6 @@
-"""
-Computes and stores long term mean for a given NetCDF file(s)
-"""
+"""Computes and stores long term mean for a given NetCDF file(s)"""
 
 import argparse
-from typing import Optional
 
 from mhm_tools.post.long_term_mean import cal_long_term_mean
 
@@ -98,8 +95,7 @@ def add_args(parser):
 
 
 def run(args: argparse.Namespace):
-    """
-    Run script to compute the long-term mean of the input data.
+    """Run script to compute the long-term mean of the input data.
 
     Parameters
     ----------

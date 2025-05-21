@@ -20,8 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 class MorphFiles:
-    """
-    A class representing a collection of morphological files.
+    """A class representing a collection of morphological files.
 
     Attributes
     ----------
@@ -63,8 +62,8 @@ class MorphFiles:
             self.read_files(filepath)
 
     def read_files(self, filepath: Path, overwrite=False):
-        """
-        Read files from the specified filepath and assigns them to the corresponding attributes.
+        """Read files from the specified filepath and assigns them to the
+        corresponding attributes.
 
         Args:
             filepath (Path): The path to the directory containing the files.
@@ -106,8 +105,8 @@ class MorphFiles:
         logger.debug(self.get_files_as_dict())
 
     def get_file(self, key):
-        """
-        Retrieve the file path associated with the given name of the member variable.
+        """Retrieve the file path associated with the given name of the member
+        variable.
 
         Parameters
         ----------
@@ -120,8 +119,7 @@ class MorphFiles:
         return self.__dict__.get(key, None)
 
     def get_files_as_list(self):
-        """
-        Return a list of all files in the object's attributes.
+        """Return a list of all files in the object's attributes.
 
         This method iterates over all attributes of the object and checks if they are lists.
         If an attribute is a list, its elements are added to the file_list.
@@ -140,8 +138,7 @@ class MorphFiles:
         return file_list
 
     def get_files_as_dict(self):
-        """
-        Return a dictionary of all files in the object's attributes.
+        """Return a dictionary of all files in the object's attributes.
 
         Returns
         -------
@@ -151,8 +148,7 @@ class MorphFiles:
 
 
 class LatLon:
-    """
-    Represents a latitude-longitude coordinate system.
+    """Represents a latitude-longitude coordinate system.
 
     Attributes
     ----------
@@ -180,8 +176,8 @@ class LatLon:
         self.mask = mask
 
     def get_n_lat(self):
-        """
-        Calculate the number of latitude points based on the given latitude range and resolution.
+        """Calculate the number of latitude points based on the given latitude
+        range and resolution.
 
         Returns
         -------
@@ -192,8 +188,8 @@ class LatLon:
         )  # + 0.5 to round up
 
     def get_n_lon(self):
-        """
-        Calculate the number of longitude points based on the given longitude range and resolution.
+        """Calculate the number of longitude points based on the given
+        longitude range and resolution.
 
         Returns
         -------
@@ -204,8 +200,7 @@ class LatLon:
         )  # + 0.5 to round up
 
     def is_fully_defined(self):
-        """
-        Check if all the required attributes are fully defined.
+        """Check if all the required attributes are fully defined.
 
         Returns
         -------
@@ -223,8 +218,7 @@ class LatLon:
 
 
 class Grid:
-    """
-    Represents a geographical area for wich morphological data exists.
+    """Represents a geographical area for wich morphological data exists.
 
     This grid is used to run the mPR model. It does not need to contain a whole catchment, but can be a subset of it or multiple catchments at once.
 
@@ -265,7 +259,8 @@ class Grid:
             self.read_latlon(latlon_file)
 
     def migrate_grid_using_systemlink(self, new_path):
-        """Mirgrates the file path by creating a new path and system linking all files there."""
+        """Mirgrates the file path by creating a new path and system linking
+        all files there."""
         logger.info(f"Creating system links in {new_path} for all files in {self.path}")
         new_path = Path(new_path)
         new_path.mkdir(parents=True, exist_ok=True)
@@ -278,8 +273,8 @@ class Grid:
         self.morph_files = MorphFiles(self.path)
 
     def read_latlon(self, latlon_file: Path):
-        """
-        Read the latlon file and sets the lower-left (l0) and upper-right (l1) corners of the grid as well as the resolution.
+        """Read the latlon file and sets the lower-left (l0) and upper-right
+        (l1) corners of the grid as well as the resolution.
 
         Args:
             latlon_file (Path): The file path of the latlon file.
@@ -309,8 +304,7 @@ class Grid:
             )
 
     def read_morph_files(self):
-        """
-        Read the morph files from the specified path.
+        """Read the morph files from the specified path.
 
         This method uses the `read_files` function from the `MorphFiles` object to read the morph files
         located at the specified path.
@@ -329,8 +323,7 @@ class MPRRunner:
     """Class for running the mPR executable."""
 
     def __init__(self, mpr_executable, mpr_packages=None, mpr_parameter_file=None):
-        """
-        Initialize the MPRRunner object.
+        """Initialize the MPRRunner object.
 
         Args:
             mpr_executable (str): Path to the mPR executable.
@@ -342,8 +335,7 @@ class MPRRunner:
         self.mpr_parameter_file = mpr_parameter_file
 
     def run_mpr(self, grid: Grid):
-        """
-        Run the mPR executable with the given namelist and parameter file.
+        """Run the mPR executable with the given namelist and parameter file.
 
         Args:
             grid (Grid): The grid object containing the namelist file.
@@ -385,8 +377,7 @@ class MPRRunner:
 
 
 class MHMRestartFile:
-    """
-    A class for creating a restart file for the MHM model.
+    """A class for creating a restart file for the MHM model.
 
     This class provides methods to split the grid (if necessary), write the grid namelist,
     call the mpr executable, merge the restart files (if applicable), and delete temporary files (if specified).
@@ -526,7 +517,8 @@ class MHMRestartFile:
         return grid
 
     def _create_latlon(self, lon_min, lat_min):
-        """Create a l0 resolution and a l1 resolution LatLon object from a given lon_min and lat_min."""
+        """Create a l0 resolution and a l1 resolution LatLon object from a
+        given lon_min and lat_min."""
         lon_max = lon_min + self.increment_l1 * self.grid.l1.resolution
         lon_max = min(lon_max, self.grid.l1.lon_max)
         lat_max = lat_min + self.increment_l1 * self.grid.l1.resolution
@@ -581,10 +573,10 @@ class MHMRestartFile:
                 self.subgrids.append(grid)
 
     def _split_grid(self):  # has do addapted to different file types not just .nc
-        """
-        Split the grid into subgrids and write them to disk.
+        """Split the grid into subgrids and write them to disk.
 
-        Subgrids are subsets of the original grid with a size of increment x increment grid cells.
+        Subgrids are subsets of the original grid with a size of
+        increment x increment grid cells.
         """
         logger.info("Splitting grid")
         if self.increment_l0 is None:
@@ -1242,8 +1234,7 @@ class MHMRestartFile:
 
     @log_arguments()
     def create_restart_file(self):
-        """
-        Create a restart file for the MHM model.
+        """Create a restart file for the MHM model.
 
         This method creates a restart file by splitting the grid (if necessary),
         writing the grid namelist, calling the mpr executable, merging the restart

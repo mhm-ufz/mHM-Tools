@@ -1,4 +1,5 @@
-"""Compare simulated with observed discharge either directly or using a bootstraping approach."""
+"""Compare simulated with observed discharge either directly or using a
+bootstraping approach."""
 
 import itertools
 import logging
@@ -41,7 +42,8 @@ def flatten_list(nested_list):
 
 
 def gen_list_of_result_dicts(data, id, datatype="", facc=None):
-    """Generate a list of result dictionaries containing time, id, discharge and year."""
+    """Generate a list of result dictionaries containing time, id, discharge
+    and year."""
     # Check if all values in the array are NaN
     discharge = data.values
     are_all_nan = np.all(np.isnan(discharge))
@@ -95,10 +97,10 @@ def get_gauge_coords(
     diff_percent=10,
     id=None,
 ):
-    """
-    Find correct gauge location.
+    """Find correct gauge location.
 
-    Takes mrm_restart file, an approximate lat lon value and and then finds the cell with the value closest to a given flow accumulation.
+    Takes mrm_restart file, an approximate lat lon value and and then
+    finds the cell with the value closest to a given flow accumulation.
 
     return lon,lat, flow accumulation
     """
@@ -193,8 +195,8 @@ def Q_data_to_xarray(
     overwrite=False,
     direct_comparison=False,
 ):
-    """
-    Get observed and model Q data and save it as CSV files to be opened later.
+    """Get observed and model Q data and save it as CSV files to be opened
+    later.
 
     This function is not part of the workflow, but a pre processing tool
     that for comodity has been stored here. This was done bc mrm_data_by_id.values
@@ -211,7 +213,6 @@ def Q_data_to_xarray(
     - "id1": Gauge IDs
     - "new_x": X-coordinates of gauges
     - "new_y": Y-coordinates of gauges
-
     """
     if date_slice is None:
         date_slice = slice(None, None)
@@ -451,7 +452,8 @@ def evaludate_grdc_data(  # noqa: PLR0913
     end_date=None,
     overwrite=False,
 ):
-    """Compare simulated with observed discharge either directly or using a bootstraping approach."""
+    """Compare simulated with observed discharge either directly or using a
+    bootstraping approach."""
     output_path = Path(output_path)
     observed_ds, model_ds = Q_data_to_xarray(
         model_data_path=model_data_path,
@@ -612,7 +614,8 @@ def plot_kde(results_df, output_path):
 
 @log_errors()
 def plot_cdf(df, output_path, boostrap_iterations=None, mask_any=True):
-    """Create cdf plots for alpha, beat and gamma for different subselections (by catchment, boostrap-mean or all results)."""
+    """Create cdf plots for alpha, beat and gamma for different subselections
+    (by catchment, boostrap-mean or all results)."""
     # --- 1) Read your CSV ---
     # Adjust 'mydata.csv' to your actual file path
     # df = pd.read_csv('/work/kelbling/ecflow_work/gloria_hourly_t2k/output/gloria_0p05deg/discharge_validation/results.csv', index_col=0)

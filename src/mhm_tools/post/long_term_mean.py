@@ -1,5 +1,4 @@
-"""
-Calculate long term means for input NetCDF files given
+"""Calculate long term means for input NetCDF files given.
 
 Authors
 -------
@@ -35,10 +34,8 @@ def aggregate_files(
     aggregation_type: str = "intensive",
     long_term_mean_type: str = "monthly",
 ) -> None:
-    """
-    Aggregate a single NetCDF file in `input_path` named `file_name`
-    into a coarser temporal resolution using CDO, writing to `output_path`.
-    """
+    """Aggregate a single NetCDF file in `input_path` named `file_name` into a
+    coarser temporal resolution using CDO, writing to `output_path`."""
     if aggregation_type not in ("intensive", "extensive"):
         raise ValueError(
             f"aggregation_type must be 'intensive' or 'extensive', got {aggregation_type!r}"
@@ -84,9 +81,10 @@ def cal_long_term_mean(
     lat_max: Optional[float] = None,
     aggregate: bool = False,
 ) -> None:
-    """
-    Compute long-term means for NetCDF forcing data.
-    Optionally perform temporal aggregation and then merge, or merge raw inputs first.
+    """Compute long-term means for NetCDF forcing data.
+
+    Optionally perform temporal aggregation and then merge, or merge raw
+    inputs first.
     """
     pattern = os.path.join(in_dir, in_file)
     files = sorted(glob.glob(pattern))
