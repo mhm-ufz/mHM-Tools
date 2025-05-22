@@ -1,4 +1,6 @@
-import glob
+"""Module for preparing MHM forcing data by converting units, optionally cropping,
+and exporting to NetCDF files."""
+
 import logging
 from pathlib import Path
 from typing import Optional
@@ -7,6 +9,7 @@ import pandas as pd
 import xarray as xr
 
 from mhm_tools.common.file_handler import get_xarray_ds_from_file
+from mhm_tools.common.logger import ErrorLogger
 from mhm_tools.common.xarray_utils import crop_ds
 
 logger = logging.getLogger(__name__)
@@ -29,10 +32,16 @@ PRECIPITATION_UNITS = ["m", "kg m-2", "mm"]
 PRECIPITATION_RATE_UNITS = ["kg m-2 s-1"]
 
 
-def convert_units(ds: xr.Dataset, var: str) -> xr.Dataset:
+def convert_units(ds: xr.Dataset, var: str) -> xr.DataArray:
+    """Convert variable to standard units.
+
+    Temperature variables are converted to degrees Celsius (degC),
+    and precipitation variables are converted to millimeters (mm).
+    """
     units = ds[var].attrs.get("units")
     if not units:
-        raise ValueError(f"Variable '{var}' missing 'units' attribute.")
+        msg = f"Variable '{var}' missing 'units' attribute."
+        raise ValueError(msg)
 
     # Temperature
     if units in TEMPERATURE_UNITS:
@@ -66,7 +75,8 @@ def convert_units(ds: xr.Dataset, var: str) -> xr.Dataset:
         ds[new_var] = ds[new_var] * factor
         ds[new_var].attrs["units"] = "mm"
     else:
-        raise ValueError(f"Unexpected units '{units}' for variable '{var}'.")
+        msg = f"Unexpected units '{units}' for variable '{var}'."
+        raise ValueError(msg)
 
     mv = -9999.0
     ds[new_var].attrs.update({"_FillValue": mv, "missing_value": mv})
@@ -74,6 +84,10 @@ def convert_units(ds: xr.Dataset, var: str) -> xr.Dataset:
 
 
 def ensure_lat_lon_order(ds: xr.Dataset) -> xr.Dataset:
+    """Ensure latitude and longitude axes are ordered correctly.
+
+    Latitudes will be sorted descending if needed, and longitudes ascending.
+    """
     if not (ds["lat"].values[1:] < ds["lat"].values[:-1]).all():
         ds = ds.sortby("lat", ascending=False)
     if not (ds["lon"].values[1:] > ds["lon"].values[:-1]).all():
@@ -95,29 +109,30 @@ def prepare_forcings(
     use_mfdataset: bool = False,
 ) -> None:
     """Loop through all files matching in_file in in_dir, convert units,
-    optionally crop, and write to NetCDF in out_dir with naming controlled by
-    out_file.
+
+    Optionally crop, and write to NetCDF in out_dir with naming controlled by out_file.
     """
-    pattern = str(Path(in_dir) / in_file)
-    files = sorted(glob.glob(pattern))
+    files = sorted(Path(in_dir).glob(in_file))
     if not files:
         with ErrorLogger(logger):
-            msg = "No files match pattern {pattern}"
+            msg = f"No files match pattern {in_file!r} in directory {in_dir!r}"
             raise FileNotFoundError(msg)
 
     Path(out_dir).mkdir(parents=True, exist_ok=True)
     for path in files:
-        # Load data-array
+        # Load dataset
         ds = get_xarray_ds_from_file(
-            file_path=path,
+            file_path=str(path),
             use_mfdataset=use_mfdataset,
             normalize_latlon_coords=True,
         )
 
         # Sort lat/lon if needed
         ds = ensure_lat_lon_order(ds)
-        # Convert units and return da
+
+        # Convert units and get DataArray
         da = convert_units(ds, var)
+
         # Crop spatially
         if crop:
             if None in (lon_min, lon_max, lat_min, lat_max):
@@ -125,7 +140,9 @@ def prepare_forcings(
                     msg = "All lon/lat bounds must be provided when crop=True."
                     raise ValueError(msg)
             da = crop_ds(da, lon_min, lon_max, lat_min, lat_max)
+
         # Determine output name
-        name = Path(path).name if out_file == "*" else out_file
+        name = path.name if out_file == "*" else out_file
+
         # Write output
         da.to_netcdf(Path(out_dir) / name)
