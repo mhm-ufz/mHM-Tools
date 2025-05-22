@@ -39,13 +39,15 @@ class LatlonFiles:
 
     def set_dem_output_file(self, path):
         """Set the path where the dem containing L0 information can be
-        found."""
+        found.
+        """
         logger.info(f"Setting dem_output_file to {path}")
         self.dem_output_file = path
 
     def set_meteo_header_path(self, path):
         """Set the path where the meteo header containing L11 information can
-        be found."""
+        be found.
+        """
         logger.info(f"Setting meteo_header_path to {path}")
         self.meteo_header_path = path
 
@@ -77,7 +79,8 @@ class LatlonFiles:
 
     def set_by_list_of_objects(self, obj_list):
         """Set all files by a list of LatlonFiles objects that may be empty or
-        contain files."""
+        contain files.
+        """
         for obj in obj_list:
             latlon_output_file = obj.get_latlon_output_file()
             dem_output_file = obj.get_dem_output_file()
@@ -94,7 +97,8 @@ def regrid_mask(
     mask_ds, lon_key_mask, lat_key_mask, target_lon, target_lat, mask_key=None
 ):
     """Regrid a xarray mask dataset mask_ds to the resolution of a second
-    dataset ds2."""
+    dataset ds2.
+    """
     mask_lon = mask_ds[lon_key_mask].data
     mask_lat = mask_ds[lat_key_mask].data
     mask_res = mask_lat[0] - mask_lat[1]
@@ -146,7 +150,8 @@ def write_to_file(ds, output_file: Path):
 
 def crop_file_with_header(ds_in, file_path, output_path, lonslice, latslice):
     """Crop the nc file and create a new header file for the new
-    coordinates."""
+    coordinates.
+    """
     pres = 1e-5
     header = file_path.parent / "header.txt"
     data_var = get_single_data_var(ds_in)
@@ -261,7 +266,8 @@ def call_create_latlon(
     crs,
 ):
     """Create header dictionaries for the different resolutions and call create
-    latlon to create a latlon file for the setup."""
+    latlon to create a latlon file for the setup.
+    """
     # create new latlon file
     logger.info("Creating new latlon file")
     with get_xarray_ds_from_file(dem_output_file, chunking=True) as ds_dem:
@@ -312,7 +318,8 @@ def crop_file(
     available_mem_gib,
 ):
     """Crops one file by lat and lon slice and may mask it with the mask
-    dataarray."""
+    dataarray.
+    """
     logger.info(f"Cropping the file {input_file}")
     output_file = output_path / input_file.relative_to(input_path)
     output_file.parent.mkdir(parents=True, exist_ok=True)

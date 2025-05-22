@@ -21,7 +21,8 @@ def _has_wildcards(path: Union[str, Path]) -> bool:
 
 def _fallback_open(open_func: Any, *args: Any, **kwargs: Any) -> xr.Dataset:
     """Open a dataset with the provided xarray function, falling back from
-    h5netcdf to netcdf4 engine if necessary."""
+    h5netcdf to netcdf4 engine if necessary.
+    """
     try:
         return open_func(*args, **kwargs)
     except ValueError as exc:

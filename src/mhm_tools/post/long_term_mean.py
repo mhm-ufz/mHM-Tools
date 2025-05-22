@@ -2,7 +2,7 @@
 
 Authors
 -------
-- Jeisson Leal (refactored to remove var_name dependency)
+- Jeisson Leal
 """
 
 import glob
@@ -35,7 +35,8 @@ def aggregate_files(
     long_term_mean_type: str = "monthly",
 ) -> None:
     """Aggregate a single NetCDF file in `input_path` named `file_name` into a
-    coarser temporal resolution using CDO, writing to `output_path`."""
+    coarser temporal resolution using CDO, writing to `output_path`.
+    """
     if aggregation_type not in ("intensive", "extensive"):
         raise ValueError(
             f"aggregation_type must be 'intensive' or 'extensive', got {aggregation_type!r}"

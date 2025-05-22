@@ -96,7 +96,8 @@ def prepare_forcings(
 ) -> None:
     """Loop through all files matching in_file in in_dir, convert units,
     optionally crop, and write to NetCDF in out_dir with naming controlled by
-    out_file."""
+    out_file.
+    """
     pattern = str(Path(in_dir) / in_file)
     files = sorted(glob.glob(pattern))
     if not files:

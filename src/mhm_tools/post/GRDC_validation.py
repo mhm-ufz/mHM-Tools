@@ -42,7 +42,8 @@ def flatten_list(nested_list):
 
 def gen_list_of_result_dicts(data, id, datatype="", facc=None):
     """Generate a list of result dictionaries containing time, id, discharge
-    and year."""
+    and year.
+    """
     # Check if all values in the array are NaN
     discharge = data.values
     are_all_nan = np.all(np.isnan(discharge))
@@ -452,7 +453,8 @@ def evaludate_grdc_data(  # noqa: PLR0913
     overwrite=False,
 ):
     """Compare simulated with observed discharge either directly or using a
-    bootstraping approach."""
+    bootstraping approach.
+    """
     output_path = Path(output_path)
     observed_ds, model_ds = Q_data_to_xarray(
         model_data_path=model_data_path,
@@ -614,7 +616,8 @@ def plot_kde(results_df, output_path):
 @log_errors()
 def plot_cdf(df, output_path, boostrap_iterations=None, mask_any=True):
     """Create cdf plots for alpha, beat and gamma for different subselections
-    (by catchment, boostrap-mean or all results)."""
+    (by catchment, boostrap-mean or all results).
+    """
     # --- 1) Read your CSV ---
     # Adjust 'mydata.csv' to your actual file path
     # df = pd.read_csv('/work/kelbling/ecflow_work/gloria_hourly_t2k/output/gloria_0p05deg/discharge_validation/results.csv', index_col=0)

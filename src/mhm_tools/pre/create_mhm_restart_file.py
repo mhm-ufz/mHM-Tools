@@ -260,7 +260,8 @@ class Grid:
 
     def migrate_grid_using_systemlink(self, new_path):
         """Mirgrates the file path by creating a new path and system linking
-        all files there."""
+        all files there.
+        """
         logger.info(f"Creating system links in {new_path} for all files in {self.path}")
         new_path = Path(new_path)
         new_path.mkdir(parents=True, exist_ok=True)
@@ -518,7 +519,8 @@ class MHMRestartFile:
 
     def _create_latlon(self, lon_min, lat_min):
         """Create a l0 resolution and a l1 resolution LatLon object from a
-        given lon_min and lat_min."""
+        given lon_min and lat_min.
+        """
         lon_max = lon_min + self.increment_l1 * self.grid.l1.resolution
         lon_max = min(lon_max, self.grid.l1.lon_max)
         lat_max = lat_min + self.increment_l1 * self.grid.l1.resolution

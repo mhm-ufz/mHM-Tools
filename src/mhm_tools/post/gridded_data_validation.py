@@ -46,7 +46,8 @@ def spearman_correlation(data1, data2):
 
 def spearman_spatial(data1, data2):
     """Calculate maps of Spearman rank correlation between two xarray
-    DataArrays of shape(12,n,m)."""
+    DataArrays of shape(12,n,m).
+    """
     if len(np.shape(data1)) != len(np.shape(data2)) or len(np.shape(data1)) != 3:
         with ErrorLogger(logger):
             msg = "Wrong shape for spatial spearman correlation!"
@@ -123,7 +124,8 @@ def climatology(data):
 
 def get_clim_from_ds(ds, input_var=None, factor=1):
     """Calculate climatology from DataSet with variable or DataArray while
-    mulitplying with a provided factor."""
+    mulitplying with a provided factor.
+    """
     data = ds * factor if input_var is None else ds[input_var] * factor
     return climatology(data)
 
@@ -249,7 +251,8 @@ def combine_results(results):
 
 def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None):
     """Take a list of files with all containing data for one month and creating
-    statisitcs while reading them one by one."""
+    statisitcs while reading them one by one.
+    """
     da = None
     if not isinstance(files, Iterable):
         # logger.warning(f"Files not a list of files but one file {files}.")
@@ -325,7 +328,8 @@ def get_stats_one_pass(
     file_name="*.*",
 ):
     """Create dataset statistics by reading in one monthly or yearly file at a
-    time and updating the statistics."""
+    time and updating the statistics.
+    """
     if path.is_dir():
         files = get_files(
             path,
@@ -403,7 +407,8 @@ def plot_single_map(
     bounds_type="fixed",
 ):
     """Plot one map to an matplotlib axis, taking care of the bounds and
-    colormap."""
+    colormap.
+    """
     n_bins = 10
     if bounds_type == "max" and diff_to_mean is not None:
         vmin = 1 - diff_to_mean
@@ -475,7 +480,8 @@ def plot_map(
 ):
     """Create a plot with four subplots showing relative mean, standard
     deviation, the spearman correlation of the climatologies and the seasonal
-    mean of both datasets."""
+    mean of both datasets.
+    """
     rel_mean = np.where(rel_mean == np.inf, np.nan, rel_mean)
     rel_std = np.where(rel_std == np.inf, np.nan, rel_std)
     fig, axes = plt.subplots(2, 2, figsize=(10.5, 4.68))
@@ -863,7 +869,8 @@ def compare_input_with_ref(
 
 def get_rel_stat_file(output_path, input_name, ref_name):
     """Create the file name for the file  contatining relative statistics of
-    the two datasets."""
+    the two datasets.
+    """
     file_name = "relative_stats"
     if input_name is not None:
         file_name += f"_{input_name}"
@@ -874,7 +881,8 @@ def get_rel_stat_file(output_path, input_name, ref_name):
 
 def evaluate_boostraping_stat_files(stat_files, input_name, ref_name):
     """Evaluate bootstrapped statistics and compute median across bootstrap
-    iterations."""
+    iterations.
+    """
     # Open the first file to initialize dimensions and weights
     try:
         with xr.open_dataset(stat_files[0]) as first_file:
@@ -930,7 +938,8 @@ def get_dataset_from_path(
     path, available_years=None, available_mem=None, file_name="*.*"
 ):
     """Get a dataset from a given path whether that is a file or a
-    directory."""
+    directory.
+    """
     if path.is_file() and path.suffix == ".nc":
         chunking = available_mem is not None
         return get_xarray_ds_from_file(
@@ -999,7 +1008,8 @@ def regridd_to_higher_spatial_resolution(ds1, ds2):
 
 def get_years_from_path(path, raise_exception=True, file_name="*.*"):
     """Get years for one dataset from the folder structure or the xarray
-    dataset."""
+    dataset.
+    """
     if path.is_dir():
         return [int(p.name) for p in year_structure_paths(path, file_name=file_name)]
     if path.is_file():
@@ -1078,7 +1088,8 @@ def get_target_time_res_from_files(input_file, ref_file):
 
 def get_target_time_res(input_path, ref_path, folder_name=""):
     """Get coarser time resolution from two datasets with files in folder
-    structur."""
+    structur.
+    """
     input_files = (Path(input_path) / folder_name).glob("*nc")
     ref_files = (Path(ref_path) / folder_name).glob("*nc")
     if not list(input_files) or not list(ref_files):
@@ -1110,7 +1121,8 @@ def gridded_data_validation(
     ref_file_name="*.*",
 ):
     """Validate a spatial variable from two datasets by comparing the
-    climatology of that variable."""
+    climatology of that variable.
+    """
     output_path = Path(output_path)
     input_path = Path(input_path)
     ref_path = Path(ref_path) if ref_path is not None else None

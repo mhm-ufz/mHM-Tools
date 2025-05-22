@@ -105,7 +105,8 @@ class CreateSubdomainMasks:
     @staticmethod
     def get_mask_from_polygon(arr, vertices):
         """Create a mask on an array with lon and lat attributes for given list
-        of vertices."""
+        of vertices.
+        """
         polygon = mpl.path.Path(vertices)
         # mask out only the values in arr that fall within bbox of polygon, convert them to points
         bbox = polygon.get_extents()

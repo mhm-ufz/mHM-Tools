@@ -203,7 +203,8 @@ class Catchment:
 
     def upscale(self, var):
         """Upscale flow direction to l1_resolution if that is int multipe of
-        data resolution."""
+        data resolution.
+        """
         factor = self.get_upscaling_factor()
 
         if factor == 1:
@@ -270,7 +271,8 @@ class Catchment:
     @staticmethod
     def create_frame(ds, frame=0, frame_value=0):
         """If a frame is used this frame is set to no data values as a
-        frame."""
+        frame.
+        """
         logger.info(f"Creating a frame of {frame} cells around the domain.")
         if frame > 0:
             for var in ds.data_vars:
@@ -408,7 +410,8 @@ class Catchment:
 
     def processing_data_variable(self, var_name, cut_by_basin, lat_slice, lon_slice):
         """Process data variable, masking it and croping it spatial
-        dimensions."""
+        dimensions.
+        """
         logger.info(f"Processing {var_name}")
         data = getattr(self, var_name)
         if data is None:
@@ -456,7 +459,8 @@ class Catchment:
 
     def write_basin_id_file(self, data_vars, frame, out_path):
         """Write the basin_id file to specified path and set a sink value frame
-        if specified."""
+        if specified.
+        """
         logger.info("Write to single file.")
         ds = xr.merge(data_vars.values())
         # set some attributes
@@ -667,7 +671,8 @@ def create_catchment(
     latlon=True,
 ):
     """Create file containing catchment ids, flowdirection and upstream area
-    from dem or flow direction."""
+    from dem or flow direction.
+    """
     logger.info(
         f"Creating catchment file for {var_name} using {var} and {ftype} from {input_file}"
     )
