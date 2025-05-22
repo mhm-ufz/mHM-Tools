@@ -1,6 +1,10 @@
 """
 Module for preparing MHM forcing data by converting units, optionally cropping,
 and exporting to NetCDF files.
+
+Authors
+-------
+- Jeisson Leal
 """
 
 import logging
@@ -110,7 +114,7 @@ def prepare_forcings(
     lat_max: Optional[float] = None,
     use_mfdataset: bool = False,
 ) -> None:
-    """Loop through all files matching in_file in in_dir, convert units,
+    """Loop through all files matching in_file in in_dir, convert units.
 
     Optionally crop, and write to NetCDF in out_dir with naming controlled by out_file.
     """

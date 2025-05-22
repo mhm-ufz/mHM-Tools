@@ -1,6 +1,10 @@
 """
 Module for computing and plotting long-term mean differences
 between model and reference datasets.
+
+Authors
+-------
+- Jeisson Leal
 """
 
 from pathlib import Path
@@ -13,16 +17,7 @@ from mhm_tools.common.netcdf import read_dataset
 
 
 def compute_difference(arr_model: np.ndarray, arr_reference: np.ndarray) -> np.ndarray:
-    """
-    Compute the element-wise difference between a model and reference array.
-
-    Parameters:
-        arr_model (np.ndarray): Array of model values.
-        arr_reference (np.ndarray): Array of reference values.
-
-    Returns:
-        np.ndarray: Difference (model minus reference).
-    """
+    """Compute the element-wise difference between a model and reference array."""
     return arr_model - arr_reference
 
 
@@ -41,9 +36,7 @@ def plot_diff(
     vmin: Optional[float] = None,
     vmax: Optional[float] = None,
 ) -> None:
-    """
-    Plot and save the difference field over longitude and latitude.
-    """
+    """Plot and save the difference field over longitude and latitude."""
     plt.figure(figsize=(12, 6))
 
     img = plt.imshow(
@@ -90,7 +83,8 @@ def long_term_mean_diff(
     vmax: Optional[float] = None,
 ) -> None:
     """
-    Compute long-term mean difference between model and reference datasets and plot the result.
+    Compute long-term mean difference between model and
+    reference datasets and plot the result.
     """
     # Read the reference and model datasets
     ds_ref = read_dataset(file_path=str(Path(ref_input_dir) / reference_pattern))

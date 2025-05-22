@@ -1,5 +1,6 @@
 """
-Computes and plots the spatial difference between a model dataset and a reference dataset.
+Computes and plots the spatial difference between a
+model dataset and a reference dataset.
 """
 
 import argparse
