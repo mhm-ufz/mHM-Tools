@@ -1,5 +1,8 @@
 """
-Calculate long term means for input NetCDF files given.
+Calculate long-term means for input NetCDF files given.
+
+This function reads one or more CF-compliant NetCDF datasets and returns
+the time-mean field as an xarray.DataArray.
 
 Authors
 -------

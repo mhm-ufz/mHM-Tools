@@ -1,6 +1,10 @@
 """
-Module for preparing MHM forcing data by converting units, optionally cropping,
-and exporting to NetCDF files.
+Prepare NetCDF MHM forcing files.
+
+This module provides functions to:
+- Convert meteorological time series into the units expected by MHM
+- Crop spatial fields to a user-defined region
+- Write the pre-processed data out as CF-compliant NetCDF
 
 Authors
 -------

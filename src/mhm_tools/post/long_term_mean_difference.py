@@ -1,6 +1,9 @@
 """
-Module for computing and plotting long-term mean differences
-between model and reference datasets.
+Compute and plot long-term mean differences between model and reference datasets.
+
+This module reads one or more CF-compliant NetCDF datasets, computes the
+long-term mean fields for both model outputs and reference data, calculates
+their differences, and generates spatial and temporal plots of those differences.
 
 Authors
 -------
