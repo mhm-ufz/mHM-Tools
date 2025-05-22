@@ -1,29 +1,32 @@
-"""Computes and plots the spatial difference between a model dataset and a
-reference dataset."""
+"""
+Computes and plots the spatial difference between a model dataset and a reference dataset.
+"""
+
+import argparse
 
 from ..post.long_term_mean_difference import long_term_mean_diff
 
 
 def str2float(value):
     """Convert a string to float, but let None remain None."""
-    # If argparse is giving us the default None (i.e. user didn’t supply the flag) …
+    # If argparse is giving us the default None (i.e. user didn't supply the flag) ...
     if value is None:
         return None
 
-    # If the user literally typed “none” (case‐insensitive), treat it as None too
+    # If the user literally typed "none" (case-insensitive), treat it as None too
     if isinstance(value, str) and value.lower() == "none":
         return None
 
     # Otherwise it must be a string we can cast
     if not isinstance(value, str):
-        raise argparse.ArgumentTypeError(
-            f"Expected a string or None, but got {type(value).__name__}."
-        )
+        msg = f"Expected a string or None, but got {type(value).__name__}."
+        raise argparse.ArgumentTypeError(msg)
 
     try:
         return float(value)
-    except ValueError:
-        raise argparse.ArgumentTypeError(f"{value!r} is not a valid float.")
+    except ValueError as err:
+        msg = f"{value!r} is not a valid float."
+        raise argparse.ArgumentTypeError(msg) from err
 
 
 def add_args(parser):
@@ -38,11 +41,11 @@ def add_args(parser):
         "  mhm-tools long_term_mean_validation \\\n"
         "    --ref_input_dir /path/to/ref \\\n"
         "    --mod_input_dir /path/to/mod \\\n"
-        '    --reference_pattern "ref_*.nc" \\\n'
-        '    --model_pattern "mod_*.nc" \\\n'
+        "    --reference_pattern \"ref_*.nc\" \\\n"
+        "    --model_pattern \"mod_*.nc\" \\\n"
         "    --ref_var pre --mod_var pre \\\n"
-        '    --colorbar_label "ΔP" \\\n'
-        '    --title "Precip. Diff" \\\n'
+        "    --colorbar_label \"ΔP\" \\\n"
+        "    --title \"Precip. Diff\" \\\n"
         "    --x_min -10 --x_max 30 --y_min 40 --y_max 70 \\\n"
         "    --cmap viridis --vmin -5 --vmax 5 \\\n"
         "    -o /out/dir --output_file diff.png"
@@ -59,25 +62,31 @@ def add_args(parser):
     req.add_argument(
         "--reference_pattern", required=True, help="Wildcard for reference file"
     )
-    req.add_argument("--model_pattern", required=True, help="Wildcard for model file")
+    req.add_argument(
+        "--model_pattern", required=True, help="Wildcard for model file"
+    )
     req.add_argument(
         "--ref_var", required=True, help="Variable name in reference dataset"
     )
-    req.add_argument("--mod_var", required=True, help="Variable name in model dataset")
+    req.add_argument(
+        "--mod_var", required=True, help="Variable name in model dataset"
+    )
     req.add_argument(
         "-o", "--output_dir", required=True, help="Directory to save the output PNG"
     )
-    req.add_argument("--output_file", required=True, help="Filename for the output PNG")
+    req.add_argument(
+        "--output_file", required=True, help="Filename for the output PNG"
+    )
 
     # optional arguments
     parser.add_argument(
         "--colorbar_label",
-        default="Difference (model − reference)",
+        default="Difference (model - reference)",
         help="Label for the plot colorbar",
     )
     parser.add_argument(
         "--title",
-        default="Mean Difference (model − reference)",
+        default="Mean Difference (model - reference)",
         help="Title for the plot",
     )
     parser.add_argument(

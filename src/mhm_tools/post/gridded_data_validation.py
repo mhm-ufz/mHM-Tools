@@ -1,5 +1,4 @@
-"""Compare a spatial variable between two datasets using the climatology of
-that variable."""
+"""Compare a spatial variable between two datasets using the climatology of that variable."""
 
 import array
 import logging
@@ -43,40 +42,6 @@ def spearman_correlation(data1, data2):
     # Calculate Spearman rank correlation using scipy
     corr, p_value = spearmanr(data1, data2)
     return corr, p_value
-
-
-# def _spearman_1d(a: np.ndarray, b: np.ndarray):
-#     """Compute Spearman’s ρ and p-value for two 1D arrays."""
-#     # nan_policy='omit' will drop NaNs in the calculation
-#     rho, p = spearmanr(a, b, nan_policy="omit")
-#     return np.float32(rho), np.float32(p)
-
-
-# def spearman_spatial(
-#     ds1: xr.DataArray, ds2: xr.DataArray
-# ) -> tuple[xr.DataArray, xr.DataArray]:
-#     """
-#     Compute a per-pixel Spearman correlation map between two DataArrays
-#     of shape (time, y, x), leveraging Dask & xarray chunking.
-#     Returns (rho, pvalue) each with dims (y, x).
-#     """
-#     # make sure they align on time
-#     ds1, ds2 = xr.align(ds1, ds2)
-
-#     rho, p = xr.apply_ufunc(
-#         _spearman_1d,  # the 1D function
-#         ds1,
-#         ds2,  # inputs
-#         input_core_dims=[["time"], ["time"]],
-#         output_core_dims=[[], []],
-#         vectorize=True,  # vectorize over y, x
-#         dask="parallelized",  # dispatch one Dask task per chunk
-#         output_dtypes=[np.float32, np.float32],
-#     )
-#     # give them nice names
-#     rho.name = "spearman_rho"
-#     p.name = "spearman_p"
-#     return rho, p
 
 
 def spearman_spatial(data1, data2):

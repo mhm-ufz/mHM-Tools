@@ -1,5 +1,7 @@
-"""Validation of spatially distributed data based on their climatology or
-timeseries."""
+"""
+Validation of spatially distributed data based on their climatology or
+timeseries.
+"""
 
 from mhm_tools.common.cli_utils import get_available_mem_in_unit, get_coords
 from mhm_tools.post.gridded_data_validation import gridded_data_validation

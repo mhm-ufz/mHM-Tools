@@ -39,7 +39,7 @@ def get_coord_key(
                 return dim
     except AttributeError:
         pass
-    # then select possible keys from the following lists and try them untill a fitting one is found.
+    # then select possible keys from the following lists and try them until a fitting one is found.
     if lat:
         keys = ["lat", "latitude", "northing", "y", "new_y", "Y"]
     elif lon:
@@ -75,8 +75,7 @@ def get_coord_key(
 
 
 def get_single_data_var(ds):
-    """Get the data var name from da dataset that only contains one data
-    variable."""
+    """Get the data var name from a dataset that only contains one data variable."""
     data_vars = list(ds.data_vars)
     if len(data_vars) > 1:
         logger.error("Only single data_var allowed")
@@ -86,8 +85,7 @@ def get_single_data_var(ds):
 
 
 def induce_data_var_from_file_name(ds, file_path):
-    """Check if one of the data_vars is part of the file name and select it as
-    most probable data_var."""
+    """Check if one of the data_vars is part of the file name and select it as the most probable data_var."""
     logger.info("Searching for more than one datavar by comparing with file name.")
     name = file_path.stem
     data_vars = list(ds.data_vars)
@@ -103,10 +101,11 @@ def induce_data_var_from_file_name(ds, file_path):
 def timedelta_to_alias(ds: xr.DataArray) -> str:
     """Map a median timedelta to a pandas frequency alias.
 
-    - ~1 day  → 'D'
-    - ~7 days → 'W'
-    - ~28–31 days → 'M'
+    - ~1 day -> 'D'
+    - ~7 days -> 'W'
+    - ~28-31 days -> 'M'
     - otherwise: fall back to '<N>H'
+
     """
     median_delta = ds.time.diff("time").median()
     days = median_delta / np.timedelta64(1, "D")
@@ -154,8 +153,7 @@ def crop_ds(
     lon_name: str = "lon",
     lat_name: str = "lat",
 ) -> xr.Dataset:
-    """Crop an xarray.Dataset to the given lon/lat bounds, handling coordinate
-    order."""
+    """Crop an xarray.Dataset to the given lon/lat bounds, handling coordinate order."""
     # ensure min < max
     lon_low, lon_high = sorted([lon_min, lon_max])
     lat_low, lat_high = sorted([lat_min, lat_max])
@@ -164,7 +162,7 @@ def crop_ds(
     lon_vals = ds[lon_name].values
     lat_vals = ds[lat_name].values
 
-    # if the coordinate axis is ascending, slice low→high; else high→low
+    # if the coordinate axis is ascending, slice low->high; else high->low
     if lon_vals[0] <= lon_vals[-1]:
         lon_slice = slice(lon_low, lon_high)
     else:

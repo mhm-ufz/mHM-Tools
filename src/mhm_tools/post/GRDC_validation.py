@@ -1,5 +1,4 @@
-"""Compare simulated with observed discharge either directly or using a
-bootstraping approach."""
+"""Compare simulated with observed discharge either directly or using a bootstraping approach."""
 
 import itertools
 import logging

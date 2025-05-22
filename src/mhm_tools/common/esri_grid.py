@@ -1,4 +1,6 @@
-"""Common ESRI ASCII grid routines."""
+"""
+Common ESRI ASCII grid routines.
+"""
 
 import logging
 import warnings

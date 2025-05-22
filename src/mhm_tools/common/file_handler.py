@@ -22,9 +22,11 @@ logger = logging.getLogger(__name__)
 # more on this in the cut_classical_mhm_setups branch There are classes for Morph and meteo data
 ######
 
-
 def create_header(ds, output_path=None, no_data_value="-9999", write=True):
-    """Write a header file from a dataset."""
+    """Write a header file from a dataset.
+
+    Takes an xarray Dataset and writes the ASCII header needed for GIS tools.
+    """
     lat_key = get_coord_key(ds, lat=True)
     lon_key = get_coord_key(ds, lon=True)
     x = ds[lon_key].values
@@ -44,7 +46,7 @@ xllcorner            {xllcorner:.6f}
 yllcorner            {yllcorner:.6f}
 cellsize             {cellsize:.6f}
 NODATA_value         {no_data_value}
-            """
+"""
         logger.info(
             f"Writing header file to {header_out_path} with header str: {header_str}"
         )
@@ -77,11 +79,10 @@ def crop_file_by_mask(ds, mask_file):
 
 
 def chunk_dataset_space_only(ds: xr.Dataset, available_mem_gib: float) -> xr.Dataset:
-    """Chunk only in space (lat/lon), leaving time whole, sized to available
-    memory.
+    """Chunk only in space (lat/lon), leaving time whole, sized to available memory.
 
-    - Uses 80% of available_mem_gib for a single chunk
-    - Computes how many total cells (t × y × x) fit, then allocates all t,
+    - Uses 80% of available_mem_gib for a single chunk.
+    - Computes how many total cells (t * y * x) fit, then allocates all t,
       and splits y/x so that t·y·x·bytes_per_cell ≤ work_bytes.
     - If no time dimension, behaves similarly with t=1.
     """
@@ -230,10 +231,8 @@ def get_xarray_ds_from_file(
             raise NotImplementedError()
     return ds_out
 
-
 def write_xarray_to_file(ds, file_path, var_name=None, fmt=None, create_folder=True):
-    """Write xarray Datasets to file with file type depending on the file
-    suffix."""
+    """Write xarray Datasets to file with file type depending on the file suffix."""
     file_path = Path(file_path)
     if create_folder and not file_path.parent.is_dir():
         file_path.parent.mkdir(parents=True)
@@ -246,10 +245,8 @@ def write_xarray_to_file(ds, file_path, var_name=None, fmt=None, create_folder=T
     with ErrorLogger(logger):
         raise NotImplementedError(msg)
 
-
 def write_xarray_to_ascii(dataset, filepath, data_var=None, fmt=None):
-    """Take xarray dataset and writes it to an asci file that can by read by
-    mHM."""
+    """Write xarray Dataset to an ASCII file that can be read by mHM."""
     # Extract the data, coordinates, and nodata value from the Dataset
     if data_var is None:
         data_var = get_single_data_var(dataset)
@@ -282,10 +279,8 @@ def write_xarray_to_ascii(dataset, filepath, data_var=None, fmt=None):
     # Replace NaN values with nodata_value in data
 
     if data.dtype.kind in ["i", "u", "f"]:  # i=int, u=unsigned, f=float
-        data_type = "num"
         data_to_write = np.where(np.isnan(data.values), nodata_value, data)
-    if data.dtype.kind in ["U", "S"]:
-        data_type = "str"
+    else:
         data_to_write = data
 
     # Write header and data to ASCII file
@@ -293,12 +288,11 @@ def write_xarray_to_ascii(dataset, filepath, data_var=None, fmt=None):
         f.write(header)
         if fmt is not None:
             np.savetxt(f, data_to_write, fmt=fmt)
-        elif data_type == "num":
+        elif data.dtype.kind in ["i", "u", "f"]:
             np.savetxt(f, data_to_write, fmt="%g")
         else:
             np.savetxt(f, data_to_write, fmt="%s")
-        logger.info(f"Writting file to {filepath}")
-
+    logger.info(f"Writing ASCII file to {filepath}")
 
 def read_ascii_to_xarray(
     filepath, var_name=None, chunking=False, available_mem_gib=None
