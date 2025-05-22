@@ -1,13 +1,12 @@
-"""Calculate long term means for input NetCDF files given.
+"""
+Calculate long term means for input NetCDF files given.
 
 Authors
 -------
 - Jeisson Leal
 """
 
-import glob
 import logging
-import os
 from pathlib import Path
 from typing import Optional
 
@@ -18,14 +17,13 @@ from mhm_tools.pre.crop_mhm_setup import crop_file
 
 logger = logging.getLogger(__name__)
 
-# shared mapping for CDO operations
+# Shared mapping for CDO operations
 OP_MAP = {
     "hourly": ("hourmean", "hoursum"),
     "daily": ("daymean", "daysum"),
     "monthly": ("monmean", "monsum"),
     "yearly": ("yearmean", "yearsum"),
 }
-
 
 def aggregate_files(
     input_path: Path,
@@ -38,13 +36,17 @@ def aggregate_files(
     coarser temporal resolution using CDO, writing to `output_path`.
     """
     if aggregation_type not in ("intensive", "extensive"):
-        raise ValueError(
-            f"aggregation_type must be 'intensive' or 'extensive', got {aggregation_type!r}"
+        msg = (
+            f"aggregation_type must be 'intensive' or 'extensive', "
+            f"got {aggregation_type!r}"
         )
+        raise ValueError(msg)
     if long_term_mean_type not in OP_MAP:
-        raise ValueError(
-            f"Unsupported long_term_mean_type {long_term_mean_type!r}; choose from {list(OP_MAP)}"
+        msg = (
+            f"Unsupported long_term_mean_type {long_term_mean_type!r}; "
+            f"choose from {list(OP_MAP)}"
         )
+        raise ValueError(msg)
 
     mean_op, sum_op = OP_MAP[long_term_mean_type]
     cdo_op = mean_op if aggregation_type == "intensive" else sum_op
@@ -52,7 +54,8 @@ def aggregate_files(
 
     input_file = input_path / file_name
     if not input_file.exists():
-        raise FileNotFoundError(f"Input file not found: {input_file}")
+        msg = f"Input file not found: {input_file}"
+        raise FileNotFoundError(msg)
     out_filename = f"{cdo_op}_{file_name}"
     out_file = output_path / out_filename
 
@@ -61,11 +64,11 @@ def aggregate_files(
         logger.info(f"Running CDO {cdo_op} on {input_file} → {out_file}")
         getattr(cdo, cdo_op)(input=str(input_file), output=str(out_file))
     except Exception as e:
+        msg = (
+            f"CDO operation '{cdo_op}' failed on file '{input_file}': {e}"
+        )
         with ErrorLogger(logger):
-            raise RuntimeError(
-                f"CDO operation '{cdo_op}' failed on file '{input_file}': {e}"
-            ) from e
-
+            raise RuntimeError(msg) from e
 
 def cal_long_term_mean(
     in_dir: str,
@@ -84,32 +87,32 @@ def cal_long_term_mean(
 ) -> None:
     """Compute long-term means for NetCDF forcing data.
 
-    Optionally perform temporal aggregation and then merge, or merge raw
-    inputs first.
+    Optionally perform temporal aggregation and then merge, or merge raw inputs first.
     """
-    pattern = os.path.join(in_dir, in_file)
-    files = sorted(glob.glob(pattern))
+    p_in_dir = Path(in_dir)
+    files = sorted(p_in_dir.glob(in_file))
     if not files:
+        msg = f"No files match pattern {p_in_dir / in_file}"
         with ErrorLogger(logger):
-            raise FileNotFoundError(f"No files match pattern {pattern}")
+            raise FileNotFoundError(msg)
     if crop and None in (lon_min, lon_max, lat_min, lat_max):
+        msg = "All lon/lat bounds must be provided when crop=True."
         with ErrorLogger(logger):
-            raise ValueError("All lon/lat bounds must be provided when crop=True.")
+            raise ValueError(msg)
 
-    os.makedirs(out_dir, exist_ok=True)
+    p_out_dir = Path(out_dir)
+    p_out_dir.mkdir(parents=True, exist_ok=True)
 
-    # spatial crop
     if crop:
-        crop_dir = os.path.join(out_dir, "cropped_files")
-        os.makedirs(crop_dir, exist_ok=True)
+        crop_dir = p_out_dir / "cropped_files"
+        crop_dir.mkdir(parents=True, exist_ok=True)
         lonslice = slice(lon_min, lon_max)
         latslice = slice(lat_max, lat_min)
-        p_input_dir = Path(in_dir)
         p_crop_dir = Path(crop_dir)
         for fpath in files:
             crop_file(
-                input_path=p_input_dir,
-                input_file=Path(fpath),
+                input_path=p_in_dir,
+                input_file=fpath,
                 output_path=p_crop_dir,
                 mask_da=False,
                 overwrite=True,
@@ -119,66 +122,68 @@ def cal_long_term_mean(
             )
         p_input_dir = p_crop_dir
     else:
-        p_input_dir = Path(in_dir)
+        p_input_dir = p_in_dir
 
     cdo = Cdo()
 
-    # choose merge pattern based on aggregation flag
     if aggregate:
         if long_term_mean_type not in OP_MAP:
-            raise ValueError(
-                f"Unsupported long_term_mean_type {long_term_mean_type!r}; choose from {list(OP_MAP)}"
+            msg = (
+                f"Unsupported long_term_mean_type {long_term_mean_type!r}; "
+                f"choose from {list(OP_MAP)}"
             )
+            raise ValueError(msg)
         if aggregation_type not in ("intensive", "extensive"):
-            raise ValueError(
-                f"aggregation_type must be 'intensive' or 'extensive', got {aggregation_type!r}"
+            msg = (
+                f"aggregation_type must be 'intensive' or 'extensive', "
+                f"got {aggregation_type!r}"
             )
+            raise ValueError(msg)
+
         mean_op, sum_op = OP_MAP[long_term_mean_type]
         cdo_op = mean_op if aggregation_type == "intensive" else sum_op
 
-        agg_pattern = os.path.join(p_input_dir, in_file)
-        files_to_aggregate = sorted(glob.glob(agg_pattern))
-        aggregation_dir = os.path.join(out_dir, "aggregated_files")
-        os.makedirs(aggregation_dir, exist_ok=True)
-        for fn in files_to_aggregate:
+        files_to_aggregate = sorted(p_input_dir.glob(in_file))
+        aggregation_dir = p_out_dir / "aggregated_files"
+        aggregation_dir.mkdir(parents=True, exist_ok=True)
+        for fpath in files_to_aggregate:
             aggregate_files(
                 input_path=p_input_dir,
-                file_name=Path(fn).name,
-                output_path=Path(aggregation_dir),
+                file_name=fpath.name,
+                output_path=aggregation_dir,
                 aggregation_type=aggregation_type,
                 long_term_mean_type=long_term_mean_type,
             )
-        merge_pattern = os.path.join(aggregation_dir, f"{cdo_op}_{Path(in_file).name}")
+        merge_pattern = str(aggregation_dir / f"{cdo_op}_{Path(in_file).name}")
     else:
-        merge_pattern = os.path.join(p_input_dir, Path(in_file).name)
+        merge_pattern = str(p_input_dir / Path(in_file).name)
 
-    # perform mergetime
-    tmp_merge = os.path.join(out_dir, "mergetime.nc")
+    tmp_merge = p_out_dir / "mergetime.nc"
     try:
         logger.info(f"Running CDO mergetime on {merge_pattern} → {tmp_merge}")
-        cdo.mergetime(input=merge_pattern, output=tmp_merge)
+        cdo.mergetime(input=merge_pattern, output=str(tmp_merge))
     except Exception as e:
+        msg = f"CDO mergetime failed: {e}"
         with ErrorLogger(logger):
-            raise RuntimeError(f"CDO mergetime failed: {e}") from e
+            raise RuntimeError(msg) from e
 
-    # compute final time mean
     final_name = out_file or "long_term_mean.nc"
-    final_path = os.path.join(out_dir, final_name)
+    final_path = p_out_dir / final_name
     try:
         logger.info(f"Running CDO timmean on {tmp_merge} → {final_path}")
         cdo.timmean(input=str(tmp_merge), output=str(final_path))
     except Exception as e:
+        msg = f"CDO timmean failed: {e}"
         with ErrorLogger(logger):
-            raise RuntimeError(f"CDO timmean failed: {e}") from e
+            raise RuntimeError(msg) from e
 
-    # cleanup
     if not keep_temporal_files:
         if crop:
-            for f in Path(out_dir, "cropped_files").glob("*"):
+            for f in (p_out_dir / "cropped_files").glob("*"):
                 f.unlink()
-            Path(out_dir, "cropped_files").rmdir()
+            (p_out_dir / "cropped_files").rmdir()
         if aggregate:
-            for f in Path(aggregation_dir).glob("*"):
+            for f in aggregation_dir.glob("*"):
                 f.unlink()
-            Path(aggregation_dir).rmdir()
-        Path(tmp_merge).unlink()
+            aggregation_dir.rmdir()
+        tmp_merge.unlink()

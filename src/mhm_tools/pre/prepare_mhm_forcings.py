@@ -1,5 +1,7 @@
-"""Module for preparing MHM forcing data by converting units, optionally cropping,
-and exporting to NetCDF files."""
+"""
+Module for preparing MHM forcing data by converting units, optionally cropping,
+and exporting to NetCDF files.
+"""
 
 import logging
 from pathlib import Path
