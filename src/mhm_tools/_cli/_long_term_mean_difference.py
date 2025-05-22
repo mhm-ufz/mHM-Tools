@@ -1,6 +1,14 @@
 """
-Computes and plots the spatial difference between a
-model dataset and a reference dataset.
+Compute and plot the spatial difference between a model dataset and a reference dataset.
+
+This script reads CF-compliant NetCDF files for both model and reference datasets, computes
+the spatial difference for a specified variable, applies any provided geographic or data
+range limits, and generates a high-resolution PNG showing that difference with customizable
+title, colorbar label, and colormap.
+
+Authors
+-------
+- Jeisson Leal
 """
 
 import argparse

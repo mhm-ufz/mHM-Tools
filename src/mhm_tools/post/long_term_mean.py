@@ -36,9 +36,7 @@ def aggregate_files(
     aggregation_type: str = "intensive",
     long_term_mean_type: str = "monthly",
 ) -> None:
-    """Aggregate a single NetCDF file in `input_path` named `file_name` into a
-    coarser temporal resolution using CDO, writing to `output_path`.
-    """
+    """Aggregate a single NetCDF file into a coarser temporal resolution using CDO."""
     if aggregation_type not in ("intensive", "extensive"):
         msg = (
             f"aggregation_type must be 'intensive' or 'extensive', "

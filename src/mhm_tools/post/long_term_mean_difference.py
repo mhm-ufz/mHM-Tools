@@ -85,10 +85,7 @@ def long_term_mean_diff(
     vmin: Optional[float] = None,
     vmax: Optional[float] = None,
 ) -> None:
-    """
-    Compute long-term mean difference between model and
-    reference datasets and plot the result.
-    """
+    """Compute long-term mean difference between model and reference datasets and plot the result."""
     # Read the reference and model datasets
     ds_ref = read_dataset(file_path=str(Path(ref_input_dir) / reference_pattern))
     ds_mod = read_dataset(file_path=str(Path(mod_input_dir) / model_pattern))
