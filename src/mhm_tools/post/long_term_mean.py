@@ -25,6 +25,7 @@ OP_MAP = {
     "yearly": ("yearmean", "yearsum"),
 }
 
+
 def aggregate_files(
     input_path: Path,
     file_name: str,
@@ -64,11 +65,10 @@ def aggregate_files(
         logger.info(f"Running CDO {cdo_op} on {input_file} → {out_file}")
         getattr(cdo, cdo_op)(input=str(input_file), output=str(out_file))
     except Exception as e:
-        msg = (
-            f"CDO operation '{cdo_op}' failed on file '{input_file}': {e}"
-        )
+        msg = f"CDO operation '{cdo_op}' failed on file '{input_file}': {e}"
         with ErrorLogger(logger):
             raise RuntimeError(msg) from e
+
 
 def cal_long_term_mean(
     in_dir: str,
