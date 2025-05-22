@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 # more on this in the cut_classical_mhm_setups branch There are classes for Morph and meteo data
 ######
 
+
 def create_header(ds, output_path=None, no_data_value="-9999", write=True):
     """Write a header file from a dataset.
 
@@ -231,6 +232,7 @@ def get_xarray_ds_from_file(
             raise NotImplementedError()
     return ds_out
 
+
 def write_xarray_to_file(ds, file_path, var_name=None, fmt=None, create_folder=True):
     """Write xarray Datasets to file with file type depending on the file suffix."""
     file_path = Path(file_path)
@@ -244,6 +246,7 @@ def write_xarray_to_file(ds, file_path, var_name=None, fmt=None, create_folder=T
     msg = f"File types other than asci and netcdf are not implemented. The suffix of the file was: {file_path.suffix}"
     with ErrorLogger(logger):
         raise NotImplementedError(msg)
+
 
 def write_xarray_to_ascii(dataset, filepath, data_var=None, fmt=None):
     """Write xarray Dataset to an ASCII file that can be read by mHM."""
@@ -293,6 +296,7 @@ def write_xarray_to_ascii(dataset, filepath, data_var=None, fmt=None):
         else:
             np.savetxt(f, data_to_write, fmt="%s")
     logger.info(f"Writing ASCII file to {filepath}")
+
 
 def read_ascii_to_xarray(
     filepath, var_name=None, chunking=False, available_mem_gib=None

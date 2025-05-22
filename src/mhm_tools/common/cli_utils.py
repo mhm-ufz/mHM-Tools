@@ -119,12 +119,21 @@ def get_coords(
     """
     mask = None
     if lonlatbox is not None:
-        lon_min_val, lon_max_val, lat_min_val, lat_max_val = map(float, lonlatbox.split(","))
+        lon_min_val, lon_max_val, lat_min_val, lat_max_val = map(
+            float, lonlatbox.split(",")
+        )
         mask = None
     elif mask_file is not None:
-        lon_min_val, lon_max_val, lat_min_val, lat_max_val, mask = get_coords_from_mask(mask_file)
+        lon_min_val, lon_max_val, lat_min_val, lat_max_val, mask = get_coords_from_mask(
+            mask_file
+        )
     elif None not in (lon_min, lon_max, lat_min, lat_max):
-        lon_min_val, lon_max_val, lat_min_val, lat_max_val = lon_min, lon_max, lat_min, lat_max
+        lon_min_val, lon_max_val, lat_min_val, lat_max_val = (
+            lon_min,
+            lon_max,
+            lat_min,
+            lat_max,
+        )
     elif raise_exception:
         with ErrorLogger(logger):
             msg = "Either lonlatbox, mask_file, or all coordinate bounds must be provided."
