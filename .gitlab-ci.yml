@@ -1,18 +1,26 @@
 image: python:3.11
 
 stages:
+  - check
   - test
   - build
   - deploy
 
-check:
-  stage: test
+black:
+  stage: check
   script:
     - pip3 install --editable .[check]
     - black --check --diff --color .
+isort:
+  stage: check
+  script:
+    - pip3 install --editable .[check]
     - isort --check --diff --color .
+ruff:
+  stage: check
+  script:
+    - pip3 install --editable .[check]
     - ruff check src/mhm_tools
-
 test:
   stage: test
   script:
