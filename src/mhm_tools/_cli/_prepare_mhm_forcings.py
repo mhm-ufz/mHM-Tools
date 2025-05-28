@@ -1,4 +1,4 @@
-"""mHM processing netCDF precipitation and temperature forcings"""
+"""mHM processing netCDF precipitation and temperature forcings."""
 
 from mhm_tools.pre.prepare_mhm_forcings import prepare_forcings
 

@@ -9,10 +9,9 @@ Authors
 
 import logging
 
-from mhm_tools.common.file_handler import get_xarray_ds_from_file
 import numpy as np
-import xarray as xr
 
+from mhm_tools.common.file_handler import get_xarray_ds_from_file
 from mhm_tools.common.logger import log_arguments
 
 from ..common import NC_ENCODE_DEFAULTS, set_netcdf_encoding

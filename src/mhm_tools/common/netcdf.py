@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
-"""
-Common NetCDF/xarray routines and utilities for reading, encoding, and bounds generation.
-"""
+"""Common NetCDF/xarray routines and utilities for reading, encoding, and bounds generation."""
 
 import glob
 import logging
@@ -19,9 +17,7 @@ xr.set_options(keep_attrs=True)
 
 
 def _has_wildcards(path: Union[str, Path]) -> bool:
-    """
-    Determine if the given path string contains any wildcard characters.
-    """
+    """Determine if the given path string contains any wildcard characters."""
     return any(w in str(path) for w in WILDCARDS)
 
 
@@ -156,9 +152,7 @@ def set_netcdf_encoding(
     ds: xr.Dataset,
     var_encoding: Optional[dict] = None,
 ) -> None:
-    """
-    Set default NetCDF encoding settings on an xarray Dataset.
-    """
+    """Set default NetCDF encoding settings on an xarray Dataset."""
     encoding = var_encoding or NC_ENCODE_DEFAULTS
     dims = set(ds.dims)
     coords = set(ds.coords)
@@ -176,9 +170,7 @@ def generate_bounds(
     da: xr.DataArray,
     bounds_dim: str = "bnds",
 ) -> xr.DataArray:
-    """
-    Generate CF-compliant bounds for a coordinate DataArray.
-    """
+    """Generate CF-compliant bounds for a coordinate DataArray."""
     (dim,) = da.dims
     diff = da.diff(dim)
     lower = da - diff / 2

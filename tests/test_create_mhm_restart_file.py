@@ -2,10 +2,10 @@ import shutil
 import unittest
 from pathlib import Path
 
-from mhm_tools.common.file_handler import get_xarray_ds_from_file
 import xarray as xr
 
 import mhm_tools as mt
+from mhm_tools.common.file_handler import get_xarray_ds_from_file
 from mhm_tools.common.logger import configure_mhm_tools_logger
 from mhm_tools.pre.create_mhm_restart_file import Grid, LatLon, MPRRunner
 

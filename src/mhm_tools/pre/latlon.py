@@ -60,6 +60,7 @@ def _create_grid(header, crs=None, dtype="f4"):
     c_size = header["cellsize"]
     x = header["xllcorner"] + c_size / 2 + np.arange(header["ncols"]) * c_size
     y = header["yllcorner"] + c_size / 2 + np.arange(header["nrows"]) * c_size
+    y = np.flip(y)
     x_grid, y_grid = np.meshgrid(x, y)
     # determine latitude and longitude of the target grid
     lons, lats = xy_to_latlon(x_grid, y_grid, crs)

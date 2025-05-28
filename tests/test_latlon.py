@@ -1,10 +1,10 @@
 import unittest
 from pathlib import Path
 
-from mhm_tools.common.file_handler import get_xarray_ds_from_file
 import xarray as xr
 
 import mhm_tools as mt
+from mhm_tools.common.file_handler import get_xarray_ds_from_file
 
 HERE = Path(__file__).parent
 TMP = HERE / "tmp"

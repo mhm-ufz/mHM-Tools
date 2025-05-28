@@ -1,4 +1,6 @@
-"""Compute and plot the spatial difference between a model dataset and a reference dataset"""
+"""Compute and plot the spatial difference between a model dataset and a reference dataset."""
+
+import argparse
 
 from ..post.long_term_mean_validation import long_term_mean_diff
 
@@ -15,14 +17,16 @@ def str2float(value):
 
     # Otherwise it must be a string we can cast
     if not isinstance(value, str):
+        msg = f"Expected a string or None, but got {type(value).__name__}."
         raise argparse.ArgumentTypeError(
-            f"Expected a string or None, but got {type(value).__name__}."
+            msg
         )
 
     try:
         return float(value)
     except ValueError:
-        raise argparse.ArgumentTypeError(f"{value!r} is not a valid float.")
+        msg = f"{value!r} is not a valid float."
+        raise argparse.ArgumentTypeError(msg)
 
 
 def add_args(parser):
