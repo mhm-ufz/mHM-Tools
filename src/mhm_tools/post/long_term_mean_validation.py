@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-import os
 from pathlib import Path
 from typing import Optional
 
@@ -92,7 +91,7 @@ def long_term_mean_diff(
     ds_mod = read_dataset(
         file_path=mod_pattern,
     )
-    da_ref = da_ref[ref_var]
+    da_ref = ds_ref[ref_var]
     da_mod = ds_mod[mod_var]
 
     # drop singleton time dim so we have 2D arrays
@@ -104,8 +103,9 @@ def long_term_mean_diff(
 
     diff = compute_difference(arr_mod, arr_ref)
 
-    os.makedirs(output_dir, exist_ok=True)
-    out_path = os.path.join(output_dir, output_file)
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True)
+    out_path = output_dir / output_file
 
     plot_diff(
         diff=diff,

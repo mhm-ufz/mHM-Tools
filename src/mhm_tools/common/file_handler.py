@@ -1,14 +1,14 @@
 """File handling utils."""
 
-import contextlib
 import logging
 from enum import Enum
 from pathlib import Path
 
-from mhm_tools.common.esri_grid import write_header
 import numpy as np
+import rioxarray
 import xarray as xr
-import rioxarray 
+
+from mhm_tools.common.esri_grid import write_header
 from mhm_tools.common.logger import ErrorLogger
 from mhm_tools.common.netcdf import read_dataset
 from mhm_tools.common.xarray_utils import (
@@ -46,9 +46,7 @@ def create_header(ds, output_path=None, no_data_value="-9999", write=True):
     }
     if write:
         header_out_path = output_path / "header.txt"
-        logger.info(
-            f"Writing header file to {header_out_path} with header: {header}"
-        )
+        logger.info(f"Writing header file to {header_out_path} with header: {header}")
         write_header(header_out_path, header)
         return header_out_path
     return header
@@ -63,8 +61,12 @@ def crop_file_by_mask(ds, mask_file):
         lon_key = get_coord_key(ds, lon=True)
         return ds.sel(
             {
-                lat_key: slice(mask_ds[lat_key_mask].max(), mask_ds[lat_key_mask].min()),
-                lon_key: slice(mask_ds[lon_key_mask].min(), mask_ds[lon_key_mask].max()),
+                lat_key: slice(
+                    mask_ds[lat_key_mask].max(), mask_ds[lat_key_mask].min()
+                ),
+                lon_key: slice(
+                    mask_ds[lon_key_mask].min(), mask_ds[lon_key_mask].max()
+                ),
             }
         )
 
@@ -219,6 +221,7 @@ def get_xarray_ds_from_file(
     logger.info(f"ds_out: {ds_out}")
     return ds_out
 
+
 def chunk_dataset(ds, chunk_type, available_mem_gib):
     """Chunk xarray.DataSet depending on chunk_type and available memory."""
     if chunk_type == ChunkType.TIME:
@@ -226,6 +229,7 @@ def chunk_dataset(ds, chunk_type, available_mem_gib):
     if chunk_type == ChunkType.SPACE:
         chunks = get_chunks_space_only(ds, available_mem_gib)
     return ds.chunk(chunks)
+
 
 def write_xarray_to_file(ds, file_path, var_name=None, fmt=None, create_folder=True):
     """Write xarray Datasets to file with file type depending on the file suffix."""
@@ -296,9 +300,7 @@ def write_xarray_to_ascii(dataset, filepath, data_var=None, fmt=None):
         logger.info(f"Writting file to {filepath}")
 
 
-def read_ascii_to_xarray(
-    filepath, var_name=None
-):
+def read_ascii_to_xarray(filepath, var_name=None):
     """Read an mHM readable asci file to an xarray dataset."""
     # Read the header from the file
     name = "data" if var_name is None else var_name

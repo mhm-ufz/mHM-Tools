@@ -4,11 +4,11 @@ import logging
 import shutil
 from pathlib import Path
 
-from mhm_tools.common.esri_grid import read_header, write_header
 import numpy as np
 import xarray as xr
 from joblib import Parallel, delayed
 
+from mhm_tools.common.esri_grid import read_header, write_header
 from mhm_tools.common.file_handler import (
     create_header,
     get_xarray_ds_from_file,
@@ -117,7 +117,7 @@ def regrid_mask(
         results /= np.nanmax(results)
         mask = results > 1e-3
     elif target_res == mask_res:
-        logger.debug('Target resolution equals mask resolution.')
+        logger.debug("Target resolution equals mask resolution.")
         return mask_ds
     else:
         msg = "mask coarser than file not yet implemented"
@@ -162,26 +162,38 @@ def crop_file_with_header(ds_in, file_path, output_path, lonslice, latslice):
     lat_key = get_coord_key(ds_in, lat=True, raise_exception=True)
     # x values
     index_x_min = int(
-        (lonslice.start - pres - header_information["xllcorner"]) / header_information["cellsize"] + 0.5
+        (lonslice.start - pres - header_information["xllcorner"])
+        / header_information["cellsize"]
+        + 0.5
     )
-    index_x_max = int((lonslice.stop + pres - header_information["xllcorner"]) / header_information["cellsize"])
-    ymax = header_information["yllcorner"] + header_information["cellsize"] * header_information["nrows"]
-    index_y_min = int((ymax - latslice.start - pres) / header_information["cellsize"] + 0.5)
+    index_x_max = int(
+        (lonslice.stop + pres - header_information["xllcorner"])
+        / header_information["cellsize"]
+    )
+    ymax = (
+        header_information["yllcorner"]
+        + header_information["cellsize"] * header_information["nrows"]
+    )
+    index_y_min = int(
+        (ymax - latslice.start - pres) / header_information["cellsize"] + 0.5
+    )
     index_y_max = int((ymax - latslice.stop + pres) / header_information["cellsize"])
     logger.debug(f"x: {index_x_min}, {index_x_max}")
     logger.debug(f"y: {index_y_min}, {index_y_max}")
     # write header file
     header_out_path = output_path / header.name
     xll = header_information["xllcorner"] + header_information["cellsize"] * index_x_min
-    yll = header_information["yllcorner"] + header_information["cellsize"] * (header_information["nrows"] - index_y_max)
+    yll = header_information["yllcorner"] + header_information["cellsize"] * (
+        header_information["nrows"] - index_y_max
+    )
 
     new_header_information = {
-"ncols": index_x_max-index_x_min,
-"nrows": index_y_max-index_y_min,
-"xllcorner": xll,
-"yllcorner": yll,
-"cellsize": header_information['cellsize'],
-"nodata_value": header_information['nodata_value']
+        "ncols": index_x_max - index_x_min,
+        "nrows": index_y_max - index_y_min,
+        "xllcorner": xll,
+        "yllcorner": yll,
+        "cellsize": header_information["cellsize"],
+        "nodata_value": header_information["nodata_value"],
     }
     logger.info(
         f"Writing header file to {header_out_path} with header: {new_header_information}"
@@ -218,12 +230,15 @@ def crop_file_with_header(ds_in, file_path, output_path, lonslice, latslice):
                 attrs=data.attrs,
             )
         data_array.attrs.update(
-            {"_FillValue": header_information["nodata_value"], "missing_value": header_information["nodata_value"]}
+            {
+                "_FillValue": header_information["nodata_value"],
+                "missing_value": header_information["nodata_value"],
+            }
         )
         # Convert to Dataset
         ds_out = data_array.to_dataset()
         ds_out.attrs.update(ds_in.attrs)
-        logger.debug(f'cropped ds {ds_out}')
+        logger.debug(f"cropped ds {ds_out}")
         return ds_out, header_out_path
     except IndexError as e:
         with ErrorLogger(logger):
@@ -242,7 +257,9 @@ def call_create_latlon(
     """Create header dictionaries for the different resolutions and call create latlon to create a latlon file for the setup."""
     # create new latlon file
     logger.info("Creating new latlon file")
-    with get_xarray_ds_from_file(dem_output_file, chunking=True, normalize_latlon_coords=True) as ds_dem:
+    with get_xarray_ds_from_file(
+        dem_output_file, chunking=True, normalize_latlon_coords=True
+    ) as ds_dem:
         l0 = create_header(ds_dem, None, write=False)
     logger.debug(f"L0: {l0}")
     l1 = l0.copy()
@@ -300,7 +317,10 @@ def crop_file(
     if input_file.suffix in [".asc", ".nc"]:
         try:
             ds = get_xarray_ds_from_file(
-                input_file, chunking=True, available_mem_gib=available_mem_gib, normalize_latlon_coords=True
+                input_file,
+                chunking=True,
+                available_mem_gib=available_mem_gib,
+                normalize_latlon_coords=True,
             )
         except ValueError:
             logger.error(
@@ -354,8 +374,8 @@ def crop_file(
         lon_key = get_coord_key(ds, lon=True)
 
         # extract lon-lat bounds
-        lon_start, lon_stop =  float(lonslice.start),  float(lonslice.stop)
-        lat_start, lat_stop =  float(latslice.start),  float(latslice.stop)
+        lon_start, lon_stop = float(lonslice.start), float(lonslice.stop)
+        lat_start, lat_stop = float(latslice.start), float(latslice.stop)
 
         logger.debug(
             f"Selecting {input_file.name} using lon:{lonslice} and lat:{latslice}"
@@ -371,10 +391,7 @@ def crop_file(
         )
 
     # check for emptiness or insufficient grid points
-    if (
-        ds_cropped.sizes[lat_key] < 2
-        or ds_cropped.sizes[lon_key] < 2
-    ):
+    if ds_cropped.sizes[lat_key] < 2 or ds_cropped.sizes[lon_key] < 2:
         msg = f"Cropping resulted in insufficient grid size \
             (lat={ds_cropped.sizes[lat_key]}, lon={ds_cropped.sizes[lon_key]})."
         with ErrorLogger(logger):

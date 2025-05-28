@@ -4,8 +4,6 @@ import argparse
 import logging
 
 from mhm_tools.common.file_handler import get_xarray_ds_from_file
-import xarray as xr
-
 from mhm_tools.common.logger import ErrorLogger
 
 logger = logging.getLogger(__name__)
@@ -76,7 +74,9 @@ def get_coords_from_mask(mask):
                 lon_max_target_grid,
                 lon_min_target_grid,
             )
-        mask_key = next(key for key in ["mask", "land_mask"] if key in mask_ds.data_vars)
+        mask_key = next(
+            key for key in ["mask", "land_mask"] if key in mask_ds.data_vars
+        )
         mask_da = mask_ds[mask_key]
         return (
             lon_min_target_grid,

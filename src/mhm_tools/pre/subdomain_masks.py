@@ -14,11 +14,11 @@ import logging
 from pathlib import Path
 
 import matplotlib as mpl
-from mhm_tools.common.file_handler import get_xarray_ds_from_file
 import numpy as np
 import xarray as xr
 from scipy.interpolate import NearestNDInterpolator
 
+from mhm_tools.common.file_handler import get_xarray_ds_from_file
 from mhm_tools.common.logger import ErrorLogger, log_arguments
 
 logger = logging.getLogger(__name__)
@@ -341,7 +341,7 @@ def create_subdomain_masks(
         basin_clusters=basin_clusters,
         land_mask=land_mask,
     )
-    with get_xarray_ds_from_filerom_file(basin_id_file) as ds:
+    with get_xarray_ds_from_file(basin_id_file) as ds:
         lat = ds.lat
         lon = ds.lon
         # if input is not global only create a file else create all subdomains

@@ -11,10 +11,9 @@ logger = logging.getLogger(__name__)
 
 
 def normalize_lat_lon(ds: xr.Dataset, lat: str, lon: float) -> xr.Dataset:
-    """
-    Normalize names for latitude/longitude.
-    """
+    """Normalize names for latitude/longitude."""
     return ds.rename({lat: "lat", lon: "lon"})
+
 
 def get_coord_key(
     ds, lat=False, lon=False, time=False, raise_exception=True, is_retry=False
@@ -150,9 +149,7 @@ def crop_ds(
     lon_name: str = "lon",
     lat_name: str = "lat",
 ) -> xr.Dataset:
-    """
-    Crop an xarray.Dataset to the given lon/lat bounds, handling coordinate order.
-    """
+    """Crop an xarray.Dataset to the given lon/lat bounds, handling coordinate order."""
     # ensure min < max
     lon_low, lon_high = sorted([lon_min, lon_max])
     lat_low, lat_high = sorted([lat_min, lat_max])
