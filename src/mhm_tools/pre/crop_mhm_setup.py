@@ -365,8 +365,8 @@ def crop_file(
         lon_key = get_coord_key(ds, lon=True)
 
         # extract lon-lat bounds
-        lon_start, lon_stop =  float(lonslice.start),  float(lonslice.stop)
-        lat_start, lat_stop =  float(latslice.start),  float(latslice.stop)
+        lon_start, lon_stop = float(lonslice.start), float(lonslice.stop)
+        lat_start, lat_stop = float(latslice.start), float(latslice.stop)
 
         logger.debug(
             f"Selecting {input_file.name} using lon:{lonslice} and lat:{latslice}"
@@ -382,10 +382,7 @@ def crop_file(
         )
 
     # check for emptiness or insufficient grid points
-    if (
-        ds_cropped.sizes[lat_key] < 2
-        or ds_cropped.sizes[lon_key] < 2
-    ):
+    if ds_cropped.sizes[lat_key] < 2 or ds_cropped.sizes[lon_key] < 2:
         logger.warning(
             "Cropping resulted in insufficient grid size "
             f"(lat={ds_cropped.sizes[lat_key]}, lon={ds_cropped.sizes[lon_key]})."
