@@ -66,3 +66,6 @@ LOG_LEVEL_STR = {
     40: "ERROR",
     50: "CRITICAL",
 }
+
+# Characters indicating wildcard patterns in NetCDF filenames
+WILDCARDS = ("*", "?", "[", "]")

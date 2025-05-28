@@ -108,6 +108,8 @@ class Catchment:
 
         self.input_da = data
 
+        self.input_da = data
+
         if var == "fdir":
             if "nodata_value" in self.input_da.attrs:
                 old_no_data_val = self.input_da.attrs["nodata_value"]
@@ -565,11 +567,13 @@ class Catchment:
         )
 
         # Slice the array to extract the filled part
-        lon_min, lon_max = np.round(self.ds.lon.values[min_col], 8), np.round(
-            self.ds.lon.values[max_col], 8
+        lon_min, lon_max = (
+            np.round(self.ds.lon.values[min_col], 8),
+            np.round(self.ds.lon.values[max_col], 8),
         )
-        lat_min, lat_max = np.round(self.ds.lat.values[max_row], 8), np.round(
-            self.ds.lat.values[min_row], 8
+        lat_min, lat_max = (
+            np.round(self.ds.lat.values[max_row], 8),
+            np.round(self.ds.lat.values[min_row], 8),
         )
         lat_slice = slice(lat_max, lat_min)
         lon_slice = slice(lon_min, lon_max)
@@ -580,8 +584,8 @@ class Catchment:
 def merge_catchment(path1, path2, out_path):
     """Merge the rolled and non-rolled file."""
     # read the rolled and non-rolled files
-    ds1 = xr.open_dataset(path1, engine="netcdf4")
-    ds2 = xr.open_dataset(path2, engine="netcdf4")
+    ds1 = get_xarray_ds_from_file(path1, engine="netcdf4")
+    ds2 = get_xarray_ds_from_file(path2, engine="netcdf4")
 
     # select all the basins in the border area
     mask_ids = np.unique(
@@ -669,8 +673,9 @@ def create_catchment(
             msg = f"Unexpected value for var={var}, must be 'fdir' or 'dem'"
             raise ValueError(msg)
 
-    with get_xarray_ds_from_file(input_file, var_name) as input_ds:
-
+    with get_xarray_ds_from_file(
+        input_file, var_name, normalize_latlon_coords=True
+    ) as input_ds:
         # transform
         transform = get_transformation_matrix_nc(input_ds, var_name)
 

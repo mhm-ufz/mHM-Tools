@@ -14,9 +14,11 @@ from . import (
     _create_subdomain_masks,
     _crop_mhm_setup,
     _grdc_validation,
+    _gridded_data_validation,
     _hydrograph,
     _latlon,
-    _seasonality_validation,
+    _long_term_mean_validation,
+    _prepare_mhm_forcings,
 )
 
 
@@ -79,19 +81,23 @@ def _get_parser():
 
     add_command_from_module(subparsers, "hydrograph", _hydrograph)
     add_command_from_module(
-        subparsers, "seasonality_validation", _seasonality_validation
+        subparsers, "gridded_data_validation", _gridded_data_validation
     )
     add_command_from_module(subparsers, "grdc_validation", _grdc_validation)
     add_command_from_module(subparsers, "latlon", _latlon)
     add_command_from_module(subparsers, "converter_nc_ascii", _file_converter)
     add_command_from_module(subparsers, "create_catchment", _create_catchment)
     add_command_from_module(subparsers, "crop_mhm_setup", _crop_mhm_setup)
+    add_command_from_module(subparsers, "prepare_mhm_forcings", _prepare_mhm_forcings)
     add_command_from_module(subparsers, "create_id_gauges", _create_idgauges)
     add_command_from_module(
         subparsers, "create_subdomain_masks", _create_subdomain_masks
     )
     add_command_from_module(
         subparsers, "create_mhm_restart_file", _create_mhm_restart_file
+    )
+    add_command_from_module(
+        subparsers, "long_term_mean_validation", _long_term_mean_validation
     )
 
     # add logging

@@ -37,6 +37,7 @@ classifiers = [
 dependencies = [
   "numpy>=1.17.3",
   "xarray",
+  "rioxarray",
   "matplotlib>=3.6.1",
   "pandas<2; python_version=='3.8'",
   "pyproj",

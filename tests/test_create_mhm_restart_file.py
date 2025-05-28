@@ -5,6 +5,7 @@ from pathlib import Path
 import xarray as xr
 
 import mhm_tools as mt
+from mhm_tools.common.file_handler import get_xarray_ds_from_file
 from mhm_tools.common.logger import configure_mhm_tools_logger
 from mhm_tools.pre.create_mhm_restart_file import Grid, LatLon, MPRRunner
 
@@ -138,7 +139,7 @@ class TestCreateRestart(unittest.TestCase):
 
         for sd in reversed(m.subgrids):
             # print(sd.morph_files.geology, flush=True)
-            with xr.open_dataset(sd.morph_files.geology) as ds:
+            with get_xarray_ds_from_file(sd.morph_files.geology) as ds:
                 assert (
                     abs(float(ds["longitude"].min()) - sd.l0.lon_min)
                     - sd.l0.resolution / 2
@@ -214,7 +215,7 @@ class TestCreateRestart(unittest.TestCase):
         # test setup successful
         m._split_grid()
         for sd in reversed(m.subgrids):
-            with xr.open_dataset(sd.morph_files.geology) as ds:
+            with get_xarray_ds_from_file(sd.morph_files.geology) as ds:
                 assert (
                     abs(float(ds["longitude"].min()) - sd.l0.lon_min)
                     - sd.l0.resolution / 2

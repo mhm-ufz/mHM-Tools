@@ -13,12 +13,16 @@ from joblib import Parallel, delayed
 
 from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_to_file
 from mhm_tools.common.logger import log_arguments, log_errors
-from mhm_tools.common.xarray_utils import get_coord_key
-from mhm_tools.post.hydrograph import gen_hydrograph_by_data_sets
-from mhm_tools.post.seasonality_grid_validation import (
+from mhm_tools.common.xarray_utils import (
+    get_coord_key,
+    get_overlapping_time_slice,
+    timedelta_to_alias,
+)
+from mhm_tools.post.gridded_data_validation import (
     get_clim_from_ds,
     spearman_correlation,
 )
+from mhm_tools.post.hydrograph import gen_hydrograph_by_data_sets
 
 logger = logging.getLogger(__name__)
 
@@ -72,8 +76,8 @@ def get_sim_data_for_one_gauge(id, index, sim_data, yarr, xarr, resolution):
         return None
     # This will ensure that x & y values always match lat and lon in mRM dataset
     try:
-        x = np.round(xarr[index], 5)
-        y = np.round(yarr[index], 5)
+        x = np.round(xarr[index], 9)
+        y = np.round(yarr[index], 9)
     except KeyError:
         logger.error(f"index {index} not found")
         return None
@@ -89,7 +93,7 @@ def get_gauge_coords(
     cell_diff=1,
     max_cell_diff=3,
     diff_percent=10,
-    id=None
+    id=None,
 ):
     """
     Find correct gauge location.
@@ -117,7 +121,16 @@ def get_gauge_coords(
             ncols11=slice(lon_col - cell_diff, lon_col + cell_diff),
         )
         abs_diff = np.abs(ds_cut.L11_fAcc - facc)
-        min_index = np.unravel_index(np.argmin(abs_diff.values), ds_cut.L11_fAcc.shape)
+        try:
+            min_index = np.unravel_index(
+                np.argmin(abs_diff.values), ds_cut.L11_fAcc.shape
+            )
+        except ValueError as ve:
+            logger.error(str(ve))
+            logger.info(abs_diff)
+            logger.info(ds_cut.L11_fAcc)
+            logger.info(facc)
+            return None, None, None
         if lonlat:
             lon_x = ds_cut.L1_domain_lon.data[min_index[0], 0]
             lat_y = ds_cut.L1_domain_lat.data[0, min_index[1]]
@@ -155,6 +168,7 @@ def get_gauge_coords(
             cell_diff=cell_diff + 1,
             max_cell_diff=3,
             diff_percent=10,
+            id=id,
         )
     logger.warning(f"No similar flow accumulation found nearby for gauge {id}.")
     logger.debug("None, None, None")
@@ -177,6 +191,7 @@ def Q_data_to_xarray(
     n_jobs=1,
     date_slice=None,
     overwrite=False,
+    direct_comparison=False,
 ):
     """
     Get observed and model Q data and save it as CSV files to be opened later.
@@ -218,7 +233,7 @@ def Q_data_to_xarray(
         saving_path.mkdir(parents=True)
 
     # getting gauge infos
-    with xr.open_dataset(observed_data_path) as gauge_info:
+    with get_xarray_ds_from_file(observed_data_path) as gauge_info:
         gauge_ids = gauge_info["id"]
         x = gauge_info["geo_x"]
         y = gauge_info["geo_y"]
@@ -237,27 +252,63 @@ def Q_data_to_xarray(
             y = y.where(slicing_condition, drop=True)
             facc = facc.where(slicing_condition, drop=True)
             gauge_ids = gauge_ids.where(slicing_condition, drop=True)
-    logger.info(f"There are {len(gauge_ids.values)} gauges")
+    logger.info(f"There are {len(gauge_ids.values)} gauges in total.")
 
-    if not obs_output_file.is_file() or overwrite:
-        with xr.open_dataset(observed_data_path) as observed_data_in:
+    # prepare for later resampling
+    with get_xarray_ds_from_file(model_data_path) as sim_data_in:
+        with get_xarray_ds_from_file(observed_data_path) as observed_data_in:
+            hours_sim, alias_sim = timedelta_to_alias(sim_data_in)
+            hours_obs, alias_obs = timedelta_to_alias(observed_data_in)
+            if hours_sim > hours_obs:
+                # resample the datasets for them to have the same temporal resolution
+                logger.info(
+                    f"The observation dataset is resampled to fit the simulation dataset with a temporal resolution of {alias_sim}"
+                )
+                observed_data_in = observed_data_in.resample(time=alias_sim).mean()
             obs_discharge_data = observed_data_in[observed_variable]
             obs_discharge_data = obs_discharge_data.sel(time=date_slice)
-            # observed_data = observed_data.rename({observed_variable: "discharge"})
-            obs_discharge_data = obs_discharge_data.sel(id=gauge_ids.values)
-            obs_discharge_data = obs_discharge_data.reindex(id=gauge_ids.values)
-            facc_da = xr.DataArray(
-                facc, name="facc", dims=["id"], coords={"id": gauge_ids.values}
-            )
-            observed_data = xr.Dataset(
-                {"facc": facc_da, "discharge": obs_discharge_data}
-            )
 
-            logger.info(f"Saving obs data to {obs_output_file}...")
-            write_xarray_to_file(observed_data, obs_output_file)
+            if hours_obs > hours_sim:
+                # resample the datasets for them to have the same temporal resolution
+                logger.info(
+                    f"The simulation dataset is resampled to fit the observation dataset with a temporal resolution of {alias_obs}"
+                )
+                sim_data_in = sim_data_in.resample(time=alias_obs).mean()
+            if slicing_condition is not None:
+                sim_data_cropped = sim_data_in.sel(
+                    {
+                        get_coord_key(sim_data_in, lat=True): slice(lat_max, lat_min),
+                        get_coord_key(sim_data_in, lon=True): slice(lon_min, lon_max),
+                    }
+                ).sel(time=date_slice)
+            else:
+                sim_data_cropped = sim_data_in.sel(time=date_slice)
+            if direct_comparison:
+                overlapping_time_slice = get_overlapping_time_slice(
+                    sim_data_in, observed_data_in
+                )
+                logger.info(
+                    f"Overlapping time is form {overlapping_time_slice.start} to {overlapping_time_slice.stop}"
+                )
+                # also slice to overlapping time
+                obs_discharge_data = obs_discharge_data.sel(time=overlapping_time_slice)
+                sim_data_cropped = sim_data_cropped.sel(time=overlapping_time_slice)
+                logger.debug(f"obs croped resampled data: {obs_discharge_data}")
+                logger.debug(f"sim croped resampled data: {sim_data_cropped}")
+    if not obs_output_file.is_file() or overwrite:
+        # observed_data = observed_data.rename({observed_variable: "discharge"})
+        obs_discharge_data = obs_discharge_data.sel(id=gauge_ids.values)
+        obs_discharge_data = obs_discharge_data.reindex(id=gauge_ids.values)
+        facc_da = xr.DataArray(
+            facc, name="facc", dims=["id"], coords={"id": gauge_ids.values}
+        )
+        observed_data = xr.Dataset({"facc": facc_da, "discharge": obs_discharge_data})
+
+        logger.info(f"Saving obs data to {obs_output_file}...")
+        write_xarray_to_file(observed_data, obs_output_file)
 
     if not sim_output_file.is_file() or overwrite:
-        with xr.open_dataset(mrm_restart_file) as ds:
+        with get_xarray_ds_from_file(mrm_restart_file) as ds:
             # get the gauge coordinates by matching coordinates and flow accumulation
             out = Parallel(n_jobs=n_jobs, backend="loky")(
                 delayed(get_gauge_coords)(
@@ -283,34 +334,38 @@ def Q_data_to_xarray(
                 gauge_ids_with_values.append(gauge_ids.values[i])
         logger.info(f"There are {len(x_new)} gauges")
         logger.info("creating sim dataset")
-        with xr.open_dataset(model_data_path) as sim_data_in:
-            if slicing_condition is not None:
-                sim_data_cropped = sim_data_in.sel(
-                    {
-                        get_coord_key(sim_data_in, lat=True): slice(lat_max, lat_min),
-                        get_coord_key(sim_data_in, lon=True): slice(lon_min, lon_max),
-                    }
-                ).sel(time=date_slice)
-            else:
-                sim_data_cropped = sim_data_in.sel(time=date_slice)
-            sim = Parallel(n_jobs=n_jobs, backend="loky")(
-                delayed(get_sim_data_for_one_gauge)(
-                    id=id,
-                    index=i,
-                    sim_data=sim_data_cropped[sim_variable],
-                    yarr=y_new,
-                    xarr=x_new,
-                    resolution=resolution,
-                )
-                for i, id in enumerate(gauge_ids_with_values)
+        sim = Parallel(n_jobs=n_jobs, backend="loky")(
+            delayed(get_sim_data_for_one_gauge)(
+                id=id,
+                index=i,
+                sim_data=sim_data_cropped[sim_variable],
+                yarr=y_new,
+                xarr=x_new,
+                resolution=resolution,
             )
+            for i, id in enumerate(gauge_ids_with_values)
+        )
         simulation_discharge = xr.concat(sim, dim="id").drop_vars(["lat", "lon"])
         facc_ids = xr.DataArray(
             data=np.array(facc_new), dims=["id"], coords={"id": gauge_ids_with_values}
         )
 
+        x_ids = xr.DataArray(
+            data=np.array(x_new), dims=["id"], coords={"id": gauge_ids_with_values}
+        )
+        y_ids = xr.DataArray(
+            data=np.array(y_new), dims=["id"], coords={"id": gauge_ids_with_values}
+        )
+
         # 4) Build a new Dataset from this 2D DataArray
-        sim_data = xr.Dataset({"discharge": simulation_discharge, "facc": facc_ids})
+        sim_data = xr.Dataset(
+            {
+                "discharge": simulation_discharge,
+                "facc": facc_ids,
+                "x": x_ids,
+                "y": y_ids,
+            }
+        )
         logger.info(f"Saving sim data to {sim_output_file}...")
         write_xarray_to_file(sim_data, sim_output_file)
     return observed_data, sim_data
@@ -342,8 +397,8 @@ def boostap_statistics(
     alpha, beta, gamma = np.nan, np.nan, np.nan
     if (
         (id in obs_da_sel.id and id in sim_da_sel.id)
-        or not sim_da_sel.isnull().all()
-        or not obs_da_sel.isnull().all()
+        and not sim_da_sel.isnull().all()
+        and not obs_da_sel.isnull().all()
     ):
         try:
             sim_id = sim_da_sel.sel(id=id)
@@ -356,6 +411,10 @@ def boostap_statistics(
             logger.debug(
                 f"results for index {index} and gauge {id}: alpha={alpha:.3f}, beta={beta:.3f}, gamma={gamma:.3f}"
             )
+            if np.isnan(alpha):
+                logger.debug("Alpha is none for:")
+                logger.debug(f"sim: {sim_id} and clim {clim_sim}")
+                logger.debug(f"obs: {obs_id} and clim {clim_obs}")
         except Exception as e:
             logger.error(f"Error for index {index} and id {id} with error {e}")
     else:
@@ -410,9 +469,12 @@ def evaludate_grdc_data(  # noqa: PLR0913
         n_jobs=n_jobs,
         date_slice=slice(start_date, end_date),
         overwrite=overwrite,
+        direct_comparison=direct_comparison,
     )
     model_da = model_ds["discharge"]
     observed_da = observed_ds["discharge"]
+    logger.debug(f"Model dataarray: {model_da}")
+    logger.debug(f"Observed dataarray: {observed_da}")
     results = []
     if (
         n_bootstrap_years is not None
@@ -424,12 +486,12 @@ def evaludate_grdc_data(  # noqa: PLR0913
             f"Bootstrapping with {n_boostrap_selections} selections with {n_bootstrap_years} years each."
         )
         results = []
-        total_years_sim = np.unique(
-            model_da.dropna(dim="time", how="all").time.dt.year.data
-        )
-        total_years_obs = np.unique(
-            observed_da.dropna(dim="time", how="all").time.dt.year.data
-        )
+        model_da = model_da.dropna(dim="time", how="all")
+        observed_da = observed_da.dropna(dim="time", how="all")
+        total_years_sim = np.unique(model_da.time.dt.year.data)
+        total_years_obs = np.unique(observed_da.time.dt.year.data)
+        logger.info(f"Observed years with non nan values: {total_years_obs}")
+        logger.info(f"Simulated years with non nan values: {total_years_obs}")
         # for index in range(n_boostrap_selections):
         ids_sim = np.unique(model_da.id.values)
         ids_obs = np.unique(observed_da.id.values)
@@ -455,12 +517,20 @@ def evaludate_grdc_data(  # noqa: PLR0913
             area=model_ds["facc"].sel(id=id).data,
             id=id,
             calc_stats=direct_comparison,
+            raise_exceptions=False,
+            title=f'{id} at {model_ds["x"].sel(id=id).data} - {model_ds["y"].sel(id=id).data}',
+            x=model_ds["x"].sel(id=id).data,
+            y=model_ds["y"].sel(id=id).data,
         )
         for id in observed_ds.id.values
         if id in model_ds.id.values
     )
-    results_df = pd.DataFrame(results_direct) if not results else pd.DataFrame(results)
-    results_df = pd.DataFrame(results)
+    if not results:
+        logger.info("Using the results from direct comparison.")
+        results_df = pd.DataFrame(results_direct)
+    else:
+        logger.info("Using the results from bootstraping.")
+        results_df = pd.DataFrame(results)
     results_df.to_csv(output_path / "results.csv")
     if results:
         plot_cdf(results_df, output_path, boostrap_iterations=n_boostrap_selections)
@@ -541,7 +611,7 @@ def plot_kde(results_df, output_path):
 
 
 @log_errors()
-def plot_cdf(df, output_path, boostrap_iterations=None):
+def plot_cdf(df, output_path, boostrap_iterations=None, mask_any=True):
     """Create cdf plots for alpha, beat and gamma for different subselections (by catchment, boostrap-mean or all results)."""
     # --- 1) Read your CSV ---
     # Adjust 'mydata.csv' to your actual file path
@@ -550,14 +620,25 @@ def plot_cdf(df, output_path, boostrap_iterations=None):
     # if not output_path.is_dir():
     #     output_path.mkdir()
     # The variables to plot
+    logger.info(f'In total there are {len(df["id"].unique())} catchments of which ')
+    logger.info(
+        f'   {len(df.dropna(subset=["alpha"], how="any")["id"].unique())} have all alpha values'
+    )
+    logger.info(
+        f'   {len(df.dropna(subset=["beta"], how="any")["id"].unique())} have beta values '
+    )
+    logger.info(
+        f'   {len(df.dropna(subset=["gamma"], how="any")["id"].unique())} have all gamma values '
+    )
+    logger.info(
+        f'   {len(df.dropna(subset=["alpha", "beta", "gamma"], how="any")["id"].unique())} have all values '
+    )
     df = df.dropna(subset=["alpha", "beta", "gamma"], how="any")
     logger.info(df.head())
     variables = ["alpha", "beta", "gamma"]
 
     # --- 2) Check number of unique IDs ---
     unique_ids = df["id"].unique()
-    n_ids = len(unique_ids)
-    logger.info(f"Found {n_ids} unique IDs.")
 
     # --- 3 & 4) Branch based on the number of unique IDs ---
     # if n_ids < 9 or plot_all:

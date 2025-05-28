@@ -18,6 +18,7 @@ import numpy as np
 import xarray as xr
 from scipy.interpolate import NearestNDInterpolator
 
+from mhm_tools.common.file_handler import get_xarray_ds_from_file
 from mhm_tools.common.logger import ErrorLogger, log_arguments
 
 logger = logging.getLogger(__name__)
@@ -102,7 +103,7 @@ class CreateSubdomainMasks:
     def read_var(fname, var_name):
         """Read a variable from a netcdf file."""
         logger.info(f"reading variable {var_name} from {fname}")
-        with xr.open_dataset(fname) as ds:
+        with get_xarray_ds_from_file(fname) as ds:
             return ds[var_name]
 
     @staticmethod
@@ -145,7 +146,7 @@ class CreateSubdomainMasks:
         land_mask = self.read_var(fname=self.land_file, var_name="land_mask").astype(
             bool
         )
-        ds_ref_file = xr.open_dataset(self.ref_file).sel(
+        ds_ref_file = get_xarray_ds_from_file(self.ref_file).sel(
             lat=land_mask.lat, lon=land_mask.lon, method="nearest"
         )
         for coord in ["latitude", "longitude"]:
@@ -218,7 +219,6 @@ class CreateSubdomainMasks:
 
         logger.info("writing output files")
         for i, basin_id in enumerate(basin_ids, 1):
-
             logger.info(f"processing subdomain {i}")
 
             sub_mask = (new_ids_remapped.values == basin_id) & ~np.isnan(land_mask)
@@ -247,7 +247,7 @@ class CreateSubdomainMasks:
 
         # Read and slice the reference file based on the land mask coordinates
         logger.info(f"Reading {self.ref_file}")
-        ds_ref_file = xr.open_dataset(self.ref_file).sel(
+        ds_ref_file = get_xarray_ds_from_file(self.ref_file).sel(
             lat=land_mask.lat, lon=land_mask.lon, method="nearest"
         )
         # Drop any redundant coordinates
@@ -341,7 +341,7 @@ def create_subdomain_masks(
         basin_clusters=basin_clusters,
         land_mask=land_mask,
     )
-    with xr.open_dataset(basin_id_file) as ds:
+    with get_xarray_ds_from_file(basin_id_file) as ds:
         lat = ds.lat
         lon = ds.lon
         # if input is not global only create a file else create all subdomains
