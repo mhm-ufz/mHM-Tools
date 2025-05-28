@@ -1108,7 +1108,7 @@ def get_target_time_res(input_path, ref_path, folder_name=""):
 
 
 @log_arguments()
-def gridded_data_validation(
+def gridded_data_evaluation(
     input_path,
     input_var,
     output_path,
