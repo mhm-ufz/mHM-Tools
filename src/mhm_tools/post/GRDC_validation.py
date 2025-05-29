@@ -18,7 +18,7 @@ from mhm_tools.common.xarray_utils import (
     get_overlapping_time_slice,
     timedelta_to_alias,
 )
-from mhm_tools.post.gridded_data_validation import (
+from mhm_tools.post.gridded_data_evaluation import (
     get_clim_from_ds,
     spearman_correlation,
 )
