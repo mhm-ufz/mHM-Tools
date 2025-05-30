@@ -308,7 +308,6 @@ def read_ascii_to_xarray(filepath, var_name=None):
     # Convert to Dataset
     da = da.sel(band=1, drop=True)
     ds = da.to_dataset()
-    logger.error(ds)
     # 4. (Optional) drop the spatial_ref coordinate if you don’t need it
     return ds.reset_coords("spatial_ref", drop=True)
 
