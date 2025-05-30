@@ -3,6 +3,7 @@
 import logging
 from pathlib import Path
 
+from mhm_tools.common.xarray_utils import get_coord_key
 import numpy as np
 
 from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_to_ascii
@@ -21,7 +22,8 @@ def create_id_gauges(id, lon, lat, file, out_path, file_is_idgauges=False):
         if "nodata_value" in ds[data_name].attrs:
             missing_value = ds[data_name].attrs["nodata_value"]
         else:
-            missing_value = ds[data_name].encoding.get("_FillValue", np.nan)
+            missing_value = ds[data_name].encoding.get("_FillValue", -9999)
+        logger.info(f"Missing values is {missing_value}")
         if not file_is_idgauges:
             for var_name in ds.data_vars:
                 # Set every element of this variable to missing_value:
@@ -29,8 +31,10 @@ def create_id_gauges(id, lon, lat, file, out_path, file_is_idgauges=False):
                 contains_value = False
         else:
             contains_value = bool(ds[data_name] == float(id)).any()
+        lon_key = get_coord_key(ds, lon=True)
+        lat_key = get_coord_key(ds, lat=True)
         if not contains_value:
-            ds.loc[ds.sel(lon=lon, lat=lat, method="nearest").coords] = id
+            ds.loc[ds.sel({lat_key: lat, lon_key:lon}, method="nearest").coords] = id
             write_xarray_to_ascii(ds, out_path, data_name, fmt="%.0f")
         else:
             logger.info("Id {id} is already in {file}.")
