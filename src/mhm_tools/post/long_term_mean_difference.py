@@ -1,15 +1,3 @@
-"""
-Compute and plot long-term mean differences between model and reference datasets.
-
-This module reads one or more CF-compliant NetCDF datasets, computes the
-long-term mean fields for both model outputs and reference data, calculates
-their differences, and generates spatial and temporal plots of those differences.
-
-Authors
--------
-- Jeisson Leal
-"""
-
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -83,7 +71,6 @@ def long_term_mean_diff(
     x_max: Optional[float] = None,
     y_min: Optional[float] = None,
     y_max: Optional[float] = None,
-    extent: Optional[Tuple[float, float, float, float]] = None,
     cmap: str = "coolwarm",
     vmin: Optional[float] = None,
     vmax: Optional[float] = None,
@@ -108,11 +95,6 @@ def long_term_mean_diff(
     out_path_dir = Path(output_dir)
     out_path_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_path_dir / output_file
-
-    # Unpack extent limits
-    x_min = x_max = y_min = y_max = None
-    if extent is not None:
-        x_min, x_max, y_min, y_max = extent
 
     plot_diff(
         diff=diff,
