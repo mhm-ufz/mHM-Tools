@@ -65,7 +65,6 @@ def plot_diff(
     plt.ylabel("Latitude")
     plt.tight_layout()
     plt.savefig(out_path, dpi=300)
-    plt.show()
     plt.close()
 
 
@@ -80,6 +79,10 @@ def long_term_mean_diff(
     title: str,
     output_dir: str,
     output_file: str,
+    x_min: Optional[float] = None,
+    x_max: Optional[float] = None,
+    y_min: Optional[float] = None,
+    y_max: Optional[float] = None,
     extent: Optional[Tuple[float, float, float, float]] = None,
     cmap: str = "coolwarm",
     vmin: Optional[float] = None,
@@ -89,7 +92,6 @@ def long_term_mean_diff(
     # Read the reference and model datasets
     ds_ref = read_dataset(file_path=str(Path(ref_input_dir) / reference_pattern))
     ds_mod = read_dataset(file_path=str(Path(mod_input_dir) / model_pattern))
-
     da_ref = ds_ref[ref_var]
     da_mod = ds_mod[mod_var]
 
