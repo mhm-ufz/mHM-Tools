@@ -236,7 +236,7 @@ def write_xarray_to_file(ds, file_path, var_name=None, fmt=None, create_folder=T
     file_path = Path(file_path)
     if create_folder and not file_path.parent.is_dir():
         file_path.parent.mkdir(parents=True)
-    logger.info(f"Writing file to {file_path}.")
+    logger.info(f"Writing file to {file_path}")
     if file_path.suffix == ".asc":
         return write_xarray_to_ascii(ds, file_path, var_name, fmt)
     if file_path.suffix == ".nc":
