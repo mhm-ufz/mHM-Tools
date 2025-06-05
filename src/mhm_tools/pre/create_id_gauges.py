@@ -3,11 +3,9 @@
 import logging
 from pathlib import Path
 
-from mhm_tools.common.xarray_utils import get_coord_key
-import numpy as np
-
 from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_to_ascii
 from mhm_tools.common.logger import log_arguments
+from mhm_tools.common.xarray_utils import get_coord_key
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +32,7 @@ def create_id_gauges(id, lon, lat, file, out_path, file_is_idgauges=False):
         lon_key = get_coord_key(ds, lon=True)
         lat_key = get_coord_key(ds, lat=True)
         if not contains_value:
-            ds.loc[ds.sel({lat_key: lat, lon_key:lon}, method="nearest").coords] = id
+            ds.loc[ds.sel({lat_key: lat, lon_key: lon}, method="nearest").coords] = id
             write_xarray_to_ascii(ds, out_path, data_name, fmt="%.0f")
         else:
             logger.info("Id {id} is already in {file}.")

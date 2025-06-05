@@ -1204,9 +1204,7 @@ class MHMRestartFile:
                 self.grid.morph_files.slope_emp is None
                 or not self.grid.morph_files.slope_emp.is_file()
             ):
-                with get_xarray_ds_from_file(
-                    self.grid.morph_files.slope
-                ) as ds_slope:
+                with get_xarray_ds_from_file(self.grid.morph_files.slope) as ds_slope:
                     data = ds_slope["slope"]
                     flattened = data.values.flatten()
                     flattened_no_nan = flattened[~np.isnan(flattened)]

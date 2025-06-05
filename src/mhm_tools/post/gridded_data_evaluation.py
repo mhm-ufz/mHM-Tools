@@ -1147,7 +1147,9 @@ def gridded_data_evaluation(
     available_years = get_available_years(input_path, ref_path, year_slice, direct_comp)
     logger.info(f"Years {available_years} are available for comparison.")
     if direct_comp:
-        target_time_res = get_target_time_res(input_path, ref_path, next(iter(available_years)))
+        target_time_res = get_target_time_res(
+            input_path, ref_path, next(iter(available_years))
+        )
         logger.info(
             f"Years {available_years} are overlapping. Data should be resampled to {target_time_res}"
         )

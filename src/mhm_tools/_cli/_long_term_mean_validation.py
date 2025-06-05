@@ -18,9 +18,7 @@ def str2float(value):
     # Otherwise it must be a string we can cast
     if not isinstance(value, str):
         msg = f"Expected a string or None, but got {type(value).__name__}."
-        raise argparse.ArgumentTypeError(
-            msg
-        )
+        raise argparse.ArgumentTypeError(msg)
 
     try:
         return float(value)
