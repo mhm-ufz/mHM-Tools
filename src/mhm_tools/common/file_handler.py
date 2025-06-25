@@ -265,13 +265,13 @@ def write_xarray_to_ascii(dataset, filepath, data_var=None, fmt=None):
     data = dataset[data_var]
     lat_key = get_coord_key(dataset, lat=True)
     lon_key = get_coord_key(dataset, lon=True)
-    lat = dataset[lat_key]
-    lon = dataset[lon_key]
+    lat = dataset[lat_key].values
+    lon = dataset[lon_key].values
     nodata_value = dataset[data_var].attrs.get("nodata_value", -9999)
 
     # Calculate header information
     nrows, ncols = data.shape
-    cellsize = lon.data[1] - lon.data[0]  # Assuming uniform spacing in lon
+    cellsize = abs(lon[1] - lon[0])  # Assuming uniform spacing in lon
     xllcorner = lon.min() - 0.5 * cellsize
     yllcorner = lat.min() - 0.5 * cellsize  # lat starts at the top and descends
 
