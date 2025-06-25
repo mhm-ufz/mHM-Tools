@@ -926,6 +926,8 @@ class Hydrograph:
             #     len(self.output_file.split("/")) == 1
             # ):  # by default the hydrograph is saved to the data directory
             # self.output_file = self.output_file
+            if not self.output_file.parent.is_dir():
+                self.output_file.parent.mkdir(parents=True)
             fig.savefig(self.output_file, bbox_inches="tight")
             self.logger.info(f"saved hydrograph to '{self.output_file}'")
         if self.show:
@@ -955,7 +957,7 @@ def get_hydrograph_from_path(
     """
     hydro = Hydrograph()
     hydro.check_which_plots_to_create(plot_code)
-    hydro.output_file = output_file
+    hydro.output_file = Path(output_file)
     hydro.title = title
     hydro.show = show
     hydro.save = save
@@ -1009,7 +1011,7 @@ def gen_hydrograph_by_data_sets(
         missing_data_error_msg = f"For {id} the hydrograph could not be created."
         if hydro.set_discharge(simulation=simulations, observation=observation):
             hydro.pre = precipitation
-            hydro.output_file = output_file
+            hydro.output_file = Path(output_file)
             hydro.title = str(id) if not title and id is not None else title
             hydro.show = show
             hydro.save = save
