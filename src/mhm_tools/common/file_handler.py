@@ -207,17 +207,21 @@ def get_xarray_ds_from_file(
             engine=engine,
         )
 
-    lat_key = get_coord_key(ds_out, lat=True)
-    lon_key = get_coord_key(ds_out, lon=True)
+    lat_key = get_coord_key(ds_out, lat=True, raise_exception=False)
+    lon_key = get_coord_key(ds_out, lon=True, raise_exception=False)
     # force correct order of y coordinate
-    if force_decending_y and ds_out[lat_key].values[0] < ds_out[lat_key].values[-1]:
-        ds_out = ds_out.sel({lat_key: slice(None, None, -1)})
-    if force_ascending_y and ds_out[lat_key].values[0] > ds_out[lat_key].values[-1]:
-        ds_out = ds_out.sel({lat_key: slice(None, None, -1)})
-    # re-name input coords to lat and lon
-    if normalize_latlon_coords:
-        ds_out = normalize_lat_lon(ds_out, lat_key, lon_key)
-
+    if lon_key is not None and lat_key is not None:
+        if force_decending_y and ds_out[lat_key].values[0] < ds_out[lat_key].values[-1]:
+            ds_out = ds_out.sel({lat_key: slice(None, None, -1)})
+        if force_ascending_y and ds_out[lat_key].values[0] > ds_out[lat_key].values[-1]:
+            ds_out = ds_out.sel({lat_key: slice(None, None, -1)})
+        # re-name input coords to lat and lon
+        if normalize_latlon_coords:
+            ds_out = normalize_lat_lon(ds_out, lat_key, lon_key)
+    elif lon_key is not None or lat_key is not None:
+        logger.error('Dataset has only one of lon at lat keys.')
+    else:
+        logger.warning('Dataset does not have lon and lat key.')
     if chunking and available_mem_gib is not None:
         ds_out = chunk_dataset(ds_out, chunk_type, available_mem_gib)
     if ds_out is None:

@@ -37,9 +37,9 @@ def get_coord_key(
         pass
     # then select possible keys from the following lists and try them untill a fitting one is found.
     if lat:
-        keys = ["lat", "latitude", "northing", "y", "new_y", "Y"]
+        keys = ["lat", "latitude", "northing", "y", "new_y", "Y", "geo_y"]
     elif lon:
-        keys = ["lon", "longitude", "easting", "x", "new_x", "X"]
+        keys = ["lon", "longitude", "easting", "x", "new_x", "X", "geo_x"]
     else:
         keys = ["time", "month_of_year"]
     for key in keys:
