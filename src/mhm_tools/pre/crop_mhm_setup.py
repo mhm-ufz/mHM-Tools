@@ -391,7 +391,7 @@ def crop_file(
         )
 
     # check for emptiness or insufficient grid points
-    if ds_cropped.sizes[lat_key] < 2 or ds_cropped.sizes[lon_key] < 2:
+    if ds_cropped.sizes[lat_key] < 1 or ds_cropped.sizes[lon_key] < 1:
         msg = f"Cropping resulted in insufficient grid size \
             (lat={ds_cropped.sizes[lat_key]}, lon={ds_cropped.sizes[lon_key]})."
         with ErrorLogger(logger):
