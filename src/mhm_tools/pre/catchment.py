@@ -662,6 +662,7 @@ def create_catchment(
     frame=1,
     upscale=False,
     latlon=True,
+    available_mem=None
 ):
     """Create file containing catchment ids, flowdirection and upstream area from dem or flow direction."""
     logger.info(
@@ -674,7 +675,7 @@ def create_catchment(
             raise ValueError(msg)
 
     with get_xarray_ds_from_file(
-        input_file, var_name, normalize_latlon_coords=True
+        input_file, var_name, normalize_latlon_coords=True, force_decending_y=True, available_mem_gib=available_mem
     ) as input_ds:
         # transform
         transform = get_transformation_matrix_nc(input_ds, var_name)
@@ -735,13 +736,11 @@ def create_catchment(
             temp_file2.unlink()
         elif coordinate_slices is not None:
             logger.info(f"Creating basin id file for {coordinate_slices}")
-            lat_max = coordinate_slices["lat"].start
-            lat_min = coordinate_slices["lat"].stop
-            lon_min = coordinate_slices["lon"].start
-            lon_max = coordinate_slices["lon"].stop
             input_ds_sliced = input_ds.sel(
-                lat=slice(lat_max, lat_min), lon=slice(lon_min, lon_max)
+                lat=coordinate_slices["lat"], lon=coordinate_slices["lon"]
             )
+            logger.info(f"lat {input_ds_sliced.lat.data[0]}, {input_ds_sliced.lat.data[-1]}")
+            logger.info(f"lon {input_ds_sliced.lon.data[0]}, {input_ds_sliced.lon.data[-1]}")
             c = Catchment(
                 ds=input_ds_sliced,
                 var_name=var_name,

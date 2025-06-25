@@ -80,7 +80,7 @@ def get_single_data_var(ds):
                 len_data_vars -= 1
                 data_vars.remove(coord)
         if len_data_vars > 1:
-            logger.error("Only single data_var allowed")
+            logger.error(f"Only single data_var allowed but has {data_vars}")
             return None
         if len_data_vars == 0:
             logger.error("No datavar that is not coordinate.")

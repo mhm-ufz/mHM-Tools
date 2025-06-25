@@ -174,7 +174,6 @@ class ChunkType(Enum):
     SPACE = 1
     TIME = 2
 
-
 def get_xarray_ds_from_file(
     file_path,
     var_name=None,
@@ -184,6 +183,8 @@ def get_xarray_ds_from_file(
     use_mfdataset=False,
     engine="h5netcdf",
     normalize_latlon_coords=False,
+    force_decending_y=True,
+    force_ascending_y=False,
 ):
     """Read file and return xarray dataset."""
     file_path = Path(file_path)
@@ -206,10 +207,15 @@ def get_xarray_ds_from_file(
             engine=engine,
         )
 
-        # re-name input coords to lat and lon
+    lat_key = get_coord_key(ds_out, lat=True)
+    lon_key = get_coord_key(ds_out, lon=True)
+    # force correct order of y coordinate
+    if force_decending_y and ds_out[lat_key].values[0] < ds_out[lat_key].values[-1]:
+        ds_out = ds_out.sel({lat_key: slice(None, None, -1)})
+    if force_ascending_y and ds_out[lat_key].values[0] > ds_out[lat_key].values[-1]:
+        ds_out = ds_out.sel({lat_key: slice(None, None, -1)})
+    # re-name input coords to lat and lon
     if normalize_latlon_coords:
-        lat_key = get_coord_key(ds_out, lat=True)
-        lon_key = get_coord_key(ds_out, lon=True)
         ds_out = normalize_lat_lon(ds_out, lat_key, lon_key)
 
     if chunking and available_mem_gib is not None:
@@ -259,15 +265,15 @@ def write_xarray_to_ascii(dataset, filepath, data_var=None, fmt=None):
     data = dataset[data_var]
     lat_key = get_coord_key(dataset, lat=True)
     lon_key = get_coord_key(dataset, lon=True)
-    lat = dataset[lat_key].values
-    lon = dataset[lon_key].values
+    lat = dataset[lat_key]
+    lon = dataset[lon_key]
     nodata_value = dataset[data_var].attrs.get("nodata_value", -9999)
 
     # Calculate header information
     nrows, ncols = data.shape
-    cellsize = lon[1] - lon[0]  # Assuming uniform spacing in lon
-    xllcorner = lon[0] - 0.5 * cellsize
-    yllcorner = lat[-1] - 0.5 * cellsize  # lat starts at the top and descends
+    cellsize = lon.data[1] - lon.data[0]  # Assuming uniform spacing in lon
+    xllcorner = lon.min() - 0.5 * cellsize
+    yllcorner = lat.min() - 0.5 * cellsize  # lat starts at the top and descends
 
     # Create the header
     header = (
@@ -301,15 +307,27 @@ def write_xarray_to_ascii(dataset, filepath, data_var=None, fmt=None):
 
 
 def read_ascii_to_xarray(filepath, var_name=None):
-    """Read an mHM readable asci file to an xarray dataset."""
+    """Read an mHM readable ASCII file to an xarray dataset with axis attributes."""
+
     # Read the header from the file
     name = "data" if var_name is None else var_name
     da = rioxarray.open_rasterio(filepath, default_name=name)
-    # Convert to Dataset
+
+    # Select the first band
     da = da.sel(band=1, drop=True)
+
+    # Convert to Dataset
     ds = da.to_dataset()
-    # 4. (Optional) drop the spatial_ref coordinate if you don’t need it
+
+    # Add axis attributes
+    if 'x' in ds.coords:
+        ds.coords['x'].attrs['axis'] = 'X'
+    if 'y' in ds.coords:
+        ds.coords['y'].attrs['axis'] = 'Y'
+
+    # Drop spatial_ref if present
     return ds.reset_coords("spatial_ref", drop=True)
+
 
 
 def get_coord_values(ds, lat=False, lon=False):

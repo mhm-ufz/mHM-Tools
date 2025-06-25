@@ -2,6 +2,7 @@
 
 import logging
 
+from mhm_tools.common.cli_utils import get_available_mem_in_unit
 import numpy as np
 
 from mhm_tools.common.logger import ErrorLogger
@@ -123,6 +124,12 @@ def add_args(parser):
             "Creates a frame of nonflow cells around the domain to enable non global domains in ulysses mrm which connects the eastern and western boundaries."
         ),
     )
+    parser.add_argument(
+        "--available_mem",
+        required=False,
+        default="5",
+        help=("""Available memory per cpu in Gb or Mb (default Gb)"""),
+    )
 
 
 def run(args):
@@ -152,6 +159,7 @@ def run(args):
     if args.upscale and not args.l1_resolution:
         msg = "If upscaling is enabled l1_resolution must be provided."
         raise ValueError(msg)
+    available_mem = get_available_mem_in_unit(args.available_mem)
     create_catchment(
         input_file=args.input_file,
         output_path=args.output_path,
@@ -165,4 +173,5 @@ def run(args):
         frame=args.frame,
         upscale=args.upscale,
         latlon=args.coords_are_not_latlon,
+        available_mem=available_mem
     )
