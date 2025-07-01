@@ -723,6 +723,7 @@ def compare_input_with_ref(
     available_mem=None,
     input_file_name="*.*",
     ref_file_name="*.*",
+    target_freq=None
 ):
     """Compare the two datasets."""
     if bootstrap_index is not None:
@@ -876,8 +877,8 @@ def compare_input_with_ref(
         rel_std=rel_std,
         rel_mean=rel_mean,
         spearman=spearman,
-        ref_clim=ref["clim"],
-        input_clim=input["clim"],
+        ref_clim=ref_clim,
+        input_clim=input_clim,
         input_name=input_name,
         ref_name=ref_name,
         output_path=output_path,
