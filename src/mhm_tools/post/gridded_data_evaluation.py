@@ -483,7 +483,8 @@ def resample_to_coarser_calendar(
         logger.info(f"Both are already {alias_in}")
 
     # finally, force them onto exactly the same time‐axis
-    ds_input, ds_ref = xr.align(ds_input, ds_ref)
+    # ds_input, ds_ref = xr.align(ds_input, ds_ref)
+    # logger.debug(f"Input file after align {ds_input}")
     return ds_input, ds_ref
 
 
