@@ -1044,7 +1044,7 @@ def get_files_from_path(path, raise_exception=True, file_name="*.*"):
         return list(year_structure_paths(path, file_name=file_name))
     if path.is_file():
         with get_xarray_ds_from_file(path, force_decending_y=True) as input_ds:
-            return list(np.unique(input_ds.time.dt.year.data))]
+            return list(np.unique(input_ds.time.dt.year.data))
     if raise_exception:
         msg = f"The provided path {path} is neither file nor directory."
         with ErrorLogger(logger):
