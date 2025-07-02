@@ -622,14 +622,14 @@ class Hydrograph:
             ax2 = fig.add_subplot(inner_gs_update[1:], sharex=ax2_pre)
             if self.calc_stats:
                 ax2_pre.set_title(
-                    f"sim - obs = {self.objectives.diff:.0f}$m^3$ or {self.objectives.rel_diff*100:.0f}%",
+                    f"sum(sim - obs) = {self.objectives.diff:.0f}$m^3$ or {self.objectives.rel_diff*100:.0f}%",
                     horizontalalignment="center",
                 )
         else:
             ax2 = fig.add_subplot(outer_gs)
             if self.calc_stats:
                 ax2.set_title(
-                    f"sim - obs = {self.objectives.diff:.0f}$m^3$ or {self.objectives.rel_diff*100:.0f}%",
+                    f"sum(sim - obs) = {self.objectives.diff:.0f}$m^3$ or {self.objectives.rel_diff*100:.0f}%",
                     horizontalalignment="center",
                 )
         ax2.spines["top"].set_visible(False)
@@ -928,7 +928,7 @@ class Hydrograph:
             # self.output_file = self.output_file
             if not self.output_file.parent.is_dir():
                 self.output_file.parent.mkdir(parents=True)
-            fig.savefig(self.output_file, bbox_inches="tight")
+            fig.savefig(self.output_file, bbox_inches="tight", dpi=800)
             self.logger.info(f"saved hydrograph to '{self.output_file}'")
         if self.show:
             plt.show()
