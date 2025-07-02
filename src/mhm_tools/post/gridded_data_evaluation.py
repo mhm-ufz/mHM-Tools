@@ -556,6 +556,7 @@ def plot_map(
     )
 
     ax_twy = axes[1, 1].twinx()
+    ref_clim = np.where(ref_clim != 0, ref_clim, np.nan)
     rel_clim = np.nanmean(input_clim, axis=(1, 2)) / np.nanmean(ref_clim, axis=(1, 2))
     rel_clim_diff_1 = max(
         np.abs(1 - np.nanmin(rel_clim)), np.abs(1 - np.nanmax(rel_clim))
@@ -578,8 +579,9 @@ def plot_map(
     axes[1, 1].set_xlim(1 - (1.1 * bar_width), 12 + (1.1 * bar_width))
     axes[1, 1].set_xticks(months)
     axes[1, 1].set_xticklabels(months)
+    ymax = 1 + rel_clim_diff_1 * 1.05 if not np.isnan(rel_clim_diff_1) else 1
     ax_twy.set_ylim(
-        max(0, 1 - rel_clim_diff_1 * 1.05), 1 + rel_clim_diff_1 * 1.05
+        np.nanmax([0, 1 - rel_clim_diff_1 * 1.05]), ymax
     )  # Example range for the ratio
     ax_twy.set_ylabel("Ratio (Input / Reference)", color="#0000A7")
     ax_twy.tick_params(axis="y", labelcolor="#0000A7")
@@ -765,6 +767,10 @@ def compare_input_with_ref(
     logger.debug(f"ref ds: {ref}")
     # regrid spatial resoution
     # regridd to same spatial resolution
+    if len(input["lat"].data) < 1 or len(input["lon"].data) < 1:
+        logger.error('Input dataset has empty coordinate.')
+    if len(ref["lat"].data) < 1 or len(ref["lon"].data) < 1:
+        logger.error('Ref dataset has empty coordinate.')
     input, ref = regridd_to_higher_spatial_resolution(input, ref)
     # regridd to same spatial resolution
 
@@ -1100,8 +1106,8 @@ def get_target_time_res_from_files(input_file, ref_file):
 
 def get_target_time_res(input_path, ref_path, folder_name=""):
     """Get coarser time resolution from two datasets with files in folder structur."""
-    input_files = (Path(input_path) / folder_name).glob("*nc")
-    ref_files = (Path(ref_path) / folder_name).glob("*nc")
+    input_files = (Path(input_path) / str(folder_name)).glob("*nc")
+    ref_files = (Path(ref_path) / str(folder_name)).glob("*nc")
     if not list(input_files) or not list(ref_files):
         logger.error("One of the datasets has no files.")
         return None
