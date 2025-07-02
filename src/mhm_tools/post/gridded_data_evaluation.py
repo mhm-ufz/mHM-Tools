@@ -1124,7 +1124,7 @@ def get_target_time_res(input_path, ref_path, folder_name=""):
     if not list(input_files) or not list(ref_files):
         logger.error("One of the datasets has no files.")
         return None
-    return get_target_time_res_from_files(next(input_files), next(ref_files))
+    return get_target_time_res_from_files(next(iter(input_files)), next(iter(ref_files)))
 
 
 @log_arguments()
@@ -1167,7 +1167,7 @@ def gridded_data_evaluation(
     available_years = get_available_years(input_path, ref_path, year_slice, direct_comp)
     logger.info(f"Years {available_years} are available for comparison.")
     if not available_years:
-        logger.warning('Since no data is available the program is stoped.')
+        logger.error('Since no data is available the program is stoped.')
         return
     target_time_res = None
     if direct_comp:
