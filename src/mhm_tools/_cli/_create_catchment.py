@@ -100,6 +100,20 @@ def add_args(parser):
         help=("""Resolution of the mHM target grid."""),
     )
     parser.add_argument(
+        "--l11_resolution",
+        required=False,
+        type=float,
+        default=None,
+        help=("""Resolution of the mRM routing resolution. Only used to extend the grid to cleanly fit this data."""),
+    )
+    parser.add_argument(
+        "--l2_resolution",
+        required=False,
+        type=float,
+        default=None,
+        help=("""Resolution of the mHM meteo input resolution. Only used to extend the grid to cleanly fit this data."""),
+    )
+    parser.add_argument(
         "--upscale",
         action="store_true",
         default=False,
@@ -170,6 +184,8 @@ def run(args):
         coordinate_slices=coordinate_slices,
         mask_file=args.mask_file,
         l1_resolution=args.l1_resolution,
+        l11_resolution=args.l11_resolution,
+        l2_resolution=args.l2_resolution,
         frame=args.frame,
         upscale=args.upscale,
         latlon=args.coords_are_not_latlon,
