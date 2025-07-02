@@ -1041,9 +1041,13 @@ def get_years_from_path(path, raise_exception=True, file_name="*.*"):
 def get_files_from_path(path, raise_exception=True, file_name="*.*"):
     """Get years for one dataset from the folder structure or the xarray dataset."""
     if path.is_dir():
-        return list(year_structure_paths(path, file_name=file_name))
+        all_files = [] 
+        all_dirs = year_structure_paths(path, file_name=file_name)
+        for dir in all_dirs:
+            all_files.extend(list(dir.glob(file_name)))
+        return all_files
     if path.is_file():
-        return path
+        return [path]
     if raise_exception:
         msg = f"The provided path {path} is neither file nor directory."
         with ErrorLogger(logger):
