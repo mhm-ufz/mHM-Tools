@@ -1038,6 +1038,19 @@ def get_years_from_path(path, raise_exception=True, file_name="*.*"):
             raise ValueError(msg)
     return []
 
+def get_files_from_path(path, raise_exception=True, file_name="*.*"):
+    """Get years for one dataset from the folder structure or the xarray dataset."""
+    if path.is_dir():
+        return list(year_structure_paths(path, file_name=file_name))
+    if path.is_file():
+        with get_xarray_ds_from_file(path, force_decending_y=True) as input_ds:
+            return list(np.unique(input_ds.time.dt.year.data))]
+    if raise_exception:
+        msg = f"The provided path {path} is neither file nor directory."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    return []
+
 
 def get_available_years(input_path, ref_path, year_slice=None, direct_comp=True):
     """
@@ -1106,8 +1119,8 @@ def get_target_time_res_from_files(input_file, ref_file):
 
 def get_target_time_res(input_path, ref_path, folder_name=""):
     """Get coarser time resolution from two datasets with files in folder structur."""
-    input_files = (Path(input_path) / str(folder_name)).glob("*nc")
-    ref_files = (Path(ref_path) / str(folder_name)).glob("*nc")
+    input_files = get_files_from_path(input_path)
+    ref_files = get_files_from_path(ref_path)
     if not list(input_files) or not list(ref_files):
         logger.error("One of the datasets has no files.")
         return None
@@ -1153,10 +1166,13 @@ def gridded_data_evaluation(
         input_path = input_path / "mHM_Fluxes_States.nc"
     available_years = get_available_years(input_path, ref_path, year_slice, direct_comp)
     logger.info(f"Years {available_years} are available for comparison.")
+    if not available_years:
+        logger.warning('Since no data is available the program is stoped.')
+        return
     target_time_res = None
     if direct_comp:
         target_time_res = get_target_time_res(
-            input_path, ref_path, next(iter(available_years))
+            input_path, ref_path
         )
         logger.info(
             f"Years {available_years} are overlapping. Data should be resampled to {target_time_res}"
