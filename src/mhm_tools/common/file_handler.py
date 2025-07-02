@@ -228,7 +228,7 @@ def get_xarray_ds_from_file(
         msg = f"File types other than asci and netcdf are not implemented. The suffix of the file was: {file_path.suffix}"
         with ErrorLogger(logger):
             raise NotImplementedError()
-    logger.info(f"ds_out: {ds_out}")
+    logger.debug(f"ds_out: {ds_out}")
     return ds_out
 
 
@@ -312,7 +312,6 @@ def write_xarray_to_ascii(dataset, filepath, data_var=None, fmt=None):
 
 def read_ascii_to_xarray(filepath, var_name=None):
     """Read an mHM readable ASCII file to an xarray dataset with axis attributes."""
-
     # Read the header from the file
     name = "data" if var_name is None else var_name
     da = rioxarray.open_rasterio(filepath, default_name=name)
