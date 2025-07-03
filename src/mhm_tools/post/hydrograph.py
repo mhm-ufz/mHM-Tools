@@ -11,6 +11,7 @@ from pathlib import Path
 
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
+from mhm_tools.common.spatial_metrics import create_csv_from_dict
 import numpy as np
 from matplotlib import gridspec
 
@@ -936,6 +937,8 @@ class Hydrograph:
             plt.close()
         return True
 
+    def write_output(self):
+        create_csv_from_dict({**self.objectives.__dict__, "id": id}, self.output_file.parent / f"{id}.csv")
 
 @log_arguments()
 def get_hydrograph_from_path(
@@ -970,6 +973,9 @@ def get_hydrograph_from_path(
     hydro.load_precipiation_data(prec_path)
     hydro.get_catchment_area(input_path, ndecimal=0)
     hydro.get_hydrograph()
+    hydro.write_output()
+    
+
 
 
 @log_arguments()
