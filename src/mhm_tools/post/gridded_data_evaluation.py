@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Iterable
 
 import matplotlib.pyplot as plt
+from mhm_tools.common.spatial_metrics import create_results_csv
 import numpy as np
 import xarray as xr
 from joblib import Parallel, delayed
@@ -499,7 +500,7 @@ def crop_data_to_overlapping_time(input_ds, ref_ds):
 
 @log_errors()
 def plot_map(
-    rel_mean, rel_std, spearman, ref_clim, input_clim, input_name, ref_name, output_path
+    rel_mean, rel_std, spearman, ref_clim, input_clim, input_name, ref_name, output_path, plots={'mean': True, 'std': True, 'corr': True, 'season': True}
 ):
     """Create a plot with four subplots showing relative mean, standard deviation, the spearman correlation of the climatologies and the seasonal mean of both datasets."""
     rel_mean = np.where(rel_mean == np.inf, np.nan, rel_mean)
@@ -729,6 +730,7 @@ def compare_input_with_ref(
     target_freq=None
 ):
     """Compare the two datasets."""
+    output_path = Path(output_path)
     if bootstrap_index is not None:
         random.seed(bootstrap_index)
     # get input statistics
@@ -789,6 +791,7 @@ def compare_input_with_ref(
             spearman, spearman_pval = spearman_spatial_joblib(
                 input_ts, ref_ts, spearman_correlation, ncpus
             )
+            create_results_csv(input_ts, ref_ts, input_name, ref_name, output_path/f'{input_name}-{ref_name}.csv')
         except ValueError as ve:
             logger.error("Input and ref do not have the same temporal extend.")
             logger.info(input_ts.time)
@@ -799,6 +802,7 @@ def compare_input_with_ref(
         spearman, spearman_pval = spearman_spatial_joblib(
             input["clim"], ref["clim"], spearman_correlation, ncpus
         )
+        create_results_csv(input["clim"], ref["clim"], input_name, ref_name, output_path/f'{input_name}-{ref_name}.csv')
 
     rel_mean = xr.DataArray(
         rel_mean,
@@ -1000,28 +1004,54 @@ def regridd_to_higher_spatial_resolution(ds1, ds2):
         xarray.Dataset: The finer dataset (unchanged).
     """
     # Determine which dataset is coarser
-    lat_res_1 = abs(ds1["lat"][1] - ds1["lat"][0]).item()
-    lon_res_1 = abs(ds1["lon"][1] - ds1["lon"][0]).item()
-    lat_res_2 = abs(ds2["lat"][1] - ds2["lat"][0]).item()
-    lon_res_2 = abs(ds2["lon"][1] - ds2["lon"][0]).item()
+
+    # lat_res_1 = abs(ds1["lat"][1] - ds1["lat"][0]).item()
+    # lon_res_1 = abs(ds1["lon"][1] - ds1["lon"][0]).item()
+    # lat_res_2 = abs(ds2["lat"][1] - ds2["lat"][0]).item()
+    # lon_res_2 = abs(ds2["lon"][1] - ds2["lon"][0]).item()
+
+    # as they are croped to the same extend the shape can be used as proxy:
+    lat_shape_1 = ds1["lat"].shape[0]
+    lon_shape_1 = ds1["lon"].shape[0]
+    lat_shape_2 = ds2["lat"].shape[0]
+    lon_shape_2 = ds2["lon"].shape[0]
 
     # Identify the finer and coarser datasets
-    if (lat_res_1 * lon_res_1) == (lat_res_2 * lon_res_2):
+    coarse_res = 0
+    if (lat_shape_1 * lon_shape_1) == (lat_shape_2 * lon_shape_2):
         return ds1, ds2
-    if (lat_res_1 * lon_res_1) > (lat_res_2 * lon_res_2):
+    if (lat_shape_1 * lon_shape_1) < (lat_shape_2 * lon_shape_2):
+        if lat_shape_1 > 1:
+            coarse_res =  abs(ds1["lat"][1] - ds1["lat"][0]).item()
+        elif lon_shape_1 > 1: 
+            coarse_res =  abs(ds1["lon"][1] - ds1["lon"][0]).item()
         coarse_ds, fine_ds = ds1, ds2
     else:
+        if lat_shape_1 > 1:
+            coarse_res =  abs(ds1["lat"][1] - ds1["lat"][0]).item()
+        elif lon_shape_1 > 1: 
+            coarse_res =  abs(ds1["lon"][1] - ds1["lon"][0]).item()
         coarse_ds, fine_ds = ds2, ds1
+    # if (lat_res_1 * lon_res_1) == (lat_res_2 * lon_res_2):
+    #         return ds1, ds2
+    #     if (lat_res_1 * lon_res_1) > (lat_res_2 * lon_res_2):
+    #         coarse_ds, fine_ds = ds1, ds2
+    #     else:
+    #         coarse_ds, fine_ds = ds2, ds1
 
     # Perform nearest-neighbor regridding
-    regridded_ds = coarse_ds.interp(
-        lat=fine_ds["lat"], lon=fine_ds["lon"], method="nearest"
-    )
+    # regridded_ds = coarse_ds.interp(
+    #     lat=fine_ds["lat"], lon=fine_ds["lon"], method="nearest"
+    # )
+    regridded_ds = coarse_ds.reindex(
+    lat=fine_ds["lat"], lon=fine_ds["lon"], method="nearest", tolerance=coarse_res
+)
+
 
     # Return regridded dataset and finer dataset
-    logger.info(
-        f'Regridded the two datasets to the resolution lat: {coarse_ds["lat"].data[1]-coarse_ds["lat"].data[0]}, lon: {coarse_ds["lon"].data[1]-coarse_ds["lon"].data[0]}'
-    )
+    # logger.info(
+    #     f'Regridded the two datasets to the resolution lat: {coarse_ds["lat"].data[1]-coarse_ds["lat"].data[0]}, lon: {coarse_ds["lon"].data[1]-coarse_ds["lon"].data[0]}'
+    # )
     if coarse_ds is ds1:
         return regridded_ds, ds2
     return ds1, regridded_ds

@@ -1,0 +1,93 @@
+import math
+
+# import required modules
+import numpy as np
+from scipy.stats import spearmanr, variation, zscore
+import pandas as pd
+
+
+######################################################################################################################
+def filter_nan(s, o):
+    data = np.transpose(np.array([s.flatten(), o.flatten()]))
+    data = data[~np.isnan(data).any(1)]
+    return data[:, 0], data[:, 1]
+
+
+######################################################################################################################
+def objective_functions(s, o, metrics=["pearson", "bias", "variance"]):
+    result = {}
+    # remove NANs
+    s, o = filter_nan(s, o)
+
+    bins = int(np.around(math.sqrt(len(o)), 0))
+    # compute corr coeff
+
+    if "pearson" in metrics:
+        result["R_{corr}"] = np.corrcoef(s, o)[1, 0]
+        # alpha = np.corrcoef(s, o)[0, 1]
+    # compute ratio of CV
+    if "variance" in metrics:
+        result[r"R_{\sigma}"] = np.nanstd(s) / np.nanstd(o)
+
+    if "bias" in metrics:
+        result[r"R_{\mu}"] = np.nanmean(s) / np.nanmean(o)
+    return result
+
+
+def norm_deviation(data):
+    """Calculate normalized deviation from spatial mean at that point in time."""
+    return data - np.nanmean(data, axis=(1, 2), keepdims=True) / np.nanmean(
+        data, axis=(1, 2), keepdims=True
+    )
+
+def nothing(data):
+    """Return data unchanged."""
+    return data
+
+def nan_area_mean(data):
+    """Calculate area mean for each point in time."""
+    return np.nanmean(data, axis=(1, 2))
+
+
+def create_dic_of_objective_functions(arr_s, arr_o, metrics, func=nothing):
+    """Call objective_functions function applying the 'func' function to all input data and providing the metrics that should be calculated."""
+    return objective_functions(func(arr_s), func(arr_o), metrics=metrics)
+
+def calculate_objectives_for_gridded_data(map1, map2, ds1_name, ds2_name, eval_params=None):
+    if eval_params is None:
+        eval_params = {
+                "general": {"metrics": ["bias"], "func": nothing}, #$E_{i,t}$
+                "temporal":{ # $\Bar{E}_t$": {
+                    "metrics": ["pearson", "variance"],
+                    "func": nan_area_mean,
+                },
+                "spatial":{ # "$frac{E_{i,t}-\Bar{E}_t}{\Bar{E}_t}$": {
+                    "metrics": ["pearson", "variance"],
+                    "func": norm_deviation,
+                },
+            }
+    evaluation_results_dict = {}
+    for eval_param, eval_param_dict in eval_params.items():
+        # self.logger.info('evaluating mhm-gleam')
+        # self.logger.info(f'mhm_run: {mhm_run.map.shape}')
+        # self.logger.info(f'gleam: {evaluated_catchment.gleam.map.shape}')
+        evaluation_results_dict[eval_param][
+            ds1_name + "-" + ds2_name
+        ] = create_dic_of_objective_functions(
+            map1,
+            map2,
+            metrics=eval_param_dict["metrics"],
+            func=eval_param_dict["func"],
+        )
+    return evaluation_results_dict
+
+
+def create_csv_from_dict(results_dict: dict, out_path):
+    """Create a csv file from the provided dictionary."""
+    df = pd.DataFrame().from_dict(results_dict)
+    df.to_csv(out_path)
+
+def create_results_csv(map1, map2, ds1_name, ds2_name, out_path):
+    """Calculate objectives and create csv file."""
+    results_dict = calculate_objectives_for_gridded_data(map1=map1, map2=map2, ds1_name=ds1_name, ds2_name=ds2_name)
+    create_csv_from_dict(results_dict=results_dict, out_path=out_path)
