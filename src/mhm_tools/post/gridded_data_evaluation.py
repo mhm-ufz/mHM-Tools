@@ -791,7 +791,7 @@ def compare_input_with_ref(
             spearman, spearman_pval = spearman_spatial_joblib(
                 input_ts, ref_ts, spearman_correlation, ncpus
             )
-            create_results_csv(input_ts, ref_ts, input_name, ref_name, output_path/f'{input_name}-{ref_name}.csv')
+            create_results_csv(input_ts.data, ref_ts.data, input_name, ref_name, output_path/f'{input_name}-{ref_name}.csv')
         except ValueError as ve:
             logger.error("Input and ref do not have the same temporal extend.")
             logger.info(input_ts.time)
@@ -802,7 +802,7 @@ def compare_input_with_ref(
         spearman, spearman_pval = spearman_spatial_joblib(
             input["clim"], ref["clim"], spearman_correlation, ncpus
         )
-        create_results_csv(input["clim"], ref["clim"], input_name, ref_name, output_path/f'{input_name}-{ref_name}.csv')
+        create_results_csv(input["clim"].data, ref["clim"].data, input_name, ref_name, output_path/f'{input_name}-{ref_name}.csv')
 
     rel_mean = xr.DataArray(
         rel_mean,
