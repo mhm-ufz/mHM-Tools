@@ -66,14 +66,12 @@ def calculate_objectives_for_gridded_data(map1, map2, ds1_name, ds2_name, eval_p
                     "func": norm_deviation,
                 },
             }
-    evaluation_results_dict = {}
+    evaluation_results_dict = {"name": ds1_name + "-" + ds2_name}
     for eval_param, eval_param_dict in eval_params.items():
         # self.logger.info('evaluating mhm-gleam')
         # self.logger.info(f'mhm_run: {mhm_run.map.shape}')
         # self.logger.info(f'gleam: {evaluated_catchment.gleam.map.shape}')
-        evaluation_results_dict[eval_param][
-            ds1_name + "-" + ds2_name
-        ] = create_dic_of_objective_functions(
+        evaluation_results_dict[eval_param] = create_dic_of_objective_functions(
             map1,
             map2,
             metrics=eval_param_dict["metrics"],
