@@ -938,7 +938,7 @@ class Hydrograph:
         return True
 
     def write_output(self):
-        create_csv_from_dict({**self.objectives.__dict__, "id": id}, self.output_file.parent / f"{id}.csv")
+        create_csv_from_dict({**self.objectives.__dict__, "id": str(id)}, self.output_file.parent / f"{id}.csv")
 
 @log_arguments()
 def get_hydrograph_from_path(
