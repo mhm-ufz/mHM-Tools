@@ -694,10 +694,10 @@ def plot_map_bias_only(
         for spine in ax.spines.values():
             spine.set_linewidth(0.5)
     axes[1].spines["top"].set_linewidth(0.25)
-    ax[0].set_yticks([])
-    ax[0].set_xticks([])
-    ax[0].yaxis.labelpad = 0
-    for spine in ax[0].spines.values():
+    axes[0].set_yticks([])
+    axes[0].set_xticks([])
+    axes[0].yaxis.labelpad = 0
+    for spine in axes[0].spines.values():
         spine.set_linewidth(0.25)
     plt.tight_layout()
 
