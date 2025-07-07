@@ -616,6 +616,95 @@ def plot_map(
     logger.info("created et_map")
 
 
+@log_errors()
+def plot_map_bias_only(
+    rel_mean, ref_clim, input_clim, input_name, ref_name, output_path
+):
+    """Create a plot with four subplots showing relative mean, standard deviation, the spearman correlation of the climatologies and the seasonal mean of both datasets."""
+    rel_mean = np.where(rel_mean == np.inf, np.nan, rel_mean)
+    fig, axes = plt.subplots(2, 1, figsize=(10.5, 4.68))
+    if input_name is not None and ref_name is not None:
+        fig.suptitle(f"Comparision {input_name} with {ref_name}")
+
+    # Set common colormap and normalization limits for mean_et and mean_aet
+    mean_diff_1 = max(np.abs(1 - np.nanmin(rel_mean)), np.abs(1 - np.nanmax(rel_mean)))
+    im0, bounds0, extend0 = plot_single_map(
+        axes[0], rel_mean, mean_diff_1, bounds_type="fixed"
+    )
+    axes[0].set_title(
+        f"Relative temporal Mean (median={np.nanmedian(rel_mean):.2f})"
+    )
+
+    # Plot for the seasonality
+    months = np.arange(1, 13, 1)
+    bar_width = 0.4
+    axes[1].bar(
+        months - bar_width / 2,
+        np.nanmean(ref_clim, axis=(1, 2)),
+        width=bar_width,
+        color="#008176",
+        label=ref_name,
+        alpha=0.8,
+    )
+    axes[1].bar(
+        months + bar_width / 2,
+        np.nanmean(input_clim, axis=(1, 2)),
+        width=bar_width,
+        color="#79A3E6",
+        label=input_name,
+        alpha=0.8,
+    )
+
+    ax_twy = axes[1].twinx()
+    ref_clim = np.where(ref_clim != 0, ref_clim, np.nan)
+    rel_clim = np.nanmean(input_clim, axis=(1, 2)) / np.nanmean(ref_clim, axis=(1, 2))
+    rel_clim_diff_1 = max(
+        np.abs(1 - np.nanmin(rel_clim)), np.abs(1 - np.nanmax(rel_clim))
+    )
+    ax_twy.errorbar(
+        months, rel_clim, label=f"{input_name}/{ref_name}", color="#0000A7", fmt="--"
+    )
+    ax_twy.axhline(y=1, color="#0000A7", linewidth=0.5)
+    axes[1].set_xlabel("month of year")
+    handles, labels = [], []
+    for ax in [axes[1], ax_twy]:
+        for handle, label in zip(*ax.get_legend_handles_labels()):
+            handles.append(handle)
+            labels.append(label)
+
+    axes[1].legend(handles, labels, loc="upper right")
+    axes[1].set_title("Seasonality")
+    axes[1].set_ylabel("ET [mm/day]")
+    axes[1].tick_params(axis="y", labelcolor="black")
+    axes[1].set_xlim(1 - (1.1 * bar_width), 12 + (1.1 * bar_width))
+    axes[1].set_xticks(months)
+    axes[1].set_xticklabels(months)
+    ymax = 1 + rel_clim_diff_1 * 1.05 if not np.isnan(rel_clim_diff_1) else 1
+    ax_twy.set_ylim(
+        np.nanmax([0, 1 - rel_clim_diff_1 * 1.05]), ymax
+    )  # Example range for the ratio
+    ax_twy.set_ylabel("Ratio (Input / Reference)", color="#0000A7")
+    ax_twy.tick_params(axis="y", labelcolor="#0000A7")
+
+    divider0 = make_axes_locatable(axes[0])
+    cax = divider0.append_axes("right", size="5%", pad=0.1)
+    fig.colorbar(im0, cax=cax, label="", boundaries=bounds0, extend=extend0)
+
+    for ax in axes.flat:
+        for spine in ax.spines.values():
+            spine.set_linewidth(0.5)
+    axes[1].spines["top"].set_linewidth(0.25)
+    ax[0].set_yticks([])
+    ax[0].set_xticks([])
+    ax[0].yaxis.labelpad = 0
+    for spine in ax[0].spines.values():
+        spine.set_linewidth(0.25)
+    plt.tight_layout()
+
+    plt.savefig(output_path / "et_map_bias_only.png", dpi=800)
+    logger.info("created et_map")
+
+
 def create_map_from_output(output_path, input_name, ref_name):
     """Read in statistics netcdf and create a map plots from it."""
     file = get_rel_stat_file(output_path, input_name, ref_name)
@@ -766,6 +855,8 @@ def compare_input_with_ref(
         direct_comp=direct_comp,
         available_mem=available_mem,
         file_name=ref_file_name,
+        plot=True,
+        bias_only=False,
     )
     logger.debug(f"ref ds: {ref}")
     # regrid spatial resoution
@@ -778,8 +869,6 @@ def compare_input_with_ref(
     # regridd to same spatial resolution
 
     # compare and save statistics
-    rel_mean = input["mean"].values / ref["mean"].values
-    rel_std = input["std"].values / ref["std"].values
     if direct_comp:
         input_ts, ref_ts = input["time_series"], ref["time_series"]
         input_ts, ref_ts = resample_to_coarser_calendar(input_ts, ref_ts)
@@ -788,9 +877,10 @@ def compare_input_with_ref(
             f"Creating data from timeseries with shape {input_ts.shape} and {ref_ts.shape}"
         )
         try:
-            spearman, spearman_pval = spearman_spatial_joblib(
-                input_ts, ref_ts, spearman_correlation, ncpus
-            )
+            if not bias_only:
+                spearman, spearman_pval = spearman_spatial_joblib(
+                    input_ts, ref_ts, spearman_correlation, ncpus
+                )
             create_results_csv(input_ts.data, ref_ts.data, input_name, ref_name, output_path/f'{input_name}-{ref_name}.csv')
         except ValueError as ve:
             logger.error("Input and ref do not have the same temporal extend.")
@@ -799,11 +889,13 @@ def compare_input_with_ref(
             raise (ve)
     else:
         logger.info("Calculating spearman correlation from seasonalities.")
-        spearman, spearman_pval = spearman_spatial_joblib(
-            input["clim"], ref["clim"], spearman_correlation, ncpus
-        )
+        if not bias_only:
+            spearman, spearman_pval = spearman_spatial_joblib(
+                input["clim"], ref["clim"], spearman_correlation, ncpus
+            )
         create_results_csv(input["clim"].data, ref["clim"].data, input_name, ref_name, output_path/f'{input_name}-{ref_name}.csv')
 
+    rel_mean = input["mean"].values / ref["mean"].values
     rel_mean = xr.DataArray(
         rel_mean,
         coords={
@@ -812,30 +904,34 @@ def compare_input_with_ref(
         },
         dims=["lat", "lon"],
     )
-    rel_std = xr.DataArray(
-        rel_std,
-        coords={
-            "lat": get_coord_values(input, lat=True),
-            "lon": get_coord_values(input, lon=True),
-        },
-        dims=["lat", "lon"],
-    )
-    spearman = xr.DataArray(
-        spearman.data,
-        coords={
-            "lat": get_coord_values(input, lat=True),
-            "lon": get_coord_values(input, lon=True),
-        },
-        dims=["lat", "lon"],
-    )
-    spearman_pval = xr.DataArray(
-        spearman_pval.data,
-        coords={
-            "lat": get_coord_values(input, lat=True),
-            "lon": get_coord_values(input, lon=True),
-        },
-        dims=["lat", "lon"],
-    )
+    if not bias_only:
+        rel_std = input["std"].values / ref["std"].values
+        rel_std = xr.DataArray(
+            rel_std,
+            coords={
+                "lat": get_coord_values(input, lat=True),
+                "lon": get_coord_values(input, lon=True),
+            },
+            dims=["lat", "lon"],
+        )
+        spearman = xr.DataArray(
+            spearman.data,
+            coords={
+                "lat": get_coord_values(input, lat=True),
+                "lon": get_coord_values(input, lon=True),
+            },
+            dims=["lat", "lon"],
+        )
+        spearman_pval = xr.DataArray(
+            spearman_pval.data,
+            coords={
+                "lat": get_coord_values(input, lat=True),
+                "lon": get_coord_values(input, lon=True),
+            },
+            dims=["lat", "lon"],
+        )
+    else: 
+        rel_std, spearman, spearman_pval = None, None, None
     input_clim = xr.DataArray(
         input["clim"].data,
         coords={
@@ -856,10 +952,7 @@ def compare_input_with_ref(
     )
     output = xr.Dataset(
         {
-            "spearman": spearman,
-            "rel_std": rel_std,
             "rel_mean": rel_mean,
-            "spearman_pval": spearman_pval,
         },
         coords={
             "month": np.arange(1, 13, 1),
@@ -867,6 +960,10 @@ def compare_input_with_ref(
             "lon": get_coord_values(input, lon=True),
         },
     )
+    if not bias_only:
+        output[f"spearman"] = spearman
+        output[f"spearman_pval"] = spearman_pval
+        output[f"rel_std"] = rel_std
     file_name = "relative_stats"
     if input_name is not None:
         file_name += f"_{input_name}"
@@ -884,16 +981,28 @@ def compare_input_with_ref(
         file_name = output_path / f"{file_name}.nc"
     output.to_netcdf(file_name)
     logger.info(f"Written output to {file_name}")
-    plot_map(
-        rel_std=rel_std,
-        rel_mean=rel_mean,
-        spearman=spearman,
-        ref_clim=ref_clim,
-        input_clim=input_clim,
-        input_name=input_name,
-        ref_name=ref_name,
-        output_path=output_path,
-    )
+    if plot:
+        if not bias_only:
+            plot_map(
+                rel_std=rel_std,
+                rel_mean=rel_mean,
+                spearman=spearman,
+                ref_clim=ref_clim,
+                input_clim=input_clim,
+                input_name=input_name,
+                ref_name=ref_name,
+                output_path=output_path,
+            )
+        else: 
+            plot_map_bias_only(
+                rel_mean=rel_mean,
+                ref_clim=ref_clim,
+                input_clim=input_clim,
+                input_name=input_name,
+                ref_name=ref_name,
+                output_path=output_path,
+            )
+            
     return file_name
 
 
