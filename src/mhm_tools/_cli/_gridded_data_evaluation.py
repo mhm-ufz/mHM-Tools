@@ -177,6 +177,12 @@ def add_args(parser):
             required unless --mask_file is provided"""
         ),
     )
+    parser.add_argument(
+        "--bias_only",
+        action="store_true",
+        required=False,
+        help=("Only compare bias spatially and for the seasonality."),
+    )
 
 
 def run(args):
@@ -235,4 +241,5 @@ def run(args):
         avaiable_mem=available_mem,
         input_file_name=args.input_file_name,
         ref_file_name=args.ref_file_name,
+        bias_only=args.bias_only
     )

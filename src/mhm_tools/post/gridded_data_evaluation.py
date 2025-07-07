@@ -816,7 +816,9 @@ def compare_input_with_ref(
     available_mem=None,
     input_file_name="*.*",
     ref_file_name="*.*",
-    target_freq=None
+    target_freq=None,
+    plot=True,
+    bias_only=False,
 ):
     """Compare the two datasets."""
     output_path = Path(output_path)
@@ -855,8 +857,6 @@ def compare_input_with_ref(
         direct_comp=direct_comp,
         available_mem=available_mem,
         file_name=ref_file_name,
-        plot=True,
-        bias_only=False,
     )
     logger.debug(f"ref ds: {ref}")
     # regrid spatial resoution
@@ -1292,6 +1292,7 @@ def gridded_data_evaluation(
     avaiable_mem=None,
     input_file_name="*.*",
     ref_file_name="*.*",
+    bias_only=False,
 ):
     """Validate a spatial variable from two datasets by comparing the climatology of that variable."""
     output_path = Path(output_path)
@@ -1409,6 +1410,7 @@ def gridded_data_evaluation(
                     input_file_name=input_file_name,
                     ref_file_name=ref_file_name,
                     target_freq=target_time_res,
+                    bias_only=bias_only
                 )
                 for bootstrap_index in range(n_bootstrap_selections)
             )
@@ -1445,4 +1447,5 @@ def gridded_data_evaluation(
             input_file_name=input_file_name,
             ref_file_name=ref_file_name,
             target_freq=target_time_res,
+            bias_only=bias_only
         )
