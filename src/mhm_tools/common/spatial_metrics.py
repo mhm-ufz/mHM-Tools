@@ -14,23 +14,23 @@ def filter_nan(s, o):
 
 
 ######################################################################################################################
-def objective_functions(s, o, metrics=["pearson", "bias", "variance"]):
+def objective_functions(s, o, metrics=["pearson", "bias", "variance"], param=""):
     result = {}
     # remove NANs
     s, o = filter_nan(s, o)
 
     bins = int(np.around(math.sqrt(len(o)), 0))
     # compute corr coeff
-
+    param = param+'-' if param != "" else param
     if "pearson" in metrics:
-        result["R_{corr}"] = np.corrcoef(s, o)[1, 0]
+        result[param+"gamma"] = np.corrcoef(s, o)[1, 0]
         # alpha = np.corrcoef(s, o)[0, 1]
     # compute ratio of CV
     if "variance" in metrics:
-        result[r"R_{\sigma}"] = np.nanstd(s) / np.nanstd(o)
+        result[param+"alpha"] = np.nanstd(s) / np.nanstd(o)
 
     if "bias" in metrics:
-        result[r"R_{\mu}"] = np.nanmean(s) / np.nanmean(o)
+        result[param+"beta"] = np.nanmean(s) / np.nanmean(o)
     return result
 
 
@@ -49,7 +49,7 @@ def nan_area_mean(data):
     return np.nanmean(data, axis=(1, 2))
 
 
-def create_dic_of_objective_functions(arr_s, arr_o, metrics, func=nothing):
+def create_dic_of_objective_functions(arr_s, arr_o, metrics, func=nothing, param=None):
     """Call objective_functions function applying the 'func' function to all input data and providing the metrics that should be calculated."""
     return objective_functions(func(arr_s), func(arr_o), metrics=metrics)
 
@@ -71,12 +71,13 @@ def calculate_objectives_for_gridded_data(map1, map2, ds1_name, ds2_name, eval_p
         # self.logger.info('evaluating mhm-gleam')
         # self.logger.info(f'mhm_run: {mhm_run.map.shape}')
         # self.logger.info(f'gleam: {evaluated_catchment.gleam.map.shape}')
-        evaluation_results_dict[eval_param] = create_dic_of_objective_functions(
+        evaluation_results_dict.update(create_dic_of_objective_functions(
             map1,
             map2,
             metrics=eval_param_dict["metrics"],
             func=eval_param_dict["func"],
-        )
+            param=eval_param
+        ))
     return evaluation_results_dict
 
 
