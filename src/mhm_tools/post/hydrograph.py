@@ -938,8 +938,10 @@ class Hydrograph:
         return True
 
     def write_output(self):
-        out_dict = {k: [v] for k,v in {**self.objectives.__dict__, "id": str(id)}.items()}
-        create_csv_from_dict(out_dict, self.output_file.parent / f"{id}.csv")
+        out_dict = {k: [v] for k,v in {**self.objectives.__dict__}.items()}
+        if id is not None: 
+            out_dict["id"] = str(id)
+        create_csv_from_dict(out_dict, self.output_file.parent / f"kge.csv")
 
 @log_arguments()
 def get_hydrograph_from_path(
