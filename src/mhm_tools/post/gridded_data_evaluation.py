@@ -525,7 +525,6 @@ def plot_map(
         f"Relative temporal Standarddeviation (median={np.nanmedian(rel_std):.2f})"
     )
 
-    im2 = axes[1, 0].imshow(spearman, vmin=np.nanmin(spearman), vmax=1)
     im2, bounds2, extend2 = plot_single_map(
         axes[1, 0],
         spearman,
