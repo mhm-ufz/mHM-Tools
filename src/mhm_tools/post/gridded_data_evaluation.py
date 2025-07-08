@@ -442,15 +442,25 @@ def plot_single_map(
             np.nanquantile(values, 0.05),
             np.nanquantile(values, 0.95),
         )
+        if abs(vmax - vmin) < abs(vmax/3) or vmin == vmax:
+            vmin, vmax = (
+                float(np.nanmin(values)),
+                float(np.nanmax(values))
+            ) 
+        if abs(vmax - vmin) < abs(vmax/3) or vmin == vmax:
+            vmin, vmax = (
+                vmin-abs(vmin/3),
+                vmax+abs(vmax/3),
+            ) 
     if bounds_type == "fixed":
         vmin, vmax = 0.5, 1.5
     bounds = np.linspace(vmin, vmax, n_bins + 1)
     bounds = [np.round(b, 2) for b in bounds]
 
     extent = "neither"
-    if np.nanquantile(values, 0.75) > vmax:
+    if np.nanquantile(values, 0.96) > vmax:
         extent = "max"
-    if np.nanquantile(values, 0.25) < vmin:
+    if np.nanquantile(values, 0.049) < vmin:
         extent = "min" if extent == "neither" else "both"
 
     norm = BoundaryNorm(bounds, cmap.N)
