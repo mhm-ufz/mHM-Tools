@@ -83,11 +83,10 @@ def calculate_objectives_for_gridded_data(map1, map2, ds1_name, ds2_name, eval_p
 
 def create_csv_from_dict(results_dict: dict, out_path):
     """Create a csv file from the provided dictionary."""
-    df = pd.DataFrame(results_dict)
+    df = pd.DataFrame(results_dict, index=[])
     df.to_csv(out_path)
 
 def create_results_csv(map1, map2, ds1_name, ds2_name, out_path):
     """Calculate objectives and create csv file."""
     results_dict = calculate_objectives_for_gridded_data(map1=map1, map2=map2, ds1_name=ds1_name, ds2_name=ds2_name)
-    results_dict.update({'index': 0})
     create_csv_from_dict(results_dict=results_dict, out_path=out_path)
