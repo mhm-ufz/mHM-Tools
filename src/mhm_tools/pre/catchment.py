@@ -232,7 +232,7 @@ class Catchment:
             lat_size, lon_size = self.input_da.shape
             # Ensure the dimensions are evenly divisible by the factor
             if lat_size % factor != 0 or lon_size % factor != 0:
-                msg = f"Data dimensions must be divisible by the upscaling factor of {factor}. Lat ({lat_size}/{factor})={lat_size/factor:.2f}; Lon ({lon_size}/{factor})={lon_size/factor:.2f}"
+                msg = f"Data dimensions must be divisible by the upscaling factor of {factor}. Lat ({lat_size}/{factor})={lat_size / factor:.2f}; Lon ({lon_size}/{factor})={lon_size / factor:.2f}"
                 with ErrorLogger(logger):
                     raise ValueError(msg)
 

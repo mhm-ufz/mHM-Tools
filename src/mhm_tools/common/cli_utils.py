@@ -76,8 +76,8 @@ def get_coords_from_mask(mask):
 
     logger.debug(
         f"Read coord from mask file: lat ({lat_min} to {lat_max}) "
-        f"{(lon_max-lon_min)/resolution} cells and lon ({lon_min} to {lon_max}) "
-        f"{(lon_max-lon_min)/resolution} cells"
+        f"{(lon_max - lon_min) / resolution} cells and lon ({lon_min} to {lon_max}) "
+        f"{(lon_max - lon_min) / resolution} cells"
     )
 
     if lat_min > lat_max:

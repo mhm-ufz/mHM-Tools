@@ -123,7 +123,7 @@ def chunk_dataset_space_only(ds: xr.Dataset, available_mem_gib: float) -> xr.Dat
         chunks[time_key] = -1
 
     logger.debug(
-        f"Chunk sizes → time: {chunks.get(time_key,'—')}, "
+        f"Chunk sizes → time: {chunks.get(time_key, '—')}, "
         f"{lat_key}: {y_chunk}, {lon_key}: {x_chunk}"
     )
     return ds.chunk(chunks)

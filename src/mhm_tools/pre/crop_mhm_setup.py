@@ -192,12 +192,12 @@ def crop_file_with_header(ds_in, file_path, output_path, lonslice, latslice):
         xll = d["xllcorner"] + d["cellsize"] * index_x_min
         yll = d["yllcorner"] + d["cellsize"] * (d["nrows"] - index_y_max)
         header_str = f"""
-ncols                {index_x_max-index_x_min}
-nrows                {index_y_max-index_y_min}
+ncols                {index_x_max - index_x_min}
+nrows                {index_y_max - index_y_min}
 xllcorner            {xll}
 yllcorner            {yll}
-cellsize             {d['cellsize']}
-NODATA_value         {d['NODATA_value']}
+cellsize             {d["cellsize"]}
+NODATA_value         {d["NODATA_value"]}
             """
         logger.info(
             f"Writing header file to {header_out_path} with header str: {header_str}"

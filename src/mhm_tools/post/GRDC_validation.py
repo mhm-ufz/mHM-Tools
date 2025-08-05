@@ -161,7 +161,7 @@ def get_gauge_coords(
         return lon_x, lat_y, found_facc
     if cell_diff < max_cell_diff:
         logger.debug(
-            f"No similar flow acc found. Increasing search radius to {cell_diff+1} cells in each direction."
+            f"No similar flow acc found. Increasing search radius to {cell_diff + 1} cells in each direction."
         )
         return get_gauge_coords(
             ds,
@@ -521,7 +521,7 @@ def evaludate_grdc_data(  # noqa: PLR0913
             id=id,
             calc_stats=direct_comparison,
             raise_exceptions=False,
-            title=f'{id} at {model_ds["x"].sel(id=id).data} - {model_ds["y"].sel(id=id).data}',
+            title=f"{id} at {model_ds['x'].sel(id=id).data} - {model_ds['y'].sel(id=id).data}",
             x=model_ds["x"].sel(id=id).data,
             y=model_ds["y"].sel(id=id).data,
         )
@@ -625,18 +625,18 @@ def plot_cdf(df, output_path, boostrap_iterations=None, mask_any=True):
     # if not output_path.is_dir():
     #     output_path.mkdir()
     # The variables to plot
-    logger.info(f'In total there are {len(df["id"].unique())} catchments of which ')
+    logger.info(f"In total there are {len(df['id'].unique())} catchments of which ")
     logger.info(
-        f'   {len(df.dropna(subset=["alpha"], how="any")["id"].unique())} have all alpha values'
+        f"   {len(df.dropna(subset=['alpha'], how='any')['id'].unique())} have all alpha values"
     )
     logger.info(
-        f'   {len(df.dropna(subset=["beta"], how="any")["id"].unique())} have beta values '
+        f"   {len(df.dropna(subset=['beta'], how='any')['id'].unique())} have beta values "
     )
     logger.info(
-        f'   {len(df.dropna(subset=["gamma"], how="any")["id"].unique())} have all gamma values '
+        f"   {len(df.dropna(subset=['gamma'], how='any')['id'].unique())} have all gamma values "
     )
     logger.info(
-        f'   {len(df.dropna(subset=["alpha", "beta", "gamma"], how="any")["id"].unique())} have all values '
+        f"   {len(df.dropna(subset=['alpha', 'beta', 'gamma'], how='any')['id'].unique())} have all values "
     )
     df = df.dropna(subset=["alpha", "beta", "gamma"], how="any")
     logger.info(df.head())

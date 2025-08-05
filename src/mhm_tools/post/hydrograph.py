@@ -609,14 +609,14 @@ class Hydrograph:
             ax2 = fig.add_subplot(inner_gs_update[1:], sharex=ax2_pre)
             if self.calc_stats:
                 ax2_pre.set_title(
-                    f"sim - obs = {self.objectives.diff:.0f}$m^3$ or {self.objectives.rel_diff*100:.0f}%",
+                    f"sim - obs = {self.objectives.diff:.0f}$m^3$ or {self.objectives.rel_diff * 100:.0f}%",
                     horizontalalignment="center",
                 )
         else:
             ax2 = fig.add_subplot(outer_gs)
             if self.calc_stats:
                 ax2.set_title(
-                    f"sim - obs = {self.objectives.diff:.0f}$m^3$ or {self.objectives.rel_diff*100:.0f}%",
+                    f"sim - obs = {self.objectives.diff:.0f}$m^3$ or {self.objectives.rel_diff * 100:.0f}%",
                     horizontalalignment="center",
                 )
         ax2.spines["top"].set_visible(False)
@@ -835,7 +835,7 @@ class Hydrograph:
                 raise ValueError(only_nan_msg)
         else:
             logger.warning(
-                f"In crop data: obs is nan {t1.any()} or sim is nan {t2.any() }"
+                f"In crop data: obs is nan {t1.any()} or sim is nan {t2.any()}"
             )
             raise ValueError(only_nan_msg)
         logger.info(f"sim_discharge_data: {self.sim_discharge_data.data}")
