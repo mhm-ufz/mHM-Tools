@@ -12,13 +12,15 @@ from . import (
     _create_mhm_restart_file,
     _create_subdomain_masks,
     _crop_mhm_setup,
+    _difference,
     _grdc_validation,
     _gridded_data_validation,
     _hydrograph,
     _latlon,
     _long_term_mean,
-    _long_term_mean_difference,
     _prepare_mhm_forcings,
+    _ratio,
+    _relative_difference,
 )
 
 
@@ -95,9 +97,9 @@ def _get_parser():
         subparsers, "create_mhm_restart_file", _create_mhm_restart_file
     )
     add_command_from_module(subparsers, "long_term_mean", _long_term_mean)
-    add_command_from_module(
-        subparsers, "long_term_mean_difference", _long_term_mean_difference
-    )
+    add_command_from_module(subparsers, "difference", _difference)
+    add_command_from_module(subparsers, "relative_difference", _relative_difference)
+    add_command_from_module(subparsers, "ratio", _ratio)
 
     # add logging
     # option 1 explicit log levels by name

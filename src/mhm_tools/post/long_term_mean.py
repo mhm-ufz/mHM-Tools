@@ -89,7 +89,7 @@ def cal_long_term_mean(
 
     # If cropping is requested, verify bounds
     if crop and None in (lon_min, lon_max, lat_min, lat_max):
-        msg = "All lon/lat bounds must be provided when crop=True."
+        msg = "All lon/lat bounds must be provided when --crop is used."
         with ErrorLogger(logger):
             raise ValueError(msg)
 
@@ -128,7 +128,7 @@ def cal_long_term_mean(
     if aggregate:
         if long_term_mean_type not in OP_MAP:
             msg = (
-                f"Unsupported long_term_mean_type {long_term_mean_mean_type!r}; "
+                f"Unsupported long_term_mean_type {long_term_mean_type!r}; "
                 f"choose from {list(OP_MAP)}"
             )
             raise ValueError(msg)

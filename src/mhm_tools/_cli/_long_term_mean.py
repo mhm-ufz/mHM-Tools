@@ -23,7 +23,8 @@ def add_args(parser):
     required.add_argument(
         "-f",
         "--in-file",
-        required=True,
+        required=False,
+        default="*.nc",
         help='Input filename or glob pattern (e.g. "data_*.nc")',
     )
     required.add_argument(

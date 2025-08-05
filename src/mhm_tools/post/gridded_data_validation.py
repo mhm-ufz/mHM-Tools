@@ -5,7 +5,7 @@ import logging
 import random
 import re
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -64,7 +64,7 @@ def spearman_spatial(data1, data2):
 
 def spearman_spatial_joblib(
     data1: np.ndarray, data2: np.ndarray, spearman_correlation, n_jobs: int = -1
-) -> tuple[np.ndarray, np.ndarray]:
+) -> Tuple[np.ndarray, np.ndarray]:
     """Parallel pixel‐wise Spearman correlation over two arrays of shape (T, Y,
     X).
 
@@ -275,7 +275,7 @@ def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None)
     monthly_counts = np.zeros((12, *da.shape[1:]))
     for f, file in enumerate(files):
         with xr.open_dataset(file, engine="netcdf4") as ds:
-            logger.info(f"timestep {count} in file {f+1} / {len(files)} from {file}")
+            logger.info(f"timestep {count} in file {f + 1} / {len(files)} from {file}")
             if coordinate_slice is not None:
                 lat_key = get_coord_key(ds, lat=True)
                 lon_key = get_coord_key(ds, lon=True)
@@ -436,7 +436,7 @@ def plot_single_map(
 
 def resample_to_coarser_calendar(
     ds_input: xr.Dataset, ds_ref: xr.Dataset
-) -> tuple[xr.Dataset, xr.Dataset]:
+) -> Tuple[xr.Dataset, xr.Dataset]:
     """Resampler the dataset with higher temporal resolution to the resolution
     of the other.
 
@@ -999,7 +999,7 @@ def regridd_to_higher_spatial_resolution(ds1, ds2):
 
     # Return regridded dataset and finer dataset
     logger.info(
-        f'Regridded the two datasets to the resolution lat: {coarse_ds["lat"].data[1]-coarse_ds["lat"].data[0]}, lon: {coarse_ds["lon"].data[1]-coarse_ds["lon"].data[0]}'
+        f"Regridded the two datasets to the resolution lat: {coarse_ds['lat'].data[1] - coarse_ds['lat'].data[0]}, lon: {coarse_ds['lon'].data[1] - coarse_ds['lon'].data[0]}"
     )
     if coarse_ds is ds1:
         return regridded_ds, ds2

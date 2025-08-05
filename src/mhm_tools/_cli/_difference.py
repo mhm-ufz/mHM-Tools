@@ -13,7 +13,7 @@ Authors
 
 import argparse
 
-from ..post.long_term_mean_difference import long_term_mean_diff
+from ..post.difference import calc_diff
 
 
 def str2float(value):
@@ -42,22 +42,23 @@ def add_args(parser):
     """Add CLI arguments for the long_term_mean_diff subcommand."""
     parser.description = (
         "Compute and plot the spatial difference between a model dataset and a reference dataset "
-        "for a specified variable. Supports wildcard matching, custom variable names, colorbar labels, "
+        "for a specified variable: diff = (da_mod - da_ref). "
+        "Supports wildcard matching, custom variable names, colorbar labels, "
         "titles, output file naming, optional axis limits, custom colormap, and explicit colormap range."
     )
     parser.epilog = (
         "Example:\n"
-        "  mhm-tools long_term_mean_validation \\\n"
+        "  mhm-tools difference \\\n"
         "    --ref_input_dir /path/to/ref \\\n"
         "    --mod_input_dir /path/to/mod \\\n"
         '    --reference_pattern "ref_*.nc" \\\n'
         '    --model_pattern "mod_*.nc" \\\n'
-        "    --ref_var pre --mod_var pre \\\n"
+        "    --ref_var pre --mod_var pre --save_ncfile \\\n"
         '    --colorbar_label "ΔP" \\\n'
         '    --title "Precip. Diff" \\\n'
         "    --x_min -10 --x_max 30 --y_min 40 --y_max 70 \\\n"
         "    --cmap viridis --vmin -5 --vmax 5 \\\n"
-        "    -o /out/dir --output_file diff.png"
+        "    -o /out/dir --output_file_png diff.png"
     )
 
     # required arguments
@@ -79,9 +80,21 @@ def add_args(parser):
     req.add_argument(
         "-o", "--output_dir", required=True, help="Directory to save the output PNG"
     )
-    req.add_argument("--output_file", required=True, help="Filename for the output PNG")
+    req.add_argument(
+        "--output_file_png", required=True, help="Filename for the output PNG"
+    )
 
     # optional arguments
+    parser.add_argument(
+        "--save_ncfile",
+        action="store_true",
+        help="if set to True, stores a NetCDF file in --output_dir",
+    )
+    parser.add_argument(
+        "--output_file_nc",
+        default="difference.nc",
+        help="If --save_ncfile, gives the name of the file to be saved in --output_dir",
+    )
     parser.add_argument(
         "--colorbar_label",
         default="Difference (model - reference)",
@@ -133,7 +146,7 @@ def run(args):
         parsed command line arguments
 
     """
-    long_term_mean_diff(
+    calc_diff(
         ref_input_dir=args.ref_input_dir,
         mod_input_dir=args.mod_input_dir,
         reference_pattern=args.reference_pattern,
@@ -143,7 +156,9 @@ def run(args):
         colorbar_label=args.colorbar_label,
         title=args.title,
         output_dir=args.output_dir,
-        output_file=args.output_file,
+        output_file_png=args.output_file_png,
+        save_ncfile=args.save_ncfile,
+        output_file_nc=args.output_file_nc,
         x_min=args.x_min,
         x_max=args.x_max,
         y_min=args.y_min,
