@@ -146,7 +146,7 @@ def crop_file_with_header(ds_in, file_path, output_path, lonslice, latslice):
     header = file_path.parent / "header.txt"
     # read header
     header_information = read_header(header)
-    logger.info(header_information)
+    logger.info(f"Read in header: {header_information}")
     # obtain data variable from dataset
     data_var = get_single_data_var(ds_in)
     if data_var is None:
@@ -157,7 +157,7 @@ def crop_file_with_header(ds_in, file_path, output_path, lonslice, latslice):
             )
             return None, None
         logger.debug(f"Found data_var={data_var}")
-    logger.info(ds_in[data_var].shape)
+    logger.debug(f"Read in dataset shape: {ds_in[data_var].shape}")
     lon_key = get_coord_key(ds_in, lon=True, raise_exception=True)
     lat_key = get_coord_key(ds_in, lat=True, raise_exception=True)
     # x values
@@ -239,6 +239,7 @@ def crop_file_with_header(ds_in, file_path, output_path, lonslice, latslice):
         ds_out = data_array.to_dataset()
         ds_out.attrs.update(ds_in.attrs)
         logger.debug(f"cropped ds {ds_out}")
+        logger.info(f"Shape of cropped ds: {ds_out[data_var].shape}")
         return ds_out, header_out_path
     except IndexError as e:
         with ErrorLogger(logger):
@@ -258,7 +259,7 @@ def call_create_latlon(
     # create new latlon file
     logger.info("Creating new latlon file")
     with get_xarray_ds_from_file(
-        dem_output_file, chunking=True, normalize_latlon_coords=True
+        dem_output_file, chunking=True, normalize_latlon_coords=True, force_decending_y=True
     ) as ds_dem:
         l0 = create_header(ds_dem, None, write=False)
     logger.debug(f"L0: {l0}")
@@ -321,6 +322,7 @@ def crop_file(
                 chunking=True,
                 available_mem_gib=available_mem_gib,
                 normalize_latlon_coords=True,
+                force_decending_y=True
             )
         except ValueError:
             logger.error(
