@@ -206,7 +206,7 @@ def get_file_stats(
     lat_key = get_coord_key(ds_in, lat=True)
     lon_key = get_coord_key(ds_in, lon=True)
     # make sure that latitude order is from highest to lowest value
-    if ds_in[lat_key][1] > ds_in[lat_key][0]:
+    if ds_in[lat_key].shape[0] > 1 and ds_in[lat_key][1] > ds_in[lat_key][0]:
         ds_croped = ds_in.isel(lat=slice(None, None, -1))
     else:
         ds_croped = ds_in
@@ -508,7 +508,7 @@ def crop_data_to_overlapping_time(input_ds, ref_ds):
     return input_ds, ref_ds
 
 
-@log_errors()
+@log_errors(raise_exceptions=True)
 def plot_map(
     rel_mean, rel_std, spearman, ref_clim, input_clim, input_name, ref_name, output_path, plots={'mean': True, 'std': True, 'corr': True, 'season': True}
 ):
@@ -625,7 +625,7 @@ def plot_map(
     logger.info("created et_map")
 
 
-@log_errors()
+@log_errors(raise_exceptions=True)
 def plot_map_bias_only(
     rel_mean, ref_clim, input_clim, input_name, ref_name, output_path
 ):

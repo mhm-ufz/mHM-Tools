@@ -4,7 +4,9 @@ import math
 import numpy as np
 from scipy.stats import spearmanr, variation, zscore
 import pandas as pd
+import logging
 
+logger = logging.getLogger(__name__)
 
 ######################################################################################################################
 def filter_nan(s, o):
@@ -24,6 +26,8 @@ def objective_functions(s, o, metrics=["pearson", "bias", "variance"], param="")
     param = param+'-' if param != "" else param
     if "pearson" in metrics:
         result[param+"gamma"] = np.corrcoef(s, o)[1, 0]
+    elif "spearman" in metrics:
+        result[param+"gamma"] = spearmanr(data1, data2)[0]
         # alpha = np.corrcoef(s, o)[0, 1]
     # compute ratio of CV
     if "variance" in metrics:
@@ -32,7 +36,6 @@ def objective_functions(s, o, metrics=["pearson", "bias", "variance"], param="")
     if "bias" in metrics:
         result[param+"beta"] = np.nanmean(s) / np.nanmean(o)
     return result
-
 
 def norm_deviation(data):
     """Calculate normalized deviation from spatial mean at that point in time."""
@@ -58,11 +61,11 @@ def calculate_objectives_for_gridded_data(map1, map2, ds1_name, ds2_name, eval_p
         eval_params = {
                 "general": {"metrics": ["bias"], "func": nothing}, #$E_{i,t}$
                 "temporal":{ # $\Bar{E}_t$": {
-                    "metrics": ["pearson", "variance"],
+                    "metrics": ["spearman", "variance"], #pearson
                     "func": nan_area_mean,
                 },
                 "spatial":{ # "$frac{E_{i,t}-\Bar{E}_t}{\Bar{E}_t}$": {
-                    "metrics": ["pearson", "variance"],
+                    "metrics": ["spearman", "variance"], # pearson
                     "func": norm_deviation,
                 },
             }
@@ -84,6 +87,7 @@ def calculate_objectives_for_gridded_data(map1, map2, ds1_name, ds2_name, eval_p
 def create_csv_from_dict(results_dict: dict, out_path):
     """Create a csv file from the provided dictionary."""
     df = pd.DataFrame(results_dict, index=[0])
+    logger.info(f'Written spatial metrics to {out_path}')
     df.to_csv(out_path)
 
 def create_results_csv(map1, map2, ds1_name, ds2_name, out_path):
