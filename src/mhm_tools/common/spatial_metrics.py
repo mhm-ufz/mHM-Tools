@@ -93,5 +93,5 @@ def create_csv_from_dict(results_dict: dict, out_path):
 def create_results_csv(map1, map2, ds1_name, ds2_name, out_path):
     """Calculate objectives and create csv file."""
     results_dict = calculate_objectives_for_gridded_data(map1=map1, map2=map2, ds1_name=ds1_name, ds2_name=ds2_name)
-    logger.info(f'Spatial metrics: {results_dirt}')
+    logger.info(f'Spatial metrics: {results_dict}')
     create_csv_from_dict(results_dict=results_dict, out_path=out_path)
