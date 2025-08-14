@@ -52,9 +52,9 @@ def nan_area_mean(data):
     return np.nanmean(data, axis=(1, 2))
 
 
-def create_dic_of_objective_functions(arr_s, arr_o, metrics, func=nothing, param=None):
+def create_dic_of_objective_functions(arr_s, arr_o, metrics, func=nothing, param=""):
     """Call objective_functions function applying the 'func' function to all input data and providing the metrics that should be calculated."""
-    return objective_functions(func(arr_s), func(arr_o), metrics=metrics)
+    return objective_functions(func(arr_s), func(arr_o), metrics=metrics, param=param)
 
 def calculate_objectives_for_gridded_data(map1, map2, ds1_name, ds2_name, eval_params=None):
     if eval_params is None:
@@ -81,6 +81,13 @@ def calculate_objectives_for_gridded_data(map1, map2, ds1_name, ds2_name, eval_p
             func=eval_param_dict["func"],
             param=eval_param
         ))
+    m1s_beta =  (1-evaluation_results_dict['general-beta'])**2
+    m1s_spatial_alpha = (1-evaluation_results_dict['spatial-alpha'])**2
+    m1s_spatial_gamma =  (1-evaluation_results_dict['spatial-gamma'])**2
+    m1s_temporal_alpha =  (1-evaluation_results_dict['temporal-alpha'])**2
+    m1s_temporal_gamma =  (1-evaluation_results_dict['temporal-gamma'])**2
+
+    evaluation_results_dict['comb'] = 1 - np.sqrt((m1s_beta+m1s_spatial_alpha+m1s_spatial_gamma+m1s_temporal_alpha+m1s_temporal_gamma)*3/5)
     return evaluation_results_dict
 
 
