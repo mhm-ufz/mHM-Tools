@@ -27,7 +27,7 @@ def objective_functions(s, o, metrics=["pearson", "bias", "variance"], param="")
     if "pearson" in metrics:
         result[param+"gamma"] = np.corrcoef(s, o)[1, 0]
     elif "spearman" in metrics:
-        result[param+"gamma"] = spearmanr(data1, data2)[0]
+        result[param+"gamma"] = spearmanr(s, o)[0]
         # alpha = np.corrcoef(s, o)[0, 1]
     # compute ratio of CV
     if "variance" in metrics:
@@ -93,4 +93,5 @@ def create_csv_from_dict(results_dict: dict, out_path):
 def create_results_csv(map1, map2, ds1_name, ds2_name, out_path):
     """Calculate objectives and create csv file."""
     results_dict = calculate_objectives_for_gridded_data(map1=map1, map2=map2, ds1_name=ds1_name, ds2_name=ds2_name)
+    logger.info(f'Spatial metrics: {results_dirt}')
     create_csv_from_dict(results_dict=results_dict, out_path=out_path)

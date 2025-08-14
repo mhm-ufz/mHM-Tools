@@ -939,6 +939,7 @@ class Hydrograph:
 
     def write_output(self):
         out_dict = {k: [v] for k,v in {**self.objectives.__dict__}.items()}
+        logger.info(f'generated metrics: {out_dict}')
         if id is not None: 
             out_dict["id"] = str(id)
         create_csv_from_dict(out_dict, self.output_file.parent / f"kge.csv")
