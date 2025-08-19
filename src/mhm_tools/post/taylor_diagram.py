@@ -1,3 +1,25 @@
+"""
+Generate Taylor diagrams for evaluating model performance against a reference dataset.
+
+This script is intended for NetCDF files containing time series of aggregated
+variables. It computes spatially averaged time series (mean over lat/lon),
+removes NaNs consistently across reference and model series, and optionally
+normalizes values by the standard deviation of the reference. Multiple models
+can be compared against a single reference within one Taylor diagram.
+
+The workflow includes:
+- loading reference and model NetCDF datasets,
+- interpolating latitude/longitude naming and orientation,
+- computing time-mean spatial series,
+- aligning data and masking invalid values,
+- plotting a Taylor diagram (via easy_mpl) to assess correlation, centered RMSD, and variance,
+- saving the result as a PNG file.
+
+Authors
+-------
+- Jeisson Leal
+"""
+
 import os
 from pathlib import Path
 from typing import List

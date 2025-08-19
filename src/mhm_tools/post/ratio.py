@@ -1,3 +1,19 @@
+"""
+Compute the spatial ratio between model and reference datasets.
+
+This script is intended for NetCDF files that represent aggregated fields
+(e.g., long-term averages, climatologies, or single-time snapshots), rather
+than full time series. It interpolates the model dataset onto the reference
+grid to ensure spatial alignment and then computes the ratio (model ÷ reference)
+at each grid cell. Division by zero is handled safely by masking with NaN.
+
+The result is plotted as a map and, if requested, saved as a NetCDF file.
+
+Authors
+-------
+- Jeisson Leal
+"""
+
 from pathlib import Path
 from typing import Optional
 

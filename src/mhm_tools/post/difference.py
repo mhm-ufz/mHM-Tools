@@ -1,3 +1,18 @@
+"""
+Calculate the spatial difference between reference and model datasets.
+
+This script is intended for NetCDF files that represent *aggregated fields*
+(such as long-term averages, climatologies, or single-time snapshots), rather
+than full time series. It loads the reference and model datasets, interpolates
+the model onto the reference grid, and then computes the difference
+(reference − model). The result is visualized as a map and, optionally, written
+to a NetCDF file.
+
+Authors
+-------
+- Jeisson Leal
+"""
+
 from pathlib import Path
 from typing import Optional
 

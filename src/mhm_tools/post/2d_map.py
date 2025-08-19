@@ -1,3 +1,10 @@
+"""Call function to plot a 2D map.
+
+Authors
+-------
+- Jeisson Leal
+"""
+
 from pathlib import Path
 
 import xarray as xr

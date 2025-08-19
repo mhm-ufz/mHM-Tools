@@ -1,3 +1,25 @@
+"""
+Compute long-term means for NetCDF forcing data.
+
+This script is designed for climate/hydrology forcing datasets that span
+multiple timesteps (e.g., hourly, daily, monthly, yearly). It supports both
+"intensive" variables (averaged over time, e.g., temperature) and "extensive"
+variables (summed over time, e.g., precipitation).
+
+The workflow includes:
+- optional cropping to a spatial domain,
+- optional temporal aggregation (hourly → daily, daily → monthly, etc.),
+- merging multiple input files along the time dimension,
+- computing the long-term mean (with optional masking thresholds),
+- saving the result as a NetCDF file.
+
+Intermediate files can be kept or automatically removed depending on options.
+
+Authors
+-------
+- Jeisson Leal
+"""
+
 import logging
 from pathlib import Path
 from typing import Optional

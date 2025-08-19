@@ -1,4 +1,4 @@
-r"""Create the catchment file for mRM.
+"""Create the catchment file for mRM.
 
 Authors
 -------
