@@ -1,4 +1,11 @@
-"""Compare simulated with observed discharge either directly or using a bootstraping approach."""
+"""
+Compare simulated with observed discharge either directly or using a bootstraping approach.
+
+Authors
+-------
+- Jeisson Leal
+- Simon Lüdke
+"""
 
 import itertools
 import logging
@@ -99,10 +106,9 @@ def get_gauge_coords(
 ):
     """Find correct gauge location.
 
-    Takes mrm_restart file, an approximate lat lon value and and then
+    Takes mrm_restart file, an approximate lat lon value and and then,
     finds the cell with the value closest to a given flow accumulation.
-
-    return lon,lat, flow accumulation
+    Returns lon,lat, flow accumulation.
     """
     if lonlat is not None:
         # print('lonlat:', lonlat)
@@ -177,7 +183,7 @@ def get_gauge_coords(
     return None, None, None
 
 
-def Q_data_to_xarray(
+def Q_data_to_xarray(  # noqa: PLR0913
     model_data_path,
     observed_data_path,
     mrm_restart_file,
@@ -256,46 +262,47 @@ def Q_data_to_xarray(
     logger.info(f"There are {len(gauge_ids.values)} gauges in total.")
 
     # prepare for later resampling
-    with xr.open_dataset(model_data_path) as sim_data_in:
-        with xr.open_dataset(observed_data_path) as observed_data_in:
-            hours_sim, alias_sim = timedelta_to_alias(sim_data_in)
-            hours_obs, alias_obs = timedelta_to_alias(observed_data_in)
-            if hours_sim > hours_obs:
-                # resample the datasets for them to have the same temporal resolution
-                logger.info(
-                    f"The observation dataset is resampled to fit the simulation dataset with a temporal resolution of {alias_sim}"
-                )
-                observed_data_in = observed_data_in.resample(time=alias_sim).mean()
-            obs_discharge_data = observed_data_in[observed_variable]
-            obs_discharge_data = obs_discharge_data.sel(time=date_slice)
+    sim_ds = xr.open_dataset(model_data_path)
+    obs_ds = xr.open_dataset(observed_data_path)
+    with sim_ds as sim_data_in, obs_ds as observed_data_in:
+        hours_sim, alias_sim = timedelta_to_alias(sim_data_in)
+        hours_obs, alias_obs = timedelta_to_alias(observed_data_in)
+        if hours_sim > hours_obs:
+            # resample the datasets for them to have the same temporal resolution
+            logger.info(
+                f"The observation dataset is resampled to fit the simulation dataset with a temporal resolution of {alias_sim}"
+            )
+            observed_data_in = observed_data_in.resample(time=alias_sim).mean()
+        obs_discharge_data = observed_data_in[observed_variable]
+        obs_discharge_data = obs_discharge_data.sel(time=date_slice)
 
-            if hours_obs > hours_sim:
-                # resample the datasets for them to have the same temporal resolution
-                logger.info(
-                    f"The simulation dataset is resampled to fit the observation dataset with a temporal resolution of {alias_obs}"
-                )
-                sim_data_in = sim_data_in.resample(time=alias_obs).mean()
-            if slicing_condition is not None:
-                sim_data_cropped = sim_data_in.sel(
-                    {
-                        get_coord_key(sim_data_in, lat=True): slice(lat_max, lat_min),
-                        get_coord_key(sim_data_in, lon=True): slice(lon_min, lon_max),
-                    }
-                ).sel(time=date_slice)
-            else:
-                sim_data_cropped = sim_data_in.sel(time=date_slice)
-            if direct_comparison:
-                overlapping_time_slice = get_overlapping_time_slice(
-                    sim_data_in, observed_data_in
-                )
-                logger.info(
-                    f"Overlapping time is form {overlapping_time_slice.start} to {overlapping_time_slice.stop}"
-                )
-                # also slice to overlapping time
-                obs_discharge_data = obs_discharge_data.sel(time=overlapping_time_slice)
-                sim_data_cropped = sim_data_cropped.sel(time=overlapping_time_slice)
-                logger.debug(f"obs croped resampled data: {obs_discharge_data}")
-                logger.debug(f"sim croped resampled data: {sim_data_cropped}")
+        if hours_obs > hours_sim:
+            # resample the datasets for them to have the same temporal resolution
+            logger.info(
+                f"The simulation dataset is resampled to fit the observation dataset with a temporal resolution of {alias_obs}"
+            )
+            sim_data_in = sim_data_in.resample(time=alias_obs).mean()
+        if slicing_condition is not None:
+            sim_data_cropped = sim_data_in.sel(
+                {
+                    get_coord_key(sim_data_in, lat=True): slice(lat_max, lat_min),
+                    get_coord_key(sim_data_in, lon=True): slice(lon_min, lon_max),
+                }
+            ).sel(time=date_slice)
+        else:
+            sim_data_cropped = sim_data_in.sel(time=date_slice)
+        if direct_comparison:
+            overlapping_time_slice = get_overlapping_time_slice(
+                sim_data_in, observed_data_in
+            )
+            logger.info(
+                f"Overlapping time is form {overlapping_time_slice.start} to {overlapping_time_slice.stop}"
+            )
+            # also slice to overlapping time
+            obs_discharge_data = obs_discharge_data.sel(time=overlapping_time_slice)
+            sim_data_cropped = sim_data_cropped.sel(time=overlapping_time_slice)
+            logger.debug(f"obs croped resampled data: {obs_discharge_data}")
+            logger.debug(f"sim croped resampled data: {sim_data_cropped}")
     if not obs_output_file.is_file() or overwrite:
         # observed_data = observed_data.rename({observed_variable: "discharge"})
         obs_discharge_data = obs_discharge_data.sel(id=gauge_ids.values)
@@ -614,9 +621,11 @@ def plot_kde(results_df, output_path):
 
 
 @log_errors()
-def plot_cdf(df, output_path, boostrap_iterations=None, mask_any=True):
-    """Create cdf plots for alpha, beat and gamma for different subselections
-    (by catchment, boostrap-mean or all results).
+def plot_cdf(df, output_path, boostrap_iterations=None, mask_any=True):  # noqa: ARG001
+    """Create CDF plots for alpha, beta and gamma.
+
+    The plots are generated for different subselections
+    (by catchment, bootstrap-mean, or all results).
     """
     # --- 1) Read your CSV ---
     # Adjust 'mydata.csv' to your actual file path

@@ -13,24 +13,18 @@ Authors
 
 import argparse
 
-from ..post.difference import calc_diff
+from ..post.difference import OutputOptions, PlotOptions, calc_diff
 
 
 def str2float(value):
     """Convert a string to float, but let None remain None."""
-    # If argparse is giving us the default None (i.e. user didn't supply the flag) ...
     if value is None:
         return None
-
-    # If the user literally typed "none" (case-insensitive), treat it as None too
     if isinstance(value, str) and value.lower() == "none":
         return None
-
-    # Otherwise it must be a string we can cast
     if not isinstance(value, str):
         msg = f"Expected a string or None, but got {type(value).__name__}."
         raise argparse.ArgumentTypeError(msg)
-
     try:
         return float(value)
     except ValueError as err:
@@ -42,7 +36,7 @@ def add_args(parser):
     """Add CLI arguments for the long_term_mean_diff subcommand."""
     parser.description = (
         "Compute and plot the spatial difference between a reference dataset and model dataset "
-        "for a specified variable: diff = (da_ref -da_mod). "
+        "for a specified variable: diff = (da_ref - da_mod). "
         "Supports wildcard matching, custom variable names, colorbar labels, "
         "titles, output file naming, optional axis limits, custom colormap, and explicit colormap range."
     )
@@ -137,15 +131,26 @@ def add_args(parser):
 
 
 def run(args):
-    """
-    Run script to plot long term means of a variable given (model - reference).
+    """Run script to plot long term means of a variable given (model - reference)."""
+    plot_opts = PlotOptions(
+        colorbar_label=args.colorbar_label,
+        title=args.title,
+        cmap=args.cmap,
+        vmin=args.vmin,
+        vmax=args.vmax,
+        x_min=args.x_min,
+        x_max=args.x_max,
+        y_min=args.y_min,
+        y_max=args.y_max,
+    )
 
-    Parameters
-    ----------
-    args : argparse.Namespace
-        parsed command line arguments
+    output_opts = OutputOptions(
+        output_dir=args.output_dir,
+        output_file_png=args.output_file_png,
+        save_ncfile=args.save_ncfile,
+        output_file_nc=args.output_file_nc,
+    )
 
-    """
     calc_diff(
         ref_input_dir=args.ref_input_dir,
         mod_input_dir=args.mod_input_dir,
@@ -153,17 +158,6 @@ def run(args):
         model_pattern=args.model_pattern,
         ref_var=args.ref_var,
         mod_var=args.mod_var,
-        colorbar_label=args.colorbar_label,
-        title=args.title,
-        output_dir=args.output_dir,
-        output_file_png=args.output_file_png,
-        save_ncfile=args.save_ncfile,
-        output_file_nc=args.output_file_nc,
-        x_min=args.x_min,
-        x_max=args.x_max,
-        y_min=args.y_min,
-        y_max=args.y_max,
-        cmap=args.cmap,
-        vmin=args.vmin,
-        vmax=args.vmax,
+        plot=plot_opts,
+        output=output_opts,
     )

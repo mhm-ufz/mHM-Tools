@@ -45,8 +45,9 @@ def spearman_correlation(data1, data2):
 
 
 def spearman_spatial(data1, data2):
-    """Calculate maps of Spearman rank correlation between two xarray
-    DataArrays of shape(12,n,m).
+    """Calculate pixel-wise Spearman correlation maps for two DataArrays.
+
+    Both inputs must have shape (12, Y, X): one climatology value per month.
     """
     if len(np.shape(data1)) != len(np.shape(data2)) or len(np.shape(data1)) != 3:
         with ErrorLogger(logger):
@@ -65,29 +66,28 @@ def spearman_spatial(data1, data2):
 def spearman_spatial_joblib(
     data1: np.ndarray, data2: np.ndarray, spearman_correlation, n_jobs: int = -1
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """Parallel pixel‐wise Spearman correlation over two arrays of shape (T, Y,
-    X).
+    """Parallel pixel-wise Spearman correlation over two arrays of shape (T, Y, X).
 
     Parameters
     ----------
     data1, data2 : ndarray, shape (T, Y, X)
-        The two time‐series stacks to correlate.
+        The two time-series stacks to correlate.
     spearman_correlation : Callable
         A function f(a: 1D, b: 1D) -> (rho, pval).
     n_jobs : int
-        Number of parallel workers (−1 = all CPUs).
+        Number of parallel workers (-1 = all CPUs).
 
     Returns
     -------
     res : ndarray, shape (Y, X)
-        Spearman ρ for each pixel.
+        Spearman rho for each pixel.
     pval : ndarray, shape (Y, X)
-        Two‐tailed p‐value for each pixel.
+        Two-tailed p-value for each pixel.
     """
     # get spatial shape
     _, ny, nx = data1.shape
 
-    # pre‐allocate outputs
+    # pre-allocate outputs
     res = np.full((ny, nx), np.nan, dtype=np.float32)
     pval = np.full((ny, nx), np.nan, dtype=np.float32)
 
@@ -111,7 +111,7 @@ def spearman_spatial_joblib(
 
 
 def climatology(data):
-    """Calculate the climatology from a xarray DataArray."""
+    """Calculate the climatology from an xarray DataArray."""
     if "time" not in data.dims or data.sizes["time"] == 0:
         msg = "Input data for climatology calculation has no valid time dimension."
         with ErrorLogger(logger):
@@ -123,8 +123,10 @@ def climatology(data):
 
 
 def get_clim_from_ds(ds, input_var=None, factor=1):
-    """Calculate climatology from DataSet with variable or DataArray while
-    mulitplying with a provided factor.
+    """Calculate climatology from a Dataset or DataArray.
+
+    Multiplies the selected data by `factor` before computing the monthly
+    climatology.
     """
     data = ds * factor if input_var is None else ds[input_var] * factor
     return climatology(data)
@@ -250,8 +252,24 @@ def combine_results(results):
 
 
 def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None):
-    """Take a list of files with all containing data for one month and creating
-    statisitcs while reading them one by one.
+    """Compute running statistics from a list of monthly files.
+
+    Iterates through NetCDF files (each containing one month's data for
+    `input_var`), optionally applies a spatial slice, multiplies by `factor`,
+    and updates running aggregates.
+
+    Returns
+    -------
+    mean : ndarray
+        Running mean over all time steps.
+    sum_square_diff : ndarray
+        Sum of squared deviations (for variance via Welford's algorithm).
+    count : int
+        Number of time steps processed.
+    monthly_sums : ndarray
+        Sum per calendar month, shape (12, ...).
+    monthly_counts : ndarray
+        Valid-count per calendar month, shape (12, ...).
     """
     da = None
     if not isinstance(files, Iterable):
@@ -327,8 +345,12 @@ def get_stats_one_pass(
     available_years=None,
     file_name="*.*",
 ):
-    """Create dataset statistics by reading in one monthly or yearly file at a
-    time and updating the statistics.
+    """Compute streaming statistics from monthly/yearly files.
+
+    Reads one file at a time and updates running aggregates to produce mean,
+    standard deviation, and monthly climatology. Optionally slices coordinates,
+    applies a multiplicative factor, supports bootstrapping over years, and can
+    write the result to disk.
     """
     if path.is_dir():
         files = get_files(
@@ -406,8 +428,21 @@ def plot_single_map(
     cmap=plt.cm.coolwarm,
     bounds_type="fixed",
 ):
-    """Plot one map to an matplotlib axis, taking care of the bounds and
-    colormap.
+    """Plot a single map on a Matplotlib Axes.
+
+    Handles bounds and colormap selection. Behavior by `bounds_type`:
+    - "max": set vmin=1 - diff_to_mean and vmax=1 + diff_to_mean
+    - "quantiles": set vmin/vmax to the 5th/95th percentiles of `values`
+    - "fixed": set vmin=0.5 and vmax=1.5
+
+    Returns
+    -------
+    im : AxesImage
+        The image artist.
+    bounds : list[float]
+        Bin edges used by BoundaryNorm.
+    extent : {"neither", "min", "max", "both"}
+        Whether data extend beyond bounds.
     """
     n_bins = 10
     if bounds_type == "max" and diff_to_mean is not None:
@@ -437,13 +472,11 @@ def plot_single_map(
 def resample_to_coarser_calendar(
     ds_input: xr.Dataset, ds_ref: xr.Dataset
 ) -> Tuple[xr.Dataset, xr.Dataset]:
-    """Resampler the dataset with higher temporal resolution to the resolution
-    of the other.
+    """Resample the higher-resolution dataset to the coarser calendar.
 
-    Compare the two datasets’ median time‐steps, turn them into
-    pandas/xarray freq aliases, and then resample the *finer* one up to
-    the *coarser* one using calendar‐aware frequencies (e.g. 'M' not
-    '720H').
+    Compare the two datasets' median time steps, convert them to pandas/xarray
+    frequency aliases, and resample the finer one up to the coarser one using
+    calendar-aware frequencies (e.g., 'M' not '720H').
     """
     hours_in, alias_in = timedelta_to_alias(ds_input)
     hours_ref, alias_ref = timedelta_to_alias(ds_ref)

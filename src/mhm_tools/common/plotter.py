@@ -1,3 +1,12 @@
+"""
+Plotting utilities for creating geospatial maps with Cartopy and Matplotlib.
+
+Includes functions for plotting:
+- Constant data maps with a legend patch.
+- Discrete data maps with colorbars and extensions.
+- General wrapper `plot_map` that auto-selects plotting strategy.
+"""
+
 from pathlib import Path
 from typing import Optional
 
@@ -20,23 +29,24 @@ def plot_constant_data_map(
     title,
     out_path,
     cmap="RdBu",
-    x_min=None,
-    x_max=None,
-    y_min=None,
-    y_max=None,
 ):
+    """Plot a map for constant-valued data.
+
+    Creates a uniform-colored map with a legend patch instead of a colorbar.
+    """
+
     base_cmap = plt.get_cmap(cmap)
     single_color = base_cmap(0.5)  # middle color
 
     cmap = ListedColormap([single_color])
     norm = BoundaryNorm([vmin - 1, vmax + 1], ncolors=1)
 
-    fig = plt.figure(figsize=(12, 6))
+    plt.figure(figsize=(12, 6))
     ax = plt.axes(projection=ccrs.PlateCarree())
     ax.set_extent([lon.min(), lon.max(), lat.min(), lat.max()], crs=ccrs.PlateCarree())
 
     lon2d, lat2d = np.meshgrid(lon, lat)
-    mesh = ax.pcolormesh(
+    ax.pcolormesh(
         lon2d,
         lat2d,
         np.full_like(arr, fill_value=vmin),
@@ -75,6 +85,11 @@ def plot_discrete_data_map(
     y_min=None,
     y_max=None,
 ):
+    """Plot a map with discrete bins using a colorbar.
+
+    Uses Cartopy for geographic projection and Matplotlib for color mapping.
+    """
+
     import cartopy.crs as ccrs
     import cartopy.feature as cfeature
     import matplotlib.pyplot as plt
@@ -102,7 +117,7 @@ def plot_discrete_data_map(
     norm = BoundaryNorm(levels, ncolors=n_bins + extra, extend=extend)
 
     # Set up the plot using Cartopy’s PlateCarree projection
-    fig = plt.figure(figsize=(12, 6))
+    plt.figure(figsize=(12, 6))
     ax = plt.axes(projection=ccrs.PlateCarree())
 
     # Automatically set extent to data bounds unless overridden
@@ -165,15 +180,24 @@ def plot_map(
     This function creates a geographically-aware color plot using a discrete colormap,
     with automatic colorbar extensions when values fall outside the given [vmin, vmax].
 
-    Parameters:
-        data (xr.DataArray): 2D input data with 'lon' and 'lat' coordinates.
-        cb_label (str): Label for the colorbar.
-        title (str): Title of the plot.
-        out_path (Path): Path where the figure will be saved.
-        cmap (str): Name of the Matplotlib colormap to use.
-        x_min, x_max, y_min, y_max (float, optional): Manual spatial limits for zooming.
-        vmin, vmax (float, optional): Color scale limits. If not provided, data min/max are used.
+    Parameters
+    ----------
+    data : xr.DataArray
+        2D input data with 'lon' and 'lat' coordinates.
+    cb_label : str
+        Label for the colorbar.
+    title : str
+        Title of the plot.
+    out_path : Path
+        Path where the figure will be saved.
+    cmap : str, optional
+        Name of the Matplotlib colormap to use.
+    x_min, x_max, y_min, y_max : float, optional
+        Manual spatial limits for zooming.
+    vmin, vmax : float, optional
+        Color scale limits. If not provided, data min/max are used.
     """
+
     # Extract longitude, latitude, and data values
     lon = data["lon"].values
     lat = data["lat"].values
@@ -201,10 +225,6 @@ def plot_map(
             title=title,
             out_path=out_path,
             cmap=cmap,
-            x_min=x_min,
-            x_max=x_max,
-            y_min=y_min,
-            y_max=y_max,
         )
     else:
         # plot regular discrete map

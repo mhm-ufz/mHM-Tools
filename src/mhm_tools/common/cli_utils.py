@@ -1,12 +1,11 @@
 """
-Provide general CLI utility functions, including parsing coordinates,
-interpreting memory units, and extracting coordinate bounds from mask files or user inputs.
+General CLI utility functions.
 
-This module offers functions for:
-- Converting 'lat,lon' strings to float tuples
-- Translating memory size strings into bytes
+This module provides helpers for common command-line tasks such as:
+- Parsing 'lat,lon' strings into float tuples
+- Converting memory size strings (e.g., "10MB", "2GB") into bytes
 - Determining coordinate extents from NetCDF mask datasets
-- Consolidating coordinate inputs from various sources
+- Consolidating coordinate inputs from strings, mask files, or explicit values
 """
 
 import argparse

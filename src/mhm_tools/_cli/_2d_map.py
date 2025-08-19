@@ -5,10 +5,6 @@ Compute and plot a 2D map for a given NetCDF dataset.
 This CLI reads a CF-compliant NetCDF file, extracts a specified variable, and
 invokes mhm_tools.common.plotter.plot_map to generate and save a geo-aware
 2D map plot with customizable labels, colormap, and spatial or data limits.
-
-Authors
--------
-- Jeisson Leal
 """
 
 import argparse
@@ -26,7 +22,8 @@ def str2float(value):
     try:
         return float(value)
     except Exception:
-        raise argparse.ArgumentTypeError(f"{value!r} is not a valid float.")
+        msg = f"{value!r} is not a valid float."
+        raise argparse.ArgumentTypeError(msg)
 
 
 def add_args(parser: argparse.ArgumentParser):
@@ -91,9 +88,8 @@ def add_args(parser: argparse.ArgumentParser):
 
 
 def run(args: argparse.Namespace):
-    """
-    Entry point: read NetCDF, extract data array, and call plot_map.
-    """
+    def run(args: argparse.Namespace):
+    """Entry point: read NetCDF, extract data array, and call plot_map."""
     # Load dataset and variable
     ds = xr.open_dataset(args.input_file)
     data = ds[args.var]

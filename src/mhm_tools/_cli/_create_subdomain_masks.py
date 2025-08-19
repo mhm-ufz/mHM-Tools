@@ -1,6 +1,5 @@
 """
-Create files containing subsets of the river network based on the provided
-input files.
+Create files containing subsets of the river network based on the provided input files.
 
 The river network, provied as nc file containing basin ids, is split
 into subdomains based on the provided basin clusters. These subdomains

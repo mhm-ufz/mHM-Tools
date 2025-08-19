@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 def normalize_lat_lon(ds: xr.Dataset, lat: str, lon: str) -> xr.Dataset:
     """
     Normalize latitude and longitude dimension and coordinate names to 'lat' and 'lon'.
+
     Handles both dimensions and coordinate variables.
     """
     rename_dict = {}

@@ -5,7 +5,7 @@ This script is intended for NetCDF files that represent *aggregated fields*
 (such as long-term averages, climatologies, or single-time snapshots), rather
 than full time series. It loads the reference and model datasets, interpolates
 the model onto the reference grid, and then computes the difference
-(reference − model). The result is visualized as a map and, optionally, written
+(reference - model). The result is visualized as a map and, optionally, written
 to a NetCDF file.
 
 Authors
@@ -13,12 +13,34 @@ Authors
 - Jeisson Leal
 """
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
 from mhm_tools.common.netcdf import read_dataset
 from mhm_tools.common.plotter import plot_map
 from mhm_tools.common.xarray_utils import get_coord_key, normalize_lat_lon
+
+
+@dataclass
+class PlotOptions:
+    colorbar_label: str
+    title: str
+    cmap: str = "RdBu"
+    vmin: Optional[float] = None
+    vmax: Optional[float] = None
+    x_min: Optional[float] = None
+    x_max: Optional[float] = None
+    y_min: Optional[float] = None
+    y_max: Optional[float] = None
+
+
+@dataclass
+class OutputOptions:
+    output_dir: str
+    output_file_png: str
+    save_ncfile: bool
+    output_file_nc: str
 
 
 def calc_diff(
@@ -28,31 +50,20 @@ def calc_diff(
     model_pattern: str,
     ref_var: str,
     mod_var: str,
-    colorbar_label: str,
-    title: str,
-    output_dir: str,
-    output_file_png: str,
-    save_ncfile: bool,
-    output_file_nc: str,
-    x_min: Optional[float] = None,
-    x_max: Optional[float] = None,
-    y_min: Optional[float] = None,
-    y_max: Optional[float] = None,
-    cmap: str = "RdBu",
-    vmin: Optional[float] = None,
-    vmax: Optional[float] = None,
+    plot: PlotOptions,
+    output: OutputOptions,
 ) -> None:
     """Compute long-term mean difference between model and reference datasets and plot the result."""
     ds_ref = read_dataset(file_path=str(Path(ref_input_dir) / reference_pattern))
     ds_mod = read_dataset(file_path=str(Path(mod_input_dir) / model_pattern))
 
-    # Gets coords names
+    # Get coordinate names
     ref_lat = get_coord_key(ds_ref, lat=True)
     ref_lon = get_coord_key(ds_ref, lon=True)
     mod_lat = get_coord_key(ds_mod, lat=True)
     mod_lon = get_coord_key(ds_mod, lon=True)
 
-    # Sets lon and lat names and lat and lon and returns the da
+    # Normalize lat/lon names and squeeze time dimension
     da_ref = normalize_lat_lon(ds_ref, lat=ref_lat, lon=ref_lon)[ref_var].squeeze(
         "time"
     )
@@ -63,28 +74,29 @@ def calc_diff(
     # Interpolate model to reference grid to avoid alignment errors
     da_mod_interp = da_mod.interp_like(da_ref)
 
-    # Now safe to subtract
+    # Compute difference
     diff = da_ref - da_mod_interp
 
-    # Sets output path to save plot
-    out_path_dir = Path(output_dir)
+    # Prepare output directory
+    out_path_dir = Path(output.output_dir)
     out_path_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_path_dir / output_file_png
+    out_path = out_path_dir / output.output_file_png
 
+    # Plot difference map
     plot_map(
         data=diff,
-        cb_label=colorbar_label,
-        title=title,
+        cb_label=plot.colorbar_label,
+        title=plot.title,
         out_path=out_path,
-        cmap=cmap,
-        x_min=x_min,
-        x_max=x_max,
-        y_min=y_min,
-        y_max=y_max,
-        vmin=vmin,
-        vmax=vmax,
+        cmap=plot.cmap,
+        x_min=plot.x_min,
+        x_max=plot.x_max,
+        y_min=plot.y_min,
+        y_max=plot.y_max,
+        vmin=plot.vmin,
+        vmax=plot.vmax,
     )
 
-    # If set, saves diff file
-    if save_ncfile:
-        diff.to_netcdf(out_path_dir / output_file_nc)
+    # Optionally save NetCDF
+    if output.save_ncfile:
+        diff.to_netcdf(out_path_dir / output.output_file_nc)

@@ -4,13 +4,7 @@ Compute and plot a Taylor diagram comparing multiple model datasets against a re
 This script reads CF-compliant NetCDF files, computes normalized standard deviation,
 correlation, and centered root mean square error (CRMSE) for each model variable
 against a single reference field, and creates one or multiple Taylor diagrams.
-
-Authors
--------
-- Jeisson Leal
 """
-
-import argparse
 
 from ..post.taylor_diagram import generate_taylor_diagram
 
@@ -89,9 +83,11 @@ def add_args(parser):
 def run(args):
     # sanity check to ensure matched lists
     if not (len(args.mod_input_dirs) == len(args.model_patterns) == len(args.mod_vars)):
-        raise ValueError(
-            "The number of --mod_input_dirs, --model_patterns, and --mod_vars must all match."
+        msg = (
+            "The number of --mod_input_dirs, --model_patterns, "
+            "and --mod_vars must all match."
         )
+        raise ValueError(msg)
 
     generate_taylor_diagram(
         ref_input_dir=args.ref_input_dir,
