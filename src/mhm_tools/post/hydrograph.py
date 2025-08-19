@@ -965,7 +965,7 @@ def get_hydrograph_from_path(
     hydro = Hydrograph()
     hydro.check_which_plots_to_create(plot_code)
     output_file = Path(output_file)
-    if output_file.is_file():
+    if output_file.suffix and output_file.parent.exists():
         hydro.output_file = output_file
     elif output_file.is_dir():
         hydro.output_file = output_file / 'hydrograph.png'
