@@ -34,7 +34,6 @@ def plot_constant_data_map(
 
     Creates a uniform-colored map with a legend patch instead of a colorbar.
     """
-
     base_cmap = plt.get_cmap(cmap)
     single_color = base_cmap(0.5)  # middle color
 
@@ -89,13 +88,6 @@ def plot_discrete_data_map(
 
     Uses Cartopy for geographic projection and Matplotlib for color mapping.
     """
-
-    import cartopy.crs as ccrs
-    import cartopy.feature as cfeature
-    import matplotlib.pyplot as plt
-    import numpy as np
-    from matplotlib.colors import BoundaryNorm, ListedColormap
-
     # Determine how the colorbar should handle data outside [vmin, vmax]
     extend = "neither"
     if np.nanmin(arr) < vmin and np.nanmax(arr) > vmax:
@@ -197,7 +189,6 @@ def plot_map(
     vmin, vmax : float, optional
         Color scale limits. If not provided, data min/max are used.
     """
-
     # Extract longitude, latitude, and data values
     lon = data["lon"].values
     lat = data["lat"].values

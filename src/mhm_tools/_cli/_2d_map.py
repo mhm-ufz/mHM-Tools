@@ -88,7 +88,6 @@ def add_args(parser: argparse.ArgumentParser):
 
 
 def run(args: argparse.Namespace):
-    def run(args: argparse.Namespace):
     """Entry point: read NetCDF, extract data array, and call plot_map."""
     # Load dataset and variable
     ds = xr.open_dataset(args.input_file)

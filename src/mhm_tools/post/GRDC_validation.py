@@ -48,9 +48,7 @@ def flatten_list(nested_list):
 
 
 def gen_list_of_result_dicts(data, id, datatype="", facc=None):
-    """Generate a list of result dictionaries containing time, id, discharge
-    and year.
-    """
+    """Generate result dicts with time, id, discharge, and year."""
     # Check if all values in the array are NaN
     discharge = data.values
     are_all_nan = np.all(np.isnan(discharge))
@@ -71,7 +69,7 @@ def gen_list_of_result_dicts(data, id, datatype="", facc=None):
 
 
 def get_grdc_for_one_gauge(id, observed_data_by_id):
-    """Read in observed data for one gauge."""
+    """Read observed data for one gauge."""
     # id, index = id.values, index=id['index'].values
     if observed_data_by_id.size == 0:
         logger.info(f"No data found for ID: {id}. Skipping...\n")
@@ -183,7 +181,7 @@ def get_gauge_coords(
     return None, None, None
 
 
-def Q_data_to_xarray(  # noqa: PLR0913
+def Q_data_to_xarray(  # noqa: PLR0913, PLR0915
     model_data_path,
     observed_data_path,
     mrm_restart_file,
@@ -264,45 +262,45 @@ def Q_data_to_xarray(  # noqa: PLR0913
     # prepare for later resampling
     sim_ds = xr.open_dataset(model_data_path)
     obs_ds = xr.open_dataset(observed_data_path)
-    with sim_ds as sim_data_in, obs_ds as observed_data_in:
-        hours_sim, alias_sim = timedelta_to_alias(sim_data_in)
-        hours_obs, alias_obs = timedelta_to_alias(observed_data_in)
+    with sim_ds as sim_in, obs_ds as obs_in:
+        hours_sim, alias_sim = timedelta_to_alias(sim_in)
+        hours_obs, alias_obs = timedelta_to_alias(obs_in)
+
+        # work on copies, not the with-bound names
+        sim_rs = sim_in
+        obs_rs = obs_in
         if hours_sim > hours_obs:
-            # resample the datasets for them to have the same temporal resolution
             logger.info(
-                f"The observation dataset is resampled to fit the simulation dataset with a temporal resolution of {alias_sim}"
+                f"Resampling observation data to {alias_sim} to match simulation."
             )
-            observed_data_in = observed_data_in.resample(time=alias_sim).mean()
-        obs_discharge_data = observed_data_in[observed_variable]
-        obs_discharge_data = obs_discharge_data.sel(time=date_slice)
+            obs_rs = obs_in.resample(time=alias_sim).mean()
+
+        obs_discharge_data = obs_rs[observed_variable].sel(time=date_slice)
 
         if hours_obs > hours_sim:
-            # resample the datasets for them to have the same temporal resolution
             logger.info(
-                f"The simulation dataset is resampled to fit the observation dataset with a temporal resolution of {alias_obs}"
+                f"Resampling simulation data to {alias_obs} to match observation."
             )
-            sim_data_in = sim_data_in.resample(time=alias_obs).mean()
+            sim_rs = sim_in.resample(time=alias_obs).mean()
+
         if slicing_condition is not None:
-            sim_data_cropped = sim_data_in.sel(
+            sim_data_cropped = sim_rs.sel(
                 {
-                    get_coord_key(sim_data_in, lat=True): slice(lat_max, lat_min),
-                    get_coord_key(sim_data_in, lon=True): slice(lon_min, lon_max),
+                    get_coord_key(sim_rs, lat=True): slice(lat_max, lat_min),
+                    get_coord_key(sim_rs, lon=True): slice(lon_min, lon_max),
                 }
             ).sel(time=date_slice)
         else:
-            sim_data_cropped = sim_data_in.sel(time=date_slice)
+            sim_data_cropped = sim_rs.sel(time=date_slice)
+
         if direct_comparison:
-            overlapping_time_slice = get_overlapping_time_slice(
-                sim_data_in, observed_data_in
-            )
+            overlapping_time_slice = get_overlapping_time_slice(sim_rs, obs_rs)
             logger.info(
-                f"Overlapping time is form {overlapping_time_slice.start} to {overlapping_time_slice.stop}"
+                f"Overlapping time is from {overlapping_time_slice.start} "
+                f"to {overlapping_time_slice.stop}"
             )
-            # also slice to overlapping time
             obs_discharge_data = obs_discharge_data.sel(time=overlapping_time_slice)
             sim_data_cropped = sim_data_cropped.sel(time=overlapping_time_slice)
-            logger.debug(f"obs croped resampled data: {obs_discharge_data}")
-            logger.debug(f"sim croped resampled data: {sim_data_cropped}")
     if not obs_output_file.is_file() or overwrite:
         # observed_data = observed_data.rename({observed_variable: "discharge"})
         obs_discharge_data = obs_discharge_data.sel(id=gauge_ids.values)
@@ -459,8 +457,10 @@ def evaludate_grdc_data(  # noqa: PLR0913
     end_date=None,
     overwrite=False,
 ):
-    """Compare simulated with observed discharge either directly or using a
-    bootstraping approach.
+    """Compare simulated with observed discharge directly or via bootstrapping.
+
+    Loads/caches data, harmonizes temporal resolution, optionally bootstraps
+    across years, and writes per-gauge plots and a results table.
     """
     output_path = Path(output_path)
     observed_ds, model_ds = Q_data_to_xarray(
@@ -622,7 +622,7 @@ def plot_kde(results_df, output_path):
 
 @log_errors()
 def plot_cdf(df, output_path, boostrap_iterations=None, mask_any=True):  # noqa: ARG001
-    """Create CDF plots for alpha, beta and gamma.
+    """Create CDF plots for alpha, beta, and gamma.
 
     The plots are generated for different subselections
     (by catchment, bootstrap-mean, or all results).

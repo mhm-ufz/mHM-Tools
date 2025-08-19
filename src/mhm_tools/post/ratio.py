@@ -25,7 +25,7 @@ from mhm_tools.common.plotter import plot_map
 from mhm_tools.common.xarray_utils import get_coord_key, normalize_lat_lon
 
 
-def calc_ratio(
+def calc_ratio(  # noqa: PLR0913
     ref_input_dir: str,
     mod_input_dir: str,
     reference_pattern: str,
@@ -89,6 +89,6 @@ def calc_ratio(
         vmax=vmax,
     )
 
-    # If set, saves diff file
+    # If set, saves ratio file
     if save_ncfile:
-        diff.to_netcdf(out_path_dir / output_file_nc)
+        ratio.to_netcdf(out_path_dir / output_file_nc)

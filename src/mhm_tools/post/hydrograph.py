@@ -318,13 +318,19 @@ class Hydrograph:
 
     @staticmethod
     def get_long_time_monthly_mean(variable, long=False):
-        """Calculate the long-term average value for every month of the year
-        for a given variable.
+        """Calculate long-term monthly means for a time-indexed variable.
 
-        Args:
-            variable: xarray with a variable and a time
-        Returns:
-            list of twelve numbers corresponding to the long-term average value for each month of the year
+        Parameters
+        ----------
+        variable : xarray.DataArray
+            Data with a 'time' coordinate.
+        long : bool, default False
+            If True, prepend last month and append first month (for cyclic plots).
+
+        Returns
+        -------
+        numpy.ndarray
+            Twelve monthly means (or 14 if `long` is True).
         """
         var_ses = [[], [], [], [], [], [], [], [], [], [], [], []]
         for i in range(len(variable)):

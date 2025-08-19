@@ -24,6 +24,8 @@ from mhm_tools.common.xarray_utils import get_coord_key, normalize_lat_lon
 
 @dataclass
 class PlotOptions:
+    """Plotting options for the difference map."""
+
     colorbar_label: str
     title: str
     cmap: str = "RdBu"
@@ -37,6 +39,8 @@ class PlotOptions:
 
 @dataclass
 class OutputOptions:
+    """Output configuration for generated PNG/NetCDF files."""
+
     output_dir: str
     output_file_png: str
     save_ncfile: bool

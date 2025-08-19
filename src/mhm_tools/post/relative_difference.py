@@ -5,7 +5,7 @@ This script is intended for NetCDF files that represent aggregated fields
 (e.g., long-term averages, climatologies, or single-time snapshots), rather
 than full time series. The model dataset is interpolated onto the reference
 grid to ensure spatial alignment. The relative difference is then calculated
-as (reference − model) ÷ reference at each grid cell, with division by zero
+as (reference - model) / reference at each grid cell, with division by zero
 safely masked as NaN.
 
 The result is plotted as a map and, if requested, saved as a NetCDF file.
@@ -26,7 +26,7 @@ from mhm_tools.common.plotter import plot_map
 from mhm_tools.common.xarray_utils import get_coord_key, normalize_lat_lon
 
 
-def calc_rel_diff(
+def calc_rel_diff(  # noqa: PLR0913
     ref_input_dir: str,
     mod_input_dir: str,
     reference_pattern: str,

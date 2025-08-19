@@ -279,8 +279,7 @@ def _get_extends(in_size, out_size, nrows, ncols, in_name, out_name):
 
 
 def rescale_grid(header, cellsize, in_name="LA", out_name="LB"):
-    """Rescale grid from given header to a coarser cell-size with matching
-    extend.
+    """Rescale grid from given header to a coarser cell-size with matching extend.
 
     Parameters
     ----------

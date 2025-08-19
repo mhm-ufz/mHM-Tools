@@ -82,7 +82,7 @@ def aggregate_files(
             raise RuntimeError(msg) from e
 
 
-def cal_long_term_mean(
+def cal_long_term_mean(  # noqa: PLR0912, PLR0915
     in_dir: str,
     in_file: str,
     out_dir: str,

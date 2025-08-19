@@ -20,7 +20,6 @@ Authors
 - Jeisson Leal
 """
 
-import os
 from pathlib import Path
 from typing import List
 
@@ -34,19 +33,29 @@ from mhm_tools.common.xarray_utils import get_coord_key, normalize_lat_lon
 
 
 def calc_tim_mean(da: xr.DataArray) -> xr.DataArray:
+    """Return the spatial mean time series (mean over lat/lon) of a DataArray.
+
+    Raises
+    ------
+    ValueError
+        If the input lacks a 'time' dimension or has <= 1 time step.
+    """
     if "time" not in da.dims:
-        raise ValueError("Input DataArray must have a 'time' dimension")
+        msg = "Input DataArray must have a 'time' dimension"
+        raise ValueError(msg)
     if da.sizes["time"] <= 1:
-        raise ValueError(
+        msg = (
             "Input DataArray must have more than one time step for Taylor plot. "
             f"Found only {da.sizes['time']} time step(s)."
         )
+        raise ValueError(msg)
     return da.mean(dim=["lat", "lon"], skipna=True)
 
 
-def prepare_da(input_dir, pattern, var_name):
-    path = os.path.join(input_dir, pattern)
-    ds = read_dataset(path)
+def prepare_da(input_dir: str, pattern: str, var_name: str) -> xr.DataArray:
+    """Load, normalize lat/lon names/orientation, and return the target variable."""
+    path = Path(input_dir) / pattern
+    ds = read_dataset(str(path))
     lat = get_coord_key(ds, lat=True)
     lon = get_coord_key(ds, lon=True)
     ds = normalize_lat_lon(ds, lat, lon)
@@ -54,10 +63,7 @@ def prepare_da(input_dir, pattern, var_name):
 
 
 def mask_nan(obs: np.ndarray, sims: dict) -> tuple[np.ndarray, dict]:
-    """
-    Mask out NaNs from observation and simulation arrays, keeping only indices
-    where all arrays have valid data.
-    """
+    """Mask NaNs across observation and simulations, keeping only common valid indices."""
     mask = ~np.isnan(obs)
     for sim_vals in sims.values():
         mask &= ~np.isnan(sim_vals)
@@ -81,6 +87,12 @@ def generate_taylor_diagram(
     output_file: str,
     normalize: bool = False,
 ) -> None:
+    """Create and save a Taylor diagram comparing multiple models to one reference.
+
+    Loads reference/model datasets, computes spatial means over time, aligns NaNs,
+    optionally normalizes by the reference's standard deviation, and plots/saves
+    a Taylor diagram using easy_mpl.
+    """
     # 1) Ensure output directory exists
     outdir = Path(output_dir)
     outdir.mkdir(parents=True, exist_ok=True)
@@ -89,13 +101,8 @@ def generate_taylor_diagram(
     da_ref = prepare_da(ref_input_dir, reference_pattern, ref_var)
     ref_values = calc_tim_mean(da_ref).values
 
-    # 3) Build the observations dict for multi-plot mode
-    observations = {ref_label: ref_values}
-
-    # 4) Initialize the simulations dict with the same top-level key
+    # 3) Build simulations dict keyed by the reference label
     simulations = {ref_label: {}}
-
-    # 5) Loop over each model directory/pattern/var/label and fill the nested dict
     for mod_dir, mod_pattern, mod_var, mod_label in zip(
         mod_input_dirs, model_patterns, mod_vars, mod_labels
     ):
@@ -103,23 +110,22 @@ def generate_taylor_diagram(
         model_series = calc_tim_mean(da_model).values
         simulations[ref_label][mod_label] = model_series
 
-    # 6) Remove NaNs and align all time series
+    # 5) Remove NaNs and align all time series
     obs_clean, sims_clean = mask_nan(ref_values, simulations[ref_label])
 
-    # 7) Normalize if requested
+    # 6) Normalize if requested
     if normalize:
-        obs_std = np.std(obs_clean)
-        if obs_std == 0:
-            raise ValueError(
-                "Standard deviation of observations is zero, cannot normalize."
-            )
+        obs_std = float(np.std(obs_clean))
+        if obs_std == 0.0:
+            msg = "Standard deviation of observations is zero, cannot normalize."
+            raise ValueError(msg)
         obs_clean = obs_clean / obs_std
         sims_clean = {k: v / obs_std for k, v in sims_clean.items()}
 
     observations_clean = {ref_label: obs_clean}
     simulations_clean = {ref_label: sims_clean}
 
-    # 8) Generate the Taylor diagram (one subplot named by ref_label)
+    # 7) Generate the Taylor diagram (one subplot named by ref_label)
     fig = taylor_plot(
         observations=observations_clean,
         simulations=simulations_clean,
@@ -128,6 +134,6 @@ def generate_taylor_diagram(
         title=title or None,
     )
 
-    # 9) Save and close
-    fig.savefig(Path(output_dir) / output_file, dpi=300, bbox_inches="tight")
+    # 8) Save and close
+    fig.savefig(outdir / output_file, dpi=300, bbox_inches="tight")
     plt.close(fig)
