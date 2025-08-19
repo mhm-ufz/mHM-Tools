@@ -640,6 +640,12 @@ class MHMRestartFile:
         }
 
     def _split_file(self, name, file_path):
+        if isinstance(file_path, list) and len(file_path) == 1:
+            file_path = file_path
+        elif isinstance(file_path, list) and len(file_path) > 1:
+            msg = f"There are multiple files with ambigous names in the setup. Please remove all but one of {file_path}"
+            with ErrorLogger(logger):
+                raise ValueError(msg)
         if not file_path or file_path is None or not file_path.is_file():
             logger.error(f"No file path provided for {name}")
             return None
