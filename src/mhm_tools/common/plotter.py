@@ -11,19 +11,30 @@ from matplotlib.colors import BoundaryNorm, ListedColormap
 
 
 def plot_constant_data_map(
-    lon, lat, arr, vmin, vmax, cb_label, title, out_path, cmap="RdBu", 
-    x_min=None, x_max=None, y_min=None, y_max=None
+    lon,
+    lat,
+    arr,
+    vmin,
+    vmax,
+    cb_label,
+    title,
+    out_path,
+    cmap="RdBu",
+    x_min=None,
+    x_max=None,
+    y_min=None,
+    y_max=None,
 ):
     base_cmap = plt.get_cmap(cmap)
     single_color = base_cmap(0.5)  # middle color
-    
+
     cmap = ListedColormap([single_color])
     norm = BoundaryNorm([vmin - 1, vmax + 1], ncolors=1)
-    
+
     fig = plt.figure(figsize=(12, 6))
     ax = plt.axes(projection=ccrs.PlateCarree())
     ax.set_extent([lon.min(), lon.max(), lat.min(), lat.max()], crs=ccrs.PlateCarree())
-    
+
     lon2d, lat2d = np.meshgrid(lon, lat)
     mesh = ax.pcolormesh(
         lon2d,
@@ -34,16 +45,15 @@ def plot_constant_data_map(
         transform=ccrs.PlateCarree(),
         shading="auto",
     )
-    
+
     ax.coastlines()
     ax.add_feature(cfeature.BORDERS, linewidth=0.5)
     ax.gridlines(draw_labels=True, linewidth=0.2, linestyle="--")
-    
+
     # Remove colorbar, add legend box with patch
     patch = mpatches.Patch(color=single_color, label=f"{vmin:.2f} {cb_label}")
     ax.legend(handles=[patch], loc="lower right", framealpha=0.8, fontsize=12)
 
-    
     plt.title(title)
     plt.tight_layout()
     plt.savefig(out_path, dpi=300)

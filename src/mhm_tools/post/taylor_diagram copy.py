@@ -1,14 +1,15 @@
+import os
 from pathlib import Path
 from typing import List
-import os
 
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 import xarray as xr
 from easy_mpl import taylor_plot
 
 from mhm_tools.common.netcdf import read_dataset
 from mhm_tools.common.xarray_utils import get_coord_key, normalize_lat_lon
+
 
 def calc_tim_mean(da: xr.DataArray) -> xr.DataArray:
     if "time" not in da.dims:
@@ -17,6 +18,7 @@ def calc_tim_mean(da: xr.DataArray) -> xr.DataArray:
         return da.mean(dim=["lat", "lon"])
     return da.isel(time=0).mean(dim=["lat", "lon"])
 
+
 def prepare_da(input_dir, pattern, var_name):
     path = os.path.join(input_dir, pattern)
     ds = read_dataset(path)
@@ -24,6 +26,7 @@ def prepare_da(input_dir, pattern, var_name):
     lon = get_coord_key(ds, lon=True)
     ds = normalize_lat_lon(ds, lat, lon)
     return ds[var_name]
+
 
 def generate_taylor_diagram(
     ref_input_dir: str,
@@ -47,14 +50,10 @@ def generate_taylor_diagram(
     ref_values = calc_tim_mean(da_ref).values
 
     # 3) Build the observations dict for multi-plot mode
-    observations = {
-        ref_label: ref_values
-    }
+    observations = {ref_label: ref_values}
 
     # 4) Initialize the simulations dict with the same top-level key
-    simulations = {
-        ref_label: {}
-    }
+    simulations = {ref_label: {}}
 
     # 5) Loop over each model directory/pattern/var/label and fill the nested dict
     for mod_dir, mod_pattern, mod_var, mod_label in zip(
@@ -71,8 +70,8 @@ def generate_taylor_diagram(
     fig = taylor_plot(
         observations=observations,
         simulations=simulations,
-        cont_kws={'colors': 'blue', 'linewidths': 1.0, 'linestyles': 'dotted'},
-        grid_kws={'axis': 'x', 'color': 'g', 'lw': 1.0},
+        cont_kws={"colors": "blue", "linewidths": 1.0, "linestyles": "dotted"},
+        grid_kws={"axis": "x", "color": "g", "lw": 1.0},
         title=title or None,
     )
 

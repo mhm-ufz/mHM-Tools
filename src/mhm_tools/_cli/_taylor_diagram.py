@@ -11,14 +11,13 @@ Authors
 """
 
 import argparse
+
 from ..post.taylor_diagram import generate_taylor_diagram
 
 
 def add_args(parser):
     """Add CLI arguments for the Taylor diagram subcommand."""
-    parser.description = (
-        "Compute and plot a Taylor diagram comparing multiple model datasets against a single reference dataset."
-    )
+    parser.description = "Compute and plot a Taylor diagram comparing multiple model datasets against a single reference dataset."
     parser.epilog = (
         "Example:\n"
         "  mhm-tools taylor_diagram \\\n"
@@ -38,9 +37,13 @@ def add_args(parser):
         "--ref_input_dir", required=True, help="Directory with reference NetCDF file"
     )
     req.add_argument(
-        "--reference_pattern", required=True, help="Filename pattern for reference NetCDF file"
+        "--reference_pattern",
+        required=True,
+        help="Filename pattern for reference NetCDF file",
     )
-    req.add_argument("--ref_var", required=True, help="Variable name in reference dataset")
+    req.add_argument(
+        "--ref_var", required=True, help="Variable name in reference dataset"
+    )
     req.add_argument(
         "--mod_input_dirs",
         nargs="+",
@@ -62,7 +65,9 @@ def add_args(parser):
     req.add_argument(
         "-o", "--output_dir", required=True, help="Directory to save the output PNG."
     )
-    req.add_argument("--output_file", required=True, help="Filename for the output PNG.")
+    req.add_argument(
+        "--output_file", required=True, help="Filename for the output PNG."
+    )
 
     # Optional arguments
     parser.add_argument(
@@ -83,11 +88,7 @@ def add_args(parser):
 
 def run(args):
     # sanity check to ensure matched lists
-    if not (
-        len(args.mod_input_dirs)
-        == len(args.model_patterns)
-        == len(args.mod_vars)
-    ):
+    if not (len(args.mod_input_dirs) == len(args.model_patterns) == len(args.mod_vars)):
         raise ValueError(
             "The number of --mod_input_dirs, --model_patterns, and --mod_vars must all match."
         )

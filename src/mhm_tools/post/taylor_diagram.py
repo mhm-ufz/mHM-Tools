@@ -1,9 +1,9 @@
+import os
 from pathlib import Path
 from typing import List
-import os
 
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 import xarray as xr
 from easy_mpl import taylor_plot
 
@@ -68,14 +68,10 @@ def generate_taylor_diagram(
     ref_values = calc_tim_mean(da_ref).values
 
     # 3) Build the observations dict for multi-plot mode
-    observations = {
-        ref_label: ref_values
-    }
+    observations = {ref_label: ref_values}
 
     # 4) Initialize the simulations dict with the same top-level key
-    simulations = {
-        ref_label: {}
-    }
+    simulations = {ref_label: {}}
 
     # 5) Loop over each model directory/pattern/var/label and fill the nested dict
     for mod_dir, mod_pattern, mod_var, mod_label in zip(
@@ -92,7 +88,9 @@ def generate_taylor_diagram(
     if normalize:
         obs_std = np.std(obs_clean)
         if obs_std == 0:
-            raise ValueError("Standard deviation of observations is zero, cannot normalize.")
+            raise ValueError(
+                "Standard deviation of observations is zero, cannot normalize."
+            )
         obs_clean = obs_clean / obs_std
         sims_clean = {k: v / obs_std for k, v in sims_clean.items()}
 
@@ -103,8 +101,8 @@ def generate_taylor_diagram(
     fig = taylor_plot(
         observations=observations_clean,
         simulations=simulations_clean,
-        cont_kws={'colors': 'blue', 'linewidths': 1.0, 'linestyles': 'dotted'},
-        grid_kws={'axis': 'x', 'color': 'g', 'lw': 1.0},
+        cont_kws={"colors": "blue", "linewidths": 1.0, "linestyles": "dotted"},
+        grid_kws={"axis": "x", "color": "g", "lw": 1.0},
         title=title or None,
     )
 

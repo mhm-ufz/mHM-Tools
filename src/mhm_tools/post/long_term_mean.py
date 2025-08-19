@@ -195,7 +195,9 @@ def cal_long_term_mean(
             logger.info(f"Calculating CDO timmean above {lower_threshold=}.")
             tmp_masked = p_out_dir / f"above_threshold_{pattern_name}"
             # Mask all values below lower_threshold by setting them missing:
-            cdo.setrtomiss(f"-1e20,{lower_threshold}", input=str(tmp_merge), output=str(tmp_masked))
+            cdo.setrtomiss(
+                f"-1e20,{lower_threshold}", input=str(tmp_merge), output=str(tmp_masked)
+            )
             cdo.timmean(input=str(tmp_masked), output=str(final_path))
         else:
             logger.info(f"Running CDO timmean on {tmp_merge} → {final_path}")

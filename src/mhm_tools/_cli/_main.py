@@ -6,6 +6,7 @@ from mhm_tools.common.logger import configure_mhm_tools_logger
 
 from .. import __version__
 from . import (
+    _2d_map,
     _bankfull,
     _create_catchment,
     _create_idgauges,
@@ -20,9 +21,8 @@ from . import (
     _long_term_mean,
     _prepare_mhm_forcings,
     _ratio,
-    _taylor_diagram,
     _relative_difference,
-    _2d_map,
+    _taylor_diagram,
 )
 
 

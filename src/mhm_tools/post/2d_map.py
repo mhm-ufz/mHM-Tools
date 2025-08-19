@@ -1,6 +1,9 @@
-import xarray as xr
 from pathlib import Path
+
+import xarray as xr
+
 from mhm_tools.common.plotter import plot_map
+
 
 def run(args):
     """
