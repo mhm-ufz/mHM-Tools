@@ -56,41 +56,47 @@ def add_args(parser):
         "--aggregation",
         dest="aggregate",
         action="store_true",
-        help="Perform temporal aggregation before merging (default: False)",
+        help="Perform temporal aggregation before merging.",
     )
     optional.add_argument(
         "--keep-temporal-files",
         action="store_true",
-        help="Keep intermediate temporal files generated during processing (default: False).",
+        help="Keep intermediate temporal files generated during processing.",
     )
     optional.add_argument(
         "--out-file",
-        help="Name of the output NetCDF file (default: long_term_mean.nc)",
+        help="Name of the output NetCDF file.",
     )
     optional.add_argument(
         "--crop",
         action="store_true",
-        help="Crop the data to the specified geographic bounds",
+        help="Crop the data to the specified geographic bounds.",
     )
     optional.add_argument(
         "--lon-min",
         type=float,
-        help="Minimum longitude for cropping",
+        help="Minimum longitude for cropping.",
     )
     optional.add_argument(
         "--lon-max",
         type=float,
-        help="Maximum longitude for cropping",
+        help="Maximum longitude for cropping.",
     )
     optional.add_argument(
         "--lat-min",
         type=float,
-        help="Minimum latitude for cropping",
+        help="Minimum latitude for cropping.",
     )
     optional.add_argument(
         "--lat-max",
         type=float,
-        help="Maximum latitude for cropping",
+        help="Maximum latitude for cropping.",
+    )
+    optional.add_argument(
+        "--lower-threshold",
+        type=float,
+        default=None,
+        help="If given, calculates the long-term mean for values equal or above lower-threshold.",
     )
     parser.set_defaults(aggregate=False)
 
@@ -121,4 +127,5 @@ def run(args: argparse.Namespace):
         lat_min=args.lat_min,
         lat_max=args.lat_max,
         aggregate=args.aggregate,
+        lower_threshold=args.lower_threshold,
     )

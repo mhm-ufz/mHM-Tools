@@ -52,7 +52,7 @@ def calc_rel_diff(
     da_mod_interp = da_mod.interp_like(da_ref)
 
     # calculating relative difference, if true prevents division by 0
-    diff = xr.where(da_ref != 0, (da_mod_interp - da_ref) / da_ref, np.nan)
+    diff = xr.where(da_ref != 0, (da_ref - da_mod_interp) / da_ref, np.nan)
 
     # Sets output path to save plot
     out_path_dir = Path(output_dir)

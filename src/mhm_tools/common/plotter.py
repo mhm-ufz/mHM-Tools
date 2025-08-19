@@ -3,10 +3,137 @@ from typing import Optional
 
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
+import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 from matplotlib.colors import BoundaryNorm, ListedColormap
+
+
+def plot_constant_data_map(
+    lon, lat, arr, vmin, vmax, cb_label, title, out_path, cmap="RdBu", 
+    x_min=None, x_max=None, y_min=None, y_max=None
+):
+    base_cmap = plt.get_cmap(cmap)
+    single_color = base_cmap(0.5)  # middle color
+    
+    cmap = ListedColormap([single_color])
+    norm = BoundaryNorm([vmin - 1, vmax + 1], ncolors=1)
+    
+    fig = plt.figure(figsize=(12, 6))
+    ax = plt.axes(projection=ccrs.PlateCarree())
+    ax.set_extent([lon.min(), lon.max(), lat.min(), lat.max()], crs=ccrs.PlateCarree())
+    
+    lon2d, lat2d = np.meshgrid(lon, lat)
+    mesh = ax.pcolormesh(
+        lon2d,
+        lat2d,
+        np.full_like(arr, fill_value=vmin),
+        cmap=cmap,
+        norm=norm,
+        transform=ccrs.PlateCarree(),
+        shading="auto",
+    )
+    
+    ax.coastlines()
+    ax.add_feature(cfeature.BORDERS, linewidth=0.5)
+    ax.gridlines(draw_labels=True, linewidth=0.2, linestyle="--")
+    
+    # Remove colorbar, add legend box with patch
+    patch = mpatches.Patch(color=single_color, label=f"{vmin:.2f} {cb_label}")
+    ax.legend(handles=[patch], loc="lower right", framealpha=0.8, fontsize=12)
+
+    
+    plt.title(title)
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=300)
+    plt.close()
+
+
+def plot_discrete_data_map(
+    lon,
+    lat,
+    arr,
+    vmin,
+    vmax,
+    cb_label,
+    title,
+    out_path,
+    cmap="RdBu",
+    x_min=None,
+    x_max=None,
+    y_min=None,
+    y_max=None,
+):
+    import cartopy.crs as ccrs
+    import cartopy.feature as cfeature
+    import matplotlib.pyplot as plt
+    import numpy as np
+    from matplotlib.colors import BoundaryNorm, ListedColormap
+
+    # Determine how the colorbar should handle data outside [vmin, vmax]
+    extend = "neither"
+    if np.nanmin(arr) < vmin and np.nanmax(arr) > vmax:
+        extend = "both"
+    elif np.nanmin(arr) < vmin:
+        extend = "min"
+    elif np.nanmax(arr) > vmax:
+        extend = "max"
+
+    # Create a discrete colormap with ~9 bins and possible extensions
+    levels = np.linspace(vmin, vmax, 10)
+    n_bins = len(levels) - 1
+
+    # Account for extra colors needed if data exceeds bounds
+    extra = {"neither": 0, "min": 1, "max": 1, "both": 2}[extend]
+
+    base_cmap = plt.get_cmap(cmap, n_bins + extra)
+    cmap = ListedColormap(base_cmap(np.arange(n_bins + extra)))
+    norm = BoundaryNorm(levels, ncolors=n_bins + extra, extend=extend)
+
+    # Set up the plot using Cartopy’s PlateCarree projection
+    fig = plt.figure(figsize=(12, 6))
+    ax = plt.axes(projection=ccrs.PlateCarree())
+
+    # Automatically set extent to data bounds unless overridden
+    ax.set_extent([lon.min(), lon.max(), lat.min(), lat.max()], crs=ccrs.PlateCarree())
+
+    # Create 2D grids of lon/lat for plotting
+    lon2d, lat2d = np.meshgrid(lon, lat)
+
+    # Plot the data field using pcolormesh with georeferenced lon/lat
+    mesh = ax.pcolormesh(
+        lon2d,
+        lat2d,
+        arr,
+        cmap=cmap,
+        norm=norm,
+        transform=ccrs.PlateCarree(),
+        shading="auto",
+    )
+
+    # Optionally override axis limits
+    if x_min is not None or x_max is not None:
+        ax.set_xlim(left=x_min, right=x_max)
+    if y_min is not None or y_max is not None:
+        ax.set_ylim(bottom=y_min, top=y_max)
+
+    # Add cartographic features
+    ax.coastlines()
+    ax.add_feature(cfeature.BORDERS, linewidth=0.5)
+    ax.gridlines(draw_labels=True, linewidth=0.2, linestyle="--")
+
+    # Create colorbar with optional extensions to show clipping
+    cb = plt.colorbar(
+        mesh, ax=ax, orientation="vertical", shrink=0.8, pad=0.05, extend=extend
+    )
+    cb.set_label(cb_label)
+
+    # Final plot layout
+    plt.title(title)
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=300)
+    plt.close()
 
 
 def plot_map(
@@ -51,63 +178,38 @@ def plot_map(
     if vmax is None:
         vmax = float(np.nanmax(arr))
 
-    # Determine how the colorbar should handle data outside [vmin, vmax]
-    extend = "neither"
-    if np.nanmin(arr) < vmin and np.nanmax(arr) > vmax:
-        extend = "both"
-    elif np.nanmin(arr) < vmin:
-        extend = "min"
-    elif np.nanmax(arr) > vmax:
-        extend = "max"
-
-    # Create a discrete colormap with ~9 bins and possible extensions
-    levels = np.linspace(vmin, vmax, 10)
-    n_bins = len(levels) - 1
-
-    # Account for extra colors needed if data exceeds bounds
-    extra = {"neither": 0, "min": 1, "max": 1, "both": 2}[extend]
-
-    base_cmap = plt.get_cmap(cmap, n_bins + extra)
-    cmap = ListedColormap(base_cmap(np.arange(n_bins + extra)))
-    norm = BoundaryNorm(levels, ncolors=n_bins + extra, extend=extend)
-
-    # Set up the plot using Cartopy’s PlateCarree projection
-    fig = plt.figure(figsize=(12, 6))
-    ax = plt.axes(projection=ccrs.PlateCarree())
-
-    # Automatically set extent to data bounds unless overridden
-    ax.set_extent([lon.min(), lon.max(), lat.min(), lat.max()], crs=ccrs.PlateCarree())
-
-    # Plot the data field using pcolormesh with georeferenced lon/lat
-    mesh = ax.pcolormesh(
-        lon2d,
-        lat2d,
-        arr,
-        cmap=cmap,
-        norm=norm,
-        transform=ccrs.PlateCarree(),
-        shading="auto",
-    )
-
-    # Optionally override axis limits
-    if x_min is not None or x_max is not None:
-        ax.set_xlim(left=x_min, right=x_max)
-    if y_min is not None or y_max is not None:
-        ax.set_ylim(bottom=y_min, top=y_max)
-
-    # Add cartographic features
-    ax.coastlines()
-    ax.add_feature(cfeature.BORDERS, linewidth=0.5)
-    ax.gridlines(draw_labels=True, linewidth=0.2, linestyle="--")
-
-    # Create colorbar with optional extensions to show clipping
-    cb = plt.colorbar(
-        mesh, ax=ax, orientation="vertical", shrink=0.8, pad=0.05, extend=extend
-    )
-    cb.set_label(cb_label)
-
-    # Final plot layout
-    plt.title(title)
-    plt.tight_layout()
-    plt.savefig(out_path, dpi=300)
-    plt.close()
+    # Fix for constant data (e.g., all zeros) so vmin != vmax
+    if vmin == vmax:
+        # Constant data plotting
+        plot_constant_data_map(
+            lon=lon,
+            lat=lat,
+            arr=arr,
+            vmin=vmin,
+            vmax=vmax,
+            cb_label=cb_label,
+            title=title,
+            out_path=out_path,
+            cmap=cmap,
+            x_min=x_min,
+            x_max=x_max,
+            y_min=y_min,
+            y_max=y_max,
+        )
+    else:
+        # plot regular discrete map
+        plot_discrete_data_map(
+            lon=lon,
+            lat=lat,
+            arr=arr,
+            vmin=vmin,
+            vmax=vmax,
+            cb_label=cb_label,
+            title=title,
+            out_path=out_path,
+            cmap=cmap,
+            x_min=x_min,
+            x_max=x_max,
+            y_min=y_min,
+            y_max=y_max,
+        )

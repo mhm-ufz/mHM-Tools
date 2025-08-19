@@ -49,7 +49,7 @@ def calc_diff(
     da_mod_interp = da_mod.interp_like(da_ref)
 
     # Now safe to subtract
-    diff = da_mod_interp - da_ref
+    diff = da_ref- da_mod_interp
 
     # Sets output path to save plot
     out_path_dir = Path(output_dir)

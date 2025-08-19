@@ -1,5 +1,5 @@
 """
-Compute and plot the spatial difference between a model dataset and a reference dataset.
+Compute and plot the spatial difference between a reference dataset and model dataset.
 
 This script reads CF-compliant NetCDF files for both model and reference datasets, computes
 the spatial difference for a specified variable, applies any provided geographic or data
@@ -41,8 +41,8 @@ def str2float(value):
 def add_args(parser):
     """Add CLI arguments for the long_term_mean_diff subcommand."""
     parser.description = (
-        "Compute and plot the spatial difference between a model dataset and a reference dataset "
-        "for a specified variable: diff = (da_mod - da_ref). "
+        "Compute and plot the spatial difference between a reference dataset and model dataset "
+        "for a specified variable: diff = (da_ref -da_mod). "
         "Supports wildcard matching, custom variable names, colorbar labels, "
         "titles, output file naming, optional axis limits, custom colormap, and explicit colormap range."
     )

@@ -74,6 +74,7 @@ def cal_long_term_mean(
     lat_min: Optional[float] = None,
     lat_max: Optional[float] = None,
     aggregate: bool = False,
+    lower_threshold: Optional[str] = None,
 ) -> None:
     """Compute long-term means for NetCDF forcing data.
 
@@ -185,12 +186,20 @@ def cal_long_term_mean(
             with ErrorLogger(logger):
                 raise RuntimeError(msg) from e
 
-    # Finally, compute the time mean (timmean) on tmp_merge
+    # Finally, compute the time mean on tmp_merge
     final_name = out_file or "long_term_mean.nc"
     final_path = p_out_dir / final_name
     try:
-        logger.info(f"Running CDO timmean on {tmp_merge} → {final_path}")
-        cdo.timmean(input=str(tmp_merge), output=str(final_path))
+        if lower_threshold is not None:
+            logger.info(f"{lower_threshold=} selected.")
+            logger.info(f"Calculating CDO timmean above {lower_threshold=}.")
+            tmp_masked = p_out_dir / f"above_threshold_{pattern_name}"
+            # Mask all values below lower_threshold by setting them missing:
+            cdo.setrtomiss(f"-1e20,{lower_threshold}", input=str(tmp_merge), output=str(tmp_masked))
+            cdo.timmean(input=str(tmp_masked), output=str(final_path))
+        else:
+            logger.info(f"Running CDO timmean on {tmp_merge} → {final_path}")
+            cdo.timmean(input=str(tmp_merge), output=str(final_path))
     except Exception as e:
         msg = f"CDO timmean failed: {e}"
         with ErrorLogger(logger):

@@ -20,7 +20,9 @@ from . import (
     _long_term_mean,
     _prepare_mhm_forcings,
     _ratio,
+    _taylor_diagram,
     _relative_difference,
+    _2d_map,
 )
 
 
@@ -100,6 +102,8 @@ def _get_parser():
     add_command_from_module(subparsers, "difference", _difference)
     add_command_from_module(subparsers, "relative_difference", _relative_difference)
     add_command_from_module(subparsers, "ratio", _ratio)
+    add_command_from_module(subparsers, "taylor_diagram", _taylor_diagram)
+    add_command_from_module(subparsers, "2d_map", _2d_map)
 
     # add logging
     # option 1 explicit log levels by name

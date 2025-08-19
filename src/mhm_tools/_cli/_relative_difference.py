@@ -2,7 +2,7 @@
 Compute and plot the spatial relative difference between a model dataset and a reference dataset.
 
 This script reads CF-compliant NetCDF files for both model and reference datasets, computes
-the spatial realtive difference as: diff = (da_mod - da_ref) / da_ref for a specified variable,
+the spatial realtive difference as: diff = (da_ref - da_mod) / da_ref for a specified variable,
 applies any provided geographic or data range limits, and generates a high-resolution PNG
 showing that difference with customizable title, colorbar label, and colormap.
 
@@ -42,7 +42,7 @@ def add_args(parser):
     """Add CLI arguments for the long_term_mean_diff subcommand."""
     parser.description = (
         "Compute and plot the spatial relative difference between a model dataset and a reference dataset "
-        "for a specified variable: diff = (da_mod - da_ref) / da_ref. "
+        "for a specified variable: diff = (da_ref - da_mod) / da_ref. "
         "Supports wildcard matching, custom variable names, colorbar labels, "
         "titles, output file naming, optional axis limits, custom colormap, and explicit colormap range."
     )
