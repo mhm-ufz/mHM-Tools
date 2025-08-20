@@ -202,9 +202,7 @@ class Catchment:
         raise ValueError(not_int_multiple_msg)
 
     def upscale(self, var):
-        """Upscale flow direction to l1_resolution if that is int multipe of
-        data resolution.
-        """
+        """Upscale flow direction to l1_resolution if that is int multipe of data resolution."""
         factor = self.get_upscaling_factor()
 
         if factor == 1:
@@ -270,9 +268,7 @@ class Catchment:
 
     @staticmethod
     def create_frame(ds, frame=0, frame_value=0):
-        """If a frame is used this frame is set to no data values as a
-        frame.
-        """
+        """If a frame is used this frame is set to no data values as a frame."""
         logger.info(f"Creating a frame of {frame} cells around the domain.")
         if frame > 0:
             for var in ds.data_vars:
@@ -286,8 +282,7 @@ class Catchment:
         return ds
 
     def fill_adjacent_missing_with_sink(self, da, fill_value, sink_value):
-        """Replace all missing values adjacent to non-missing values with 0 in
-        an xarray Dataset.
+        """Replace all missing values adjacent to non-missing values with 0 in an xarray Dataset.
 
         Parameters
         ----------
@@ -409,9 +404,7 @@ class Catchment:
                 raise Exception(msg)
 
     def processing_data_variable(self, var_name, cut_by_basin, lat_slice, lon_slice):
-        """Process data variable, masking it and croping it spatial
-        dimensions.
-        """
+        """Process data variable, masking it and croping it spatial dimensions."""
         logger.info(f"Processing {var_name}")
         data = getattr(self, var_name)
         if data is None:
@@ -458,9 +451,7 @@ class Catchment:
         return data_var
 
     def write_basin_id_file(self, data_vars, frame, out_path):
-        """Write the basin_id file to specified path and set a sink value frame
-        if specified.
-        """
+        """Write the basin_id file to specified path and set a sink value frame if specified."""
         logger.info("Write to single file.")
         ds = xr.merge(data_vars.values())
         # set some attributes
@@ -670,9 +661,7 @@ def create_catchment(
     upscale=False,
     latlon=True,
 ):
-    """Create file containing catchment ids, flowdirection and upstream area
-    from dem or flow direction.
-    """
+    """Create file containing catchment ids, flowdirection and upstream area from dem or flow direction."""
     logger.info(
         f"Creating catchment file for {var_name} using {var} and {ftype} from {input_file}"
     )

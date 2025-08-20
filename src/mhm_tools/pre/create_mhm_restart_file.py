@@ -692,7 +692,7 @@ class MHMRestartFile:
         }
         return sorted(dims, key=lambda x: weight_dims.get(x, 5))
 
-    def _merge_restart_files(self):  # noqa: PLR0912, PLR0913
+    def _merge_restart_files(self):  # noqa: PLR0912, PLR0915
         logger.info("Merging restart files")
 
         # 1. create an empty file for the whole grid
