@@ -255,9 +255,10 @@ def call_create_latlon(
     meteo_header_path,
     crs,
 ):
-    """
-    Create header dictionaries for the different resolutions and
-    call create latlon to create a latlon file for the setup.
+    """Create lat/lon headers for multiple resolutions and write the latlon file.
+
+    Builds L0, L1, and optionally L11 headers from the DEM and requested
+    resolutions, then calls `create_latlon` with the given CRS and meteo header.
     """
     # create new latlon file
     logger.info("Creating new latlon file")

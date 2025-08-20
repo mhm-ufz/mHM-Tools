@@ -108,7 +108,7 @@ def plot_discrete_data_map(
     cmap = ListedColormap(base_cmap(np.arange(n_bins + extra)))
     norm = BoundaryNorm(levels, ncolors=n_bins + extra, extend=extend)
 
-    # Set up the plot using Cartopy’s PlateCarree projection
+    # Set up the plot using Cartopy's PlateCarree projection
     plt.figure(figsize=(12, 6))
     ax = plt.axes(projection=ccrs.PlateCarree())
 

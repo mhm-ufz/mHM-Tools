@@ -62,13 +62,17 @@ class MorphFiles:
             self.read_files(filepath)
 
     def read_files(self, filepath: Path, overwrite=False):
-        """Read files from the specified filepath and assigns them to the
-        corresponding attributes.
+        """Read morph files and assign them to attributes.
 
-        Args:
-            filepath (Path): The path to the directory containing the files.
-            overwrite (bool, optional): If False, existing attribute values will not be overwritten.
-                Defaults to False.
+        Scans `filepath` for known variables and sets the corresponding instance
+        attributes. Existing values are preserved unless `overwrite=True`.
+
+        Parameters
+        ----------
+        filepath : Path
+            Directory containing the files.
+        overwrite : bool, default False
+            If False, existing attribute values will not be overwritten.
         """
         member_key_synonyms = {
             "bulk_density": ["BLDFIE"],
@@ -105,8 +109,7 @@ class MorphFiles:
         logger.debug(self.get_files_as_dict())
 
     def get_file(self, key):
-        """Retrieve the file path associated with the given name of the member
-        variable.
+        """Retrieve the file path associated with the given name of the member variable.
 
         Parameters
         ----------
@@ -176,28 +179,25 @@ class LatLon:
         self.mask = mask
 
     def get_n_lat(self):
-        """Calculate the number of latitude points based on the given latitude
-        range and resolution.
+        """Return the number of latitude points for the range and resolution.
 
         Returns
         -------
             int: The number of latitude points.
         """
-        return int(
-            (self.lat_max - self.lat_min) / self.resolution + 0.5
-        )  # + 0.5 to round up
+        # +0.5 to round to nearest integer
+        return int((self.lat_max - self.lat_min) / self.resolution + 0.5)
 
     def get_n_lon(self):
-        """Calculate the number of longitude points based on the given
-        longitude range and resolution.
+        """Return the number of longitude points for the range and resolution.
 
         Returns
         -------
-            int: The number of longitude points.
+        int
+            Number of longitude points.
         """
-        return int(
-            (self.lon_max - self.lon_min) / self.resolution + 0.5
-        )  # + 0.5 to round up
+        # +0.5 to round to nearest integer
+        return int((self.lon_max - self.lon_min) / self.resolution + 0.5)
 
     def is_fully_defined(self):
         """Check if all the required attributes are fully defined.
@@ -220,7 +220,8 @@ class LatLon:
 class Grid:
     """Represents a geographical area for wich morphological data exists.
 
-    This grid is used to run the mPR model. It does not need to contain a whole catchment, but can be a subset of it or multiple catchments at once.
+    This grid is used to run the mPR model. It does not need to contain a whole catchment,
+    but can be a subset of it or multiple catchments at once.
 
     Attributes
     ----------
@@ -259,9 +260,7 @@ class Grid:
             self.read_latlon(latlon_file)
 
     def migrate_grid_using_systemlink(self, new_path):
-        """Mirgrates the file path by creating a new path and system linking
-        all files there.
-        """
+        """Mirgrates the file path by creating a new path and system linking all files there."""
         logger.info(f"Creating system links in {new_path} for all files in {self.path}")
         new_path = Path(new_path)
         new_path.mkdir(parents=True, exist_ok=True)
@@ -274,15 +273,19 @@ class Grid:
         self.morph_files = MorphFiles(self.path)
 
     def read_latlon(self, latlon_file: Path):
-        """Read the latlon file and sets the lower-left (l0) and upper-right
+        """Longitude and Latidute reader.
+
+        Read the latlon file and sets the lower-left (l0) and upper-right
         (l1) corners of the grid as well as the resolution.
 
-        Args:
-            latlon_file (Path): The file path of the latlon file.
+        Parameters
+        ----------
+        latlon_file : Path
+            Path to the latlon NetCDF file.
 
         Returns
         -------
-            None
+        None
         """
         with xr.open_dataset(latlon_file) as ds:
             x0 = ds["xc_l0"].to_numpy()
@@ -518,9 +521,7 @@ class MHMRestartFile:
         return grid
 
     def _create_latlon(self, lon_min, lat_min):
-        """Create a l0 resolution and a l1 resolution LatLon object from a
-        given lon_min and lat_min.
-        """
+        """Create l0 and a l1 resolution LatLon object from a given lon_min and lat_min."""
         lon_max = lon_min + self.increment_l1 * self.grid.l1.resolution
         lon_max = min(lon_max, self.grid.l1.lon_max)
         lat_max = lat_min + self.increment_l1 * self.grid.l1.resolution
@@ -661,7 +662,21 @@ class MHMRestartFile:
         return {k: v for d in sub_grid_paths for k, v in d.items()}
 
     def _order_dims(self, dims):
-        """Order the dimensions of the data variable."""
+        """Order the dimensions of the data variable.
+
+        Dimensions are sorted by a fixed priority: lower weights come first; any
+        unknown dimension defaults to weight 5.
+
+        Parameters
+        ----------
+        dims : Iterable[str]
+            Names of the dimensions.
+
+        Returns
+        -------
+        list[str]
+            Dimensions sorted by priority.
+        """
         weight_dims = {
             "land_cover_period_out": 0,
             "month_of_year": 1,
@@ -677,7 +692,7 @@ class MHMRestartFile:
         }
         return sorted(dims, key=lambda x: weight_dims.get(x, 5))
 
-    def _merge_restart_files(self):
+    def _merge_restart_files(self):  # noqa: PLR0912, PLR0913
         logger.info("Merging restart files")
 
         # 1. create an empty file for the whole grid

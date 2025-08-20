@@ -1256,7 +1256,8 @@ def gridded_data_validation(  # noqa: PLR0913
             )
         else:
             with ErrorLogger(logger):
-                raise ValueError("input path does not exist")
+                msg = "input path does not exist"
+                raise ValueError(msg)
 
     elif (
         n_bootstrap_years is not None

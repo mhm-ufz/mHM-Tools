@@ -104,8 +104,23 @@ class CreateSubdomainMasks:
 
     @staticmethod
     def get_mask_from_polygon(arr, vertices):
-        """Create a mask on an array with lon and lat attributes for given list
-        of vertices.
+        """Create a boolean mask for points inside a polygon.
+
+        The input `arr` is a 2D array with `lat` and `lon` coordinates; the mask is
+        True for cells whose (lon, lat) fall inside the polygon defined by
+        `vertices`.
+
+        Parameters
+        ----------
+        arr : xarray.DataArray
+            2D data array with coordinates `lat` and `lon`.
+        vertices : sequence[tuple[float, float]]
+            Polygon vertices as (lon, lat) pairs.
+
+        Returns
+        -------
+        numpy.ndarray
+            Boolean mask with the same shape as `arr`, True inside the polygon.
         """
         polygon = mpl.path.Path(vertices)
         # mask out only the values in arr that fall within bbox of polygon, convert them to points

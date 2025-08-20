@@ -21,9 +21,9 @@ def str2float(value):
         return None
     try:
         return float(value)
-    except Exception:
+    except (TypeError, ValueError) as err:
         msg = f"{value!r} is not a valid float."
-        raise argparse.ArgumentTypeError(msg)
+        raise argparse.ArgumentTypeError(msg) from err
 
 
 def add_args(parser: argparse.ArgumentParser):

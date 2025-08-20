@@ -181,7 +181,7 @@ def get_gauge_coords(
     return None, None, None
 
 
-def Q_data_to_xarray(  # noqa: PLR0913, PLR0915
+def Q_data_to_xarray(  # noqa: PLR0913
     model_data_path,
     observed_data_path,
     mrm_restart_file,
@@ -199,8 +199,7 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915
     overwrite=False,
     direct_comparison=False,
 ):
-    """Get observed and model Q data and save it as CSV files to be opened
-    later.
+    """Get observed and model Q data and save it as CSV files to be opened later.
 
     This function is not part of the workflow, but a pre processing tool
     that for comodity has been stored here. This was done bc mrm_data_by_id.values
