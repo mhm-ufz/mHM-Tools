@@ -259,7 +259,10 @@ def call_create_latlon(
     # create new latlon file
     logger.info("Creating new latlon file")
     with get_xarray_ds_from_file(
-        dem_output_file, chunking=True, normalize_latlon_coords=True, force_decending_y=True
+        dem_output_file,
+        chunking=True,
+        normalize_latlon_coords=True,
+        force_decending_y=True,
     ) as ds_dem:
         l0 = create_header(ds_dem, None, write=False)
     logger.debug(f"L0: {l0}")
@@ -322,7 +325,7 @@ def crop_file(
                 chunking=True,
                 available_mem_gib=available_mem_gib,
                 normalize_latlon_coords=True,
-                force_decending_y=True
+                force_decending_y=True,
             )
         except ValueError:
             logger.error(

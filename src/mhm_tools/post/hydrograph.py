@@ -11,12 +11,12 @@ from pathlib import Path
 
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
-from mhm_tools.common.spatial_metrics import create_csv_from_dict
 import numpy as np
 from matplotlib import gridspec
 
 from mhm_tools.common.file_handler import get_xarray_ds_from_file
 from mhm_tools.common.logger import ErrorLogger, log_arguments
+from mhm_tools.common.spatial_metrics import create_csv_from_dict
 
 logger = logging.getLogger(__name__)
 
@@ -938,11 +938,12 @@ class Hydrograph:
         return True
 
     def write_output(self):
-        out_dict = {k: [v] for k,v in {**self.objectives.__dict__}.items()}
-        logger.info(f'generated metrics: {out_dict}')
-        if id is not None: 
+        out_dict = {k: [v] for k, v in {**self.objectives.__dict__}.items()}
+        logger.info(f"generated metrics: {out_dict}")
+        if id is not None:
             out_dict["id"] = str(id)
-        create_csv_from_dict(out_dict, self.output_file.parent / f"kge.csv")
+        create_csv_from_dict(out_dict, self.output_file.parent / "kge.csv")
+
 
 @log_arguments()
 def get_hydrograph_from_path(
@@ -968,12 +969,12 @@ def get_hydrograph_from_path(
     if output_file.suffix and output_file.parent.exists():
         hydro.output_file = output_file
     elif output_file.is_dir():
-        hydro.output_file = output_file / 'hydrograph.png'
-    else: 
-        msg = f'Output file is neither file nor directory. {output_file}'
+        hydro.output_file = output_file / "hydrograph.png"
+    else:
+        msg = f"Output file is neither file nor directory. {output_file}"
         with ErrorLogger(logger):
             raise ValueError(msg)
-        
+
     hydro.title = title
     hydro.show = show
     hydro.save = save
@@ -987,8 +988,6 @@ def get_hydrograph_from_path(
     hydro.get_catchment_area(input_path, ndecimal=0)
     hydro.get_hydrograph()
     hydro.write_output()
-    
-
 
 
 @log_arguments()

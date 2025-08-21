@@ -76,7 +76,7 @@ def get_single_data_var(ds):
     len_data_vars = len(data_vars)
     if len_data_vars > 1:
         for coord in [get_coord_key(ds, lon=True), get_coord_key(ds, lat=True)]:
-            if coord in data_vars: 
+            if coord in data_vars:
                 len_data_vars -= 1
                 data_vars.remove(coord)
         if len_data_vars > 1:

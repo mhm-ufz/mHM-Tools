@@ -241,5 +241,5 @@ def run(args):
         avaiable_mem=available_mem,
         input_file_name=args.input_file_name,
         ref_file_name=args.ref_file_name,
-        bias_only=args.bias_only
+        bias_only=args.bias_only,
     )

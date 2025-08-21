@@ -332,8 +332,8 @@ def Q_data_to_xarray(
                 y_new.append(yn)
                 facc_new.append(fan)
                 gauge_ids_with_values.append(gauge_ids.values[i])
-        if len(x_new) == 0: 
-            msg = 'There are no gauges that could be found.'
+        if len(x_new) == 0:
+            msg = "There are no gauges that could be found."
             with ErrorLogger(logger):
                 raise ValueError(msg)
         logger.info(f"There are {len(x_new)} gauges")

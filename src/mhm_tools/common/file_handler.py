@@ -174,6 +174,7 @@ class ChunkType(Enum):
     SPACE = 1
     TIME = 2
 
+
 def get_xarray_ds_from_file(
     file_path,
     var_name=None,
@@ -219,9 +220,9 @@ def get_xarray_ds_from_file(
         if normalize_latlon_coords:
             ds_out = normalize_lat_lon(ds_out, lat_key, lon_key)
     elif lon_key is not None or lat_key is not None:
-        logger.error('Dataset has only one of lon at lat keys.')
+        logger.error("Dataset has only one of lon at lat keys.")
     else:
-        logger.warning('Dataset does not have lon and lat key.')
+        logger.warning("Dataset does not have lon and lat key.")
     if chunking and available_mem_gib is not None:
         ds_out = chunk_dataset(ds_out, chunk_type, available_mem_gib)
     if ds_out is None:
@@ -323,14 +324,13 @@ def read_ascii_to_xarray(filepath, var_name=None):
     ds = da.to_dataset()
 
     # Add axis attributes
-    if 'x' in ds.coords:
-        ds.coords['x'].attrs['axis'] = 'X'
-    if 'y' in ds.coords:
-        ds.coords['y'].attrs['axis'] = 'Y'
+    if "x" in ds.coords:
+        ds.coords["x"].attrs["axis"] = "X"
+    if "y" in ds.coords:
+        ds.coords["y"].attrs["axis"] = "Y"
 
     # Drop spatial_ref if present
     return ds.reset_coords("spatial_ref", drop=True)
-
 
 
 def get_coord_values(ds, lat=False, lon=False):

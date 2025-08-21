@@ -10,39 +10,38 @@ from mhm_tools.common.xarray_utils import get_coord_key
 logger = logging.getLogger(__name__)
 
 
-def write_gauge_id(ds, id, lat, lon, facc_file=None, threshold=None, facc_value=None ):
+def write_gauge_id(ds, id, lat, lon, facc_file=None, threshold=None, facc_value=None):
     """Set gauge_id in ds."""
     if facc_file:
         with get_xarray_ds_from_file(file_path=facc_file) as ds_facc:
             lon_key = get_coord_key(ds_facc, lon=True)
             lat_key = get_coord_key(ds_facc, lat=True)
-            if 'uparea_grid' in ds_facc: 
-                var = ds_facc['uparea_grid']
-            elif 'facc' in ds_facc: 
-                var = ds_facc['facc']
-            else: 
-                msg = 'Neither uparea_grid nor facc in dataset datavars.'
+            if "uparea_grid" in ds_facc:
+                var = ds_facc["uparea_grid"]
+            elif "facc" in ds_facc:
+                var = ds_facc["facc"]
+            else:
+                msg = "Neither uparea_grid nor facc in dataset datavars."
                 with ErrorLogger(logger):
                     raise ValueError(msg)
             var_max = var.where(var == var.max(), drop=True)
             # Extract x and y coordinate values
             y_coord = var_max[lat_key].values[0]
             x_coord = var_max[lon_key].values[0]
-        logger.info(f'Provided coords {lon} / {lat}')
-        logger.info(f'Max facc coords {x_coord} / {y_coord}')
+        logger.info(f"Provided coords {lon} / {lat}")
+        logger.info(f"Max facc coords {x_coord} / {y_coord}")
         lat = y_coord
         lon = x_coord
-    # elif threshold:
-    #     pass 
-    # elif facc_value: 
-        # pass 
     lon_key = get_coord_key(ds, lon=True)
     lat_key = get_coord_key(ds, lat=True)
     ds.loc[ds.sel({lat_key: lat, lon_key: lon}, method="nearest").coords] = id
     return ds
 
+
 @log_arguments()
-def create_id_gauges(id, lon, lat, file, out_path, file_is_idgauges=False, facc_file=None):
+def create_id_gauges(
+    id, lon, lat, file, out_path, file_is_idgauges=False, facc_file=None
+):
     """Create id gauges file."""
     file = Path(file)
     out_path = Path(out_path)
@@ -61,7 +60,7 @@ def create_id_gauges(id, lon, lat, file, out_path, file_is_idgauges=False, facc_
         else:
             contains_value = bool(ds[data_name] == float(id)).any()
         if not contains_value:
-            ds = write_gauge_id(ds, id, lat, lon, facc_file)#, threshold, facc_value)
+            ds = write_gauge_id(ds, id, lat, lon, facc_file)  # , threshold, facc_value)
             write_xarray_to_ascii(ds, out_path, data_name, fmt="%.0f")
         else:
             logger.info("Id {id} is already in {file}.")
