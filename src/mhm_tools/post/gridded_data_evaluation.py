@@ -628,7 +628,7 @@ def plot_map(
             spine.set_linewidth(0.25)
     plt.tight_layout()
 
-    plt.savefig(output_path / "et_map.png", dpi=800)
+    plt.savefig(output_path / f"et_map_{input_name}_{ref_name}.png", dpi=800)
     logger.info("created et_map")
 
 
