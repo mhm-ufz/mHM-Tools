@@ -1,11 +1,11 @@
 import unittest
 from pathlib import Path
 
-from mhm_tools.common.file_handler import get_xarray_ds_from_file
-from mhm_tools.common.xarray_utils import get_coord_key
 import numpy as np
 import xarray as xr
 
+from mhm_tools.common.file_handler import get_xarray_ds_from_file
+from mhm_tools.common.xarray_utils import get_coord_key
 from mhm_tools.pre import catchment
 
 HERE = Path(__file__).parent
@@ -119,7 +119,7 @@ class TestCatchment(unittest.TestCase):
                 out_var_name=output_var_names[1],
                 latlon=self.latlon,
                 do_shift=True,
-            )
+            ),
         ]
 
         output_path = Path(HERE, "files")
