@@ -1,6 +1,8 @@
 import unittest
 from pathlib import Path
 
+from mhm_tools.common.file_handler import get_xarray_ds_from_file
+from mhm_tools.common.xarray_utils import get_coord_key
 import numpy as np
 import xarray as xr
 
@@ -12,7 +14,7 @@ HERE = Path(__file__).parent
 class TestCatchment(unittest.TestCase):
     def setUp(self):
         lon = np.linspace(-180, 180, 360)
-        lat = np.linspace(-90, 90, 180)
+        lat = np.linspace(90, -90, 180)
         data = np.random.rand(180, 360)
         self.ds = xr.Dataset(
             {
@@ -117,7 +119,7 @@ class TestCatchment(unittest.TestCase):
                 out_var_name=output_var_names[1],
                 latlon=self.latlon,
                 do_shift=True,
-            ),
+            )
         ]
 
         output_path = Path(HERE, "files")
@@ -139,11 +141,16 @@ class TestCatchment(unittest.TestCase):
         path2 = Path(HERE, "files/hydro2.nc")
         out_path = Path(HERE, "files/hydro_merged_03min.nc")
 
-        self.assertTrue(path1.exists(), "hydro1.nc does not exist.")
-        self.assertTrue(path2.exists(), "hydro2.nc does not exist.")
+        self.assertTrue(path1.is_file(), "hydro1.nc does not exist.")
+        with xr.open_dataset(path2, engine="netcdf4") as ds1:
+            lat_key = get_coord_key(ds1, lat=True, raise_exception=False)
+            lon_key = get_coord_key(ds1, lon=True, raise_exception=False)
+            # print(ds1[lat_key].shape)
+            # print(ds1[lon_key].shape)
+        self.assertTrue(path2.is_file(), "hydro2.nc does not exist.")
 
         catchment.merge_catchment(path1, path2, out_path)
-        self.assertTrue(out_path.exists())
+        self.assertTrue(out_path.is_file())
 
     def tearDown(self):
         files_to_remove = ["hydro1.nc", "hydro2.nc", "hydro_merged_03min.nc"]
