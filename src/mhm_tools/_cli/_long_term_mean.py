@@ -21,13 +21,6 @@ def add_args(parser):
         help="Input directory containing forcing NetCDF files",
     )
     required.add_argument(
-        "-f",
-        "--in-file",
-        required=False,
-        default="*.nc",
-        help='Input filename or glob pattern (e.g. "data_*.nc")',
-    )
-    required.add_argument(
         "-o",
         "--out-dir",
         required=True,
@@ -35,6 +28,13 @@ def add_args(parser):
     )
 
     optional = parser.add_argument_group("optional arguments")
+    optional.add_argument(
+        "-f",
+        "--in-file",
+        required=False,
+        default="*.nc",
+        help='Input filename or glob pattern.',
+    )
     optional.add_argument(
         "--long-term-mean-type",
         choices=["hourly", "daily", "monthly", "yearly"],
@@ -65,6 +65,7 @@ def add_args(parser):
     )
     optional.add_argument(
         "--out-file",
+        default="long_term_mean.nc",
         help="Name of the output NetCDF file.",
     )
     optional.add_argument(
