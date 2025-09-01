@@ -34,50 +34,50 @@ def add_args(parser: argparse.ArgumentParser):
     parser.epilog = (
         "Example:\n"
         "mhm-tools 2d_map \\\n"
-        "--input_file /path/to/data.nc \\\n"
+        "--input-file /path/to/data.nc \\\n"
         "--var temperature \\\n"
-        "--colorbar_label 'Temp (°C)' \\\n"
+        "--colorbar-label 'Temp (°C)' \\\n"
         "--title 'Surface Temperature' \\\n"
-        "--x_min -10 --x_max 30 --y_min 40 --y_max 70 \\\n"
+        "--x-min -10 --x-max 30 --y-min 40 --y-max 70 \\\n"
         "--cmap viridis --vmin -5 --vmax 5 \\\n"
-        "-o /out/dir --output_file_png map.png"
+        "-o /out/dir --output-file_png map.png"
     )
 
     # required arguments
     req = parser.add_argument_group("required arguments")
     req.add_argument(
-        "--input_file", required=True, help="Path to the input NetCDF file"
+        "--input-file", required=True, help="Path to the input NetCDF file"
     )
     req.add_argument(
         "--var", required=True, help="Variable name in the NetCDF dataset to plot"
     )
     req.add_argument(
         "-o",
-        "--output_dir",
+        "--output-dir",
         required=True,
         help="Directory where the output PNG will be saved",
     )
     req.add_argument(
-        "--output_file_png", required=True, help="Filename for the output PNG"
+        "--output-file-png", required=True, help="Filename for the output PNG"
     )
 
     # optional arguments
-    parser.add_argument("--colorbar_label", default="", help="Label for the colorbar")
+    parser.add_argument("--colorbar-label", default="", help="Label for the colorbar")
     parser.add_argument("--title", default="", help="Title for the plot")
     parser.add_argument(
-        "--x_min", type=str2float, default=None, help="Minimum longitude to display"
+        "--x-min", type=str2float, default=None, help="Minimum longitude to display"
     )
     parser.add_argument(
-        "--x_max", type=str2float, default=None, help="Maximum longitude to display"
+        "--x-max", type=str2float, default=None, help="Maximum longitude to display"
     )
     parser.add_argument(
-        "--y_min", type=str2float, default=None, help="Minimum latitude to display"
+        "--y-min", type=str2float, default=None, help="Minimum latitude to display"
     )
     parser.add_argument(
-        "--y_max", type=str2float, default=None, help="Maximum latitude to display"
+        "--y-max", type=str2float, default=None, help="Maximum latitude to display"
     )
     parser.add_argument(
-        "--cmap", default="RdBu", help="Matplotlib colormap name to use"
+        "--cmap", default="RdBu_r", help="Matplotlib colormap name to use"
     )
     parser.add_argument(
         "--vmin", type=str2float, default=None, help="Minimum data value for colormap"
