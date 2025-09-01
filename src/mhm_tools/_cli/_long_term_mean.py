@@ -33,7 +33,7 @@ def add_args(parser):
         "--in-file",
         required=False,
         default="*.nc",
-        help='Input filename or glob pattern.',
+        help="Input filename or glob pattern.",
     )
     optional.add_argument(
         "--long-term-mean-type",
