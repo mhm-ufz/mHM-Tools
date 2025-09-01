@@ -55,9 +55,9 @@ def get_coord_key(
         pass
     # then select possible keys from the following lists and try them until a fitting one is found.
     if lat:
-        keys = ["lat", "latitude", "northing", "y", "new_y", "Y"]
+        keys = ["lat", "latitude", "northing", "y", "new_y", "Y", "geo_y"]
     elif lon:
-        keys = ["lon", "longitude", "easting", "x", "new_x", "X"]
+        keys = ["lon", "longitude", "easting", "x", "new_x", "X", "geo_x"]
     else:
         keys = ["time", "month_of_year"]
     for key in keys:
@@ -85,15 +85,24 @@ def get_coord_key(
         with ErrorLogger(logger):
             msg = f"None of {keys} in {type(ds).__name__} keys {ds_dims}."
             raise ValueError(msg)
-    return ""
+    return None
 
 
 def get_single_data_var(ds):
     """Get the data var name from a dataset that only contains one data variable."""
     data_vars = list(ds.data_vars)
-    if len(data_vars) > 1:
-        logger.error("Only single data_var allowed")
-        return None
+    len_data_vars = len(data_vars)
+    if len_data_vars > 1:
+        for coord in [get_coord_key(ds, lon=True), get_coord_key(ds, lat=True)]:
+            if coord in data_vars: 
+                len_data_vars -= 1
+                data_vars.remove(coord)
+        if len_data_vars > 1:
+            logger.error(f"Only single data_var allowed but has {data_vars}")
+            return None
+        if len_data_vars == 0:
+            logger.error("No datavar that is not coordinate.")
+            return None
     logger.debug(f"data_vars: {data_vars}")
     return data_vars[0]
 

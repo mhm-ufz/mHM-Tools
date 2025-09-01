@@ -34,8 +34,15 @@ def add_args(parser):
         "--output",
         dest="out_file",
         required=False,
-        default="hydrograph.pdf",
+        default="gauges_id.asc",
         help="The name of the output file.",
+    )
+    parser.add_argument(
+        "-u",
+        "--facc_file",
+        required=False,
+        default=None,
+        help="The name of the facc file used to adjust get coordinates.",
     )
     parser.add_argument(
         "--gauge_coords",
@@ -96,4 +103,5 @@ def run(args):
         lat=lat,
         file_is_idgauges=args.is_id_gauges,
         id=args.gauge_id,
+        facc_file=args.facc_file
     )

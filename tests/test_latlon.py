@@ -4,6 +4,7 @@ from pathlib import Path
 import xarray as xr
 
 import mhm_tools as mt
+from mhm_tools.common.file_handler import get_xarray_ds_from_file
 
 HERE = Path(__file__).parent
 TMP = HERE / "tmp"
@@ -54,7 +55,7 @@ class TestLatLon(unittest.TestCase):
         self.assertEqual(header_l2["nrows"], 9)
         self.assertEqual(header_l2["ncols"], 6)
 
-        ds = xr.open_dataset(self.latlon_file)
+        ds = get_xarray_ds_from_file(self.latlon_file)
         self.assertEqual(len(ds["yc_l0"]), 432)
         self.assertEqual(len(ds["xc_l0"]), 288)
         self.assertEqual(len(ds["yc_l1"]), 18)

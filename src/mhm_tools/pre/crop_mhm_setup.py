@@ -8,6 +8,7 @@ import numpy as np
 import xarray as xr
 from joblib import Parallel, delayed
 
+from mhm_tools.common.esri_grid import read_header, write_header
 from mhm_tools.common.file_handler import (
     create_header,
     get_xarray_ds_from_file,
@@ -116,6 +117,7 @@ def regrid_mask(
         results /= np.nanmax(results)
         mask = results > 1e-3
     elif target_res == mask_res:
+        logger.debug("Target resolution equals mask resolution.")
         return mask_ds
     else:
         msg = "mask coarser than file not yet implemented"
@@ -136,14 +138,19 @@ def write_to_file(ds, output_file: Path):
     suffix = output_file.suffix
     if suffix == ".asc":
         write_xarray_to_ascii(ds, output_file)
+        # ds.to_netcdf(output_file.with_suffix('.nc'))
     elif suffix == ".nc":
         ds.to_netcdf(output_file)
 
 
 def crop_file_with_header(ds_in, file_path, output_path, lonslice, latslice):
     """Crop the nc file and create a new header file for the new coordinates."""
-    pres = 1e-5
+    pres = 1e-9
     header = file_path.parent / "header.txt"
+    # read header
+    header_information = read_header(header)
+    logger.info(header_information)
+    # obtain data variable from dataset
     data_var = get_single_data_var(ds_in)
     if data_var is None:
         data_var = induce_data_var_from_file_name(ds_in, file_path)
@@ -153,97 +160,92 @@ def crop_file_with_header(ds_in, file_path, output_path, lonslice, latslice):
             )
             return None, None
         logger.debug(f"Found data_var={data_var}")
-    logger.debug(type(ds_in[data_var].data))
-    with header.open("r") as h:
-        d = {}
-        logger.debug(f"Reading out header.txt file {header}")
-        for line in h.readlines():
-            if not line.strip():
-                continue
-            line_content = line.strip().split(" ")
-            logger.debug(f"{line_content[0].strip()} = {line_content[-1].strip()}")
-            d[line_content[0].strip()] = float(line_content[-1].strip())
-        # lon = np.arange(
-        #     d["xllcorner"], d["xllcorner"] + d["cellsize"] * d["ncols"], d["cellsize"]
-        # )
-        # reverse order for lat (TODO: Make this resistant input with south north ordering)
-        # lat = np.arange(
-        #     d["yllcorner"] + d["cellsize"] * (d["nrows"] - 1),
-        #     d["yllcorner"] - d["cellsize"],
-        #     -d["cellsize"],
-        # )
-        logger.info(ds_in[data_var].shape)
-        lon_key = get_coord_key(ds_in, lon=True, raise_exception=True)
-        lat_key = get_coord_key(ds_in, lat=True, raise_exception=True)
-        # x values
-        index_x_min = int(
-            (lonslice.start - pres - d["xllcorner"]) / d["cellsize"] + 0.5
+    logger.info(ds_in[data_var].shape)
+    lon_key = get_coord_key(ds_in, lon=True, raise_exception=True)
+    lat_key = get_coord_key(ds_in, lat=True, raise_exception=True)
+    # x values
+    index_x_min = int(
+        (lonslice.start - pres - header_information["xllcorner"])
+        / header_information["cellsize"]
+        + 0.5
+    )
+    index_x_max = int(
+        (lonslice.stop + pres - header_information["xllcorner"])
+        / header_information["cellsize"]
+    )
+    ymax = (
+        header_information["yllcorner"]
+        + header_information["cellsize"] * header_information["nrows"]
+    )
+    index_y_min = int(
+        (ymax - latslice.start - pres) / header_information["cellsize"] + 0.5
+    )
+    index_y_max = int((ymax - latslice.stop + pres) / header_information["cellsize"])
+    logger.debug(f"x: {index_x_min}, {index_x_max}")
+    logger.debug(f"y: {index_y_min}, {index_y_max}")
+    # write header file
+    header_out_path = output_path / header.name
+    xll = header_information["xllcorner"] + header_information["cellsize"] * index_x_min
+    yll = header_information["yllcorner"] + header_information["cellsize"] * (
+        header_information["nrows"] - index_y_max
+    )
+
+    new_header_information = {
+        "ncols": index_x_max - index_x_min,
+        "nrows": index_y_max - index_y_min,
+        "xllcorner": xll,
+        "yllcorner": yll,
+        "cellsize": header_information["cellsize"],
+        "nodata_value": header_information["nodata_value"],
+    }
+    logger.info(
+        f"Writing header file to {header_out_path} with header: {new_header_information}"
+    )
+    write_header(header_out_path, new_header_information)
+    try:
+        data = ds_in[data_var].isel(
+            {
+                lat_key: slice(index_y_min, index_y_max),
+                lon_key: slice(index_x_min, index_x_max),
+            }
         )
-        index_x_max = int((lonslice.stop + pres - d["xllcorner"]) / d["cellsize"])
-        # index_y_min = int((latslice.stop - pres - d["yllcorner"]) / d["cellsize"] + 0.5)
-        # index_y_max = int((latslice.start + pres - d["yllcorner"]) / d["cellsize"])
-        ymax = d["yllcorner"] + d["cellsize"] * d["nrows"]
-        index_y_min = int((ymax - latslice.start - pres) / d["cellsize"] + 0.5)
-        index_y_max = int((ymax - latslice.stop + pres) / d["cellsize"])
-        logger.debug(f"x: {index_x_min}, {index_x_max}")
-        logger.debug(f"y: {index_y_min}, {index_y_max}")
-        # write header file
-        header_out_path = output_path / header.name
-        xll = d["xllcorner"] + d["cellsize"] * index_x_min
-        yll = d["yllcorner"] + d["cellsize"] * (d["nrows"] - index_y_max)
-        header_str = f"""
-ncols                {index_x_max - index_x_min}
-nrows                {index_y_max - index_y_min}
-xllcorner            {xll}
-yllcorner            {yll}
-cellsize             {d["cellsize"]}
-NODATA_value         {d["NODATA_value"]}
-            """
-        logger.info(
-            f"Writing header file to {header_out_path} with header str: {header_str}"
+        if "time" in ds_in.dims:
+            data_array = xr.DataArray(
+                data=data,
+                dims=["time", lat_key, lon_key],
+                coords={
+                    "time": ds_in.time,
+                    lat_key: data[lat_key],
+                    lon_key: data[lon_key],
+                },
+                name=data_var,
+                attrs=data.attrs,
+            )
+        else:
+            data_array = xr.DataArray(
+                data=data,
+                dims=[lat_key, lon_key],
+                coords={
+                    lat_key: data[lat_key],
+                    lon_key: data[lon_key],
+                },
+                name=data_var,
+                attrs=data.attrs,
+            )
+        data_array.attrs.update(
+            {
+                "_FillValue": header_information["nodata_value"],
+                "missing_value": header_information["nodata_value"],
+            }
         )
-        with (header_out_path).open("w") as nh:
-            nh.write(header_str)
-        try:
-            data = ds_in[data_var].isel(
-                {
-                    lat_key: slice(index_y_min, index_y_max),
-                    lon_key: slice(index_x_min, index_x_max),
-                }
-            )
-            if "time" in ds_in.dims:
-                data_array = xr.DataArray(
-                    data=data,
-                    dims=["time", lat_key, lon_key],
-                    coords={
-                        "time": ds_in.time,
-                        lat_key: data[lat_key],
-                        lon_key: data[lon_key],
-                    },
-                    name=data_var,
-                    attrs=data.attrs,
-                )
-            else:
-                data_array = xr.DataArray(
-                    data=data,
-                    dims=[lat_key, lon_key],
-                    coords={
-                        lat_key: data[lat_key],
-                        lon_key: data[lon_key],
-                    },
-                    name=data_var,
-                    attrs=data.attrs,
-                )
-            data_array.attrs.update(
-                {"_FillValue": d["NODATA_value"], "missing_value": d["NODATA_value"]}
-            )
-            # Convert to Dataset
-            ds_out = xr.Dataset({data_var: data_array})
-            ds_out.attrs.update(ds_in.attrs)
-            return ds_out, header_out_path
-        except IndexError as e:
-            with ErrorLogger(logger):
-                raise e
+        # Convert to Dataset
+        ds_out = data_array.to_dataset()
+        ds_out.attrs.update(ds_in.attrs)
+        logger.debug(f"cropped ds {ds_out}")
+        return ds_out, header_out_path
+    except IndexError as e:
+        with ErrorLogger(logger):
+            raise e
 
 
 @log_arguments()
@@ -262,7 +264,9 @@ def call_create_latlon(
     """
     # create new latlon file
     logger.info("Creating new latlon file")
-    with get_xarray_ds_from_file(dem_output_file, chunking=True) as ds_dem:
+    with get_xarray_ds_from_file(
+        dem_output_file, chunking=True, normalize_latlon_coords=True
+    ) as ds_dem:
         l0 = create_header(ds_dem, None, write=False)
     logger.debug(f"L0: {l0}")
     l1 = l0.copy()
@@ -320,7 +324,10 @@ def crop_file(
     if input_file.suffix in [".asc", ".nc"]:
         try:
             ds = get_xarray_ds_from_file(
-                input_file, chunking=True, available_mem_gib=available_mem_gib
+                input_file,
+                chunking=True,
+                available_mem_gib=available_mem_gib,
+                normalize_latlon_coords=True,
             )
         except ValueError:
             logger.error(
@@ -346,13 +353,15 @@ def crop_file(
             "Latlon cropping depreciated will implement new latlon creation using the mhm-tools latlon functionality."
         )
         latlon_files.set_latlon_output_file(output_file)
+        return latlon_files
     # 2. Restart files are complex and are not yet implemented. mHM restart files can be croped, mRM restart files can't (?).
-    elif "restart" in input_file.name.lower():
+    if "restart" in input_file.name.lower():
         logger.warning(
             f"Restart file {input_file} could not be copied as that is not yet implemented."
         )
+        return latlon_files
     # 3. Files that are in the same folder as a header file. Typical examples are meteo datasets such as temperature or precipitation
-    elif list(input_file.parent.glob("header.txt")):
+    if list(input_file.parent.glob("header.txt")):
         logger.debug("Cropping and writing new header file...")
         ds_cropped, header_path = crop_file_with_header(
             ds,
@@ -389,12 +398,11 @@ def crop_file(
         )
 
     # check for emptiness or insufficient grid points
-    if ds_cropped.sizes[lat_key] < 2 or ds_cropped.sizes[lon_key] < 2:
-        logger.warning(
-            "Cropping resulted in insufficient grid size "
-            f"(lat={ds_cropped.sizes[lat_key]}, lon={ds_cropped.sizes[lon_key]})."
-        )
-        return latlon_files
+    if ds_cropped.sizes[lat_key] < 1 or ds_cropped.sizes[lon_key] < 1:
+        msg = f"Cropping resulted in insufficient grid size \
+            (lat={ds_cropped.sizes[lat_key]}, lon={ds_cropped.sizes[lon_key]})."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
 
     # only the dem file or and eventual mHM restart file are masked using the provided mask file
     if "dem" in input_file.name.lower():  # or "mhm" in f.name.lower()

@@ -30,6 +30,8 @@ def str2float(value):
     if not isinstance(value, str):
         msg = f"Expected a string or None, but got {type(value).__name__}."
         raise argparse.ArgumentTypeError(msg)
+        msg = f"Expected a string or None, but got {type(value).__name__}."
+        raise argparse.ArgumentTypeError(msg)
 
     try:
         return float(value)

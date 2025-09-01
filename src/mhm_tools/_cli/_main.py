@@ -2,6 +2,7 @@
 
 import argparse
 
+from mhm_tools._cli import _file_converter
 from mhm_tools.common.logger import configure_mhm_tools_logger
 
 from .. import __version__
@@ -15,7 +16,7 @@ from . import (
     _crop_mhm_setup,
     _difference,
     _grdc_validation,
-    _gridded_data_validation,
+    _gridded_data_evaluation,
     _hydrograph,
     _latlon,
     _long_term_mean,
@@ -84,10 +85,11 @@ def _get_parser():
 
     add_command_from_module(subparsers, "hydrograph", _hydrograph)
     add_command_from_module(
-        subparsers, "gridded_data_validation", _gridded_data_validation
+        subparsers, "gridded_data_evaluation", _gridded_data_evaluation
     )
     add_command_from_module(subparsers, "grdc_validation", _grdc_validation)
     add_command_from_module(subparsers, "latlon", _latlon)
+    add_command_from_module(subparsers, "converter_nc_ascii", _file_converter)
     add_command_from_module(subparsers, "create_catchment", _create_catchment)
     add_command_from_module(subparsers, "crop_mhm_setup", _crop_mhm_setup)
     add_command_from_module(subparsers, "prepare_mhm_forcings", _prepare_mhm_forcings)

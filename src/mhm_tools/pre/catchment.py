@@ -47,6 +47,8 @@ class Catchment:
         out_var_name=None,
         do_shift=False,
         l1_resolution=None,
+        l11_resolution=None,
+        l2_resolution=None,
         upscale=False,
         latlon=True,
     ):
@@ -60,6 +62,8 @@ class Catchment:
         self.ftype = ftype
         self.catchment_mask = None
         self.l1_resolution = l1_resolution
+        self.l11_resolution = l11_resolution if l11_resolution is not None else l1_resolution
+        self.l2_resolution = l2_resolution if l2_resolution is not None else l1_resolution
         self.do_upscale = upscale
         self.out_var_name = (
             out_var_name if out_var_name is not None else f"{var_name}.nc"
@@ -190,14 +194,17 @@ class Catchment:
                 "_FillValue"
             ]
 
-    def get_upscaling_factor(self):
+    def get_upscaling_factor(self, max_resolution=False):
         """Create upscaling factor."""
         input_res = round(abs(self.ds.lon.data[1] - self.ds.lon.data[0]), 6)
+        upscale_res = self.l1_resolution
+        if max_resolution:
+            upscale_res = max([res for res in [self.l1_resolution, self.l11_resolution, self.l2_resolution] if res is not None ])
         if (
-            int(self.l1_resolution / input_res + 0.5) - (self.l1_resolution / input_res)
+            int(upscale_res / input_res + 0.5) - (upscale_res / input_res)
             < 1e6
         ):
-            return int(self.l1_resolution / input_res + 0.5)
+            return int(upscale_res / input_res + 0.5)
         not_int_multiple_msg = f"Upscaling only works if L1 resolution is integer muplipe of L0 resolution but L1 = {self.l1_resolution / input_res:.4f} * L0"
         raise ValueError(not_int_multiple_msg)
 
@@ -543,7 +550,7 @@ class Catchment:
             f"min row: {min_row} max row: {max_row} min_col: {min_col}, max_col: {max_col}"
         )
         if self.l1_resolution is not None:
-            factor = self.get_upscaling_factor()
+            factor = self.get_upscaling_factor(max_resolution=True)
             if factor != 1:
                 logger.info(
                     f"Regridding to fit coarse grid with res {self.l1_resolution} (factor {factor})"
@@ -582,8 +589,8 @@ class Catchment:
 def merge_catchment(path1, path2, out_path):
     """Merge the rolled and non-rolled file."""
     # read the rolled and non-rolled files
-    ds1 = xr.open_dataset(path1, engine="netcdf4")
-    ds2 = xr.open_dataset(path2, engine="netcdf4")
+    ds1 = get_xarray_ds_from_file(path1, engine="netcdf4")
+    ds2 = get_xarray_ds_from_file(path2, engine="netcdf4")
 
     # select all the basins in the border area
     mask_ids = np.unique(
@@ -657,9 +664,12 @@ def create_catchment(
     coordinate_slices=None,
     mask_file=None,
     l1_resolution=None,
+    l11_resolution=None,
+    l2_resolution=None,
     frame=1,
     upscale=False,
     latlon=True,
+    available_mem=None
 ):
     """Create file containing catchment ids, flowdirection and upstream area from dem or flow direction."""
     logger.info(
@@ -671,7 +681,9 @@ def create_catchment(
             msg = f"Unexpected value for var={var}, must be 'fdir' or 'dem'"
             raise ValueError(msg)
 
-    with get_xarray_ds_from_file(input_file, var_name) as input_ds:
+    with get_xarray_ds_from_file(
+        input_file, var_name, normalize_latlon_coords=True, force_decending_y=True, available_mem_gib=available_mem
+    ) as input_ds:
         # transform
         transform = get_transformation_matrix_nc(input_ds, var_name)
 
@@ -690,6 +702,8 @@ def create_catchment(
                 out_var_name=temp_file1,
                 do_shift=False,
                 l1_resolution=l1_resolution,
+                l11_resolution=l11_resolution,
+                l2_resolution=l2_resolution,
                 upscale=upscale,
             )
             # create a shifted version of the catchment to avoid border effects
@@ -704,6 +718,8 @@ def create_catchment(
                 out_var_name=temp_file2,
                 do_shift=True,
                 l1_resolution=l1_resolution,
+                l11_resolution=l11_resolution,
+                l2_resolution=l2_resolution,
                 upscale=upscale,
             )
             catchments = [global_catchments, global_catchments_shifted]
@@ -731,13 +747,11 @@ def create_catchment(
             temp_file2.unlink()
         elif coordinate_slices is not None:
             logger.info(f"Creating basin id file for {coordinate_slices}")
-            lat_max = coordinate_slices["lat"].start
-            lat_min = coordinate_slices["lat"].stop
-            lon_min = coordinate_slices["lon"].start
-            lon_max = coordinate_slices["lon"].stop
             input_ds_sliced = input_ds.sel(
-                lat=slice(lat_max, lat_min), lon=slice(lon_min, lon_max)
+                lat=coordinate_slices["lat"], lon=coordinate_slices["lon"]
             )
+            logger.info(f"lat {input_ds_sliced.lat.data[0]}, {input_ds_sliced.lat.data[-1]}")
+            logger.info(f"lon {input_ds_sliced.lon.data[0]}, {input_ds_sliced.lon.data[-1]}")
             c = Catchment(
                 ds=input_ds_sliced,
                 var_name=var_name,
@@ -748,6 +762,8 @@ def create_catchment(
                 out_var_name="basin_ids.nc",
                 do_shift=False,
                 l1_resolution=l1_resolution,
+                l11_resolution=l11_resolution,
+                l2_resolution=l2_resolution,
                 upscale=upscale,
             )
             if l1_resolution is not None and upscale:
@@ -769,6 +785,8 @@ def create_catchment(
                 out_var_name="basin_ids.nc",
                 do_shift=False,
                 l1_resolution=l1_resolution,
+                l11_resolution=l11_resolution,
+                l2_resolution=l2_resolution,
                 upscale=upscale,
             )
             c.delineate_basin(gauge_coords)

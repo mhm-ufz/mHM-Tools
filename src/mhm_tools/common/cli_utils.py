@@ -11,8 +11,7 @@ This module provides helpers for common command-line tasks such as:
 import argparse
 import logging
 
-import xarray as xr
-
+from mhm_tools.common.file_handler import get_xarray_ds_from_file
 from mhm_tools.common.logger import ErrorLogger
 
 logger = logging.getLogger(__name__)
@@ -58,35 +57,46 @@ def get_coords_from_mask(mask):
     tuple
         (lon_min, lon_max, lat_min, lat_max, mask_dataarray)
     """
-    ds = xr.open_dataset(mask)
-    lon = ds.lon
-    lat = ds.lat
-    lon_min = lon.min()
-    lon_max = lon.max()
-    lat_min = lat.min()
-    lat_max = lat.max()
+    with get_xarray_ds_from_file(mask, normalize_latlon_coords=True) as mask_ds:
+        lon = mask_ds.lon
+        lat = mask_ds.lat
+        lon_min_target_grid = lon.min()
+        lon_max_target_grid = lon.max()
+        lat_min_target_grid = lat.min()
+        lat_max_target_grid = lat.max()
 
-    # adjust from cell centers to corner boundaries
-    resolution = ds.lon.values[1] - ds.lon.values[0]
-    lon_min -= resolution / 2
-    lon_max += resolution / 2
-    lat_min -= resolution / 2
-    lat_max += resolution / 2
+        # change values from center cell to corner values
+        resolution = mask_ds.lon.values[1] - mask_ds.lon.values[0]
+        lon_min_target_grid -= resolution / 2
+        lon_max_target_grid += resolution / 2
+        lat_min_target_grid -= resolution / 2
+        lat_max_target_grid += resolution / 2
 
-    logger.debug(
-        f"Read coord from mask file: lat ({lat_min} to {lat_max}) "
-        f"{(lon_max - lon_min) / resolution} cells and lon ({lon_min} to {lon_max}) "
-        f"{(lon_max - lon_min) / resolution} cells"
-    )
+        logger.debug(
+            f"Read coord from mask file: lat ({lat_min_target_grid} to {lat_max_target_grid}) {(lon_max_target_grid-lat_min_target_grid)/resolution} cells and lon ({lon_min_target_grid} to {lon_max_target_grid}) {(lon_max_target_grid-lat_min_target_grid)/resolution} cells"
+        )
 
-    if lat_min > lat_max:
-        lat_min, lat_max = lat_max, lat_min
-    if lon_min > lon_max:
-        lon_min, lon_max = lon_max, lon_min
-
-    mask_key = next(key for key in ["mask", "land_mask"] if key in ds.data_vars)
-    mask_da = ds[mask_key]
-    return lon_min, lon_max, lat_min, lat_max, mask_da
+        if lat_min_target_grid > lat_max_target_grid:
+            lat_min_target_grid, lat_max_target_grid = (
+                lat_max_target_grid,
+                lat_min_target_grid,
+            )
+        if lon_min_target_grid > lon_max_target_grid:
+            lon_min_target_grid, lon_max_target_grid = (
+                lon_max_target_grid,
+                lon_min_target_grid,
+            )
+        mask_key = next(
+            key for key in ["mask", "land_mask"] if key in mask_ds.data_vars
+        )
+        mask_da = mask_ds[mask_key]
+        return (
+            lon_min_target_grid,
+            lon_max_target_grid,
+            lat_min_target_grid,
+            lat_max_target_grid,
+            mask_da,
+        )
 
 
 def get_coords(

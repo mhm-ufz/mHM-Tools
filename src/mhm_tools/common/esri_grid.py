@@ -199,11 +199,17 @@ def write_grid(file, header, data=None, dtype="f4"):
     # write header and data
     header_path = Path(file)
     header_path.parent.mkdir(parents=True, exist_ok=True)
+    typ = int if is_int else float
+    header_str = f"""
+        ncols                {header["ncols"]}
+        nrows                {header["nrows"]}
+        xllcorner            {header["xllcorner"]}
+        yllcorner            {header["yllcorner"]}
+        cellsize             {header["cellsize"]}
+        nodata_value         {typ(header["nodata_value"])}
+    """
     with header_path.open("w") as f:
-        for key in ["nrows", "ncols", "xllcorner", "yllcorner", "cellsize"]:
-            print(key, header[key], file=f)
-        typ = int if is_int else float
-        print("nodata_value", typ(header["nodata_value"]), file=f)
+        f.write(header_str)
         if data is not None:
             np.savetxt(f, data, fmt="%i" if is_int else "%f")
 

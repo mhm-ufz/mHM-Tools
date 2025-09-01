@@ -20,6 +20,7 @@ import xarray as xr
 
 from mhm_tools.common.file_handler import get_xarray_ds_from_file
 from mhm_tools.common.logger import ErrorLogger
+from mhm_tools.common.logger import ErrorLogger
 from mhm_tools.common.xarray_utils import crop_ds
 
 logger = logging.getLogger(__name__)
@@ -50,6 +51,8 @@ def convert_units(ds: xr.Dataset, var: str) -> xr.DataArray:
     """
     units = ds[var].attrs.get("units")
     if not units:
+        msg = f"Variable '{var}' missing 'units' attribute."
+        raise ValueError(msg)
         msg = f"Variable '{var}' missing 'units' attribute."
         raise ValueError(msg)
 
@@ -85,6 +88,8 @@ def convert_units(ds: xr.Dataset, var: str) -> xr.DataArray:
         ds[new_var] = ds[new_var] * factor
         ds[new_var].attrs["units"] = "mm"
     else:
+        msg = f"Unexpected units '{units}' for variable '{var}'."
+        raise ValueError(msg)
         msg = f"Unexpected units '{units}' for variable '{var}'."
         raise ValueError(msg)
 

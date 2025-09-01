@@ -19,13 +19,13 @@ import xarray as xr
 from joblib import Parallel, delayed
 
 from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_to_file
-from mhm_tools.common.logger import log_arguments, log_errors
+from mhm_tools.common.logger import ErrorLogger, log_arguments, log_errors
 from mhm_tools.common.xarray_utils import (
     get_coord_key,
     get_overlapping_time_slice,
     timedelta_to_alias,
 )
-from mhm_tools.post.gridded_data_validation import (
+from mhm_tools.post.gridded_data_evaluation import (
     get_clim_from_ds,
     spearman_correlation,
 )
@@ -237,7 +237,7 @@ def Q_data_to_xarray(  # noqa: PLR0913
         saving_path.mkdir(parents=True)
 
     # getting gauge infos
-    with xr.open_dataset(observed_data_path) as gauge_info:
+    with get_xarray_ds_from_file(observed_data_path) as gauge_info:
         gauge_ids = gauge_info["id"]
         x = gauge_info["geo_x"]
         y = gauge_info["geo_y"]
@@ -313,7 +313,7 @@ def Q_data_to_xarray(  # noqa: PLR0913
         write_xarray_to_file(observed_data, obs_output_file)
 
     if not sim_output_file.is_file() or overwrite:
-        with xr.open_dataset(mrm_restart_file) as ds:
+        with get_xarray_ds_from_file(mrm_restart_file) as ds:
             # get the gauge coordinates by matching coordinates and flow accumulation
             out = Parallel(n_jobs=n_jobs, backend="loky")(
                 delayed(get_gauge_coords)(
@@ -337,6 +337,10 @@ def Q_data_to_xarray(  # noqa: PLR0913
                 y_new.append(yn)
                 facc_new.append(fan)
                 gauge_ids_with_values.append(gauge_ids.values[i])
+        if len(x_new) == 0: 
+            msg = 'There are no gauges that could be found.'
+            with ErrorLogger(logger):
+                raise ValueError(msg)
         logger.info(f"There are {len(x_new)} gauges")
         logger.info("creating sim dataset")
         sim = Parallel(n_jobs=n_jobs, backend="loky")(

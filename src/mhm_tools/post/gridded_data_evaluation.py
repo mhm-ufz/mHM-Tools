@@ -276,7 +276,7 @@ def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None)
         # logger.warning(f"Files not a list of files but one file {files}.")
         files = [files]
     logger.debug(files)
-    with xr.open_dataset(files[0], engine="netcdf4") as ds:
+    with get_xarray_ds_from_file(files[0], engine="netcdf4", force_decending_y=True) as ds:
         # Apply coordinate slicing if needed
         if coordinate_slice is not None:
             lat_key = get_coord_key(ds, lat=True)
@@ -292,8 +292,8 @@ def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None)
     monthly_sums = np.zeros((12, *da.shape[1:]))
     monthly_counts = np.zeros((12, *da.shape[1:]))
     for f, file in enumerate(files):
-        with xr.open_dataset(file, engine="netcdf4") as ds:
-            logger.info(f"timestep {count} in file {f + 1} / {len(files)} from {file}")
+        with get_xarray_ds_from_file(file, engine="netcdf4", force_decending_y=True) as ds:
+            logger.info(f"timestep {count} in file {f+1} / {len(files)} from {file}")
             if coordinate_slice is not None:
                 lat_key = get_coord_key(ds, lat=True)
                 lon_key = get_coord_key(ds, lon=True)
@@ -379,7 +379,7 @@ def get_stats_one_pass(
     monthly_counts = np.where(monthly_counts > 0, monthly_counts, np.nan)
     climatology = monthly_sums / monthly_counts
     climatology = np.where(monthly_counts > 0, climatology, np.nan)
-    with xr.open_dataset(files[0], engine="netcdf4") as ds_in:
+    with get_xarray_ds_from_file(files[0], engine="netcdf4", force_decending_y=True) as ds_in:
         lat_key = get_coord_key(ds_in, lat=True)
         lon_key = get_coord_key(ds_in, lon=True)
         # Apply coordinate slicing if needed
@@ -493,8 +493,9 @@ def resample_to_coarser_calendar(
         # same resolution, nothing to do
         logger.info(f"Both are already {alias_in}")
 
-    # finally, force them onto exactly the same time-axis
-    ds_input, ds_ref = xr.align(ds_input, ds_ref)
+    # finally, force them onto exactly the same time‐axis
+    # ds_input, ds_ref = xr.align(ds_input, ds_ref)
+    # logger.debug(f"Input file after align {ds_input}")
     return ds_input, ds_ref
 
 
@@ -572,6 +573,7 @@ def plot_map(
     )
 
     ax_twy = axes[1, 1].twinx()
+    ref_clim = np.where(ref_clim != 0, ref_clim, np.nan)
     rel_clim = np.nanmean(input_clim, axis=(1, 2)) / np.nanmean(ref_clim, axis=(1, 2))
     rel_clim_diff_1 = max(
         np.abs(1 - np.nanmin(rel_clim)), np.abs(1 - np.nanmax(rel_clim))
@@ -594,8 +596,9 @@ def plot_map(
     axes[1, 1].set_xlim(1 - (1.1 * bar_width), 12 + (1.1 * bar_width))
     axes[1, 1].set_xticks(months)
     axes[1, 1].set_xticklabels(months)
+    ymax = 1 + rel_clim_diff_1 * 1.05 if not np.isnan(rel_clim_diff_1) else 1
     ax_twy.set_ylim(
-        max(0, 1 - rel_clim_diff_1 * 1.05), 1 + rel_clim_diff_1 * 1.05
+        np.nanmax([0, 1 - rel_clim_diff_1 * 1.05]), ymax
     )  # Example range for the ratio
     ax_twy.set_ylabel("Ratio (Input / Reference)", color="#0000A7")
     ax_twy.tick_params(axis="y", labelcolor="#0000A7")
@@ -632,7 +635,7 @@ def create_map_from_output(output_path, input_name, ref_name):
     """Read in statistics netcdf and create a map plots from it."""
     file = get_rel_stat_file(output_path, input_name, ref_name)
     logger.info(f"Plotting data from {file}")
-    with xr.open_dataset(file) as ds:
+    with get_xarray_ds_from_file(file, force_decending_y=True) as ds:
         rel_std = ds["rel_std"]
         rel_mean = ds["rel_mean"]
         spearman = ds["spearman"]
@@ -700,7 +703,7 @@ def get_stats(
             with ErrorLogger(logger):
                 raise ValueError(msg)
     else:
-        with xr.open_dataset(path, engine="netcdf4") as ds_input:
+        with get_xarray_ds_from_file(path, engine="netcdf4", force_decending_y=True) as ds_input:
             ds = ds_input
             if coordinate_slice is not None:
                 ds = ds.sel(
@@ -779,8 +782,12 @@ def compare_input_with_ref(  # noqa: PLR0913
         file_name=ref_file_name,
     )
     logger.debug(f"ref ds: {ref}")
-
-    # match spatial resolution (nearest)
+    # regrid spatial resoution
+    # regridd to same spatial resolution
+    if len(input["lat"].data) < 1 or len(input["lon"].data) < 1:
+        logger.error('Input dataset has empty coordinate.')
+    if len(ref["lat"].data) < 1 or len(ref["lon"].data) < 1:
+        logger.error('Ref dataset has empty coordinate.')
     input, ref = regridd_to_higher_spatial_resolution(input, ref)
 
     # compare and save statistics
@@ -905,8 +912,8 @@ def compare_input_with_ref(  # noqa: PLR0913
         rel_std=rel_std,
         rel_mean=rel_mean,
         spearman=spearman,
-        ref_clim=ref["clim"],
-        input_clim=input["clim"],
+        ref_clim=ref_clim,
+        input_clim=input_clim,
         input_name=input_name,
         ref_name=ref_name,
         output_path=output_path,
@@ -928,7 +935,7 @@ def evaluate_boostraping_stat_files(stat_files, input_name, ref_name):
     """Evaluate bootstrapped stats and return medians across iterations."""
     # Open the first file to initialize dimensions and weights
     try:
-        with xr.open_dataset(stat_files[0]) as first_file:
+        with get_xarray_ds_from_file(stat_files[0], force_decending_y=True) as first_file:
             shape = first_file["rel_mean"].shape
             n_bootstrap = len(stat_files)
 
@@ -953,7 +960,7 @@ def evaluate_boostraping_stat_files(stat_files, input_name, ref_name):
         raise ve
     # Fill the preallocated arrays with bootstrap data
     for i, file in enumerate(stat_files):
-        with xr.open_dataset(file) as ds:
+        with get_xarray_ds_from_file(file, force_decending_y=True) as ds:
             mean[i] = ds["rel_mean"].values
             std[i] = ds["rel_std"].values
             spearman[i] = ds["spearman"].values
@@ -988,6 +995,7 @@ def get_dataset_from_path(
             chunking=chunking,
             available_mem_gib=available_mem,
             chunk_type=ChunkType.SPACE,
+            force_decending_y=True
         )
     if path.is_dir():
         file_list = get_files(
@@ -1054,8 +1062,24 @@ def get_years_from_path(path, raise_exception=True, file_name="*.*"):
     if path.is_dir():
         return [int(p.name) for p in year_structure_paths(path, file_name=file_name)]
     if path.is_file():
-        with get_xarray_ds_from_file(path) as input_ds:
+        with get_xarray_ds_from_file(path, force_decending_y=True) as input_ds:
             return [int(y) for y in np.unique(input_ds.time.dt.year.data)]
+    if raise_exception:
+        msg = f"The provided path {path} is neither file nor directory."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    return []
+
+def get_files_from_path(path, raise_exception=True, file_name="*.*"):
+    """Get years for one dataset from the folder structure or the xarray dataset."""
+    if path.is_dir():
+        all_files = [] 
+        all_dirs = year_structure_paths(path, file_name=file_name)
+        for dir in all_dirs:
+            all_files.extend(list(dir.glob(file_name)))
+        return all_files
+    if path.is_file():
+        return [path]
     if raise_exception:
         msg = f"The provided path {path} is neither file nor directory."
         with ErrorLogger(logger):
@@ -1119,31 +1143,27 @@ def year_structure_paths(path: Path, file_name="*.*") -> bool:
 
 def get_target_time_res_from_files(input_file, ref_file):
     """Get time resolution for resampling from two files."""
-    with xr.open_dataset(input_file) as input_in:
+    with get_xarray_ds_from_file(input_file, force_decending_y=True) as input_in:
         res_sim = input_in.time.diff("time").median()
-    with xr.open_dataset(ref_file) as ref_in:
+    with get_xarray_ds_from_file(ref_file, force_decending_y=True) as ref_in:
         res_obs = ref_in.time.diff("time").median()
     target_res = res_obs if res_obs > res_sim else res_sim
     return f"{int(target_res / np.timedelta64(1, 'h'))}h"
 
 
 def get_target_time_res(input_path, ref_path, folder_name=""):
-    """Return the coarser time resolution from two datasets.
-
-    Searches each path (optionally within `folder_name`) for NetCDF files and,
-    if found, infers the coarser time resolution by comparing the first file
-    from each dataset via `get_target_time_res_from_files`.
-    """
-    input_files = (Path(input_path) / folder_name).glob("*nc")
-    ref_files = (Path(ref_path) / folder_name).glob("*nc")
+    """Get coarser time resolution from two datasets with files in folder structur."""
+    input_files = get_files_from_path(input_path)
+    ref_files = get_files_from_path(ref_path)
     if not list(input_files) or not list(ref_files):
         logger.error("One of the datasets has no files.")
         return None
-    return get_target_time_res_from_files(next(input_files), next(ref_files))
+    return get_target_time_res_from_files(next(iter(input_files)), next(iter(ref_files)))
+
 
 
 @log_arguments()
-def gridded_data_validation(  # noqa: PLR0913
+def gridded_data_evaluation(
     input_path,
     input_var,
     output_path,
@@ -1184,21 +1204,16 @@ def gridded_data_validation(  # noqa: PLR0913
 
     available_years = get_available_years(input_path, ref_path, year_slice, direct_comp)
     logger.info(f"Years {available_years} are available for comparison.")
-
-    # Derive a target time resolution for harmonized resampling (if possible)
+    if not available_years:
+        logger.error('Since no data is available the program is stoped.')
+        return
     target_time_res = None
-    sample_year = None
-    if isinstance(available_years, slice):
-        sample_year = available_years.start
-    else:
-        try:
-            sample_year = next(iter(available_years))
-        except Exception:
-            sample_year = None
-    if sample_year is not None:
-        target_time_res = get_target_time_res(input_path, ref_path, sample_year)
+    if direct_comp:
+        target_time_res = get_target_time_res(
+            input_path, ref_path
+        )
         logger.info(
-            f"Overlapping years {available_years}. Data should be resampled to {target_time_res}"
+            f"Years {available_years} are overlapping. Data should be resampled to {target_time_res}"
         )
 
     if ref_path is None:
@@ -1211,7 +1226,7 @@ def gridded_data_validation(  # noqa: PLR0913
         if input_path.is_file():
             # Write file stats to file
             with get_xarray_ds_from_file(
-                input_path, chunking=True, available_mem_gib=10
+                input_path, chunking=True, available_mem_gib=10, force_decending_y=True
             ) as ds_in:
                 get_file_stats(
                     ds_in,

@@ -287,7 +287,7 @@ class Grid:
         -------
         None
         """
-        with xr.open_dataset(latlon_file) as ds:
+        with get_xarray_ds_from_file(latlon_file) as ds:
             x0 = ds["xc_l0"].to_numpy()
             y0 = ds["yc_l0"].to_numpy()
             self.l0 = LatLon(
@@ -635,6 +635,12 @@ class MHMRestartFile:
         }
 
     def _split_file(self, name, file_path):
+        if isinstance(file_path, list) and len(file_path) == 1:
+            file_path = file_path
+        elif isinstance(file_path, list) and len(file_path) > 1:
+            msg = f"There are multiple files with ambigous names in the setup. Please remove all but one of {file_path}"
+            with ErrorLogger(logger):
+                raise ValueError(msg)
         if not file_path or file_path is None or not file_path.is_file():
             logger.error(f"No file path provided for {name}")
             return None
@@ -642,7 +648,7 @@ class MHMRestartFile:
             logger.error(f"File {file_path} is not a netCDF file")
             return None
         logger.debug(f"Splitting {file_path}")
-        with xr.open_dataset(file_path) as ds:
+        with get_xarray_ds_from_file(file_path) as ds:
             lon_range = np.arange(
                 self.grid.l1.lon_min,
                 self.grid.l1.lon_max,
@@ -797,7 +803,7 @@ class MHMRestartFile:
             ints = re.findall(r"\d+", str(restart_file_path))
             isel_start = int(ints[-2])
             jsel_start = int(ints[-1])
-            with xr.open_dataset(restart_file_path) as cur_ds:
+            with get_xarray_ds_from_file(restart_file_path) as cur_ds:
                 logger.debug(f"Opening {restart_file_path}")
                 # reverse the data vars if the latitude is decreasing
                 reverse_data_vars = [
@@ -877,8 +883,8 @@ class MHMRestartFile:
 
     def _correct_restart_file(self, ds=None):
         if ds is None:
-            ds = xr.open_dataset(self.grid.restart_file)
-        ds_mask = xr.open_dataset(self.grid.land_mask_file)
+            ds = get_xarray_ds_from_file(self.grid.restart_file)
+        ds_mask = get_xarray_ds_from_file(self.grid.land_mask_file)
         logger.debug(
             f"land mask shape before sel: {ds_mask.land_mask.shape} lat_min: {ds_mask.land_mask.lat.min()}, lat_max: {ds_mask.land_mask.lat.max()}"
         )
@@ -1213,7 +1219,7 @@ class MHMRestartFile:
                 self.grid.morph_files.slope_emp is None
                 or not self.grid.morph_files.slope_emp.is_file()
             ):
-                with xr.open_dataset(self.grid.morph_files.slope) as ds_slope:
+                with get_xarray_ds_from_file(self.grid.morph_files.slope) as ds_slope:
                     data = ds_slope["slope"]
                     flattened = data.values.flatten()
                     flattened_no_nan = flattened[~np.isnan(flattened)]
@@ -1226,13 +1232,13 @@ class MHMRestartFile:
                     self.grid.morph_files.slope_emp = self.grid.path / "slope_emp.nc"
         else:
             for sgrid in self.subgrids:
-                with xr.open_dataset(sgrid.morph_files.slope) as ds_slope:
+                with get_xarray_ds_from_file(sgrid.morph_files.slope) as ds_slope:
                     data = ds_slope["slope"]
                     flattened = data.values.flatten()
                     flattened_no_nan = flattened[~np.isnan(flattened)]
                     td.update(flattened_no_nan)
             for sgrid in self.subgrids:
-                with xr.open_dataset(sgrid.morph_files.slope) as ds_slope:
+                with get_xarray_ds_from_file(sgrid.morph_files.slope) as ds_slope:
                     data = ds_slope["slope"]
                     cdf = td.cdf(data.values)
                     cdf = xr.DataArray(cdf, dims=["latitude", "longitude"])

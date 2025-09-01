@@ -11,9 +11,9 @@ from pathlib import Path
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
-import xarray as xr
 from matplotlib import gridspec
 
+from mhm_tools.common.file_handler import get_xarray_ds_from_file
 from mhm_tools.common.logger import ErrorLogger, log_arguments
 
 logger = logging.getLogger(__name__)
@@ -423,7 +423,7 @@ class Hydrograph:
         path = Path(path)
         discharge_file = path / "discharge.nc"
         if discharge_file.is_file():
-            with xr.open_dataset(path / "discharge.nc") as ds:
+            with get_xarray_ds_from_file(path / "discharge.nc") as ds:
                 discharge_data = ds.load()
                 for v in discharge_data.variables:
                     if not isinstance(v, str):
@@ -466,7 +466,7 @@ class Hydrograph:
             msg = f"{path} is neither a directory nor a file"
             self.logger.warning(msg)
             return
-        with xr.open_dataset(path) as ds:
+        with get_xarray_ds_from_file(path) as ds:
             self.pre = ds.load()
 
     def create_plot_at_timestep(self, fig, gs):
@@ -609,14 +609,14 @@ class Hydrograph:
             ax2 = fig.add_subplot(inner_gs_update[1:], sharex=ax2_pre)
             if self.calc_stats:
                 ax2_pre.set_title(
-                    f"sim - obs = {self.objectives.diff:.0f}$m^3$ or {self.objectives.rel_diff * 100:.0f}%",
+                    f"sum(sim - obs) = {self.objectives.diff:.0f}$m^3$ or {self.objectives.rel_diff*100:.0f}%",
                     horizontalalignment="center",
                 )
         else:
             ax2 = fig.add_subplot(outer_gs)
             if self.calc_stats:
                 ax2.set_title(
-                    f"sim - obs = {self.objectives.diff:.0f}$m^3$ or {self.objectives.rel_diff * 100:.0f}%",
+                    f"sum(sim - obs) = {self.objectives.diff:.0f}$m^3$ or {self.objectives.rel_diff*100:.0f}%",
                     horizontalalignment="center",
                 )
         ax2.spines["top"].set_visible(False)
@@ -917,7 +917,9 @@ class Hydrograph:
             #     len(self.output_file.split("/")) == 1
             # ):  # by default the hydrograph is saved to the data directory
             # self.output_file = self.output_file
-            fig.savefig(self.output_file, bbox_inches="tight")
+            if not self.output_file.parent.is_dir():
+                self.output_file.parent.mkdir(parents=True)
+            fig.savefig(self.output_file, bbox_inches="tight", dpi=800)
             self.logger.info(f"saved hydrograph to '{self.output_file}'")
         if self.show:
             plt.show()
@@ -938,7 +940,7 @@ def get_hydrograph_from_path(
     """
     hydro = Hydrograph()
     hydro.check_which_plots_to_create(plot_code)
-    hydro.output_file = output_file
+    hydro.output_file = Path(output_file)
     hydro.title = title
     hydro.show = show
     hydro.save = save
@@ -980,7 +982,7 @@ def gen_hydrograph_by_data_sets(
         missing_data_error_msg = f"For {id} the hydrograph could not be created."
         if hydro.set_discharge(simulation=simulations, observation=observation):
             hydro.pre = precipitation
-            hydro.output_file = output_file
+            hydro.output_file = Path(output_file)
             hydro.title = str(id) if not title and id is not None else title
             hydro.show = show
             hydro.save = save
