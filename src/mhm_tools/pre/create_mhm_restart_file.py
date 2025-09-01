@@ -636,7 +636,7 @@ class MHMRestartFile:
 
     def _split_file(self, name, file_path):
         if isinstance(file_path, list) and len(file_path) == 1:
-            file_path = file_path
+            file_path = file_path[0]
         elif isinstance(file_path, list) and len(file_path) > 1:
             msg = f"There are multiple files with ambigous names in the setup. Please remove all but one of {file_path}"
             with ErrorLogger(logger):

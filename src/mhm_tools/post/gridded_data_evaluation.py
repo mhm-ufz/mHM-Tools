@@ -30,6 +30,23 @@ from mhm_tools.common.xarray_utils import (
 logger = logging.getLogger(__name__)
 
 
+class EvalDataset:
+    """Dataset containing all the necessary information about a evaluation dataset."""
+
+    path = None
+    name = None
+    var = None
+    factor = 1
+    file_name = "*.*"
+
+    def __init__(self, path, name, var, factor, file_name):
+        self.path = Path(path) if path is not None else None
+        self.name = name
+        self.var = var
+        self.factor = factor
+        self.file_name = file_name
+
+
 def spearman_correlation(data1, data2):
     """Calculate Spearman rank correlation between two xarray DataArrays."""
     # Check that both arrays are of the same size and flatten them
@@ -276,7 +293,9 @@ def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None)
         # logger.warning(f"Files not a list of files but one file {files}.")
         files = [files]
     logger.debug(files)
-    with get_xarray_ds_from_file(files[0], engine="netcdf4", force_decending_y=True) as ds:
+    with get_xarray_ds_from_file(
+        files[0], engine="netcdf4", force_decending_y=True
+    ) as ds:
         # Apply coordinate slicing if needed
         if coordinate_slice is not None:
             lat_key = get_coord_key(ds, lat=True)
@@ -292,7 +311,9 @@ def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None)
     monthly_sums = np.zeros((12, *da.shape[1:]))
     monthly_counts = np.zeros((12, *da.shape[1:]))
     for f, file in enumerate(files):
-        with get_xarray_ds_from_file(file, engine="netcdf4", force_decending_y=True) as ds:
+        with get_xarray_ds_from_file(
+            file, engine="netcdf4", force_decending_y=True
+        ) as ds:
             logger.info(f"timestep {count} in file {f+1} / {len(files)} from {file}")
             if coordinate_slice is not None:
                 lat_key = get_coord_key(ds, lat=True)
@@ -379,7 +400,9 @@ def get_stats_one_pass(
     monthly_counts = np.where(monthly_counts > 0, monthly_counts, np.nan)
     climatology = monthly_sums / monthly_counts
     climatology = np.where(monthly_counts > 0, climatology, np.nan)
-    with get_xarray_ds_from_file(files[0], engine="netcdf4", force_decending_y=True) as ds_in:
+    with get_xarray_ds_from_file(
+        files[0], engine="netcdf4", force_decending_y=True
+    ) as ds_in:
         lat_key = get_coord_key(ds_in, lat=True)
         lon_key = get_coord_key(ds_in, lon=True)
         # Apply coordinate slicing if needed
@@ -493,7 +516,7 @@ def resample_to_coarser_calendar(
         # same resolution, nothing to do
         logger.info(f"Both are already {alias_in}")
 
-    # finally, force them onto exactly the same time‐axis
+    # finally, force them onto exactly the same time-axis
     # ds_input, ds_ref = xr.align(ds_input, ds_ref)
     # logger.debug(f"Input file after align {ds_input}")
     return ds_input, ds_ref
@@ -703,7 +726,9 @@ def get_stats(
             with ErrorLogger(logger):
                 raise ValueError(msg)
     else:
-        with get_xarray_ds_from_file(path, engine="netcdf4", force_decending_y=True) as ds_input:
+        with get_xarray_ds_from_file(
+            path, engine="netcdf4", force_decending_y=True
+        ) as ds_input:
             ds = ds_input
             if coordinate_slice is not None:
                 ds = ds.sel(
@@ -785,9 +810,9 @@ def compare_input_with_ref(  # noqa: PLR0913
     # regrid spatial resoution
     # regridd to same spatial resolution
     if len(input["lat"].data) < 1 or len(input["lon"].data) < 1:
-        logger.error('Input dataset has empty coordinate.')
+        logger.error("Input dataset has empty coordinate.")
     if len(ref["lat"].data) < 1 or len(ref["lon"].data) < 1:
-        logger.error('Ref dataset has empty coordinate.')
+        logger.error("Ref dataset has empty coordinate.")
     input, ref = regridd_to_higher_spatial_resolution(input, ref)
 
     # compare and save statistics
@@ -935,7 +960,9 @@ def evaluate_boostraping_stat_files(stat_files, input_name, ref_name):
     """Evaluate bootstrapped stats and return medians across iterations."""
     # Open the first file to initialize dimensions and weights
     try:
-        with get_xarray_ds_from_file(stat_files[0], force_decending_y=True) as first_file:
+        with get_xarray_ds_from_file(
+            stat_files[0], force_decending_y=True
+        ) as first_file:
             shape = first_file["rel_mean"].shape
             n_bootstrap = len(stat_files)
 
@@ -995,7 +1022,7 @@ def get_dataset_from_path(
             chunking=chunking,
             available_mem_gib=available_mem,
             chunk_type=ChunkType.SPACE,
-            force_decending_y=True
+            force_decending_y=True,
         )
     if path.is_dir():
         file_list = get_files(
@@ -1070,10 +1097,11 @@ def get_years_from_path(path, raise_exception=True, file_name="*.*"):
             raise ValueError(msg)
     return []
 
+
 def get_files_from_path(path, raise_exception=True, file_name="*.*"):
     """Get years for one dataset from the folder structure or the xarray dataset."""
     if path.is_dir():
-        all_files = [] 
+        all_files = []
         all_dirs = year_structure_paths(path, file_name=file_name)
         for dir in all_dirs:
             all_files.extend(list(dir.glob(file_name)))
@@ -1151,28 +1179,23 @@ def get_target_time_res_from_files(input_file, ref_file):
     return f"{int(target_res / np.timedelta64(1, 'h'))}h"
 
 
-def get_target_time_res(input_path, ref_path, folder_name=""):
+def get_target_time_res(input_path, ref_path):
     """Get coarser time resolution from two datasets with files in folder structur."""
     input_files = get_files_from_path(input_path)
     ref_files = get_files_from_path(ref_path)
     if not list(input_files) or not list(ref_files):
         logger.error("One of the datasets has no files.")
         return None
-    return get_target_time_res_from_files(next(iter(input_files)), next(iter(ref_files)))
-
+    return get_target_time_res_from_files(
+        next(iter(input_files)), next(iter(ref_files))
+    )
 
 
 @log_arguments()
 def gridded_data_evaluation(
-    input_path,
-    input_var,
+    input: EvalDataset,
+    ref: EvalDataset,
     output_path,
-    ref_path,
-    ref_var,
-    input_name=None,
-    ref_name=None,
-    input_factor=1,
-    ref_factor=1,
     only_plot=False,
     coordinate_slice=None,
     n_cpus=1,
@@ -1181,20 +1204,18 @@ def gridded_data_evaluation(
     direct_comp=True,
     year_slice=None,
     avaiable_mem=None,
-    input_file_name="*.*",
-    ref_file_name="*.*",
 ):
     """Validate a spatial variable by comparing dataset climatologies."""
     output_path = Path(output_path)
-    input_path = Path(input_path)
-    ref_path = Path(ref_path) if ref_path is not None else None
+    input_path = input.path
+    ref_path = ref.path
 
     if not output_path.is_dir():
         output_path.mkdir(parents=True)
 
-    if only_plot and get_rel_stat_file(output_path, input_name, ref_name).is_file():
+    if only_plot and get_rel_stat_file(output_path, input.name, ref.name).is_file():
         create_map_from_output(
-            output_path=output_path, input_name=input_name, ref_name=ref_name
+            output_path=output_path, input_name=input.name, ref_name=ref.name
         )
         return
 
@@ -1205,13 +1226,11 @@ def gridded_data_evaluation(
     available_years = get_available_years(input_path, ref_path, year_slice, direct_comp)
     logger.info(f"Years {available_years} are available for comparison.")
     if not available_years:
-        logger.error('Since no data is available the program is stoped.')
+        logger.error("Since no data is available the program is stoped.")
         return
     target_time_res = None
     if direct_comp:
-        target_time_res = get_target_time_res(
-            input_path, ref_path
-        )
+        target_time_res = get_target_time_res(input_path, ref_path)
         logger.info(
             f"Years {available_years} are overlapping. Data should be resampled to {target_time_res}"
         )
@@ -1219,9 +1238,9 @@ def gridded_data_evaluation(
     if ref_path is None:
         # Only create statistics; do not compare
         logger.info(
-            f"No ref file provided. Only creating a stat file for {input_name}."
+            f"No ref file provided. Only creating a stat file for {input.name}."
         )
-        output_name = f"{input_name}_stats.nc" if input_name is not None else "stats.nc"
+        output_name = f"{input.name}_stats.nc" if input.name is not None else "stats.nc"
 
         if input_path.is_file():
             # Write file stats to file
@@ -1230,8 +1249,8 @@ def gridded_data_evaluation(
             ) as ds_in:
                 get_file_stats(
                     ds_in,
-                    input_var,
-                    input_factor,
+                    input.var,
+                    input.factor,
                     coordinate_slice,
                     output=output_path / output_name,
                     avaiable_years=available_years,  # keep parameter name as used elsewhere
@@ -1246,14 +1265,14 @@ def gridded_data_evaluation(
             _ = Parallel(n_jobs=n_cpus)(
                 delayed(get_stats_one_pass)(
                     input_path,
-                    input_var,
-                    input_factor,
+                    input.var,
+                    input.factor,
                     coordinate_slice,
                     n_bootstrap_years,
                     bootstrap_index,
                     output_path / output_name,
                     available_years=available_years,
-                    file_name=input_file_name,
+                    file_name=input.file_name,
                 )
                 for bootstrap_index in range(n_bootstrap_selections)
             )
@@ -1262,12 +1281,12 @@ def gridded_data_evaluation(
             # Stats for one dataset read from multiple files in a directory
             get_stats_one_pass(
                 input_path,
-                input_var,
-                input_factor,
+                input.var,
+                input.factor,
                 coordinate_slice,
                 output_path=output_path / output_name,
                 available_years=available_years,
-                file_name=input_file_name,
+                file_name=input.file_name,
             )
         else:
             with ErrorLogger(logger):
@@ -1284,26 +1303,26 @@ def gridded_data_evaluation(
         # Compare via bootstrapping
         if only_plot:
             stat_files = list(
-                output_path.glob(f"relative_stats_{input_name}_{ref_name}_*")
+                output_path.glob(f"relative_stats_{input.name}_{ref.name}_*")
             )
         else:
             stat_files = Parallel(n_jobs=n_cpus)(
                 delayed(compare_input_with_ref)(
                     input_path,
-                    input_var,
+                    input.var,
                     output_path,
                     ref_path,
-                    ref_var,
-                    input_name,
-                    ref_name,
-                    input_factor,
-                    ref_factor,
+                    ref.var,
+                    input.name,
+                    ref.name,
+                    input.factor,
+                    ref.factor,
                     coordinate_slice,
                     n_bootstrap_years,
                     bootstrap_index,
                     available_years=available_years,
-                    input_file_name=input_file_name,
-                    ref_file_name=ref_file_name,
+                    input_file_name=input.file_name,
+                    ref_file_name=ref.file_name,
                     target_freq=target_time_res,
                 )
                 for bootstrap_index in range(n_bootstrap_selections)
@@ -1311,13 +1330,13 @@ def gridded_data_evaluation(
         stat_files = [file for file in stat_files if file is not None]
         if stat_files:
             results = evaluate_boostraping_stat_files(
-                stat_files, input_name=input_name, ref_name=ref_name
+                stat_files, input_name=input.name, ref_name=ref.name
             )
             plot_map(
                 **results,
                 output_path=output_path,
-                input_name=input_name,
-                ref_name=ref_name,
+                input_name=input.name,
+                ref_name=ref.name,
             )
         else:
             logger.error("There are no statfiles created from the evaluation.")
@@ -1325,20 +1344,20 @@ def gridded_data_evaluation(
         logger.info("Compare without bootstrapping.")
         compare_input_with_ref(
             input_path,
-            input_var,
+            input.var,
             output_path,
             ref_path,
-            ref_var,
-            input_name,
-            ref_name,
-            input_factor,
-            ref_factor,
+            ref.var,
+            input.name,
+            ref.name,
+            input.factor,
+            ref.factor,
             coordinate_slice,
             ncpus=n_cpus,
             available_years=available_years,
             direct_comp=direct_comp,
             available_mem=avaiable_mem,
-            input_file_name=input_file_name,
-            ref_file_name=ref_file_name,
+            input_file_name=input.file_name,
+            ref_file_name=ref.file_name,
             target_freq=target_time_res,
         )

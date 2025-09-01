@@ -181,7 +181,7 @@ def get_gauge_coords(
     return None, None, None
 
 
-def Q_data_to_xarray(  # noqa: PLR0913
+def Q_data_to_xarray(  # noqa: PLR0913, PLR0915
     model_data_path,
     observed_data_path,
     mrm_restart_file,
@@ -231,6 +231,7 @@ def Q_data_to_xarray(  # noqa: PLR0913
         observed_data = observed_data.sel(time=date_slice)
     if obs_output_file.is_file() and sim_output_file.is_file() and not overwrite:
         return observed_data, sim_data
+
     # creating saving path
     saving_path = Path(saving_path)
     if not saving_path.is_dir():
@@ -337,8 +338,8 @@ def Q_data_to_xarray(  # noqa: PLR0913
                 y_new.append(yn)
                 facc_new.append(fan)
                 gauge_ids_with_values.append(gauge_ids.values[i])
-        if len(x_new) == 0: 
-            msg = 'There are no gauges that could be found.'
+        if len(x_new) == 0:
+            msg = "There are no gauges that could be found."
             with ErrorLogger(logger):
                 raise ValueError(msg)
         logger.info(f"There are {len(x_new)} gauges")

@@ -1,7 +1,7 @@
 """Evaluation of spatially distributed data based on their climatology or timeseries."""
 
 from mhm_tools.common.cli_utils import get_available_mem_in_unit, get_coords
-from mhm_tools.post.gridded_data_evaluation import gridded_data_evaluation
+from mhm_tools.post.gridded_data_evaluation import EvalDataset, gridded_data_evaluation
 
 
 def add_args(parser):
@@ -215,16 +215,24 @@ def run(args):
         }
     year_slice = slice(args.start_year, args.end_year)
     available_mem = get_available_mem_in_unit(args.available_mem)
+    input = EvalDataset(
+        path=args.input_path,
+        name=args.input_name,
+        var=args.input_var,
+        factor=float(args.input_factor),
+        file_name=args.input_file_name,
+    )
+    ref = EvalDataset(
+        path=args.ref_path,
+        name=args.ref_name,
+        var=args.ref_var,
+        factor=float(args.ref_factor),
+        file_name=args.ref_file_name,
+    )
     gridded_data_evaluation(
-        args.input_path,
-        args.input_variable,
+        input,
+        ref,
         args.output_dir,
-        args.ref_path,
-        args.ref_variable,
-        args.input_name,
-        args.ref_name,
-        float(args.input_factor),
-        float(args.ref_factor),
         args.only_plot,
         coordinate_slice,
         args.ncpus,
@@ -233,6 +241,4 @@ def run(args):
         args.direct_comparison,
         year_slice=year_slice,
         avaiable_mem=available_mem,
-        input_file_name=args.input_file_name,
-        ref_file_name=args.ref_file_name,
     )

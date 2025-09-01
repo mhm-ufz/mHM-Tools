@@ -62,8 +62,12 @@ class Catchment:
         self.ftype = ftype
         self.catchment_mask = None
         self.l1_resolution = l1_resolution
-        self.l11_resolution = l11_resolution if l11_resolution is not None else l1_resolution
-        self.l2_resolution = l2_resolution if l2_resolution is not None else l1_resolution
+        self.l11_resolution = (
+            l11_resolution if l11_resolution is not None else l1_resolution
+        )
+        self.l2_resolution = (
+            l2_resolution if l2_resolution is not None else l1_resolution
+        )
         self.do_upscale = upscale
         self.out_var_name = (
             out_var_name if out_var_name is not None else f"{var_name}.nc"
@@ -199,11 +203,18 @@ class Catchment:
         input_res = round(abs(self.ds.lon.data[1] - self.ds.lon.data[0]), 6)
         upscale_res = self.l1_resolution
         if max_resolution:
-            upscale_res = max([res for res in [self.l1_resolution, self.l11_resolution, self.l2_resolution] if res is not None ])
-        if (
-            int(upscale_res / input_res + 0.5) - (upscale_res / input_res)
-            < 1e6
-        ):
+            upscale_res = max(
+                [
+                    res
+                    for res in [
+                        self.l1_resolution,
+                        self.l11_resolution,
+                        self.l2_resolution,
+                    ]
+                    if res is not None
+                ]
+            )
+        if int(upscale_res / input_res + 0.5) - (upscale_res / input_res) < 1e6:
             return int(upscale_res / input_res + 0.5)
         not_int_multiple_msg = f"Upscaling only works if L1 resolution is integer muplipe of L0 resolution but L1 = {self.l1_resolution / input_res:.4f} * L0"
         raise ValueError(not_int_multiple_msg)
@@ -669,7 +680,7 @@ def create_catchment(
     frame=1,
     upscale=False,
     latlon=True,
-    available_mem=None
+    available_mem=None,
 ):
     """Create file containing catchment ids, flowdirection and upstream area from dem or flow direction."""
     logger.info(
@@ -682,7 +693,11 @@ def create_catchment(
             raise ValueError(msg)
 
     with get_xarray_ds_from_file(
-        input_file, var_name, normalize_latlon_coords=True, force_decending_y=True, available_mem_gib=available_mem
+        input_file,
+        var_name,
+        normalize_latlon_coords=True,
+        force_decending_y=True,
+        available_mem_gib=available_mem,
     ) as input_ds:
         # transform
         transform = get_transformation_matrix_nc(input_ds, var_name)
@@ -750,8 +765,12 @@ def create_catchment(
             input_ds_sliced = input_ds.sel(
                 lat=coordinate_slices["lat"], lon=coordinate_slices["lon"]
             )
-            logger.info(f"lat {input_ds_sliced.lat.data[0]}, {input_ds_sliced.lat.data[-1]}")
-            logger.info(f"lon {input_ds_sliced.lon.data[0]}, {input_ds_sliced.lon.data[-1]}")
+            logger.info(
+                f"lat {input_ds_sliced.lat.data[0]}, {input_ds_sliced.lat.data[-1]}"
+            )
+            logger.info(
+                f"lon {input_ds_sliced.lon.data[0]}, {input_ds_sliced.lon.data[-1]}"
+            )
             c = Catchment(
                 ds=input_ds_sliced,
                 var_name=var_name,

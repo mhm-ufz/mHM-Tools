@@ -20,7 +20,6 @@ import xarray as xr
 
 from mhm_tools.common.file_handler import get_xarray_ds_from_file
 from mhm_tools.common.logger import ErrorLogger
-from mhm_tools.common.logger import ErrorLogger
 from mhm_tools.common.xarray_utils import crop_ds
 
 logger = logging.getLogger(__name__)

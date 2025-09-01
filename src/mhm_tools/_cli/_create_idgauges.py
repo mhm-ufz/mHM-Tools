@@ -103,5 +103,5 @@ def run(args):
         lat=lat,
         file_is_idgauges=args.is_id_gauges,
         id=args.gauge_id,
-        facc_file=args.facc_file
+        facc_file=args.facc_file,
     )
