@@ -86,7 +86,9 @@ def get_single_data_var(ds):
             logger.error("No datavar that is not coordinate.")
             return None
     logger.debug(f"data_vars: {data_vars}")
-    return data_vars[0]
+    if len(data_vars) == 1:
+        return data_vars[0]
+    return None
 
 
 def induce_data_var_from_file_name(ds, file_path):

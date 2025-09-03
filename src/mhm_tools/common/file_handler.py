@@ -201,12 +201,16 @@ def get_xarray_ds_from_file(
             var_name=var_name,
         )
         chunk_type = ChunkType.SPACE
-    if file_path.suffix == ".nc":
+    elif file_path.suffix == ".nc":
         ds_out = read_dataset(
             file_path=file_path,
             use_mfdataset=use_mfdataset,
             engine=engine,
         )
+    else:
+        msg = f"Reading file types other than asci and netcdf is not implemented. The suffix of the file was: {file_path.suffix}"
+        with ErrorLogger(logger):
+            raise NotImplementedError(msg)
 
     lat_key = get_coord_key(ds_out, lat=True, raise_exception=False)
     lon_key = get_coord_key(ds_out, lon=True, raise_exception=False)
@@ -226,9 +230,9 @@ def get_xarray_ds_from_file(
     if chunking and available_mem_gib is not None:
         ds_out = chunk_dataset(ds_out, chunk_type, available_mem_gib)
     if ds_out is None:
-        msg = f"File types other than asci and netcdf are not implemented. The suffix of the file was: {file_path.suffix}"
+        msg = f"The dataset read from {file_path} is empty."
         with ErrorLogger(logger):
-            raise NotImplementedError()
+            raise ValueError(msg)
     logger.debug(f"ds_out: {ds_out}")
     return ds_out
 
@@ -252,7 +256,7 @@ def write_xarray_to_file(ds, file_path, var_name=None, fmt=None, create_folder=T
         return write_xarray_to_ascii(ds, file_path, var_name, fmt)
     if file_path.suffix == ".nc":
         return ds.to_netcdf(file_path)
-    msg = f"File types other than asci and netcdf are not implemented. The suffix of the file was: {file_path.suffix}"
+    msg = f"Writing to file types other than asci and netcdf is not implemented. The suffix of the file was: {file_path.suffix}"
     with ErrorLogger(logger):
         raise NotImplementedError(msg)
 
@@ -264,9 +268,9 @@ def write_xarray_to_ascii(dataset, filepath, data_var=None, fmt=None):
         data_var = get_single_data_var(dataset)
         if data_var is None:
             logger.error(
-                f"Data can not be written to {filepath} as the dataset has multiple data_vars which is incompatible with asci."
+                f"Data can not be written to {filepath} as the dataset has multiple data_vars which is incompatible with asci or no datavar exists."
             )
-            return
+            return None
     data = dataset[data_var]
     lat_key = get_coord_key(dataset, lat=True)
     lon_key = get_coord_key(dataset, lon=True)
@@ -309,6 +313,7 @@ def write_xarray_to_ascii(dataset, filepath, data_var=None, fmt=None):
         else:
             np.savetxt(f, data_to_write, fmt="%s")
         logger.info(f"Writting file to {filepath}")
+    return filepath
 
 
 def read_ascii_to_xarray(filepath, var_name=None):
