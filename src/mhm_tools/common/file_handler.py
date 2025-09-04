@@ -357,7 +357,7 @@ def read_ascii_to_xarray(
 
     # Create DataArray with lat/lon dimensions and nodata value
     name = "data" if var_name is None else var_name
-    data_array = xr.DataArray(
+    da = xr.DataArray(
         data=data_values,
         dims=["lat", "lon"],
         coords={"lon": ("lon", lon, {"axis": "X"}), "lat": ("lat", lat, {"axis": "Y"})},

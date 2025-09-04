@@ -549,7 +549,6 @@ def plot_map(
     input_name,
     ref_name,
     output_path,
-    plots={"mean": True, "std": True, "corr": True, "season": True},
 ):
     """Create a 2x2 figure of relative mean, relative std, Spearman correlation, and seasonal means.
 
@@ -870,6 +869,8 @@ def compare_input_with_ref(  # noqa: PLR0913
     target_freq=None,
     plot=True,
     bias_only=False,
+    input_file_name=None,
+    ref_file_name=None,
 ):
     """Compare the two datasets."""
     output_path = Path(output_path)
@@ -1361,8 +1362,6 @@ def gridded_data_evaluation(
     direct_comp=True,
     year_slice=None,
     avaiable_mem=None,
-    input_file_name="*.*",
-    ref_file_name="*.*",
     bias_only=False,
 ):
     """Validate a spatial variable by comparing dataset climatologies."""

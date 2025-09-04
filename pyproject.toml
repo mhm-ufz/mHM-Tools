@@ -48,7 +48,8 @@ dependencies = [
   "crick",
   "distributed",
   "seaborn",
-  "netCDF4"
+  "netCDF4",
+  "easy_mpl"
 ]
 
 [project.urls]
