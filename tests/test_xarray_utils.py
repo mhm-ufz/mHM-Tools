@@ -1,23 +1,25 @@
 # tests/test_xarray_utils_unittest.py
 import unittest
 from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import xarray as xr
 
 import mhm_tools.common.xarray_utils as utils
 from mhm_tools.common.xarray_utils import (
-    normalize_lat_lon,
+    crop_ds,
     get_coord_key,
+    get_overlapping_time_slice,
     get_single_data_var,
     induce_data_var_from_file_name,
+    normalize_lat_lon,
     timedelta_to_alias,
-    get_overlapping_time_slice,
-    crop_ds,
 )
 
+
 class XarrayUtilsBase(unittest.TestCase):
-    def make_sample_ds(self, lat_key='lat', lon_key='lon'):
+    def make_sample_ds(self, lat_key="lat", lon_key="lon"):
         # 3x4 grid, ascending coords
         lat = np.array([10.0, 11.0, 12.0])
         lon = np.array([100.0, 101.0, 102.0, 103.0])
@@ -70,7 +72,6 @@ class XarrayUtilsBase(unittest.TestCase):
         return xr.DataArray(np.zeros(time.size), coords={"time": time}, dims=("time",))
 
 
-
 class TestNormalizeLatLon(XarrayUtilsBase):
     def test_normalize_lat_lon_renames(self):
         ds = xr.Dataset(
@@ -109,8 +110,8 @@ class TestGetCoordKey(XarrayUtilsBase):
     def test_get_coord_key_no_raise_returns_none(self):
         ds = self.make_sample_ds()
         ds2 = ds.drop_dims("lat")
-        self.assertFalse('lat' in ds2.coords)
-        self.assertFalse('lat' in ds2.dims)
+        self.assertFalse("lat" in ds2.coords)
+        self.assertFalse("lat" in ds2.dims)
         lat_coord = get_coord_key(ds2, lat=True, raise_exception=False)
         self.assertIsNone(lat_coord)
 
@@ -220,8 +221,12 @@ class TestGetOverlappingTimeSlice(XarrayUtilsBase):
         # Note: the implementation path uses a context manager; if it is misused,
         # any Exception is acceptable here.
         t = np.array(np.arange("2021-01-01", "2021-01-04", dtype="datetime64[D]"))
-        ds1 = xr.Dataset({"a": ("time", np.array([np.nan, np.nan, np.nan]))}, coords={"time": t})
-        ds2 = xr.Dataset({"b": ("time", np.array([np.nan, np.nan, np.nan]))}, coords={"time": t})
+        ds1 = xr.Dataset(
+            {"a": ("time", np.array([np.nan, np.nan, np.nan]))}, coords={"time": t}
+        )
+        ds2 = xr.Dataset(
+            {"b": ("time", np.array([np.nan, np.nan, np.nan]))}, coords={"time": t}
+        )
         with self.assertRaises(Exception):
             get_overlapping_time_slice(ds1, ds2)
 

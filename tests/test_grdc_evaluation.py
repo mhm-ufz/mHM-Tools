@@ -3,7 +3,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
@@ -78,11 +78,15 @@ def cm_enter(ds):
 # -----------------------------
 class TestLowLevelHelpers(unittest.TestCase):
     def test_flatten_list(self):
-        self.assertEqual(gv.flatten_list([1, [2, [3, None], 4], None, 5]), [1, 2, 3, 4, 5])
+        self.assertEqual(
+            gv.flatten_list([1, [2, [3, None], 4], None, 5]), [1, 2, 3, 4, 5]
+        )
 
     def test_gen_list_of_result_dicts_all_nan(self):
         times = pd.date_range("2000-01-01", periods=3, freq="H")
-        da = xr.DataArray([np.nan, np.nan, np.nan], dims=("time",), coords={"time": times})
+        da = xr.DataArray(
+            [np.nan, np.nan, np.nan], dims=("time",), coords={"time": times}
+        )
         res = gv.gen_list_of_result_dicts(da, id=123, datatype="obs", facc=42.0)
         self.assertIsNone(res)
 
@@ -154,10 +158,17 @@ class TestQDataToXarray(unittest.TestCase):
                 return next(gi)
 
             # Patch pieces that hit filesystem or heavy logic
-            with patch.object(gv, "get_xarray", side_effect=gxarr_side_effect), \
-                 patch.object(gv, "get_gauge_coords", side_effect=[(10.0, 50.0, 1000.0), (10.1, 49.9, 1500.0)]), \
-                 patch.object(gv, "get_sim_data_for_one_gauge") as mock_sim_for_gauge, \
-                 patch.object(gv, "write_xarray_to_file") as mock_write:
+            with patch.object(
+                gv, "get_xarray", side_effect=gxarr_side_effect
+            ), patch.object(
+                gv,
+                "get_gauge_coords",
+                side_effect=[(10.0, 50.0, 1000.0), (10.1, 49.9, 1500.0)],
+            ), patch.object(
+                gv, "get_sim_data_for_one_gauge"
+            ) as mock_sim_for_gauge, patch.object(
+                gv, "write_xarray_to_file"
+            ) as mock_write:
                 # Make get_sim_data_for_one_gauge return per-id DA with time dimension
                 def _sim_for_gauge(id, index, sim_data, yarr, xarr, resolution):
                     da = xr.DataArray(
@@ -186,7 +197,7 @@ class TestQDataToXarray(unittest.TestCase):
                     resolution=0.1,
                     n_jobs=1,
                     date_slice=None,
-                    overwrite=True,          # force writing, skip file existence branch
+                    overwrite=True,  # force writing, skip file existence branch
                     direct_comparison=True,  # apply overlap slice
                 )
 
@@ -227,19 +238,40 @@ class TestEvaluateDirect(unittest.TestCase):
             # Build very small ready-made datasets that Q_data_to_xarray returns
             ids = [42]
             times = pd.date_range("2005-01-01", periods=3, freq="D")
-            obs_da = xr.DataArray([1.0, 2.0, 3.0], dims=("time",), coords={"time": times}, name="discharge").expand_dims(id=[42])
-            sim_da = xr.DataArray([1.0, 2.0, 3.0], dims=("time",), coords={"time": times}, name="discharge").expand_dims(id=[42])
+            obs_da = xr.DataArray(
+                [1.0, 2.0, 3.0],
+                dims=("time",),
+                coords={"time": times},
+                name="discharge",
+            ).expand_dims(id=[42])
+            sim_da = xr.DataArray(
+                [1.0, 2.0, 3.0],
+                dims=("time",),
+                coords={"time": times},
+                name="discharge",
+            ).expand_dims(id=[42])
 
             observed_out = xr.Dataset({"discharge": obs_da})
             model_out = xr.Dataset(
-                {"discharge": sim_da, "facc": (("id",), np.array([1000.0])), "x": (("id",), np.array([10.0])), "y": (("id",), np.array([50.0]))},
+                {
+                    "discharge": sim_da,
+                    "facc": (("id",), np.array([1000.0])),
+                    "x": (("id",), np.array([10.0])),
+                    "y": (("id",), np.array([50.0])),
+                },
                 coords={"id": [42]},
             )
 
             # Q_data_to_xarray returns these directly (bypass all I/O/Parallel)
-            with patch.object(gv, "Q_data_to_xarray", return_value=(observed_out, model_out)), \
-                 patch.object(gv, "gen_hydrograph_by_data_sets", return_value={"id": 42, "alpha": 1.0, "beta": 1.0, "gamma": 0.5}), \
-                 patch.object(gv, "plot_cdf") as mock_plot:
+            with patch.object(
+                gv, "Q_data_to_xarray", return_value=(observed_out, model_out)
+            ), patch.object(
+                gv,
+                "gen_hydrograph_by_data_sets",
+                return_value={"id": 42, "alpha": 1.0, "beta": 1.0, "gamma": 0.5},
+            ), patch.object(
+                gv, "plot_cdf"
+            ) as mock_plot:
 
                 gv.evaludate_grdc_data(
                     model_data_path="sim.nc",
@@ -247,8 +279,8 @@ class TestEvaluateDirect(unittest.TestCase):
                     mrm_restart_file="restart.nc",
                     output_path=outdir,
                     n_jobs=1,
-                    direct_comparison=True,     # direct path
-                    n_boostrap_selections=0,   # disable bootstrap
+                    direct_comparison=True,  # direct path
+                    n_boostrap_selections=0,  # disable bootstrap
                     overwrite=True,
                 )
 
@@ -272,10 +304,14 @@ class TestEvaluateBootstrap(unittest.TestCase):
 
             # Two years, one id; values: deterministic
             ids = [7]
-            t = pd.date_range("2010-01-01", periods=730, freq="D")  # 2 years (non-leap + leap ok)
+            t = pd.date_range(
+                "2010-01-01", periods=730, freq="D"
+            )  # 2 years (non-leap + leap ok)
             obs_vals = np.ones((len(t), 1))
             sim_vals = 2.0 * np.ones((len(t), 1))
-            obs_ds = xr.Dataset({"discharge": (("time", "id"), obs_vals)}, coords={"time": t, "id": ids})
+            obs_ds = xr.Dataset(
+                {"discharge": (("time", "id"), obs_vals)}, coords={"time": t, "id": ids}
+            )
             sim_ds = xr.Dataset(
                 {
                     "discharge": (("time", "id"), sim_vals),
@@ -286,10 +322,25 @@ class TestEvaluateBootstrap(unittest.TestCase):
                 coords={"time": t, "id": ids},
             )
 
-            with patch.object(gv, "Q_data_to_xarray", return_value=(obs_ds, sim_ds)), \
-                 patch.object(gv, "gen_hydrograph_by_data_sets", return_value={"id": 7, "alpha": 2.0, "beta": 0.0, "gamma": 0.0}), \
-                 patch.object(gv, "boostap_statistics", return_value={"index": 0, "id": 7, "alpha": 2.0, "beta": 0.0, "gamma": 0.7}), \
-                 patch.object(gv, "plot_cdf") as mock_plot:
+            with patch.object(
+                gv, "Q_data_to_xarray", return_value=(obs_ds, sim_ds)
+            ), patch.object(
+                gv,
+                "gen_hydrograph_by_data_sets",
+                return_value={"id": 7, "alpha": 2.0, "beta": 0.0, "gamma": 0.0},
+            ), patch.object(
+                gv,
+                "boostap_statistics",
+                return_value={
+                    "index": 0,
+                    "id": 7,
+                    "alpha": 2.0,
+                    "beta": 0.0,
+                    "gamma": 0.7,
+                },
+            ), patch.object(
+                gv, "plot_cdf"
+            ) as mock_plot:
 
                 gv.evaludate_grdc_data(
                     model_data_path="sim.nc",
@@ -297,9 +348,9 @@ class TestEvaluateBootstrap(unittest.TestCase):
                     mrm_restart_file="restart.nc",
                     output_path=outdir,
                     n_jobs=1,
-                    direct_comparison=False,   # take bootstrap branch
+                    direct_comparison=False,  # take bootstrap branch
                     n_bootstrap_years=1,
-                    n_boostrap_selections=3,   # >0 triggers bootstrap
+                    n_boostrap_selections=3,  # >0 triggers bootstrap
                     overwrite=True,
                 )
 
