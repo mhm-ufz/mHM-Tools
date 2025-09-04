@@ -159,7 +159,7 @@ class TestQDataToXarray(unittest.TestCase):
 
             # Patch pieces that hit filesystem or heavy logic
             with patch.object(
-                gv, "get_xarray", side_effect=gxarr_side_effect
+                gv, "load_ds", side_effect=gxarr_side_effect
             ), patch.object(
                 gv,
                 "get_gauge_coords",
