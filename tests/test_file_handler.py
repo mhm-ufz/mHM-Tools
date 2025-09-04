@@ -64,27 +64,27 @@ class TestCreateHeader(unittest.TestCase, BaseDatasetMixin):
 
 
 class TestChunkHelpers(unittest.TestCase, BaseDatasetMixin):
-    def test_get_chunks_space_only_with_time(self):
+    def test_chunk_dataset_space_only_with_time(self):
         ds = self.make_ds_with_time()
         for mem_gib in [0.1, 0.5, 1.0, 4.0]:
             with self.subTest(mem_gib=mem_gib):
-                chunks = fh.get_chunks_space_only(ds, mem_gib)
+                chunks = fh.chunk_dataset_space_only(ds, mem_gib)
                 self.assertEqual(chunks.get("time"), -1)
                 self.assertTrue(1 <= chunks["lat"] <= ds.sizes["lat"])
                 self.assertTrue(1 <= chunks["lon"] <= ds.sizes["lon"])
 
-    def test_get_chunks_space_only_no_time(self):
+    def test_chunk_dataset_space_only_no_time(self):
         ds = self.make_simple_ds()
-        chunks = fh.get_chunks_space_only(ds, 1.0)
+        chunks = fh.chunk_dataset_space_only(ds, 1.0)
         self.assertNotIn("time", chunks)
         self.assertTrue(1 <= chunks["lat"] <= ds.sizes["lat"])
         self.assertTrue(1 <= chunks["lon"] <= ds.sizes["lon"])
 
-    def test_get_chunks_space_and_time(self):
+    def test_chunk_dataset_space_and_time(self):
         ds = self.make_ds_with_time()
         for mem_gib in [0.1, 0.5, 1.0, 2.0]:
             with self.subTest(mem_gib=mem_gib):
-                chunks = fh.get_chunks_space_and_time(ds, mem_gib)
+                chunks = fh.chunk_dataset_space_and_time(ds, mem_gib)
                 self.assertIn("time", chunks)
                 self.assertGreaterEqual(chunks["time"], 1)
                 self.assertTrue(1 <= chunks["lat"] <= ds.sizes["lat"])
@@ -103,8 +103,8 @@ class TestChunkHelpers(unittest.TestCase, BaseDatasetMixin):
             return {"lat": 1, "lon": 2, "time": 1}
 
         with patch.object(
-            fh, "get_chunks_space_only", side_effect=_space_only
-        ), patch.object(fh, "get_chunks_space_and_time", side_effect=_space_time):
+            fh, "chunk_dataset_space_only", side_effect=_space_only
+        ), patch.object(fh, "chunk_dataset_space_and_time", side_effect=_space_time):
 
             out_space = fh.chunk_dataset(ds, fh.ChunkType.SPACE, 1.0)
             self.assertTrue(flags["space"])

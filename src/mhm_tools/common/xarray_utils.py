@@ -10,24 +10,27 @@ from mhm_tools.common.logger import ErrorLogger
 logger = logging.getLogger(__name__)
 
 
-def normalize_lat_lon(ds: xr.Dataset, lat: str, lon: str) -> xr.Dataset:
+def normalize_lat_lon(ds: xr.Dataset, lat: str = None, lon: str = None) -> xr.Dataset:
     """
     Normalize latitude and longitude dimension and coordinate names to 'lat' and 'lon'.
 
     Handles both dimensions and coordinate variables.
     """
     rename_dict = {}
-
+    if lat is None: 
+        lat = get_coord_key(ds, lon=True)
+    if lon is None: 
+        lon = get_coord_key(ds, lon=True)
     # Rename coordinate variables if needed
-    if "lat" not in ds.coords and lat in ds.coords:
+    if lat is not None and "lat" not in ds.coords and lat in ds.coords:
         rename_dict[lat] = "lat"
-    if "lon" not in ds.coords and lon in ds.coords:
+    if lon is not None and "lon" not in ds.coords and lon in ds.coords:
         rename_dict[lon] = "lon"
 
     # Rename dimension names if needed
-    if "lat" not in ds.dims and lat in ds.dims:
+    if lat is not None and "lat" not in ds.dims and lat in ds.dims:
         rename_dict[lat] = "lat"
-    if "lon" not in ds.dims and lon in ds.dims:
+    if lon is not None and "lon" not in ds.dims and lon in ds.dims:
         rename_dict[lon] = "lon"
 
     return ds.rename(rename_dict)
