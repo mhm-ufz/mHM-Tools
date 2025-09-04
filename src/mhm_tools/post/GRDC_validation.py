@@ -358,10 +358,10 @@ def Q_data_to_xarray(
             simulation_discharge = simulation_discharge.drop_dims(["lat"])
         if "lon" in simulation_discharge.dims or "lon" in simulation_discharge.coords:
             simulation_discharge = simulation_discharge.drop_dims(["lon"])
-        if "lat" in simulation_discharge.data_vars:
-            simulation_discharge = simulation_discharge.drop_vars(["lat"])
-        if "lon" in simulation_discharge.data_vars:
-            simulation_discharge = simulation_discharge.drop_vars(["lon"])
+        # if "lat" in simulation_discharge.data_vars:
+        #     simulation_discharge = simulation_discharge.drop_vars(["lat"])
+        # if "lon" in simulation_discharge.data_vars:
+        #     simulation_discharge = simulation_discharge.drop_vars(["lon"])
         facc_ids = xr.DataArray(
             data=np.array(facc_new), dims=["id"], coords={"id": gauge_ids_with_values}
         )
