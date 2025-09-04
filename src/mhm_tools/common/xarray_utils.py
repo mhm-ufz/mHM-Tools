@@ -17,9 +17,9 @@ def normalize_lat_lon(ds: xr.Dataset, lat: str = None, lon: str = None) -> xr.Da
     Handles both dimensions and coordinate variables.
     """
     rename_dict = {}
-    if lat is None: 
+    if lat is None:
         lat = get_coord_key(ds, lon=True)
-    if lon is None: 
+    if lon is None:
         lon = get_coord_key(ds, lon=True)
     # Rename coordinate variables if needed
     if lat is not None and "lat" not in ds.coords and lat in ds.coords:

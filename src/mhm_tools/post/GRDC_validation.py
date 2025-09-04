@@ -185,7 +185,7 @@ def load_ds(file_path):
     return get_xarray_ds_from_file(file_path)
 
 
-def Q_data_to_xarray( # noqa: PLR0913, PLR0915
+def Q_data_to_xarray(  # noqa: PLR0913, PLR0915
     model_data_path,
     observed_data_path,
     mrm_restart_file,

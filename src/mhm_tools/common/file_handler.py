@@ -182,6 +182,7 @@ class ChunkType(Enum):
     SPACE = 1
     TIME = 2
 
+
 def chunk_dataset(ds, chunk_type, available_mem_gib):
     """Chunk xarray.DataSet depending on chunk_type and available memory."""
     if chunk_type == ChunkType.TIME:
@@ -200,8 +201,8 @@ def get_xarray_ds_from_file(
     use_mfdataset=False,
     engine="h5netcdf",
     normalize_latlon_coords=False,
-    force_decending_y=False, 
-    force_ascending_y=False
+    force_decending_y=False,
+    force_ascending_y=False,
 ):
     """Read file and return xarray dataset."""
     file_path = Path(file_path)
@@ -230,19 +231,21 @@ def get_xarray_ds_from_file(
     lon_key = get_coord_key(ds_out, lon=True, raise_exception=False)
     # force correct order of y coordinate
     if lat_key is not None:
-        if force_decending_y and ds_out[lat_key].values[0] < ds_out[lat_key].values[-1]:
-            ds_out = ds_out.sel({lat_key: slice(None, None, -1)})
-        elif force_ascending_y and ds_out[lat_key].values[0] > ds_out[lat_key].values[-1]:
+        if (
+            force_decending_y and ds_out[lat_key].values[0] < ds_out[lat_key].values[-1]
+        ) or (
+            force_ascending_y and ds_out[lat_key].values[0] > ds_out[lat_key].values[-1]
+        ):
             ds_out = ds_out.sel({lat_key: slice(None, None, -1)})
     if normalize_latlon_coords:
         # re-name input coords to lat and lon
         ds_out = normalize_lat_lon(ds_out, lat_key, lon_key)
-   
+
     if lon_key is None and lat_key is None:
         logger.warning("Dataset does not have lon and lat key.")
     elif lon_key is None or lat_key is None:
         logger.error("Dataset has only one of lon at lat keys.")
-    
+
     if chunking and available_mem_gib is not None:
         ds_out = chunk_dataset(ds_out, chunk_type, available_mem_gib)
     if ds_out is None:
@@ -277,7 +280,7 @@ def write_xarray_to_ascii(dataset, filepath, data_var=None, fmt=None):
             logger.error(
                 f"Data can not be written to {filepath} as the dataset has multiple data_vars which is incompatible with asci or no datavar exists."
             )
-            return None
+            return
     data = dataset[data_var]
     lat = dataset["lat"].values
     lon = dataset["lon"].values
@@ -366,14 +369,13 @@ def read_ascii_to_xarray(
     ds = da.to_dataset()
 
     # Add axis attributes
-    if 'x' in ds.coords:
-        ds.coords['x'].attrs['axis'] = 'X'
-    if 'y' in ds.coords:
-        ds.coords['y'].attrs['axis'] = 'Y'
+    if "x" in ds.coords:
+        ds.coords["x"].attrs["axis"] = "X"
+    if "y" in ds.coords:
+        ds.coords["y"].attrs["axis"] = "Y"
 
     # Drop spatial_ref if present
     return ds.reset_coords("spatial_ref", drop=True)
-
 
 
 def get_coord_values(ds, lat=False, lon=False):

@@ -10,7 +10,9 @@ from mhm_tools.common.xarray_utils import get_coord_key
 logger = logging.getLogger(__name__)
 
 
-def write_gauge_id(ds, id, lat, lon, facc_file=None):  # , threshold=None, facc_value=None ):
+def write_gauge_id(
+    ds, id, lat, lon, facc_file=None
+):  # , threshold=None, facc_value=None ):
     """Set gauge_id in ds."""
     if facc_file:
         with get_xarray_ds_from_file(file_path=facc_file) as ds_facc:
