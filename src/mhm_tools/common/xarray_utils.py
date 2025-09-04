@@ -10,9 +10,27 @@ from mhm_tools.common.logger import ErrorLogger
 logger = logging.getLogger(__name__)
 
 
-def normalize_lat_lon(ds: xr.Dataset, lat: str, lon: float) -> xr.Dataset:
-    """Normalize names for latitude/longitude."""
-    return ds.rename({lat: "lat", lon: "lon"})
+def normalize_lat_lon(ds: xr.Dataset, lat: str, lon: str) -> xr.Dataset:
+    """
+    Normalize latitude and longitude dimension and coordinate names to 'lat' and 'lon'.
+
+    Handles both dimensions and coordinate variables.
+    """
+    rename_dict = {}
+
+    # Rename coordinate variables if needed
+    if "lat" not in ds.coords and lat in ds.coords:
+        rename_dict[lat] = "lat"
+    if "lon" not in ds.coords and lon in ds.coords:
+        rename_dict[lon] = "lon"
+
+    # Rename dimension names if needed
+    if "lat" not in ds.dims and lat in ds.dims:
+        rename_dict[lat] = "lat"
+    if "lon" not in ds.dims and lon in ds.dims:
+        rename_dict[lon] = "lon"
+
+    return ds.rename(rename_dict)
 
 
 def get_coord_key(
@@ -35,7 +53,7 @@ def get_coord_key(
                 return dim
     except AttributeError:
         pass
-    # then select possible keys from the following lists and try them untill a fitting one is found.
+    # then select possible keys from the following lists and try them until a fitting one is found.
     if lat:
         keys = ["lat", "latitude", "northing", "y", "new_y", "Y", "geo_y"]
     elif lon:
@@ -71,7 +89,7 @@ def get_coord_key(
 
 
 def get_single_data_var(ds):
-    """Get the data var name from da dataset that only contains one data variable."""
+    """Get the data var name from a dataset that only contains one data variable."""
     data_vars = list(ds.data_vars)
     len_data_vars = len(data_vars)
     if len_data_vars > 1:
@@ -92,7 +110,7 @@ def get_single_data_var(ds):
 
 
 def induce_data_var_from_file_name(ds, file_path):
-    """Check if one of the data_vars is part of the file name and select it as most probable data_var."""
+    """Check if one of the data_vars is part of the file name and select it as the most probable data_var."""
     logger.info("Searching for more than one datavar by comparing with file name.")
     name = file_path.stem
     data_vars = list(ds.data_vars)
@@ -106,13 +124,13 @@ def induce_data_var_from_file_name(ds, file_path):
 
 
 def timedelta_to_alias(ds: xr.DataArray) -> str:
-    """
-    Map a median timedelta to a pandas frequency alias.
+    """Map a median timedelta to a pandas frequency alias.
 
-    - ~1 day  → 'D'
-    - ~7 days → 'W'
-    - ~28–31 days → 'M'
+    - ~1 day -> 'D'
+    - ~7 days -> 'W'
+    - ~28-31 days -> 'M'
     - otherwise: fall back to '<N>H'
+
     """
     median_delta = ds.time.diff("time").median()
     days = median_delta / np.timedelta64(1, "D")
@@ -169,7 +187,7 @@ def crop_ds(
     lon_vals = ds[lon_name].values
     lat_vals = ds[lat_name].values
 
-    # if the coordinate axis is ascending, slice low→high; else high→low
+    # if the coordinate axis is ascending, slice low->high; else high->low
     if lon_vals[0] <= lon_vals[-1]:
         lon_slice = slice(lon_low, lon_high)
     else:

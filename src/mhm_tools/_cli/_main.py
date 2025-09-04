@@ -7,18 +7,23 @@ from mhm_tools.common.logger import configure_mhm_tools_logger
 
 from .. import __version__
 from . import (
+    _2d_map,
     _bankfull,
     _create_catchment,
     _create_idgauges,
     _create_mhm_restart_file,
     _create_subdomain_masks,
     _crop_mhm_setup,
+    _difference,
     _grdc_validation,
     _gridded_data_evaluation,
     _hydrograph,
     _latlon,
-    _long_term_mean_validation,
+    _long_term_mean,
     _prepare_mhm_forcings,
+    _ratio,
+    _relative_difference,
+    _taylor_diagram,
 )
 
 
@@ -39,7 +44,6 @@ def add_command_from_module(subparsers, name, module):
         Name of the command to add.
     module : module
         Module containing the `add_args` and `run` functions defining the command.
-
     """
     desc = module.__doc__
     kwargs = {"description": desc}
@@ -96,9 +100,12 @@ def _get_parser():
     add_command_from_module(
         subparsers, "create_mhm_restart_file", _create_mhm_restart_file
     )
-    add_command_from_module(
-        subparsers, "long_term_mean_validation", _long_term_mean_validation
-    )
+    add_command_from_module(subparsers, "long_term_mean", _long_term_mean)
+    add_command_from_module(subparsers, "difference", _difference)
+    add_command_from_module(subparsers, "relative_difference", _relative_difference)
+    add_command_from_module(subparsers, "ratio", _ratio)
+    add_command_from_module(subparsers, "taylor_diagram", _taylor_diagram)
+    add_command_from_module(subparsers, "2d_map", _2d_map)
 
     # add logging
     # option 1 explicit log levels by name
@@ -150,7 +157,6 @@ def main(argv=None):
     Returns
     -------
         result of the called sub-argument routine
-
     """
     args = _get_parser().parse_args(argv)
     configure_mhm_tools_logger(

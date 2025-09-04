@@ -1,7 +1,5 @@
-#!/usr/bin/env python3
 """Common NetCDF/xarray routines and utilities for reading, encoding, and bounds generation."""
 
-import glob
 import logging
 from pathlib import Path
 from typing import Any, List, Optional, Union
@@ -22,9 +20,9 @@ def _has_wildcards(path: Union[str, Path]) -> bool:
 
 
 def _fallback_open(open_func: Any, *args: Any, **kwargs: Any) -> xr.Dataset:
-    """
-    Open a dataset with the provided xarray function,
-    falling back from h5netcdf to netcdf4 engine if necessary.
+    """Open a dataset with the provided xarray function.
+
+    Falls back from the h5netcdf to the netcdf4 engine if necessary.
     """
     try:
         return open_func(*args, **kwargs)
@@ -47,16 +45,16 @@ def read_dataset(
     This function accepts either a single path (possibly containing
     shell-style wildcards), or a list of paths, and handles both:
 
-      - Single-file case: opens it directly.
-      - Multi-file case:
-        * If `use_mfdataset=True`, uses xarray.open_mfdataset for
+    - Single-file case: opens it directly.
+    - Multi-file case:
+        * If `use_mfdataset=True`, uses `xarray.open_mfdataset` for
           contiguous datasets.
-        * Otherwise, opens each file individually and then combines
-          them via coords (attributes overridden).
+        * Otherwise, opens each file individually and combines them
+          via coordinates (attributes overridden).
 
     Parameters
     ----------
-    file_path : str or Path or list thereof
+    file_path : Union[str, Path, List[Union[str, Path]]]
         A file path (can include wildcards), or a list of explicit
         file paths.
     use_mfdataset : bool, default False
@@ -93,6 +91,7 @@ def read_dataset(
 
     >>> paths = ["data/part1.nc", "data/part2.nc"]
     >>> ds = read_dataset(paths)
+
     """
     # Normalize to list of string paths
     if isinstance(file_path, (list, tuple)):
@@ -101,10 +100,9 @@ def read_dataset(
     else:
         pattern = str(file_path)
         if _has_wildcards(pattern):
-            logger.debug(f"Globbing for pattern: {pattern} (recursive=True)")
-            # recursive=True will match any number of subdir levels
-            matches = glob.glob(pattern, recursive=True)
-            paths = sorted(matches)
+            logger.debug(f"Globbing for pattern: {pattern}")
+            matches = sorted(Path().glob(pattern))
+            paths = [str(p) for p in matches]
             if not paths:
                 msg = f"No files match pattern: {pattern}"
                 logger.error(msg)

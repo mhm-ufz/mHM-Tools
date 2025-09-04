@@ -15,7 +15,6 @@ def add_args(parser):
     ----------
     parser : argparse.ArgumentParser
         the main argument parser
-
     """
     parser.add_argument(
         "-f",
@@ -78,14 +77,12 @@ def add_args(parser):
 
 
 def run(args):
-    """
-    Create the id gauges file.
+    """Create the id gauges file.
 
     Parameters
     ----------
     args : argparse.Namespace
         parsed command line arguments
-
     """
     if args.lat and args.lon:
         lat = args.lat

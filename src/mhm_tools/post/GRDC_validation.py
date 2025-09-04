@@ -1,4 +1,11 @@
-"""Compare simulated with observed discharge either directly or using a bootstraping approach."""
+"""
+Compare simulated with observed discharge either directly or using a bootstraping approach.
+
+Authors
+-------
+- Jeisson Leal
+- Simon Lüdke
+"""
 
 import itertools
 import logging
@@ -41,7 +48,7 @@ def flatten_list(nested_list):
 
 
 def gen_list_of_result_dicts(data, id, datatype="", facc=None):
-    """Generate a list of result dictionaries containing time, id, discharge and year."""
+    """Generate result dicts with time, id, discharge, and year."""
     # Check if all values in the array are NaN
     discharge = data.values
     are_all_nan = np.all(np.isnan(discharge))
@@ -62,7 +69,7 @@ def gen_list_of_result_dicts(data, id, datatype="", facc=None):
 
 
 def get_grdc_for_one_gauge(id, observed_data_by_id):
-    """Read in observed data for one gauge."""
+    """Read observed data for one gauge."""
     # id, index = id.values, index=id['index'].values
     if observed_data_by_id.size == 0:
         logger.info(f"No data found for ID: {id}. Skipping...\n")
@@ -95,12 +102,11 @@ def get_gauge_coords(
     diff_percent=10,
     id=None,
 ):
-    """
-    Find correct gauge location.
+    """Find correct gauge location.
 
-    Takes mrm_restart file, an approximate lat lon value and and then finds the cell with the value closest to a given flow accumulation.
-
-    return lon,lat, flow accumulation
+    Takes mrm_restart file, an approximate lat lon value and and then,
+    finds the cell with the value closest to a given flow accumulation.
+    Returns lon,lat, flow accumulation.
     """
     if lonlat is not None:
         # print('lonlat:', lonlat)
@@ -159,7 +165,7 @@ def get_gauge_coords(
         return lon_x, lat_y, found_facc
     if cell_diff < max_cell_diff:
         logger.debug(
-            f"No similar flow acc found. Increasing search radius to {cell_diff+1} cells in each direction."
+            f"No similar flow acc found. Increasing search radius to {cell_diff + 1} cells in each direction."
         )
         return get_gauge_coords(
             ds,
@@ -179,7 +185,7 @@ def load_ds(file_path):
     return get_xarray_ds_from_file(file_path)
 
 
-def Q_data_to_xarray(
+def Q_data_to_xarray( # noqa: PLR0913, PLR0915
     model_data_path,
     observed_data_path,
     mrm_restart_file,
@@ -197,8 +203,7 @@ def Q_data_to_xarray(
     overwrite=False,
     direct_comparison=False,
 ):
-    """
-    Get observed and model Q data and save it as CSV files to be opened later.
+    """Get observed and model Q data and save it as CSV files to be opened later.
 
     This function is not part of the workflow, but a pre processing tool
     that for comodity has been stored here. This was done bc mrm_data_by_id.values
@@ -215,7 +220,6 @@ def Q_data_to_xarray(
     - "id1": Gauge IDs
     - "new_x": X-coordinates of gauges
     - "new_y": Y-coordinates of gauges
-
     """
     if date_slice is None:
         date_slice = slice(None, None)
@@ -231,6 +235,7 @@ def Q_data_to_xarray(
         observed_data = observed_data.sel(time=date_slice)
     if obs_output_file.is_file() and sim_output_file.is_file() and not overwrite:
         return observed_data, sim_data
+
     # creating saving path
     saving_path = Path(saving_path)
     if not saving_path.is_dir():
@@ -272,33 +277,40 @@ def Q_data_to_xarray(
             obs_discharge_data = observed_data_in[observed_variable]
             obs_discharge_data = obs_discharge_data.sel(time=date_slice)
 
-            if hours_obs > hours_sim:
-                # resample the datasets for them to have the same temporal resolution
-                logger.info(
-                    f"The simulation dataset is resampled to fit the observation dataset with a temporal resolution of {alias_obs}"
-                )
-                sim_data_in = sim_data_in.resample(time=alias_obs).mean()
-            if slicing_condition is not None:
-                sim_data_cropped = sim_data_in.sel(
-                    {
-                        get_coord_key(sim_data_in, lat=True): slice(lat_max, lat_min),
-                        get_coord_key(sim_data_in, lon=True): slice(lon_min, lon_max),
-                    }
-                ).sel(time=date_slice)
-            else:
-                sim_data_cropped = sim_data_in.sel(time=date_slice)
-            if direct_comparison:
-                overlapping_time_slice = get_overlapping_time_slice(
-                    sim_data_in, observed_data_in
-                )
-                logger.info(
-                    f"Overlapping time is form {overlapping_time_slice.start} to {overlapping_time_slice.stop}"
-                )
-                # also slice to overlapping time
-                obs_discharge_data = obs_discharge_data.sel(time=overlapping_time_slice)
-                sim_data_cropped = sim_data_cropped.sel(time=overlapping_time_slice)
-                logger.debug(f"obs croped resampled data: {obs_discharge_data}")
-                logger.debug(f"sim croped resampled data: {sim_data_cropped}")
+        # work on copies, not the with-bound names
+        obs_rs = observed_data_in
+        if hours_sim > hours_obs:
+            logger.info(
+                f"Resampling observation data to {alias_sim} to match simulation."
+            )
+            obs_rs = observed_data_in.resample(time=alias_sim).mean()
+        obs_discharge_data = obs_rs[observed_variable].sel(time=date_slice)
+
+        sim_rs = sim_data_in
+        if hours_obs > hours_sim:
+            logger.info(
+                f"Resampling simulation data to {alias_obs} to match observation."
+            )
+            sim_rs = sim_data_in.resample(time=alias_obs).mean()
+
+        if slicing_condition is not None:
+            sim_data_cropped = sim_rs.sel(
+                {
+                    get_coord_key(sim_rs, lat=True): slice(lat_max, lat_min),
+                    get_coord_key(sim_rs, lon=True): slice(lon_min, lon_max),
+                }
+            ).sel(time=date_slice)
+        else:
+            sim_data_cropped = sim_rs.sel(time=date_slice)
+
+        if direct_comparison:
+            overlapping_time_slice = get_overlapping_time_slice(sim_rs, obs_rs)
+            logger.info(
+                f"Overlapping time is from {overlapping_time_slice.start} "
+                f"to {overlapping_time_slice.stop}"
+            )
+            obs_discharge_data = obs_discharge_data.sel(time=overlapping_time_slice)
+            sim_data_cropped = sim_data_cropped.sel(time=overlapping_time_slice)
     if not obs_output_file.is_file() or overwrite:
         # observed_data = observed_data.rename({observed_variable: "discharge"})
         obs_discharge_data = obs_discharge_data.sel(id=gauge_ids.values)
@@ -467,7 +479,11 @@ def evaludate_grdc_data(  # noqa: PLR0913
     end_date=None,
     overwrite=False,
 ):
-    """Compare simulated with observed discharge either directly or using a bootstraping approach."""
+    """Compare simulated with observed discharge directly or via bootstrapping.
+
+    Loads/caches data, harmonizes temporal resolution, optionally bootstraps
+    across years, and writes per-gauge plots and a results table.
+    """
     output_path = Path(output_path)
     observed_ds, model_ds = Q_data_to_xarray(
         model_data_path=model_data_path,
@@ -534,7 +550,7 @@ def evaludate_grdc_data(  # noqa: PLR0913
             id=id,
             calc_stats=direct_comparison,
             raise_exceptions=False,
-            title=f'{id} at {model_ds["x"].sel(id=id).data} - {model_ds["y"].sel(id=id).data}',
+            title=f"{id} at {model_ds['x'].sel(id=id).data} - {model_ds['y'].sel(id=id).data}",
             x=model_ds["x"].sel(id=id).data,
             y=model_ds["y"].sel(id=id).data,
         )
@@ -627,8 +643,12 @@ def plot_kde(results_df, output_path):
 
 
 @log_errors()
-def plot_cdf(df, output_path, boostrap_iterations=None, mask_any=True):
-    """Create cdf plots for alpha, beat and gamma for different subselections (by catchment, boostrap-mean or all results)."""
+def plot_cdf(df, output_path, boostrap_iterations=None, mask_any=True):  # noqa: ARG001
+    """Create CDF plots for alpha, beta, and gamma.
+
+    The plots are generated for different subselections
+    (by catchment, bootstrap-mean, or all results).
+    """
     # --- 1) Read your CSV ---
     # Adjust 'mydata.csv' to your actual file path
     # df = pd.read_csv('/work/kelbling/ecflow_work/gloria_hourly_t2k/output/gloria_0p05deg/discharge_validation/results.csv', index_col=0)
@@ -636,18 +656,18 @@ def plot_cdf(df, output_path, boostrap_iterations=None, mask_any=True):
     # if not output_path.is_dir():
     #     output_path.mkdir()
     # The variables to plot
-    logger.info(f'In total there are {len(df["id"].unique())} catchments of which ')
+    logger.info(f"In total there are {len(df['id'].unique())} catchments of which ")
     logger.info(
-        f'   {len(df.dropna(subset=["alpha"], how="any")["id"].unique())} have all alpha values'
+        f"   {len(df.dropna(subset=['alpha'], how='any')['id'].unique())} have all alpha values"
     )
     logger.info(
-        f'   {len(df.dropna(subset=["beta"], how="any")["id"].unique())} have beta values '
+        f"   {len(df.dropna(subset=['beta'], how='any')['id'].unique())} have beta values "
     )
     logger.info(
-        f'   {len(df.dropna(subset=["gamma"], how="any")["id"].unique())} have all gamma values '
+        f"   {len(df.dropna(subset=['gamma'], how='any')['id'].unique())} have all gamma values "
     )
     logger.info(
-        f'   {len(df.dropna(subset=["alpha", "beta", "gamma"], how="any")["id"].unique())} have all values '
+        f"   {len(df.dropna(subset=['alpha', 'beta', 'gamma'], how='any')['id'].unique())} have all values "
     )
     df = df.dropna(subset=["alpha", "beta", "gamma"], how="any")
     logger.info(df.head())

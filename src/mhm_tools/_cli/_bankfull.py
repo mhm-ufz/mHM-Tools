@@ -1,13 +1,14 @@
-"""
-Calculate the river discharge at bankfull conditions and the bankfull width.
+"""Calculate the river discharge at bankfull conditions and the bankfull width.
 
-Bankfull discharge is determined as the yearly peak flow
-with a recurrence interval given by "return_period", which is 1.5 years by default.
-The wetted perimeter is estimated from bankfull discharge with Lacey's formula.
+Bankfull discharge is determined as the yearly peak flow with a
+recurrence interval given by "return_period", which is 1.5 years by
+default. The wetted perimeter is estimated from bankfull discharge with
+Lacey's formula.
 
-This routine will simply use the closest flood event in terms of its recurrence interval.
-Also, any input time-stepping is accepted but daily or sub-daily data is preferred.
-Ouput variables in the created NetCDF file are called "Q_bkfl" and "P_bkfl".
+This routine will simply use the closest flood event in terms of its
+recurrence interval. Also, any input time-stepping is accepted but daily
+or sub-daily data is preferred. Ouput variables in the created NetCDF
+file are called "Q_bkfl" and "P_bkfl".
 """
 
 from ..post.bankfull import bankfull_discharge

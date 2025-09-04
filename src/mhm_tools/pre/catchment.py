@@ -1,5 +1,4 @@
-r"""
-Create the catchment file for mRM.
+"""Create the catchment file for mRM.
 
 Authors
 -------
@@ -249,7 +248,7 @@ class Catchment:
             lat_size, lon_size = self.input_da.shape
             # Ensure the dimensions are evenly divisible by the factor
             if lat_size % factor != 0 or lon_size % factor != 0:
-                msg = f"Data dimensions must be divisible by the upscaling factor of {factor}. Lat ({lat_size}/{factor})={lat_size/factor:.2f}; Lon ({lon_size}/{factor})={lon_size/factor:.2f}"
+                msg = f"Data dimensions must be divisible by the upscaling factor of {factor}. Lat ({lat_size}/{factor})={lat_size / factor:.2f}; Lon ({lon_size}/{factor})={lon_size / factor:.2f}"
                 with ErrorLogger(logger):
                     raise ValueError(msg)
 
@@ -301,8 +300,7 @@ class Catchment:
         return ds
 
     def fill_adjacent_missing_with_sink(self, da, fill_value, sink_value):
-        """
-        Replace all missing values adjacent to non-missing values with 0 in an xarray Dataset.
+        """Replace all missing values adjacent to non-missing values with 0 in an xarray Dataset.
 
         Parameters
         ----------
