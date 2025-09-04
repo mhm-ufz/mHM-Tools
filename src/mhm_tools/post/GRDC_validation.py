@@ -174,6 +174,8 @@ def get_gauge_coords(
     logger.debug("None, None, None")
     return None, None, None
 
+def load_ds(file_path):
+    return get_xarray_ds_from_file(file_path)
 
 def Q_data_to_xarray(
     model_data_path,
@@ -219,11 +221,11 @@ def Q_data_to_xarray(
     obs_output_file = Path(f"{saving_path}/GRDC_data.nc")
     if sim_output_file.is_file() and not overwrite:
         logger.info("reading sim data from file...")
-        sim_data = get_xarray_ds_from_file(sim_output_file)
+        sim_data = load_ds(sim_output_file)
         sim_data = sim_data.sel(time=date_slice)
     if obs_output_file.is_file() and not overwrite:
         logger.info("reading obs data from file...")
-        observed_data = get_xarray_ds_from_file(obs_output_file)
+        observed_data = load_ds(obs_output_file)
         observed_data = observed_data.sel(time=date_slice)
     if obs_output_file.is_file() and sim_output_file.is_file() and not overwrite:
         return observed_data, sim_data
@@ -233,7 +235,7 @@ def Q_data_to_xarray(
         saving_path.mkdir(parents=True)
 
     # getting gauge infos
-    with get_xarray_ds_from_file(observed_data_path) as gauge_info:
+    with load_ds(observed_data_path) as gauge_info:
         gauge_ids = gauge_info["id"]
         x = gauge_info["geo_x"]
         y = gauge_info["geo_y"]
@@ -255,8 +257,8 @@ def Q_data_to_xarray(
     logger.info(f"There are {len(gauge_ids.values)} gauges in total.")
 
     # prepare for later resampling
-    with get_xarray_ds_from_file(model_data_path) as sim_data_in:
-        with get_xarray_ds_from_file(observed_data_path) as observed_data_in:
+    with load_ds(model_data_path) as sim_data_in:
+        with load_ds(observed_data_path) as observed_data_in:
             hours_sim, alias_sim = timedelta_to_alias(sim_data_in)
             hours_obs, alias_obs = timedelta_to_alias(observed_data_in)
             if hours_sim > hours_obs:
@@ -308,7 +310,7 @@ def Q_data_to_xarray(
         write_xarray_to_file(observed_data, obs_output_file)
 
     if not sim_output_file.is_file() or overwrite:
-        with get_xarray_ds_from_file(mrm_restart_file) as ds:
+        with load_ds(mrm_restart_file) as ds:
             # get the gauge coordinates by matching coordinates and flow accumulation
             out = Parallel(n_jobs=n_jobs, backend="loky")(
                 delayed(get_gauge_coords)(
@@ -349,7 +351,15 @@ def Q_data_to_xarray(
             )
             for i, id in enumerate(gauge_ids_with_values)
         )
-        simulation_discharge = xr.concat(sim, dim="id").drop_vars(["lat", "lon"])
+        simulation_discharge = xr.concat(sim, dim="id")
+        if "lat" in simulation_discharge.dims or "lat" in simulation_discharge.coords:
+            simulation_discharge = simulation_discharge.drop_dims(["lat"])
+        if "lon" in simulation_discharge.dims or "lon" in simulation_discharge.coords:
+            simulation_discharge = simulation_discharge.drop_dims(["lon"])
+        if "lat" in simulation_discharge.data_vars:
+            simulation_discharge = simulation_discharge.drop_vars(["lat"])
+        if "lon" in simulation_discharge.data_vars:
+            simulation_discharge = simulation_discharge.drop_vars(["lon"])
         facc_ids = xr.DataArray(
             data=np.array(facc_new), dims=["id"], coords={"id": gauge_ids_with_values}
         )
