@@ -22,6 +22,7 @@ ruff:
     - pip3 install --editable .[check]
     - ruff check src/mhm_tools
 test:
+  when: always
   stage: test
   script:
     - pip3 install --editable .[test]
