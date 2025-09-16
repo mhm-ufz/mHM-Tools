@@ -91,7 +91,7 @@ def chunk_dataset_space_only(ds: xr.Dataset, available_mem_gib: float) -> xr.Dat
         f"Chunking spatial dims to fit ≈{available_mem_gib} GiB (time unchunked)"
     )
     # --- pick one variable to get dtype size ---
-    var = next(iter(ds.data_vars.values()))
+    var = get_single_data_var(ds)
     dtype_sz = var.dtype.itemsize  # bytes per element
 
     # --- find coordinate names ---
@@ -126,7 +126,13 @@ def chunk_dataset_space_only(ds: xr.Dataset, available_mem_gib: float) -> xr.Dat
         f"Chunk sizes → time: {chunks.get(time_key, '—')}, "
         f"{lat_key}: {y_chunk}, {lon_key}: {x_chunk}"
     )
-    return ds.chunk(chunks)
+    try:
+        return ds.chunk(chunks)
+    except Exception as e:
+        logger.error(chunks)
+        logger.error(ds)
+        with ErrorLogger(logger):
+            raise e
 
 
 def chunk_dataset_space_and_time(ds, available_mem_gib) -> xr.Dataset:
@@ -136,7 +142,7 @@ def chunk_dataset_space_and_time(ds, available_mem_gib) -> xr.Dataset:
       - try to keep time chunks small (1…4)vi
       - make y/x chunks as square as possible
     """
-    logger.info(f"Chunking dataset with a max amount of mem of {available_mem_gib}Gb")
+    logger.info(f"Chunking dataset with a max amount of mem of {available_mem_gib / 1_000_000_000 :.1f}Gb")
     # ---------------- metadata only (cheap) --------------------------------
     var_name = next(iter(ds.data_vars))  # first data variable
     var = ds[var_name]  # an xarray.Variable wrapper
@@ -216,8 +222,6 @@ def get_xarray_ds_from_file(
         ds_out = read_ascii_to_xarray(
             filepath=file_path,
             var_name=var_name,
-            chunking=chunking,
-            available_mem_gib=available_mem_gib,
         )
         chunk_type = ChunkType.SPACE
     elif file_path.suffix == ".nc":
@@ -325,7 +329,7 @@ def write_xarray_to_ascii(dataset, filepath, data_var=None, fmt=None):
 
 
 def read_ascii_to_xarray(
-    filepath, var_name=None, chunking=False, available_mem_gib=None
+    filepath, var_name=None
 ):
     """Read an mHM readable asci file to an xarray dataset."""
     # Read the header from the file
