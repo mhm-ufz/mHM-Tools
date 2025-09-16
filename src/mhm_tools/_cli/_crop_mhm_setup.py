@@ -124,7 +124,12 @@ def add_args(parser):
             required unless --mask_file is provided"""
         ),
     )
-
+    parser.add_argument(
+        "--create_header",
+        required=False,
+        action="store_true",
+        help="Force writing of header file.",
+    )
 
 def run(args):
     """Cut out a domain setup out of an existing mHM setup..
@@ -165,4 +170,5 @@ def run(args):
         filename=args.file_name,
         recursive_depth=args.folder_recursion_depth,
         available_mem_gib=available_mem,
+        force_header_creation=args.create_header
     )

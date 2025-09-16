@@ -316,6 +316,7 @@ def crop_file(
     input_path,
     overwrite,
     available_mem_gib,
+    force_header_creation=False
 ):
     """Crops one file by lat and lon slice and may mask it with the mask dataarray."""
     logger.info(f"Cropping the file {input_file}")
@@ -434,6 +435,9 @@ def crop_file(
         for var_name in ds_cropped.data_vars:
             ds_cropped[var_name] = ds_cropped[var_name].astype(float)
         write_to_file(ds_cropped, output_file)
+        if force_header_creation and not (output_file.parent / 'header.txt').is_file():
+            create_header(ds_cropped, output_path=output_file.parent / 'header.txt', write=True)
+
     logger.info(f"Written to {output_file}")
     return latlon_files
 
@@ -453,6 +457,7 @@ def crop_mhm_setup(
     filename="*.*",
     recursive_depth=5,
     available_mem_gib=5,
+    force_header_creation=False
 ):
     """Cut out an existing mhm domain setup using a mask file."""
     # check if the input is correct
@@ -480,6 +485,7 @@ def crop_mhm_setup(
             input_path=input_path,
             overwrite=overwrite,
             available_mem_gib=available_mem_gib,
+            force_header_creation=force_header_creation
         )
         for f in files
     )
