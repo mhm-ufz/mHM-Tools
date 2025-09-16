@@ -3,9 +3,11 @@
 import logging
 
 import numpy as np
+from scipy.stats import spearmanr
 import xarray as xr
 
 from mhm_tools.common.logger import ErrorLogger
+from mhm_tools.post.gridded_data_evaluation import climatology, logger
 
 logger = logging.getLogger(__name__)
 
@@ -203,3 +205,27 @@ def crop_ds(
 
     # select using a dict so named dims are respected
     return ds.sel({lon_name: lon_slice, lat_name: lat_slice})
+
+
+def get_clim_from_ds(ds, input_var=None, factor=1):
+    """Calculate climatology from a Dataset or DataArray.
+
+    Multiplies the selected data by `factor` before computing the monthly
+    climatology.
+    """
+    data = ds * factor if input_var is None else ds[input_var] * factor
+    return climatology(data)
+
+
+def spearman_correlation(data1, data2):
+    """Calculate Spearman rank correlation between two xarray DataArrays."""
+    # Check that both arrays are of the same size and flatten them
+    if data1.shape != data2.shape:
+        with ErrorLogger(logger):
+            msg = "Both DataArrays must have the same shape"
+            raise ValueError(msg)
+    data1 = data1.values.flatten()
+    data2 = data2.values.flatten()
+    # Calculate Spearman rank correlation using scipy
+    corr, p_value = spearmanr(data1, data2)
+    return corr, p_value

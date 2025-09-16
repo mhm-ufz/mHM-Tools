@@ -13,7 +13,6 @@ import xarray as xr
 from joblib import Parallel, delayed
 from matplotlib.colors import BoundaryNorm
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-from scipy.stats import spearmanr
 
 from mhm_tools.common.file_handler import (
     ChunkType,
@@ -27,6 +26,8 @@ from mhm_tools.common.xarray_utils import (
     get_overlapping_time_slice,
     timedelta_to_alias,
 )
+from mhm_tools.common.xarray_utils import get_clim_from_ds
+from mhm_tools.common.xarray_utils import spearman_correlation
 
 logger = logging.getLogger(__name__)
 
@@ -46,20 +47,6 @@ class EvalDataset:
         self.var = var
         self.factor = factor
         self.file_name = file_name
-
-
-def spearman_correlation(data1, data2):
-    """Calculate Spearman rank correlation between two xarray DataArrays."""
-    # Check that both arrays are of the same size and flatten them
-    if data1.shape != data2.shape:
-        with ErrorLogger(logger):
-            msg = "Both DataArrays must have the same shape"
-            raise ValueError(msg)
-    data1 = data1.values.flatten()
-    data2 = data2.values.flatten()
-    # Calculate Spearman rank correlation using scipy
-    corr, p_value = spearmanr(data1, data2)
-    return corr, p_value
 
 
 def spearman_spatial(data1, data2):
@@ -138,16 +125,6 @@ def climatology(data):
     data_clim = data.groupby("time.month").mean(dim="time", skipna=True)
     # Ensure the climatology has all 12 months, filling missing months with NaNs
     return data_clim.reindex(month=np.arange(1, 13), fill_value=np.nan)
-
-
-def get_clim_from_ds(ds, input_var=None, factor=1):
-    """Calculate climatology from a Dataset or DataArray.
-
-    Multiplies the selected data by `factor` before computing the monthly
-    climatology.
-    """
-    data = ds * factor if input_var is None else ds[input_var] * factor
-    return climatology(data)
 
 
 def get_std_from_ds(ds, input_var=None, clim=None, factor=1):

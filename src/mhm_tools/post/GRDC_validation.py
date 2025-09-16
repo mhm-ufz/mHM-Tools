@@ -21,12 +21,12 @@ from joblib import Parallel, delayed
 from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_to_file
 from mhm_tools.common.logger import ErrorLogger, log_arguments, log_errors
 from mhm_tools.common.xarray_utils import (
+    get_clim_from_ds,
     get_coord_key,
     get_overlapping_time_slice,
     timedelta_to_alias,
 )
-from mhm_tools.post.gridded_data_evaluation import (
-    get_clim_from_ds,
+from mhm_tools.common.xarray_utils import (
     spearman_correlation,
 )
 from mhm_tools.post.hydrograph import gen_hydrograph_by_data_sets
@@ -225,6 +225,8 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915
         date_slice = slice(None, None)
     sim_output_file = Path(f"{saving_path}/{model_keyword}_data.nc")
     obs_output_file = Path(f"{saving_path}/GRDC_data.nc")
+
+    # ignored if overwrite is True
     if sim_output_file.is_file() and not overwrite:
         logger.info("reading sim data from file...")
         sim_data = load_ds(sim_output_file)
@@ -242,11 +244,11 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915
         saving_path.mkdir(parents=True)
 
     # getting gauge infos
-    with load_ds(observed_data_path) as gauge_info:
-        gauge_ids = gauge_info["id"]
-        x = gauge_info["geo_x"]
-        y = gauge_info["geo_y"]
-        facc = gauge_info["area"]
+    with load_ds(observed_data_path) as observed_data_in:
+        gauge_ids = observed_data_in["id"]
+        x = observed_data_in["geo_x"]
+        y = observed_data_in["geo_y"]
+        facc = observed_data_in["area"]
         slicing_condition = None
         if (
             lon_min is not None
@@ -261,11 +263,10 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915
             y = y.where(slicing_condition, drop=True)
             facc = facc.where(slicing_condition, drop=True)
             gauge_ids = gauge_ids.where(slicing_condition, drop=True)
-    logger.info(f"There are {len(gauge_ids.values)} gauges in total.")
+        logger.info(f"There are {len(gauge_ids.values)} gauges in total.")
 
-    # prepare for later resampling
-    with load_ds(model_data_path) as sim_data_in:
-        with load_ds(observed_data_path) as observed_data_in:
+         # prepare for later resampling
+        with load_ds(model_data_path) as sim_data_in:
             hours_sim, alias_sim = timedelta_to_alias(sim_data_in)
             hours_obs, alias_obs = timedelta_to_alias(observed_data_in)
             if hours_sim > hours_obs:

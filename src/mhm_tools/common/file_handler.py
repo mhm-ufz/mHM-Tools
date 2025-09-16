@@ -226,7 +226,10 @@ def get_xarray_ds_from_file(
             use_mfdataset=use_mfdataset,
             engine=engine,
         )
-
+    else:
+        msg = f"Reading file types other than asci and netcdf is not implemented. The suffix of the file was: {file_path.suffix}"
+        with ErrorLogger(logger):
+            raise NotImplementedError(msg)
     lat_key = get_coord_key(ds_out, lat=True, raise_exception=False)
     lon_key = get_coord_key(ds_out, lon=True, raise_exception=False)
     # force correct order of y coordinate
