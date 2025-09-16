@@ -7,7 +7,6 @@ from scipy.stats import spearmanr
 import xarray as xr
 
 from mhm_tools.common.logger import ErrorLogger
-from mhm_tools.post.gridded_data_evaluation import logger
 
 logger = logging.getLogger(__name__)
 
