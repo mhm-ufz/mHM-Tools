@@ -335,10 +335,11 @@ def crop_file(
                 normalize_latlon_coords=True,
                 force_decending_y=True,
             )
-        except ValueError:
+        except ValueError as ve:
             logger.error(
                 f"File {input_file} could not be read. It probably does not have the right format."
             )
+            logger.debug(ve)
             return latlon_files
     else:
         # header files are not copied but recreated as they change
