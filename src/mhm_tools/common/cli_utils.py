@@ -128,8 +128,9 @@ def get_coords(
     """
     mask = None
     if lonlatbox is not None:
+        lonlat_split = lonlatbox.split(",")
         lon_min_val, lon_max_val, lat_min_val, lat_max_val = map(
-            float, lonlatbox.split(",")
+            float, lonlat_split[:4]
         )
         mask = None
     elif mask_file is not None:
