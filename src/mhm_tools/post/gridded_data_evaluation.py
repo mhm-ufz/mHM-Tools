@@ -25,9 +25,9 @@ from mhm_tools.common.xarray_utils import (
     get_coord_key,
     get_overlapping_time_slice,
     timedelta_to_alias,
+    get_clim_from_ds,
+    spearman_correlation
 )
-from mhm_tools.common.xarray_utils import get_clim_from_ds
-from mhm_tools.common.xarray_utils import spearman_correlation
 
 logger = logging.getLogger(__name__)
 
@@ -113,19 +113,6 @@ def spearman_spatial_joblib(
         pval[i, j] = p
 
     return res, pval
-
-
-def climatology(data):
-    """Calculate the climatology from an xarray DataArray."""
-    if "time" not in data.dims or data.sizes["time"] == 0:
-        msg = "Input data for climatology calculation has no valid time dimension."
-        with ErrorLogger(logger):
-            raise ValueError(msg)
-    # group into monthly mean data
-    data_clim = data.groupby("time.month").mean(dim="time", skipna=True)
-    # Ensure the climatology has all 12 months, filling missing months with NaNs
-    return data_clim.reindex(month=np.arange(1, 13), fill_value=np.nan)
-
 
 def get_std_from_ds(ds, input_var=None, clim=None, factor=1):
     """Calculate maps of temporal standard deviation from an DataArray.

@@ -7,7 +7,7 @@ from scipy.stats import spearmanr
 import xarray as xr
 
 from mhm_tools.common.logger import ErrorLogger
-from mhm_tools.post.gridded_data_evaluation import climatology, logger
+from mhm_tools.post.gridded_data_evaluation import logger
 
 logger = logging.getLogger(__name__)
 
@@ -205,6 +205,18 @@ def crop_ds(
 
     # select using a dict so named dims are respected
     return ds.sel({lon_name: lon_slice, lat_name: lat_slice})
+
+
+def climatology(data):
+    """Calculate the climatology from an xarray DataArray."""
+    if "time" not in data.dims or data.sizes["time"] == 0:
+        msg = "Input data for climatology calculation has no valid time dimension."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    # group into monthly mean data
+    data_clim = data.groupby("time.month").mean(dim="time", skipna=True)
+    # Ensure the climatology has all 12 months, filling missing months with NaNs
+    return data_clim.reindex(month=np.arange(1, 13), fill_value=np.nan)
 
 
 def get_clim_from_ds(ds, input_var=None, factor=1):
