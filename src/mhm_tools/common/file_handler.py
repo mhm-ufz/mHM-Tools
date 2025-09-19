@@ -60,7 +60,6 @@ def create_header(ds, output_path=None, no_data_value="-9999", write=True):
         )
         with header_out_path.open("w") as hf:
             hf.write(header_str)
-        return header_out_path
     return header_str
 
 
@@ -382,7 +381,9 @@ def read_ascii_to_xarray(
         ds.coords["y"].attrs["axis"] = "Y"
 
     # Drop spatial_ref if present
-    return ds.reset_coords("spatial_ref", drop=True)
+    if "spatial_ref" in ds.coords:
+        ds = ds.reset_coords("spatial_ref", drop=True)
+    return ds
 
 
 def get_coord_values(ds, lat=False, lon=False):
