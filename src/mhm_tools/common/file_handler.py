@@ -38,30 +38,30 @@ def create_header(ds, output_path=None, no_data_value="-9999", write=True):
 
     ncols = len(x)
     nrows = len(y)
+    header_str = f"""
+        ncols                {ncols}
+        nrows                {nrows}
+        xllcorner            {xllcorner:.6f}
+        yllcorner            {yllcorner:.6f}
+        cellsize             {cellsize:.6f}
+        NODATA_value         {no_data_value}
+        """
     if write:
-        header_out_path = output_path / "header.txt"
-        header_str = f"""
-ncols                {ncols}
-nrows                {nrows}
-xllcorner            {xllcorner:.6f}
-yllcorner            {yllcorner:.6f}
-cellsize             {cellsize:.6f}
-NODATA_value         {no_data_value}
-"""
+        if output_path.is_dir():
+            header_out_path = output_path / "header.txt"
+        elif output_path.is_file():
+            header_out_path = output_path
+        else:
+            msg = f"Header output path is neither file nor directory."
+            with ErrorLogger(logger):
+                raise ValueError(msg)
         logger.info(
             f"Writing header file to {header_out_path} with header str: {header_str}"
         )
         with header_out_path.open("w") as hf:
             hf.write(header_str)
         return header_out_path
-    return {
-        "ncols": ncols,
-        "nrows": nrows,
-        "xllcorner": xllcorner,
-        "yllcorner": yllcorner,
-        "cellsize": cellsize,
-        "NODATA_value": no_data_value,
-    }
+    return header_str
 
 
 def crop_file_by_mask(ds, mask_file):

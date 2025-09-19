@@ -440,6 +440,9 @@ def crop_file(
             create_header(ds_cropped, output_path=output_file.parent / 'header.txt', write=True)
 
     logger.info(f"Written to {output_file}")
+    if force_header_creation:
+        if not (output_file.parent / 'header.txt').is_file():
+            create_header(ds_cropped, output_path=output_file.parent, write=True)
     return latlon_files
 
 

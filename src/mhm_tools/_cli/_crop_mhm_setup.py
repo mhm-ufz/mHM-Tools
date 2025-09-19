@@ -53,7 +53,7 @@ def add_args(parser):
         default=None,
         help=(
             "Coordinates reference system (e.g. 'epsg:3035'). Needed to create a new latlon file."
-            "If not given, headers will be intncverpreted as given in lat-lon ('epsg:4326')."
+            "If not given, headers will be interpreted as given in lat-lon ('epsg:4326')."
         ),
     )
     parser.add_argument(
@@ -127,9 +127,13 @@ def add_args(parser):
     parser.add_argument(
         "--create_header",
         required=False,
+        default=False,
         action="store_true",
-        help="Force writing of header file.",
+        help=(
+            """Force creation of header file for all files."""
+        ),
     )
+
 
 def run(args):
     """Cut out a domain setup out of an existing mHM setup..

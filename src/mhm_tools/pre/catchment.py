@@ -180,7 +180,7 @@ class Catchment:
         self.get_fdir()
 
     def delineate_basin(self, gauge_coords, stream_order=4):
-        """Deliniate the basin for a given lat and lon."""
+        """Delineate the basin for a given lat and lon."""
         logger.info(f"Deliniating basin for gauge coordinates {gauge_coords}")
         gauge_coords = (gauge_coords[0], gauge_coords[1])
         self.basin = self._fdir.basins(
@@ -198,7 +198,7 @@ class Catchment:
                 "_FillValue"
             ]
 
-    def get_upscaling_factor(self, max_resolution=False):
+    def get_upscaling_factor(self, max_resolution=True):
         """Create upscaling factor."""
         input_res = round(abs(self.ds.lon.data[1] - self.ds.lon.data[0]), 6)
         upscale_res = self.l1_resolution
@@ -271,10 +271,14 @@ class Catchment:
 
     def get_upstream_area(self):
         """Perform the calculation of the upstream catchment area."""
-        self.upgrid = self._fdir.upstream_area(unit="km2").astype(int)
+        upgrid = self._fdir.upstream_area(unit="km2").astype(int)
+        logger.error(np.max(upgrid))
+        logger.error(np.mean(upgrid))
+        logger.error(np.min(upgrid))
 
     def get_grid_area(self):
         """Perform the calculation of the catchment area."""
+        self.get_upstream_area()
         self.grdare = self._fdir.area.astype(int)
 
     def get_facc(self):
@@ -421,7 +425,7 @@ class Catchment:
                 msg = f'Format "{format}" unknown, use one of ["nc", "asc"]'
                 raise Exception(msg)
 
-    def processing_data_variable(self, var_name, cut_by_basin, lat_slice, lon_slice):
+    def processing_data_variable(self, var_name, cut_by_basin, lat_slice=None, lon_slice=None):
         """Process data variable, masking it and croping it spatial dimensions."""
         logger.info(f"Processing {var_name}")
         data = getattr(self, var_name)
@@ -442,14 +446,14 @@ class Catchment:
                     f"Creating lon and lat arrays from l1_resolution {self.l1_resolution}"
                 )
                 lon = np.arange(
-                    lon.min() - input_res / 2 + self.l1_resolution / 2,
-                    lon.max() + self.l1_resolution / 2,
-                    self.l1_resolution,
+                    lon.min() - input_res / 2 + self.l2_resolution / 2,
+                    lon.max() + self.l2_resolution / 2,
+                    self.l2_resolution,
                 )
                 lat = np.arange(
-                    lat.max() + input_res / 2 - self.l1_resolution / 2,
-                    lat.min() - self.l1_resolution / 2,
-                    -self.l1_resolution,
+                    lat.max() + input_res / 2 - self.l2_resolution / 2,
+                    lat.min() - self.l2_resolution / 2,
+                    -self.l2_resolution,
                 )
         logger.debug(
             f"lon_min {np.min(lon):.3f}, lon_max {np.max(lon):.3f}, resulution: {self.l1_resolution}"
@@ -463,8 +467,9 @@ class Catchment:
                 "lat": lat,  # [slice(860, 870)],
             },
         )
-        logger.info(f"Cutting {var_name} data to correct spatial dimensions")
-        data_var = data_var.sel(lat=lat_slice, lon=lon_slice)
+        if lat_slice is not None and lon_slice is not None: 
+            logger.info(f"Cutting {var_name} data to correct spatial dimensions")
+            data_var = data_var.sel(lat=lat_slice, lon=lon_slice)
         logger.debug(data_var)
         return data_var
 
@@ -566,7 +571,7 @@ class Catchment:
                 logger.info(
                     f"Regridding to fit coarse grid with res {self.l1_resolution} (factor {factor})"
                 )
-                min_row = min_row // factor * factor
+                min_row = min_row // factor * factor 
                 min_col = min_col // factor * factor
                 # Calculating max_row/col it needs:
                 #  +1 to include the whole last coarse grid cell -1 to not get one cell from the next block
@@ -746,7 +751,7 @@ def create_catchment(
                     c.get_facc()
                 c.get_basins()
                 c.get_grid_area()
-                # c.get_upstream_area()
+                c.get_upstream_area()
                 c.write(output_path, single_file=True, frame=frame, mask_file=mask_file)
             # add paths to the temp files
             temp_file1 = pl.Path(output_path, "hydro1.nc")
