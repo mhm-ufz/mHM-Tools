@@ -67,3 +67,9 @@ LOG_LEVEL_STR = {
 
 # Characters indicating wildcard patterns in NetCDF filenames
 WILDCARDS = ("*", "?", "[", "]")
+
+
+# possible coordinate keys
+LAT_KEYS = ["lat", "latitude", "northing", "y", "new_y", "Y", "geo_y"]
+LON_KEYS = ["lon", "longitude", "easting", "x", "new_x", "X", "geo_x"]
+TIME_KEYS = ["time", "month_of_year"]

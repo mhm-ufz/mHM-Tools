@@ -2,6 +2,7 @@
 
 import logging
 
+from mhm_tools.common.constants import LAT_KEYS, LON_KEYS, TIME_KEYS
 import numpy as np
 from scipy.stats import spearmanr
 import xarray as xr
@@ -22,16 +23,13 @@ def normalize_lat_lon(ds: xr.Dataset, lat: str = None, lon: str = None) -> xr.Da
         lat = get_coord_key(ds, lon=True)
     if lon is None:
         lon = get_coord_key(ds, lon=True)
-    # Rename coordinate variables if needed
-    if lat is not None and "lat" not in ds.coords and lat in ds.coords:
-        rename_dict[lat] = "lat"
-    if lon is not None and "lon" not in ds.coords and lon in ds.coords:
-        rename_dict[lon] = "lon"
+    
+    coords_and_dims = list(ds.coords) + list(ds.dims)
 
-    # Rename dimension names if needed
-    if lat is not None and "lat" not in ds.dims and lat in ds.dims:
+    # Rename coordinate variables if needed
+    if lat is not None and "lat" not in coords_and_dims and lat in coords_and_dims:
         rename_dict[lat] = "lat"
-    if lon is not None and "lon" not in ds.dims and lon in ds.dims:
+    if lon is not None and "lon" not in coords_and_dims and lon in coords_and_dims:
         rename_dict[lon] = "lon"
 
     return ds.rename(rename_dict)
@@ -59,11 +57,11 @@ def get_coord_key(
         pass
     # then select possible keys from the following lists and try them until a fitting one is found.
     if lat:
-        keys = ["lat", "latitude", "northing", "y", "new_y", "Y", "geo_y"]
+        keys = LAT_KEYS
     elif lon:
-        keys = ["lon", "longitude", "easting", "x", "new_x", "X", "geo_x"]
+        keys = LON_KEYS
     else:
-        keys = ["time", "month_of_year"]
+        keys = TIME_KEYS
     for key in keys:
         if key in ds_dims and len(ds[key].shape) == 1:
             return key
@@ -97,7 +95,7 @@ def get_single_data_var(ds):
     data_vars = list(ds.data_vars)
     len_data_vars = len(data_vars)
     if len_data_vars > 1:
-        for coord in [get_coord_key(ds, lon=True), get_coord_key(ds, lat=True)]:
+        for coord in LAT_KEYS + LON_KEYS + TIME_KEYS:
             if coord in data_vars:
                 len_data_vars -= 1
                 data_vars.remove(coord)
