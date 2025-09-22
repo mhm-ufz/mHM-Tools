@@ -246,6 +246,9 @@ def get_xarray_ds_from_file(
             force_ascending_y and ds_out[lat_key].values[0] > ds_out[lat_key].values[-1]
         ):
             ds_out = ds_out.sel({lat_key: slice(None, None, -1)})
+    logger.debug(ds_out)
+    logger.debug(lat_key)
+    logger.debug(lon_key)
     if normalize_latlon_coords:
         # re-name input coords to lat and lon
         ds_out = normalize_lat_lon(ds_out, lat_key, lon_key)
