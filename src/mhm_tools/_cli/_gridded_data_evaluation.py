@@ -231,7 +231,7 @@ def run(args):
     ref = EvalDataset(
         path=args.ref_path,
         name=args.ref_name,
-        var=args.ref_var,
+        var=args.ref_variable,
         factor=float(args.ref_factor),
         file_name=args.ref_file_name,
     )
