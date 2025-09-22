@@ -86,6 +86,11 @@ def add_args(parser):
         help=("""Available memory per cpu in Gb or Mb (default Gb)"""),
     )
     parser.add_argument(
+        "--chunking",
+        action="store_true",
+        help=("""Set if each dataset should be read as a chunked dask array."""),
+    )
+    parser.add_argument(
         "--lon_min",
         required=False,
         default=None,
@@ -174,5 +179,6 @@ def run(args):
         filename=args.file_name,
         recursive_depth=args.folder_recursion_depth,
         available_mem_gib=available_mem,
-        force_header_creation=args.create_header
+        force_header_creation=args.create_header,
+        chunking=args.chunking
     )

@@ -91,7 +91,8 @@ def chunk_dataset_space_only(ds: xr.Dataset, available_mem_gib: float) -> xr.Dat
     )
     # --- pick one variable to get dtype size ---
     var = get_single_data_var(ds)
-    dtype_sz = var.dtype.itemsize  # bytes per element
+
+    dtype_sz = ds[var].dtype.itemsize  # bytes per element
 
     # --- find coordinate names ---
     lat_key = get_coord_key(ds, lat=True)
@@ -150,6 +151,8 @@ def chunk_dataset_space_and_time(ds, available_mem_gib) -> xr.Dataset:
     lat_key = get_coord_key(ds, lat=True)
     lon_key = get_coord_key(ds, lon=True)
     time_key = get_coord_key(ds, time=True, raise_exception=False)
+    if time_key is None:
+        return chunk_dataset_space_only(ds, available_mem_gib)
 
     ny = ds.sizes[lat_key]
     nx = ds.sizes[lon_key]
