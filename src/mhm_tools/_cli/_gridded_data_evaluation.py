@@ -224,7 +224,7 @@ def run(args):
     input = EvalDataset(
         path=args.input_path,
         name=args.input_name,
-        var=args.input_var,
+        var=args.input_variable,
         factor=float(args.input_factor),
         file_name=args.input_file_name,
     )
