@@ -951,12 +951,11 @@ def get_hydrograph_from_path(
     output_file = Path(output_file)
     if output_file.suffix and output_file.parent.exists():
         hydro.output_file = output_file
-    elif output_file.is_dir():
-        hydro.output_file = output_file / "hydrograph.png"
     else:
-        msg = f"Output file is neither file nor directory. {output_file}"
-        with ErrorLogger(logger):
-            raise ValueError(msg)
+        if not output_file.is_dir():
+            output_file.mkdir(parents=True)
+        hydro.output_file = output_file / "hydrograph.png"
+            
 
     hydro.title = title
     hydro.show = show
