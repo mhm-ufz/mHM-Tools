@@ -50,7 +50,8 @@ dependencies = [
   "seaborn",
   "netCDF4",
   "easy_mpl",
-  "cartopy"
+  "cartopy",
+  "cdo"
 ]
 
 [project.urls]
