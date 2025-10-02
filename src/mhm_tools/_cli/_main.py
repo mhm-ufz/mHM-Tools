@@ -2,7 +2,6 @@
 
 import argparse
 
-from mhm_tools._cli import _file_converter
 from mhm_tools.common.logger import configure_mhm_tools_logger
 
 from .. import __version__
@@ -24,6 +23,9 @@ from . import (
     _ratio,
     _relative_difference,
     _taylor_diagram,
+    _file_converter, 
+    _merge,
+    _regrid
 )
 
 
@@ -90,6 +92,8 @@ def _get_parser():
     add_command_from_module(subparsers, "grdc_validation", _grdc_validation)
     add_command_from_module(subparsers, "latlon", _latlon)
     add_command_from_module(subparsers, "converter_nc_ascii", _file_converter)
+    add_command_from_module(subparsers, "merge_files", _merge)
+    add_command_from_module(subparsers, "regrid_file", _regrid)
     add_command_from_module(subparsers, "create_catchment", _create_catchment)
     add_command_from_module(subparsers, "crop_mhm_setup", _crop_mhm_setup)
     add_command_from_module(subparsers, "prepare_mhm_forcings", _prepare_mhm_forcings)

@@ -16,7 +16,7 @@ import pyflwdir
 import xarray as xr
 from scipy.ndimage import binary_dilation
 
-from mhm_tools.common.file_handler import get_xarray_ds_from_file
+from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_to_file
 from mhm_tools.common.logger import ErrorLogger, log_arguments
 
 logger = logging.getLogger(__name__)
@@ -272,9 +272,6 @@ class Catchment:
     def get_upstream_area(self):
         """Perform the calculation of the upstream catchment area."""
         upgrid = self._fdir.upstream_area(unit="km2").astype(int)
-        logger.error(np.max(upgrid))
-        logger.error(np.mean(upgrid))
-        logger.error(np.min(upgrid))
 
     def get_grid_area(self):
         """Perform the calculation of the catchment area."""
@@ -385,15 +382,12 @@ class Catchment:
         }
         fname = out_path / f"{var_name}.{format}"
         if format == "nc":
-            data_var.to_netcdf(
-                fname,
-                encoding={
+            write_xarray_to_file(data_var, fname, encoding={
                     var_name: {
                         "dtype": data_var[var_name].dtype,
                         "_FillValue": self.VARIABLES[var_name]["_FillValue"],
                     }
-                },
-            )
+                })
         elif format == "asc":
             cellsize = cellsize or abs(float(data_var["lon"][1] - data_var["lon"][0]))
             is_ascending = bool(data_var["lat"][0] < data_var["lat"][-1])
@@ -500,9 +494,7 @@ class Catchment:
         #     ds["flwdir"], FDIR_FILLVALUE[self.ftype], FDIR_SINKVALUE[self.ftype]
         # )
         # ds["flwdir"].data[:] = fdir_filled.data[:]
-        ds.to_netcdf(
-            out_path / self.out_var_name,
-            encoding={
+        write_xarray_to_file(ds, out_path / self.out_var_name ,encoding={
                 var_name: {
                     "dtype": ds[var_name].dtype,
                     "_FillValue": self.VARIABLES[var_name]["_FillValue"],
@@ -513,20 +505,86 @@ class Catchment:
         logger.info(f"Basin Id has been written to {out_path / self.out_var_name}")
         return ds
 
+    def upscale_mask(self, da: xr.DataArray, factor=None, lon_name="lon", lat_name="lat") -> xr.DataArray:
+        """
+        Upscale a 2D/3D mask-like field on a regular lon/lat grid by an integer factor.
+
+        L2 cell = 1  if any underlying L0 cell is (not NaN) OR (== 0)
+                = 0  otherwise
+
+        Parameters
+        ----------
+        da : xr.DataArray
+            Input with dims including lon_name and lat_name (time/other dims allowed).
+        factor : int | tuple[int,int]
+            Integer multiple(s): k or (kx, ky). E.g. 5 or (5, 3).
+        lon_name, lat_name : str
+            Coordinate names.
+
+        Returns
+        -------
+        xr.DataArray
+            Coarsened mask (0/1), aligned to the top-left of each kx×ky block.
+        """
+        logger.info('Create upscaled mask')
+        if factor is None: 
+            factor = self.get_upscaling_factor(max_resolution=True)
+        if isinstance(factor, int):
+            kx = ky = int(factor)
+        else:
+            kx, ky = map(int, factor)
+
+        if kx < 1 or ky < 1:
+            raise ValueError("factor must be >= 1")
+
+        # Condition: non-masked (not NaN) OR equals 0
+        cond = (~xr.apply_ufunc(np.isnan, da)) | (da == 0)
+
+        # Coarsen over lat/lon windows and take logical OR (any)
+        coarsen_map = {dim: size for dim, size in ((lon_name, kx), (lat_name, ky)) if dim in cond.dims}
+        out = cond.coarsen(coarsen_map, boundary="trim").any().astype("int8")
+
+        # Make coordinates every k-th point so grid aligns with the upscaled blocks
+        if lon_name in out.dims:
+            out = out.assign_coords({lon_name: da[lon_name].isel({lon_name: slice(0, None, kx)})})
+        if lat_name in out.dims:
+            out = out.assign_coords({lat_name: da[lat_name].isel({lat_name: slice(0, None, ky)})})
+
+        out.name = da.name or "mask_L2"
+        out.attrs.update(da.attrs)
+        logger.info(f"Resolution of upscaled mask: {round(abs(out.lon.data[1] - out.lon.data[0]), 6)}")
+        return out
+
     def write_mask_file(self, ds, mask_file):
         """Write basin mask to specified path."""
         if mask_file is not None:
+            logger.info('Writing mask file')
             # name the variable mask
             mask = ds.basin > 0
             mask_file = pl.Path(mask_file)
             mask_da = xr.DataArray(
                 mask, coords={"lat": ds.lat, "lon": ds.lon}, dims=["lat", "lon"]
             )
+            mask_da['lat'].attrs.update({"units": "degrees_north",
+                "long_name": "latitude",
+                "standard_name": "latitude",
+                "axis": "Y",
+            })
+            mask_da['lon'].attrs.update({"units": "degrees_east",
+                "long_name": "longitude",
+                "standard_name": "longitude",
+                "axis": "X",
+            })
+            if not self.do_upscale:
+                mask_upscaled = self.upscale_mask(mask_da)
+            else: 
+                mask_upscaled = mask_da
+            mask_upscaled = mask_upscaled.rename({'lat': 'lat_l2', 'lon': 'lon_l2'})
             mask_ds = xr.Dataset(
-                {"land_mask": mask_da, "mask": mask_da},
-                coords={"lon": ds.lon, "lat": ds.lat},
+                {"land_mask": mask_da, "mask": mask_da, "mask_l2": mask_upscaled},
+                # coords={"lon": ds.lon, "lat": ds.lat, "lat_l2": mask_upscaled.lat, "lon_l2": mask_upscaled.lon},
             )
-            mask_ds.to_netcdf(mask_file)
+            write_xarray_to_file(mask_ds, mask_file)
             logger.info(f"Mask file has been written to {mask_file}")
         else:
             logger.info("No mask file path specified.")
@@ -622,7 +680,7 @@ def merge_catchment(path1, path2, out_path):
 
     # in the border area, use the rolled data, else the original
     merged = xr.where(mask, ds2.reindex_like(ds1, method="nearest"), ds1)
-    merged.to_netcdf(out_path)
+    write_xarray_to_file(merged, out_path)
 
 
 def get_transformation_matrix_nc(ds, var_name):

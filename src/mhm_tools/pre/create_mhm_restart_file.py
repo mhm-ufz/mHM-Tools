@@ -12,7 +12,7 @@ import xarray as xr
 from crick import TDigest
 from joblib import Parallel, delayed
 
-from mhm_tools.common.file_handler import get_xarray_ds_from_file
+from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_to_file
 from mhm_tools.common.logger import ErrorLogger, log_arguments
 from mhm_tools.common.xarray_utils import get_coord_key
 
@@ -619,7 +619,7 @@ class MHMRestartFile:
         if "slope" in file_path.name or "geology" in file_path.name:
             ds_cut = ds_cut.sortby("latitude")
         try:
-            ds_cut.to_netcdf(out_path, "w")
+            write_xarray_to_file(ds_cut, out_path)
             logger.debug(f"Written {out_path}")
         except Exception as e:
             logger.error(f"Failed to write {out_path} with {e}")
@@ -1196,7 +1196,7 @@ class MHMRestartFile:
         if not self.output_path.is_dir():
             self.output_path.mkdir(parents=True)
         output_file = self.output_path / self.grid.restart_file.name
-        ds.to_netcdf(output_file, encoding=encoding)
+        write_xarray_to_file(ds, output_file, encoding=encoding)
         self.grid.restart_file = output_file
 
     def _delete_temp_files(self):
@@ -1228,7 +1228,7 @@ class MHMRestartFile:
                     cdf = xr.DataArray(cdf, dims=["latitude", "longitude"])
                     ds_slope["slope"] = cdf
                     ds_slope_emp = ds_slope.rename({"slope": "slope_emp"})
-                    ds_slope_emp.to_netcdf(self.grid.path / "slope_emp.nc")
+                    write_xarray_to_file(ds_slope_emp, self.grid.path / "slope_emp.nc")
                     self.grid.morph_files.slope_emp = self.grid.path / "slope_emp.nc"
         else:
             for sgrid in self.subgrids:
@@ -1244,7 +1244,7 @@ class MHMRestartFile:
                     cdf = xr.DataArray(cdf, dims=["latitude", "longitude"])
                     ds_slope["slope"] = cdf
                     ds_slope_emp = ds_slope.rename({"slope": "slope_emp"})
-                    ds_slope_emp.to_netcdf(sgrid.path / "slope_emp.nc")
+                    write_xarray_to_file(ds_slope_emp, sgrid.path / "slope_emp.nc")
                     sgrid.morph_files.slope_emp = sgrid.path / "slope_emp.nc"
 
     def _create_restart_for_grid(self, grid):

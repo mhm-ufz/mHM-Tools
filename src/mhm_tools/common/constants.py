@@ -70,6 +70,6 @@ WILDCARDS = ("*", "?", "[", "]")
 
 
 # possible coordinate keys
-LAT_KEYS = ["lat", "latitude", "northing", "y", "new_y", "Y", "geo_y"]
-LON_KEYS = ["lon", "longitude", "easting", "x", "new_x", "X", "geo_x"]
-TIME_KEYS = ["time", "month_of_year"]
+LAT_KEYS = ["lat", "latitude", "northing", "y", "new_y", "Y", "geo_y", "lat_l2"]
+LON_KEYS = ["lon", "longitude", "easting", "x", "new_x", "X", "geo_x", "lat_l2"]
+TIME_KEYS = ["time", "month_of_year", "valid_time"]

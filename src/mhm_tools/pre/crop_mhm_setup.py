@@ -477,8 +477,7 @@ def crop_mhm_setup(
     )
     files = []
     if input_path.is_dir():
-        for depth in range(recursive_depth):
-            files.extend(input_path.glob("*/" * depth + filename))
+        files.extend(input_path.rglob(filename))
     else:
         files = [input_path]
 

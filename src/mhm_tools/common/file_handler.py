@@ -268,16 +268,16 @@ def get_xarray_ds_from_file(
     return ds_out
 
 
-def write_xarray_to_file(ds, file_path, var_name=None, fmt=None, create_folder=True):
+def write_xarray_to_file(ds, file_path, var_name=None, fmt=None, create_folder=True, encoding=None, engine="netcdf4"):
     """Write xarray Datasets to file with file type depending on the file suffix."""
     file_path = Path(file_path)
     if create_folder and not file_path.parent.is_dir():
         file_path.parent.mkdir(parents=True)
-    logger.info(f"Writing file to {file_path}.")
+    logger.info(f"Writing file to {file_path}")
     if file_path.suffix == ".asc":
         return write_xarray_to_ascii(ds, file_path, var_name, fmt)
     if file_path.suffix == ".nc":
-        return ds.to_netcdf(file_path)
+        return ds.to_netcdf(file_path, encoding=encoding,engine=engine)
     msg = f"Writing to file types other than asci and netcdf is not implemented. The suffix of the file was: {file_path.suffix}"
     with ErrorLogger(logger):
         raise NotImplementedError(msg)
