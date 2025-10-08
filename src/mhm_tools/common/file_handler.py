@@ -7,8 +7,10 @@ from pathlib import Path
 
 import numpy as np
 import xarray as xr
+import dask
+from concurrent.futures import ThreadPoolExecutor
 
-from mhm_tools.common.logger import ErrorLogger
+from mhm_tools.common.logger import ErrorLogger, log_arguments
 from mhm_tools.common.netcdf import read_dataset
 from mhm_tools.common.xarray_utils import (
     get_coord_key,
@@ -98,8 +100,8 @@ def chunk_dataset_space_only(ds: xr.Dataset, available_mem_gib: float) -> xr.Dat
     lat_key = get_coord_key(ds, lat=True)
     lon_key = get_coord_key(ds, lon=True)
     time_key = None
-    with contextlib.suppress(ValueError):
-        time_key = get_coord_key(ds, time=True)
+    # with contextlib.suppress(ValueError):
+    time_key = get_coord_key(ds, time=True, raise_exception=False)
 
     ny = ds.sizes[lat_key]
     nx = ds.sizes[lon_key]
@@ -118,7 +120,7 @@ def chunk_dataset_space_only(ds: xr.Dataset, available_mem_gib: float) -> xr.Dat
     x_chunk = min(nx, side)
 
     chunks = {lat_key: y_chunk, lon_key: x_chunk}
-    if time_key:
+    if time_key is not None:
         # -1 means “take all” for that dim
         chunks[time_key] = -1
 
@@ -126,14 +128,9 @@ def chunk_dataset_space_only(ds: xr.Dataset, available_mem_gib: float) -> xr.Dat
         f"Chunk sizes → time: {chunks.get(time_key, '—')}, "
         f"{lat_key}: {y_chunk}, {lon_key}: {x_chunk}"
     )
-    try:
-        return ds.chunk(chunks)
-    except Exception as e:
-        logger.error(chunks)
-        logger.error(ds)
-        with ErrorLogger(logger):
-            raise e
-
+    logger.debug(f"   The chunks used are {chunks}")
+    return chunks
+    
 
 def chunk_dataset_space_and_time(ds, available_mem_gib) -> xr.Dataset:
     """Chunk dataset adjusting chunk size to avaiable memory.
@@ -142,7 +139,7 @@ def chunk_dataset_space_and_time(ds, available_mem_gib) -> xr.Dataset:
       - try to keep time chunks small (1…4)vi
       - make y/x chunks as square as possible
     """
-    logger.info(f"Chunking dataset with a max amount of mem of {available_mem_gib / 1_000_000_000 :.1f}Gb")
+    logger.info(f"Chunking dataset with a max amount of mem of {available_mem_gib:.1f}Gb")
     # ---------------- metadata only (cheap) --------------------------------
     var_name = next(iter(ds.data_vars))  # first data variable
     var = ds[var_name]  # an xarray.Variable wrapper
@@ -177,7 +174,7 @@ def chunk_dataset_space_and_time(ds, available_mem_gib) -> xr.Dataset:
         chunks[time_key] = t_chunk
     logger.debug(f"   The chunks used are {chunks}")
 
-    return ds.chunk(chunks)
+    return chunks
 
 
 class ChunkType(Enum):
@@ -190,14 +187,21 @@ class ChunkType(Enum):
     SPACE = 1
     TIME = 2
 
-
+@log_arguments()
 def chunk_dataset(ds, chunk_type, available_mem_gib):
     """Chunk xarray.DataSet depending on chunk_type and available memory."""
     if chunk_type == ChunkType.TIME:
         chunks = chunk_dataset_space_and_time(ds, available_mem_gib)
     if chunk_type == ChunkType.SPACE:
         chunks = chunk_dataset_space_only(ds, available_mem_gib)
-    return ds.chunk(chunks)
+    try:
+        return ds.chunk(chunks)
+    except Exception as e:
+        logger.error(chunks)
+        logger.error(ds)
+        with ErrorLogger(logger):
+            raise e
+
 
 
 def get_xarray_ds_from_file(
@@ -268,19 +272,33 @@ def get_xarray_ds_from_file(
     return ds_out
 
 
-def write_xarray_to_file(ds, file_path, var_name=None, fmt=None, create_folder=True, encoding=None, engine="netcdf4"):
+def write_xarray_to_file(ds, file_path, var_name=None, fmt=None, create_folder=True, encoding=None, compute_kwargs={}, engine="netcdf4", available_mem_gib=None):
     """Write xarray Datasets to file with file type depending on the file suffix."""
     file_path = Path(file_path)
     if create_folder and not file_path.parent.is_dir():
         file_path.parent.mkdir(parents=True)
     logger.info(f"Writing file to {file_path}")
     if file_path.suffix == ".asc":
-        return write_xarray_to_ascii(ds, file_path, var_name, fmt)
-    if file_path.suffix == ".nc":
-        return ds.to_netcdf(file_path, encoding=encoding,engine=engine)
-    msg = f"Writing to file types other than asci and netcdf is not implemented. The suffix of the file was: {file_path.suffix}"
-    with ErrorLogger(logger):
-        raise NotImplementedError(msg)
+         write_xarray_to_ascii(ds, file_path, var_name, fmt)
+    elif file_path.suffix == ".nc":
+        if available_mem_gib is not None: 
+            # ds = chunk_dataset(ds, ChunkType.TIME, available_mem_gib//50)
+            encoding = {v: {'zlib': True, 'complevel': 4, 'shuffle': True} for v in ds.data_vars}
+            compute_kwargs={'scheduler': 'threads', 'num_workers': 1}
+            dask.config.set({"array.slicing.split_large_chunks": True})  # also works as context manager
+            # 3) Limit threads for the local threaded scheduler
+            pool = ThreadPoolExecutor(max_workers=1)
+            with dask.config.set(scheduler='threads', pool=pool):
+                # ds.to_netcdf(file#_path, engine=engine, format='NETCDF4',
+                        # encoding=encoding)
+                delayed = ds.to_netcdf(file_path, engine="netcdf4", encoding=encoding, compute=False)
+                delayed.compute(scheduler="threads", num_workers=1)
+        ds.to_netcdf(file_path, engine=engine, format='NETCDF4',
+                        encoding=encoding)
+    else:
+        msg = f"Writing to file types other than asci and netcdf is not implemented. The suffix of the file was: {file_path.suffix}"
+        with ErrorLogger(logger):
+            raise NotImplementedError(msg)
 
 
 def write_xarray_to_ascii(dataset, filepath, data_var=None, fmt=None):

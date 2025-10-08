@@ -10,9 +10,11 @@ from joblib import Parallel, delayed
 
 from mhm_tools.common.esri_grid import read_header, write_header
 from mhm_tools.common.file_handler import (
+    ChunkType,
     create_header,
     get_xarray_ds_from_file,
     write_xarray_to_ascii,
+    write_xarray_to_file,
 )
 from mhm_tools.common.logger import ErrorLogger, log_arguments
 from mhm_tools.common.xarray_utils import (
@@ -128,19 +130,19 @@ def regrid_mask(
     return results
 
 
-def write_to_file(ds, output_file: Path):
-    """Take xarray Dataset and write it to file.
+# def write_to_file(ds, output_file: Path):
+#     """Take xarray Dataset and write it to file.
 
-    File type depends on path suffix.
-    """
-    logger.info(f"Writing to file {output_file}")
-    logger.debug(f"Content is: {ds}")
-    suffix = output_file.suffix
-    if suffix == ".asc":
-        write_xarray_to_ascii(ds, output_file)
-        # ds.to_netcdf(output_file.with_suffix('.nc'))
-    elif suffix == ".nc":
-        ds.to_netcdf(output_file)
+#     File type depends on path suffix.
+#     """
+#     logger.info(f"Writing to file {output_file}")
+#     logger.debug(f"Content is: {ds}")
+#     suffix = output_file.suffix
+#     if suffix == ".asc":
+#         write_xarray_to_ascii(ds, output_file)
+#         # ds.to_netcdf(output_file.with_suffix('.nc'))
+#     elif suffix == ".nc":
+#         ds.to_netcdf(output_file)
 
 
 def crop_file_with_header(ds_in, file_path, output_path, lonslice, latslice):
@@ -346,9 +348,10 @@ def crop_file(
             ds = get_xarray_ds_from_file(
                 input_file,
                 chunking=chunking,
-                available_mem_gib=available_mem_gib,
+                available_mem_gib=available_mem_gib//3,
                 normalize_latlon_coords=True,
                 force_decending_y=True,
+                chunk_type=ChunkType.TIME
             )
         except ValueError as ve:
             logger.error(
@@ -432,13 +435,13 @@ def crop_file(
         else:
             logger.info("Can't mask dem file because no mask was provided.")
     try:
-        write_to_file(ds_cropped, output_file)
+        write_xarray_to_file(ds_cropped, output_file, available_mem_gib=available_mem_gib)
     except Exception as e:
         logger.warning(f"First try writing the file failed: {e}")
         logger.info("Changing datatype to float")
         for var_name in ds_cropped.data_vars:
             ds_cropped[var_name] = ds_cropped[var_name].astype(float)
-        write_to_file(ds_cropped, output_file)
+        write_xarray_to_file(ds_cropped, output_file, available_mem_gib=available_mem_gib)
         if force_header_creation and not (output_file.parent / 'header.txt').is_file():
             create_header(ds_cropped, output_path=output_file.parent / 'header.txt', write=True)
 

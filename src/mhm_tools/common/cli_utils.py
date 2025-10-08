@@ -37,11 +37,14 @@ def get_available_mem_in_unit(available_mem):
     if available_mem is None:
         return None
     mem_str = available_mem.lower().strip()
+    logger.info(f"mem_string {mem_str}")
+    if mem_str.endswith("kb"):
+        return int(mem_str[:-2])  // 1000_000
     if mem_str.endswith("mb"):
-        return int(mem_str[:-2]) * 1_000_000
+        return int(mem_str[:-2])  // 1000
     if mem_str.endswith("gb"):
-        return int(mem_str[:-2]) * 1_000_000_000
-    return int(mem_str)
+        return int(mem_str[:-2])
+    return int(mem_str) * 1_000_000_000
 
 
 def get_coords_from_mask(mask):
