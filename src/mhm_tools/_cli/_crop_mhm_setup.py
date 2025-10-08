@@ -138,6 +138,13 @@ def add_args(parser):
             """Force creation of header file for all files."""
         ),
     )
+    parser.add_argument(
+        "--output_var",
+        required=False, 
+        default=None, 
+        help=("""Output variable name for single data var""")
+    )
+
 
 
 def run(args):
@@ -177,8 +184,8 @@ def run(args):
         crs=args.crs,
         n_jobs=args.ncpus,
         filename=args.file_name,
-        recursive_depth=args.folder_recursion_depth,
         available_mem_gib=available_mem,
         force_header_creation=args.create_header,
-        chunking=args.chunking
+        chunking=args.chunking,
+        output_var=args.output_var
     )

@@ -320,7 +320,8 @@ def crop_file(
     overwrite,
     available_mem_gib,
     force_header_creation=False,
-    chunking=False
+    chunking=False,
+    output_var=None
 ):
     """Crops one file by lat and lon slice and may mask it with the mask dataarray."""
     logger.info(f"Cropping the file {input_file}")
@@ -434,6 +435,12 @@ def crop_file(
             ds_cropped = ds_cropped.where(mask_regridded == 1, np.nan)
         else:
             logger.info("Can't mask dem file because no mask was provided.")
+    if output_var is not None: 
+        try:
+            data_var = get_single_data_var(ds_cropped)
+            ds_cropped = ds_cropped.rename({data_var: output_var})
+        except ValueError: 
+            logger.warning(f'Could not rename data_var to specified output variable name {output_var}')
     try:
         write_xarray_to_file(ds_cropped, output_file, available_mem_gib=available_mem_gib)
     except Exception as e:
@@ -465,10 +472,10 @@ def crop_mhm_setup(
     crs=None,
     n_jobs=1,
     filename="*.*",
-    recursive_depth=5,
     available_mem_gib=5,
     force_header_creation=False,
-    chunking=False
+    chunking=False,
+    output_var=None
 ):
     """Cut out an existing mhm domain setup using a mask file."""
     # check if the input is correct
@@ -496,7 +503,8 @@ def crop_mhm_setup(
             overwrite=overwrite,
             available_mem_gib=available_mem_gib,
             force_header_creation=force_header_creation,
-            chunking=chunking
+            chunking=chunking,
+            output_var=output_var
         )
         for f in files
     )

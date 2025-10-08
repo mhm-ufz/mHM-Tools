@@ -42,7 +42,8 @@ def merge_files_from_folder(files, out_file, n_cpus):
             _cdo.mergetime(
                 input=" ".join(map(str, part_parts_merged)),
                 output=str(out_file),
-                options=f"-P {n_cpus} -O",
+                env={"SKIP_SAME_TIME": 1},
+                options=f"-P {n_cpus} -O --skip",
             )
     return str(out_file)
 
