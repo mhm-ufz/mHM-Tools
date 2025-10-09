@@ -322,7 +322,8 @@ def crop_file(
     force_header_creation=False,
     chunking=False,
     output_var=None,
-    only_create_header=False
+    only_create_header=False,
+    no_cropping=False
 ):
     """Crops one file by lat and lon slice and may mask it with the mask dataarray."""
     logger.info(f"Cropping the file {input_file}")
@@ -375,42 +376,43 @@ def crop_file(
     logger.debug(f"read in dataset: {ds}")
     # Handling of special cases:
     ds_cropped = None
-    # 3. Files that are in the same folder as a header file. Typical examples are meteo datasets such as temperature or precipitation
-    if list(input_file.parent.glob("header.txt")):
-        logger.debug("Cropping and writing new header file...")
-        ds_cropped, header_path = crop_file_with_header(
-            ds,
-            input_file,
-            output_path / input_file.parent.relative_to(input_path),
-            lonslice=lonslice,
-            latslice=latslice,
-        )
-        if not (ds_cropped is None and header_path is None):
-            lat_key = get_coord_key(ds_cropped, lat=True)
-            lon_key = get_coord_key(ds_cropped, lon=True)
-            if input_file.stem in ["pre", "pet", "tavg"]:
-                latlon_files.set_meteo_header_path(header_path)
-    # 4. All other netcdf files containing mostly morphological data.
-    else:
-        lat_key = get_coord_key(ds, lat=True)
-        lon_key = get_coord_key(ds, lon=True)
+    if not no_cropping:
+        # 3. Files that are in the same folder as a header file. Typical examples are meteo datasets such as temperature or precipitation
+        if list(input_file.parent.glob("header.txt")):
+            logger.debug("Cropping and writing new header file...")
+            ds_cropped, header_path = crop_file_with_header(
+                ds,
+                input_file,
+                output_path / input_file.parent.relative_to(input_path),
+                lonslice=lonslice,
+                latslice=latslice,
+            )
+            if not (ds_cropped is None and header_path is None):
+                lat_key = get_coord_key(ds_cropped, lat=True)
+                lon_key = get_coord_key(ds_cropped, lon=True)
+                if input_file.stem in ["pre", "pet", "tavg"]:
+                    latlon_files.set_meteo_header_path(header_path)
+        # 4. All other netcdf files containing mostly morphological data.
+        else:
+            lat_key = get_coord_key(ds, lat=True)
+            lon_key = get_coord_key(ds, lon=True)
 
-        # extract lon-lat bounds
-        lon_start, lon_stop = float(lonslice.start), float(lonslice.stop)
-        lat_start, lat_stop = float(latslice.start), float(latslice.stop)
+            # extract lon-lat bounds
+            lon_start, lon_stop = float(lonslice.start), float(lonslice.stop)
+            lat_start, lat_stop = float(latslice.start), float(latslice.stop)
 
-        logger.debug(
-            f"Selecting {input_file.name} using lon:{lonslice} and lat:{latslice}"
-        )
-        ds_cropped = crop_ds(
-            ds=ds,
-            lon_min=lon_start,
-            lon_max=lon_stop,
-            lat_min=lat_start,
-            lat_max=lat_stop,
-            lon_name=lon_key,
-            lat_name=lat_key,
-        )
+            logger.debug(
+                f"Selecting {input_file.name} using lon:{lonslice} and lat:{latslice}"
+            )
+            ds_cropped = crop_ds(
+                ds=ds,
+                lon_min=lon_start,
+                lon_max=lon_stop,
+                lat_min=lat_start,
+                lat_max=lat_stop,
+                lon_name=lon_key,
+                lat_name=lat_key,
+            )
 
     # check for emptiness or insufficient grid points
     if ds_cropped.sizes[lat_key] < 1 or ds_cropped.sizes[lon_key] < 1:
@@ -476,7 +478,8 @@ def crop_mhm_setup(
     force_header_creation=False,
     chunking=False,
     output_var=None,
-    only_create_header=False
+    only_create_header=False,
+    no_cropping=False
 ):
     """Cut out an existing mhm domain setup using a mask file."""
     # check if the input is correct
@@ -506,7 +509,8 @@ def crop_mhm_setup(
             force_header_creation=force_header_creation,
             chunking=chunking,
             output_var=output_var,
-            only_create_header=only_create_header
+            only_create_header=only_create_header,
+            no_cropping=no_cropping
         )
         for f in files
     )

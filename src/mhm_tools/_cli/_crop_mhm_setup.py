@@ -148,6 +148,15 @@ def add_args(parser):
         ),
     )
     parser.add_argument(
+        "--no_cropping",
+        required=False,
+        default=False,
+        action="store_true",
+        help=(
+            """Do not crop the file but only writes a header. This activate the forced header creation and only header functions."""
+        ),
+    )
+    parser.add_argument(
         "--output_var",
         required=False, 
         default=None, 
@@ -182,6 +191,7 @@ def run(args):
     lonslice = slice(lon_min_target_grid, lon_max_target_grid)
     # l0_resolution = float(args.lonlatbox.split(",")[4])
     available_mem = get_available_mem_in_unit(args.available_mem)
+    only_header = True if args.no_cropping else args.only_header
     crop_mhm_setup(
         input_path=args.input_path,
         output_path=args.output_path,
@@ -197,5 +207,6 @@ def run(args):
         force_header_creation=args.create_header,
         chunking=args.chunking,
         output_var=args.output_var,
-        only_create_header=args.only_header
+        only_create_header=only_header,
+        no_cropping=args.no_cropping
     )
