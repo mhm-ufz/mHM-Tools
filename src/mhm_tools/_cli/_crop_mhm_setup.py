@@ -139,6 +139,15 @@ def add_args(parser):
         ),
     )
     parser.add_argument(
+        "--only_header",
+        required=False,
+        default=False,
+        action="store_true",
+        help=(
+            """Do not save the cropped files but only the header. This activate the forced header creation."""
+        ),
+    )
+    parser.add_argument(
         "--output_var",
         required=False, 
         default=None, 
@@ -187,5 +196,6 @@ def run(args):
         available_mem_gib=available_mem,
         force_header_creation=args.create_header,
         chunking=args.chunking,
-        output_var=args.output_var
+        output_var=args.output_var,
+        only_create_header=args.only_header
     )
