@@ -18,7 +18,7 @@ from typing import Optional
 import pandas as pd
 import xarray as xr
 
-from mhm_tools.common.file_handler import get_xarray_ds_from_file
+from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_to_file
 from mhm_tools.common.logger import ErrorLogger
 from mhm_tools.common.xarray_utils import crop_ds
 
@@ -159,4 +159,4 @@ def prepare_forcings(
         name = path.name if out_file == "*" else out_file
 
         # Write output
-        da.to_netcdf(Path(out_dir) / name)
+        write_xarray_to_file(ds=da, file_path=Path(out_dir) / name)

@@ -164,7 +164,7 @@ def regrid_file(input, mask, output, l2, method="nearest", var=None):
         if (in_lon, in_lat) != ("lon", "lat"):
             dsi_renamed = dsi.rename({in_lon: "lon", in_lat: "lat"})
             tmp_in = tempfile.mktemp(suffix=".nc")
-            dsi_renamed.to_netcdf(tmp_in)
+            write_xarray_to_file(ds=dsi_renamed, file_path=tmp_in)
             renamed = True
 
         tmp_out = tempfile.mktemp(suffix=".nc")
@@ -173,7 +173,7 @@ def regrid_file(input, mask, output, l2, method="nearest", var=None):
         # Rename back if needed
         if renamed:
             out = out.rename({"lon": in_lon, "lat": in_lat})
-        out.to_netcdf(output)
+        write_xarray_to_file(ds=out, file_path=output)
         logger.info(f"Wrote {output}")
     else:
         # xarray path (nearest/linear; bilinear falls back to linear)

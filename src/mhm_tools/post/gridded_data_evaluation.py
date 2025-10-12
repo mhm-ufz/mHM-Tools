@@ -18,6 +18,7 @@ from mhm_tools.common.file_handler import (
     ChunkType,
     get_coord_values,
     get_xarray_ds_from_file,
+    write_xarray_to_file,
 )
 from mhm_tools.common.logger import ErrorLogger, log_arguments, log_errors
 from mhm_tools.common.spatial_metrics import create_results_csv
@@ -191,7 +192,7 @@ def get_file_stats(
         ts.name = "time_series"
         output = xr.merge([output, ts])
     if output_path is not None:
-        output.to_netcdf(output_path)
+        write_xarray_to_file(ds=output, file_path=output_path)
     return output
 
 
@@ -403,7 +404,7 @@ def get_stats_one_pass(
             else output_path
         )
         logger.info(f"Writing output to {output_file}")
-        output.to_netcdf(output_file)
+        write_xarray_to_file(ds=output, file_path=output_file)
     return output
 
 
@@ -1016,7 +1017,7 @@ def compare_input_with_ref(  # noqa: PLR0913
     else:
         file_name = output_path / f"{file_name}.nc"
 
-    output.to_netcdf(file_name)
+    write_xarray_to_file(ds=output, file_path=file_name)
     logger.info(f"Written output to {file_name}")
     if plot:
         if not bias_only:

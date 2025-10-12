@@ -10,7 +10,7 @@ import logging
 
 import numpy as np
 
-from mhm_tools.common.file_handler import get_xarray_ds_from_file
+from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_to_file
 from mhm_tools.common.logger import log_arguments
 
 from ..common import NC_ENCODE_DEFAULTS, set_netcdf_encoding
@@ -135,4 +135,4 @@ def bankfull_discharge(
     set_netcdf_encoding(ds=ds, var_encoding=var_encode)
 
     # save
-    ds.to_netcdf(out_file)
+    write_xarray_to_file(ds=ds, file_path=out_file)

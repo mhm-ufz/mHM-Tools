@@ -870,7 +870,7 @@ class MHMRestartFile:
             )
         # save the intermediate file
         logger.info(f"Writing restart file to {self.grid.restart_file}")
-        ds_whole.to_netcdf(self.grid.restart_file)
+        write_xarray_to_file(ds=ds_whole, file_path=self.grid.restart_file)
         logger.info("Renaming coordinates and data variables")
 
         return ds_whole

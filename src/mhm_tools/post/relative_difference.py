@@ -18,6 +18,7 @@ Authors
 from pathlib import Path
 from typing import Optional
 
+from mhm_tools.common.file_handler import write_xarray_to_file
 import numpy as np
 import xarray as xr
 
@@ -92,4 +93,4 @@ def calc_rel_diff(  # noqa: PLR0913
 
     # If set, saves rel. diff file
     if save_ncfile:
-        diff.to_netcdf(out_path_dir / output_file_nc)
+        write_xarray_to_file(ds=diff, file_path=out_path_dir / output_file_nc)

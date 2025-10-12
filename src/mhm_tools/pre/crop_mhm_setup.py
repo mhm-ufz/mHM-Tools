@@ -129,22 +129,6 @@ def regrid_mask(
     results[~mask] = 0
     return results
 
-
-# def write_to_file(ds, output_file: Path):
-#     """Take xarray Dataset and write it to file.
-
-#     File type depends on path suffix.
-#     """
-#     logger.info(f"Writing to file {output_file}")
-#     logger.debug(f"Content is: {ds}")
-#     suffix = output_file.suffix
-#     if suffix == ".asc":
-#         write_xarray_to_ascii(ds, output_file)
-#         # ds.to_netcdf(output_file.with_suffix('.nc'))
-#     elif suffix == ".nc":
-#         ds.to_netcdf(output_file)
-
-
 def crop_file_with_header(ds_in, file_path, output_path, lonslice, latslice):
     """Crop the nc file and create a new header file for the new coordinates."""
     pres = 1e-9
