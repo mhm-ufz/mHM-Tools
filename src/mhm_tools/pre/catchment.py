@@ -212,8 +212,10 @@ class Catchment:
                         self.l2_resolution,
                     ]
                     if res is not None
-                ]
+                ], default=None
             )
+        if upscale_res is None: 
+            return 1
         if int(upscale_res / input_res + 0.5) - (upscale_res / input_res) < 1e6:
             return int(upscale_res / input_res + 0.5)
         not_int_multiple_msg = f"Upscaling only works if L1 resolution is integer muplipe of L0 resolution but L1 = {self.l1_resolution / input_res:.4f} * L0"
@@ -345,14 +347,16 @@ class Catchment:
         out_path = pl.Path(out_path)
         if not out_path.is_dir():
             out_path.mkdir(parents=True, exist_ok=True)
+        lat_slice_idx, lon_slice_idx = None, None
+        lat_slice, lon_slice = None, None
         if cut_by_basin:
-            lat_slice, lon_slice = self.cut_to_filled_area(buffer)
+            lat_slice_idx, lon_slice_idx = self.cut_to_filled_area(buffer)
         else:
             lat_slice, lon_slice = slice(84, -56), slice(None)
 
         for var_name in self.VARIABLES:
             data_var = self.processing_data_variable(
-                var_name, cut_by_basin, lat_slice, lon_slice
+                var_name, cut_by_basin, lat_slice, lon_slice, lat_slice_idx, lon_slice_idx
             )
             if data_var is None:
                 continue
@@ -419,7 +423,7 @@ class Catchment:
                 msg = f'Format "{format}" unknown, use one of ["nc", "asc"]'
                 raise Exception(msg)
 
-    def processing_data_variable(self, var_name, cut_by_basin, lat_slice=None, lon_slice=None):
+    def processing_data_variable(self, var_name, cut_by_basin, lat_slice=None, lon_slice=None, lat_slice_idx=None, lon_slice_idx=None):
         """Process data variable, masking it and croping it spatial dimensions."""
         logger.info(f"Processing {var_name}")
         data = getattr(self, var_name)
@@ -464,6 +468,9 @@ class Catchment:
         if lat_slice is not None and lon_slice is not None: 
             logger.info(f"Cutting {var_name} data to correct spatial dimensions")
             data_var = data_var.sel(lat=lat_slice, lon=lon_slice)
+        elif lat_slice_idx is not None and lon_slice_idx is not None: 
+            logger.info(f"Cutting {var_name} data to correct spatial dimensions")
+            data_var = data_var.isel(lat=lat_slice_idx, lon=lon_slice_idx)
         logger.debug(data_var)
         return data_var
 
@@ -504,6 +511,95 @@ class Catchment:
         )
         logger.info(f"Basin Id has been written to {out_path / self.out_var_name}")
         return ds
+    
+    def _cell_edges(self, centers: np.ndarray) -> np.ndarray:
+        """Compute edges (len=N+1) from center coords (len=N) on a regular grid."""
+        c = np.asarray(centers)
+        d = np.diff(c)
+        left  = c[0]  - 0.5 * d[0]
+        right = c[-1] + 0.5 * d[-1]
+        mids  = (c[:-1] + c[1:]) / 2.0
+        return np.concatenate(([left], mids, [right]))
+
+    def _coarse_centers_from_edges(self, edges: np.ndarray, k: int, n_blocks: int, ascending: bool) -> np.ndarray:
+        """
+        Given fine-grid edges, build coarse-grid centers for block size k.
+        Ensures coarse edges == fine edges over the cropped window.
+        """
+        # we assume you've cropped L0 so len(fine_centers) is divisible by k
+        # The window's left edge and right edge are edges[0] and edges[k*n_blocks]
+        left_edge = edges[0]
+        dx_coarse = (edges[k] - edges[0])  # = k * dx_fine (works for asc/desc)
+        # centers are midpoints of each coarse cell
+        n = np.arange(n_blocks)
+        centers = left_edge + (n + 0.5) * dx_coarse
+        if not ascending:
+            centers = centers[::-1]
+        return centers
+
+    def upscale_mask_with_correct_coords(
+        self,   
+        da: xr.DataArray,
+        factor: int = None,
+        lon_name: str = "lon",
+        lat_name: str = "lat",
+    ) -> xr.DataArray:
+        """
+        Coarsen a 2D mask-like field by integer factor and assign correct coarse coords
+        so that coarse *edges* equal fine *edges* of the cropped window.
+        """
+        if factor is None: 
+            factor = self.get_upscaling_factor(max_resolution=True)
+        if factor < 1:
+            raise ValueError("factor must be >= 1")
+
+        # 1) coarsen over lon/lat windows
+        kx = ky = int(factor)
+        coarsen_map = {}
+        if lon_name in da.dims:
+            coarsen_map[lon_name] = kx
+        if lat_name in da.dims:
+            coarsen_map[lat_name] = ky
+
+        cond = (~xr.apply_ufunc(np.isnan, da)) | (da == 0)
+        out  = cond.coarsen(coarsen_map, boundary="trim").any().astype("int8")
+
+        # 2) compute correct coarse coordinates from fine edges
+        lon_f = da[lon_name].values
+        lat_f = da[lat_name].values
+        lon_edges = self._cell_edges(lon_f)
+        lat_edges = self._cell_edges(lat_f)
+
+        asc_lon = lon_f[0] < lon_f[-1]
+        asc_lat = lat_f[0] < lat_f[-1]
+
+        n_lon_blocks = out.sizes.get(lon_name, 1)
+        n_lat_blocks = out.sizes.get(lat_name, 1)
+
+        # figure out which portion of edges we used after boundary="trim":
+        # Since you cropped L0 to a multiple of factor, the coarsen starts at index 0
+        # and uses exactly n_blocks*k cells. So we can take edges[0 : n_blocks*k + 1].
+        lon_edges_win = lon_edges[: n_lon_blocks * kx + 1] if asc_lon else lon_edges[-(n_lon_blocks * kx + 1):]
+        lat_edges_win = lat_edges[: n_lat_blocks * ky + 1] if asc_lat else lat_edges[-(n_lat_blocks * ky + 1):]
+
+        lon_coarse = self._coarse_centers_from_edges(lon_edges_win, kx, n_lon_blocks, asc_lon)
+        lat_coarse = self._coarse_centers_from_edges(lat_edges_win, ky, n_lat_blocks, asc_lat)
+
+        out = out.assign_coords({lon_name: lon_coarse, lat_name: lat_coarse})
+        out.name = da.name or "mask_L2"
+
+        # 3) (optional) log edges for verification
+        lon_edges_coarse = self._cell_edges(out[lon_name].values)
+        lat_edges_coarse = self._cell_edges(out[lat_name].values)
+        logger.info(
+            f"Coarse lon edges: {lon_edges_coarse[0]:.6f} .. {lon_edges_coarse[-1]:.6f} "
+            f"(should equal fine window edges: {lon_edges_win[0]:.6f} .. {lon_edges_win[-1]:.6f})"
+        )
+        logger.info(
+            f"Coarse lat edges: {lat_edges_coarse[0]:.6f} .. {lat_edges_coarse[-1]:.6f} "
+            f"(should equal fine window edges: {lat_edges_win[0]:.6f} .. {lat_edges_win[-1]:.6f})"
+        )
+        return out
 
     def upscale_mask(self, da: xr.DataArray, factor=None, lon_name="lon", lat_name="lat") -> xr.DataArray:
         """
@@ -576,7 +672,7 @@ class Catchment:
                 "axis": "X",
             })
             if not self.do_upscale:
-                mask_upscaled = self.upscale_mask(mask_da)
+                mask_upscaled = self.upscale_mask_with_correct_coords(mask_da)
             else: 
                 mask_upscaled = mask_da
             mask_upscaled = mask_upscaled.rename({'lat': 'lat_l2', 'lon': 'lon_l2'})
@@ -612,52 +708,73 @@ class Catchment:
         if buffer > 0:
             # Add a buffer of one cell
             logger.info(f"Using a min buffer of {buffer}")
-            min_row = min_row - buffer if min_row > 0 else min_row
-            min_col = min_col - buffer if min_col > 0 else min_col
-            max_row = (
-                max_row + buffer if max_row < self.catchment_mask.shape[0] else max_row
-            )
-            max_col = (
-                max_col + buffer if max_col < self.catchment_mask.shape[1] else max_col
-            )
-        logger.info(
-            f"min row: {min_row} max row: {max_row} min_col: {min_col}, max_col: {max_col}"
-        )
-        if self.l1_resolution is not None:
-            factor = self.get_upscaling_factor(max_resolution=True)
-            if factor != 1:
-                logger.info(
-                    f"Regridding to fit coarse grid with res {self.l1_resolution} (factor {factor})"
-                )
-                min_row = min_row // factor * factor 
-                min_col = min_col // factor * factor
-                # Calculating max_row/col it needs:
-                #  +1 to include the whole last coarse grid cell -1 to not get one cell from the next block
-                max_row = (max_row // factor + 1) * factor - 1
-                max_col = (max_col // factor + 1) * factor - 1
-                if max_col >= len(cols):
-                    logger.warning("While regridding max_cols was larger than col-size")
-                    max_col = len(cols) - 1
-                if max_row >= len(rows):
-                    logger.warning("While regridding max_rows was larger than row-size")
-                    max_row = len(rows) - 1
-        logger.info(
-            f"min row: {min_row} max row: {max_row} min_col: {min_col}, max_col: {max_col}"
-        )
+            min_row = max(0, min_row - buffer)
+            min_col = max(0, min_col - buffer)
+            max_row = min(self.catchment_mask.shape[0] - 1, max_row + buffer)
+            max_col = min(self.catchment_mask.shape[1] - 1, max_col + buffer)
 
-        # Slice the array to extract the filled part
-        lon_min, lon_max = (
-            np.round(self.ds.lon.values[min_col], 8),
-            np.round(self.ds.lon.values[max_col], 8),
+            # min_row = min_row - buffer if min_row > 0 else min_row
+            # min_col = min_col - buffer if min_col > 0 else min_col
+            # max_row = (
+            #     max_row + buffer if max_row < self.catchment_mask.shape[0] else max_row
+            # )
+            # max_col = (
+            #     max_col + buffer if max_col < self.catchment_mask.shape[1] else max_col
+            # )
+        # logger.info(
+        #     f"min row: {min_row} max row: {max_row} min_col: {min_col}, max_col: {max_col}"
+        # )
+        logger.info(f"L0 initial window (rows, cols): [{min_row}:{max_row}], [{min_col}:{max_col}]")
+
+        factor = self.get_upscaling_factor(max_resolution=True)
+        if factor > 1:
+            logger.info(
+                f"Regridding to fit coarse grid with res {max([r for r in [self.l1_resolution, self.l11_resolution, self.l2_resolution] if r is not None ])} (factor {factor})"
+            )
+            min_row = min_row // factor * factor 
+            min_col = min_col // factor * factor
+            # Calculating max_row/col it needs:
+            #  +1 to include the whole last coarse grid cell -1 to not get one cell from the next block
+            max_row = (max_row // factor + 1) * factor - 1
+            max_col = (max_col // factor + 1) * factor - 1
+             # clamp
+            max_row = min(max_row, self.catchment_mask.shape[0] - 1)
+            max_col = min(max_col, self.catchment_mask.shape[1] - 1)
+            # if max_col >= len(cols):
+            #     logger.warning("While regridding max_cols was larger than col-size")
+            #     max_col = len(cols) - 1
+            # if max_row >= len(rows):
+            #     logger.warning("While regridding max_rows was larger than row-size")
+            #     max_row = len(rows) - 1
+        logger.info(
+            f"min row: {min_row} max row: {max_row} min_col: {min_col}, max_col: {max_col}"
         )
-        lat_min, lat_max = (
-            np.round(self.ds.lat.values[max_row], 8),
-            np.round(self.ds.lat.values[min_row], 8),
-        )
-        lat_slice = slice(lat_max, lat_min)
-        lon_slice = slice(lon_min, lon_max)
-        logger.info(f"lat_slice: {lat_slice}, lon_slice: {lon_slice}")
-        return lat_slice, lon_slice
+        # build index slice
+        lat_slice_idx = slice(min_row, max_row + 1)
+        lon_slice_idx = slice(min_col, max_col + 1)
+
+        #Sanity: cropped shape divisible by factor ---
+        n_lat = lat_slice_idx.stop - lat_slice_idx.start
+        n_lon = lon_slice_idx.stop - lon_slice_idx.start
+        if factor > 1:
+            if (n_lat % factor) != 0 or (n_lon % factor) != 0:
+                raise AssertionError(
+                    f"Cropped L0 shape ({n_lat}, {n_lon}) not divisible by factor={factor}"
+                )
+
+        # # Slice the array to extract the filled part
+        # lon_min, lon_max = (
+        #     np.round(self.ds.lon.values[min_col], 8),
+        #     np.round(self.ds.lon.values[max_col], 8),
+        # )
+        # lat_min, lat_max = (
+        #     np.round(self.ds.lat.values[max_row], 8),
+        #     np.round(self.ds.lat.values[min_row], 8),
+        # )
+        # lat_slice = slice(lat_max, lat_min)
+        # lon_slice = slice(lon_min, lon_max)
+        logger.info(f"lat_slice: {lat_slice_idx}, lon_slice: {lon_slice_idx}")
+        return lat_slice_idx, lon_slice_idx
 
 
 def merge_catchment(path1, path2, out_path):

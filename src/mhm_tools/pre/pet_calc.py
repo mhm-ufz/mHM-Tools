@@ -8,6 +8,7 @@ from mhm_tools.common.logger import ErrorLogger, log_arguments
 from mhm_tools.common.xarray_utils import get_coord_key, get_single_data_var, timedelta_to_alias
 import xarray as xr 
 import numpy as np
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +104,7 @@ def calculate_pet(
         tarr = tavg.isel(time=idx).values[np.newaxis, :, :]
         tasks.append((tarr, lat3d, current_time, stat_freq))
 
+    logger.info(f'Calculating pet in parallel on {max_workers} cores')
     # Compute PET in parallel
     results = Parallel(n_jobs=max_workers, backend="loky")(
         delayed(_compute_pet)(task) for task in tasks

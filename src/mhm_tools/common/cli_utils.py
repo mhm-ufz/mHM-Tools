@@ -47,7 +47,7 @@ def get_available_mem_in_unit(available_mem):
     return int(mem_str) * 1_000_000_000
 
 
-def get_coords_from_mask(mask):
+def get_coords_from_mask(mask, mask_key=None):
     """Get the coordinate extents from a mask NetCDF file.
 
     Parameters
@@ -61,15 +61,22 @@ def get_coords_from_mask(mask):
         (lon_min, lon_max, lat_min, lat_max, mask_dataarray)
     """
     with get_xarray_ds_from_file(mask, normalize_latlon_coords=True) as mask_ds:
-        lon = mask_ds.lon
-        lat = mask_ds.lat
+        
+        if mask_key is None: 
+            mask_key = next(
+                key for key in ["mask", "land_mask", "mask_l2"] if key in mask_ds.data_vars
+            )
+        mask_da = mask_ds[mask_key]
+
+        lon = mask_da.lon
+        lat = mask_da.lat
         lon_min_target_grid = lon.min()
         lon_max_target_grid = lon.max()
         lat_min_target_grid = lat.min()
         lat_max_target_grid = lat.max()
 
         # change values from center cell to corner values
-        resolution = mask_ds.lon.values[1] - mask_ds.lon.values[0]
+        resolution = mask_da.lon.values[1] - mask_da.lon.values[0]
         lon_min_target_grid -= resolution / 2
         lon_max_target_grid += resolution / 2
         lat_min_target_grid -= resolution / 2
@@ -89,10 +96,7 @@ def get_coords_from_mask(mask):
                 lon_max_target_grid,
                 lon_min_target_grid,
             )
-        mask_key = next(
-            key for key in ["mask", "land_mask"] if key in mask_ds.data_vars
-        )
-        mask_da = mask_ds[mask_key]
+        
         return (
             lon_min_target_grid,
             lon_max_target_grid,
@@ -110,6 +114,7 @@ def get_coords(
     lat_min=None,
     lat_max=None,
     raise_exception=True,
+    mask_var=None
 ):
     """Get coordinate bounds from a lonlatbox string, mask file, or explicit values.
 
@@ -138,7 +143,7 @@ def get_coords(
         mask = None
     elif mask_file is not None:
         lon_min_val, lon_max_val, lat_min_val, lat_max_val, mask = get_coords_from_mask(
-            mask_file
+            mask_file, mask_key=mask_var
         )
     elif None not in (lon_min, lon_max, lat_min, lat_max):
         lon_min_val, lon_max_val, lat_min_val, lat_max_val = (
@@ -153,4 +158,4 @@ def get_coords(
             raise ValueError(msg)
     else:
         return None, None, None, None, None
-    return lon_min_val, lon_max_val, lat_min_val, lat_max_val, mask
+    return float(lon_min_val), float(lon_max_val), float(lat_min_val), float(lat_max_val), mask

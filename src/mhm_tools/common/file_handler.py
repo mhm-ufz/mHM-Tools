@@ -264,6 +264,14 @@ def get_xarray_ds_from_file(
 
     if chunking and available_mem_gib is not None:
         ds_out = chunk_dataset(ds_out, chunk_type, available_mem_gib)
+    else: 
+        # if no chunking remove chunking encoding because this might cause errors while writing
+        for name in list(ds_out.variables):
+            enc = ds_out.variables[name].encoding
+            enc.pop("chunksizes", None)
+            enc.pop("_ChunkSizes", None)
+            enc.pop("chunks", None)
+            enc["contiguous"] = True
     if ds_out is None:
         msg = f"The dataset read from {file_path} is empty."
         with ErrorLogger(logger):
@@ -296,8 +304,14 @@ def write_xarray_to_file(ds, file_path, var_name=None, fmt=None, create_folder=T
         else:
             if encoding is None:
                 ds, encoding = move_reserved_attrs_to_encoding(ds)
-            ds.to_netcdf(file_path, engine=engine, format='NETCDF4',
-                        encoding=encoding)
+            try:
+                ds.to_netcdf(file_path, engine=engine, format='NETCDF4',
+                            encoding=encoding)
+            except ValueError: 
+                logger.error(f'Error while writing to {file_path}')
+                logger.error(ds)
+                logger.info(f'Trying to write without encoding {encoding}')
+                ds.to_netcdf(file_path, engine=engine, format='NETCDF4')
     else:
         msg = f"Writing to file types other than asci and netcdf is not implemented. The suffix of the file was: {file_path.suffix}"
         with ErrorLogger(logger):

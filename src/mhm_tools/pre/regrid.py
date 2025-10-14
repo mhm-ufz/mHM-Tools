@@ -75,6 +75,7 @@ def _make_cdo_grid_file(lon, lat, path):
         f"yfirst  = {yfirst}\n"
         f"yinc    = {yinc}\n"
     )
+    logger.info(f'cdo grid: {txt}')
     with open(path, "w") as f:
         f.write(txt)
 
@@ -123,7 +124,8 @@ def regrid_file(input, mask, output, l2, method="nearest", var=None):
         latL2 = dsm[lat_name].values
         
     else: 
-        lon_name, lat_name = get_coord_key(dsm, lon=True), get_coord_key(dsm, lat=True)
+        lon_name = get_coord_key(dsm, lon=True)
+        lat_name = get_coord_key(dsm, lat=True)
         lon0 = dsm[lon_name].values
         lat0 = dsm[lat_name].values
         if lon0.ndim != 1 or lat0.ndim != 1:
@@ -141,7 +143,8 @@ def regrid_file(input, mask, output, l2, method="nearest", var=None):
         # Build aligned L2 coords covering the same extent as mask grid
         lonL2 = _build_aligned_coords(lon0.min(), lon0.max(), l2)
         latL2 = _build_aligned_coords(lat0.min(), lat0.max(), l2)
-
+    logger.info(f"{lon_name} {lonL2}")
+    logger.info(f"{lat_name} {latL2}")
     # Load input
     dsi = get_xarray_ds_from_file(input)
 
@@ -163,12 +166,13 @@ def regrid_file(input, mask, output, l2, method="nearest", var=None):
         renamed = False
         if (in_lon, in_lat) != ("lon", "lat"):
             dsi_renamed = dsi.rename({in_lon: "lon", in_lat: "lat"})
-            tmp_in = tempfile.mktemp(suffix=".nc")
+            tmp_in = tempfile.mktsemp(suffix=".nc")
             write_xarray_to_file(ds=dsi_renamed, file_path=tmp_in)
             renamed = True
 
-        tmp_out = tempfile.mktemp(suffix=".nc")
-        regrid_cdo(tmp_in, tmp_out, lonL2, latL2, "bilinear")
+        tmp_out = tempfile.mkstemp(suffix=".nc")
+        logger.info(f'Regridding with cdo {method} interpolation')
+        regrid_cdo(tmp_in, tmp_out, lonL2, latL2, method)
         out = get_xarray_ds_from_file(tmp_out)
         # Rename back if needed
         if renamed:
@@ -184,8 +188,10 @@ def regrid_file(input, mask, output, l2, method="nearest", var=None):
             in_lat = get_coord_key(dsi, lat=True)
         except Exception:
             in_lon, in_lat = lon_name, lat_name
+        logger.info(f'regrid with xarray {method} interpolation')
         out = regrid_xarray(dsi, in_lon, in_lat, lonL2, latL2, method, var=var)
         encoding = {v: {"zlib": True, "complevel": 4} for v in out.data_vars}
+        logger.info(out)
         write_xarray_to_file(out, output, encoding)
         print(f"Wrote {output}")
 
