@@ -2,7 +2,6 @@
 
 import logging
 from mhm_tools.pre.pet_calc import calculate_pet
-from mhm_tools.pre.prepare_mhm_forcings import prepare_forcings
 
 logger = logging.getLogger(__name__)
 

@@ -16,11 +16,12 @@ from pathlib import Path
 from typing import Optional
 
 import pandas as pd
+from mhm_tools.common.time_utils import resample_to_daily_or_hourly_adaptive
 import xarray as xr
 
 from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_to_file
 from mhm_tools.common.logger import ErrorLogger
-from mhm_tools.common.xarray_utils import crop_ds, get_single_data_var
+from mhm_tools.common.xarray_utils import crop_ds, get_single_data_var, resample_to_daily_or_hourly
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +121,7 @@ def prepare_forcings(
     lat_min: Optional[float] = None,
     lat_max: Optional[float] = None,
     use_mfdataset: bool = False,
+    target_frequency: str = None
 ) -> None:
     """Loop through all files matching in_file in in_dir, convert units.
 
@@ -144,6 +146,10 @@ def prepare_forcings(
         # Sort lat/lon if needed
         ds = ensure_lat_lon_order(ds)
 
+        # needs to be before unit conversion because that changes rates to quantities
+        if target_frequency is not None:
+            ds = resample_to_daily_or_hourly_adaptive(da, target_frequency)
+        
         # Convert units and get DataArray
         da, encoding = convert_units(ds, var)
 

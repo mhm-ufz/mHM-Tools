@@ -69,6 +69,12 @@ def add_args(parser):
         default=False,
         help="Use xarray.open_mfdataset for multi-file datasets",
     )
+    parser.add_argument(
+        "--target_frequency",
+        type=bool,
+        default=None,
+        help="Resample the dataset to this target frequency (hourly, daily).",
+    )
 
 
 def run(args):
@@ -91,4 +97,5 @@ def run(args):
         lat_min=args.lat_min,
         lat_max=args.lat_max,
         use_mfdataset=args.use_mfdataset,
+        target_frequency=args.target_frequency
     )
