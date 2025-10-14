@@ -1,7 +1,11 @@
+import logging
+from mhm_tools.common.xarray_utils import timedelta_to_alias
 import numpy as np
 import pandas as pd
 import xarray as xr
 from typing import Literal, Union
+
+logger = logging.getLogger(__name__)
 
 # --- your helpers, used AS-IS somewhere in your codebase ---
 # timedelta_to_alias(ds: xr.DataArray) -> Tuple[int, str]
@@ -53,9 +57,11 @@ def _is_intensive(var: xr.DataArray) -> bool:
     looks_total = any(t in u for t in ["mm", "kg m-2", "kg/m2", "j m-2", "j/m2", "m"])
     has_per_time = any(t in u for t in ["/s", " s-1", "/h", " h-1", "/d", " d-1"])
     if looks_total and not has_per_time:
+        logger.info(f'Unit {u} results in extensive resampling')
         return False
 
     # default: intensive
+    logger.info(f'Unit {u} results in intensive resampling')
     return True
 
 def _target_alias(which: Literal["daily", "hourly"]) -> str:
@@ -135,22 +141,24 @@ def resample_to_daily_or_hourly_adaptive(
     -------
     Same type as input, resampled to calendar-aware 'D' or '1H'.
     """
+    
     _ensure_time(obj)
 
     alias_tgt = _target_alias(target)
     tgt_hours = 24 if target == "daily" else 1
     in_hours, alias_in = _alias_and_hours(obj)
-
+    
     # If already at target cadence (1H or D), return
     if (target == "hourly" and in_hours == 1) or (target == "daily" and alias_in == "D"):
         return obj
 
+    logger.info(f'Adaptive regridding from {alias_in} to {target}')
     going_coarser = in_hours < tgt_hours   # e.g., 1H -> D
     going_finer   = in_hours > tgt_hours   # e.g., D/ME/W/3H -> 1H or D
 
     def _resample_da(da: xr.DataArray) -> xr.DataArray:
         intensive = _is_intensive(da)
-
+        
         if going_coarser:
             if intensive:
                 # average to the coarser calendar bins
@@ -189,18 +197,20 @@ def resample_to_daily_or_hourly_adaptive(
                     return _distribute_extensive_to_finer(da, alias_in=alias_in, alias_out="1H")
 
     if isinstance(obj, xr.DataArray):
-        return _resample_da(obj)
-
-    # Dataset: apply variable-wise, preserving coords/attrs
-    out_vars = {}
-    for name, da in obj.data_vars.items():
-        out_vars[name] = _resample_da(da)
-    out = xr.Dataset(out_vars)
-    # carry coordinates (besides resampled time) from original dataset
-    for cname, coord in obj.coords.items():
-        if cname == "time":
-            out = out.assign_coords(time=out[list(out_vars)[0]].time)
-        elif cname not in out.coords:
-            out = out.assign_coords({cname: coord})
-    out.attrs = obj.attrs
+        out = _resample_da(obj)
+    else: 
+        # Dataset: apply variable-wise, preserving coords/attrs
+        out_vars = {}
+        for name, da in obj.data_vars.items():
+            out_vars[name] = _resample_da(da)
+        out = xr.Dataset(out_vars)
+        # carry coordinates (besides resampled time) from original dataset
+        for cname, coord in obj.coords.items():
+            if cname == "time":
+                out = out.assign_coords(time=out[list(out_vars)[0]].time)
+            elif cname not in out.coords:
+                out = out.assign_coords({cname: coord})
+        out.attrs = obj.attrs
+    in_hours, alias_in = _alias_and_hours(obj)
+    logger.info(f'New resolution {alias_in} meaning {in_hours} hours per timestep')
     return out

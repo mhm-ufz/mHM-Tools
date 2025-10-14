@@ -148,7 +148,7 @@ def prepare_forcings(
 
         # needs to be before unit conversion because that changes rates to quantities
         if target_frequency is not None:
-            ds = resample_to_daily_or_hourly_adaptive(da, target_frequency)
+            ds = resample_to_daily_or_hourly_adaptive(ds, target_frequency)
         
         # Convert units and get DataArray
         da, encoding = convert_units(ds, var)

@@ -71,7 +71,7 @@ def add_args(parser):
     )
     parser.add_argument(
         "--target_frequency",
-        type=bool,
+        type=str,
         default=None,
         help="Resample the dataset to this target frequency (hourly, daily).",
     )
