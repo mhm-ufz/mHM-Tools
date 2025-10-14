@@ -13,6 +13,7 @@ import logging
 
 from mhm_tools.common.file_handler import get_xarray_ds_from_file
 from mhm_tools.common.logger import ErrorLogger
+from mhm_tools.common.xarray_utils import get_coord_key
 
 logger = logging.getLogger(__name__)
 
@@ -67,16 +68,17 @@ def get_coords_from_mask(mask, mask_key=None):
                 key for key in ["mask", "land_mask", "mask_l2"] if key in mask_ds.data_vars
             )
         mask_da = mask_ds[mask_key]
-
-        lon = mask_da.lon
-        lat = mask_da.lat
+        lon_key = get_coord_key(mask_da, lon=True)
+        lat_key = get_coord_key(mask_da, lat=True)
+        lon = mask_da[lon_key]
+        lat = mask_da[lat_key]
         lon_min_target_grid = lon.min()
         lon_max_target_grid = lon.max()
         lat_min_target_grid = lat.min()
         lat_max_target_grid = lat.max()
 
         # change values from center cell to corner values
-        resolution = mask_da.lon.values[1] - mask_da.lon.values[0]
+        resolution = lon.values[1] - lon.values[0]
         lon_min_target_grid -= resolution / 2
         lon_max_target_grid += resolution / 2
         lat_min_target_grid -= resolution / 2
