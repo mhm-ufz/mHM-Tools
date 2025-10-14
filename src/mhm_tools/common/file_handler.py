@@ -293,7 +293,11 @@ def write_xarray_to_file(ds, file_path, var_name=None, fmt=None, create_folder=T
                         # encoding=encoding)
                 delayed = ds.to_netcdf(file_path, engine="netcdf4", encoding=encoding, compute=False)
                 delayed.compute(scheduler="threads", num_workers=1)
-        ds.to_netcdf(file_path, engine=engine, format='NETCDF4',
+        else:
+            if encoding is None:
+                ds, encoding = move_reserved_attrs_to_encoding(ds)
+                print(encoding)
+            ds.to_netcdf(file_path, engine=engine, format='NETCDF4',
                         encoding=encoding)
     else:
         msg = f"Writing to file types other than asci and netcdf is not implemented. The suffix of the file was: {file_path.suffix}"
@@ -414,3 +418,82 @@ def get_coord_values(ds, lat=False, lon=False):
     """Get latitude or longitude values from DataSet."""
     key = get_coord_key(ds, lat=lat, lon=lon)
     return ds[key].values
+
+
+RESERVED_FOR_ENCODING = {
+    "_FillValue", "scale_factor", "add_offset", "dtype",
+    "zlib", "complevel", "shuffle", "fletcher32", "contiguous",
+    "chunksizes", "endian", "least_significant_digit"
+}
+
+def move_reserved_attrs_to_encoding(
+    obj: xr.Dataset | xr.DataArray,
+    include_coords: bool = True,
+    extra_reserved: set[str] | None = None,
+):
+    """
+    Move reserved serialization keys from .attrs to .encoding and return:
+      - a (shallow-copied) xarray object with cleaned attrs
+      - an `encoding` dict suitable for xarray.to_netcdf(encoding=encoding)
+
+    Parameters
+    ----------
+    obj : xr.Dataset | xr.DataArray
+        The object to clean.
+    include_coords : bool, default True
+        If True, also process coordinate variables.
+    extra_reserved : set[str] | None
+        Additional keys to treat as reserved (moved to encoding).
+
+    Returns
+    -------
+    cleaned_obj : same type as `obj`
+    encoding : dict
+        Mapping var_name -> per-variable encoding dict.
+    """
+    reserved = set(RESERVED_FOR_ENCODING)
+    if extra_reserved:
+        reserved |= set(extra_reserved)
+
+    def _process_var(var):
+        # Move reserved keys from attrs -> encoding
+        for k in list(var.attrs.keys()):
+            if k in reserved:
+                var.encoding[k] = var.attrs.pop(k)
+
+    if isinstance(obj, xr.Dataset):
+        ds = obj.copy(deep=False)
+        names = list(ds.variables) if include_coords else list(ds.data_vars)
+        for name in names:
+            _process_var(ds.variables[name])
+
+        # Build the global encoding dict (only include non-empty encodings)
+        encoding = {
+            name: {k: v for k, v in ds.variables[name].encoding.items() if k in reserved}
+            for name in names
+            if ds.variables[name].encoding
+        }
+        return ds, encoding
+
+    else:  # DataArray
+        da = obj.copy(deep=False)
+        _process_var(da)
+        names = [da.name] if da.name is not None else ["__dataarray__"]
+
+        coord_encoding = {}
+        if include_coords:
+            for cname, cvar in da.coords.variables.items():
+                _process_var(cvar)
+                if cvar.encoding:
+                    coord_encoding[cname] = {
+                        k: v for k, v in cvar.encoding.items() if k in reserved
+                    }
+
+        data_encoding = {}
+        # Only include the data variable if it has a name (required by xarray)
+        if da.name is not None and da.encoding:
+            data_encoding[da.name] = {k: v for k, v in da.encoding.items() if k in reserved}
+
+        # Merge data + coords encodings
+        encoding = {**coord_encoding, **data_encoding}
+        return da, encoding

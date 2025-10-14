@@ -20,7 +20,7 @@ import xarray as xr
 
 from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_to_file
 from mhm_tools.common.logger import ErrorLogger
-from mhm_tools.common.xarray_utils import crop_ds
+from mhm_tools.common.xarray_utils import crop_ds, get_single_data_var
 
 logger = logging.getLogger(__name__)
 
@@ -50,8 +50,6 @@ def convert_units(ds: xr.Dataset, var: str) -> xr.DataArray:
     """
     units = ds[var].attrs.get("units")
     if not units:
-        msg = f"Variable '{var}' missing 'units' attribute."
-        raise ValueError(msg)
         msg = f"Variable '{var}' missing 'units' attribute."
         raise ValueError(msg)
 
@@ -93,8 +91,9 @@ def convert_units(ds: xr.Dataset, var: str) -> xr.DataArray:
         raise ValueError(msg)
 
     mv = -9999.0
+    encoding = {"_FillValue": mv, "missing_value": mv}
     ds[new_var].attrs.update({"_FillValue": mv, "missing_value": mv})
-    return ds[new_var]
+    return ds[new_var], encoding
 
 
 def ensure_lat_lon_order(ds: xr.Dataset) -> xr.Dataset:
@@ -114,7 +113,7 @@ def prepare_forcings(
     in_file: str,
     out_dir: str,
     out_file: str,
-    var: str,
+    var: str = None,
     crop: bool = False,
     lon_min: Optional[float] = None,
     lon_max: Optional[float] = None,
@@ -140,12 +139,13 @@ def prepare_forcings(
             use_mfdataset=use_mfdataset,
             normalize_latlon_coords=True,
         )
-
+        if var is None: 
+            var = get_single_data_var(ds)
         # Sort lat/lon if needed
         ds = ensure_lat_lon_order(ds)
 
         # Convert units and get DataArray
-        da = convert_units(ds, var)
+        da, encoding = convert_units(ds, var)
 
         # Crop spatially
         if crop:
@@ -159,4 +159,4 @@ def prepare_forcings(
         name = path.name if out_file == "*" else out_file
 
         # Write output
-        write_xarray_to_file(ds=da, file_path=Path(out_dir) / name)
+        write_xarray_to_file(ds=da, file_path=Path(out_dir) / name)#, encoding=encoding)

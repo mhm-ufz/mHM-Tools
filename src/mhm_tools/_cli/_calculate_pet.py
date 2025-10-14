@@ -1,8 +1,10 @@
 """Calculating pet from tavg."""
 
+import logging
 from mhm_tools.pre.pet_calc import calculate_pet
 from mhm_tools.pre.prepare_mhm_forcings import prepare_forcings
 
+logger = logging.getLogger(__name__)
 
 def add_args(parser):
     """Add CLI arguments for calculate_pet subcommand.
@@ -38,4 +40,4 @@ def run(args):
     args : argparse.Namespace
         parsed command line arguments
     """
-    calculate_pet(tavg=args.tavg, freq=args.freq, output_file=args.output_file)
+    calculate_pet(tavg_file=args.tavg, stat_freq=args.freq, out_file=args.output_file)

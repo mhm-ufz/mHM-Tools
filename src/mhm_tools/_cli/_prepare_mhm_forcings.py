@@ -39,10 +39,10 @@ def add_args(parser):
     required.add_argument(
         "-o", "--out-dir", required=True, help="Output directory for processed files"
     )
-    required.add_argument(
+    parser.add_argument(
         "-v",
         "--var",
-        required=True,
+        required=False,
         help="Variable name to convert: 2t (temperature), tp (total precipitation), tprate (precipitation rate)",
     )
 

@@ -2,6 +2,7 @@
 
 import argparse
 
+from mhm_tools._cli import _calculate_pet
 from mhm_tools.common.logger import configure_mhm_tools_logger
 
 from .. import __version__
@@ -97,6 +98,7 @@ def _get_parser():
     add_command_from_module(subparsers, "create_catchment", _create_catchment)
     add_command_from_module(subparsers, "crop_mhm_setup", _crop_mhm_setup)
     add_command_from_module(subparsers, "prepare_mhm_forcings", _prepare_mhm_forcings)
+    add_command_from_module(subparsers, "calculate_pet", _calculate_pet)
     add_command_from_module(subparsers, "create_id_gauges", _create_idgauges)
     add_command_from_module(
         subparsers, "create_subdomain_masks", _create_subdomain_masks

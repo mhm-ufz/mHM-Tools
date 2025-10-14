@@ -229,4 +229,4 @@ def create_latlon(
         encoding.update({"zlib": True, "complevel": compression})
     set_netcdf_encoding(latlon, encoding)
     # save netcdf file
-    write_xarray_to_file(ds=latlon, file_path=out_file, encoding=encoding)
+    write_xarray_to_file(ds=latlon, file_path=out_file)#, encoding=encoding)
