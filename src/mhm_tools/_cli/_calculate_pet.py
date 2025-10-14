@@ -31,6 +31,13 @@ def add_args(parser):
     parser.add_argument(
         "-f", "--freq", required=False, default=None, help="Frequency of pet output, daily or hourly."
     )
+    parser.add_argument(
+        "--ncpus",
+        required=False,
+        default=1,
+        type=int,
+        help=("Number of cores used for parallelisation."),
+    )
 
 def run(args):
     """Run script to convert input forcings into the right mHM format.
@@ -40,4 +47,4 @@ def run(args):
     args : argparse.Namespace
         parsed command line arguments
     """
-    calculate_pet(tavg_file=args.tavg, stat_freq=args.freq, out_file=args.output_file)
+    calculate_pet(tavg_file=args.tavg, stat_freq=args.freq, out_file=args.output_file, max_workers=args.ncpus)

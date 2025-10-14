@@ -296,7 +296,6 @@ def write_xarray_to_file(ds, file_path, var_name=None, fmt=None, create_folder=T
         else:
             if encoding is None:
                 ds, encoding = move_reserved_attrs_to_encoding(ds)
-                print(encoding)
             ds.to_netcdf(file_path, engine=engine, format='NETCDF4',
                         encoding=encoding)
     else:

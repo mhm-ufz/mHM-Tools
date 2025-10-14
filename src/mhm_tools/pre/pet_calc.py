@@ -1,5 +1,5 @@
 
-from concurrent.futures import ProcessPoolExecutor
+from joblib import Parallel, delayed
 from datetime import datetime, timezone
 import logging
 from pathlib import Path
@@ -59,7 +59,7 @@ def calculate_pet(
     out_file: str,
     lon_number: int =None,
     stat_freq: str= None,
-    max_workers: int = None,
+    max_workers: int = 1,
 ) -> None:
     """
     Calculate PET in parallel across time dimension and save to NetCDF.
@@ -75,7 +75,7 @@ def calculate_pet(
     lon = ds.lon if 'lon' in ds.coords else ds[get_coord_key(ds, lat=True)]
 
     times = ds.time.values
-
+    logger.info(f'Creating pet from tavg ds with shape {tavg.shape}')
     if stat_freq is None: 
         hours, time_id = timedelta_to_alias(ds)
         if time_id == 'D':
@@ -86,7 +86,7 @@ def calculate_pet(
             msg = f"Frequency of input dataset is different from hourly or daily it is {time_id}."
             with ErrorLogger(logger):
                 raise ValueError(msg)
-
+    logger.info(f'Data frequency is {stat_freq}')
     # Prepare latitude broadcast
     if lon_number is None: 
         lon_number = len(lon)
@@ -104,9 +104,10 @@ def calculate_pet(
         tasks.append((tarr, lat3d, current_time, stat_freq))
 
     # Compute PET in parallel
-    with ProcessPoolExecutor(max_workers=max_workers) as executor:
-        results = list(executor.map(_compute_pet, tasks))
-
+    results = Parallel(n_jobs=max_workers, backend="loky")(
+        delayed(_compute_pet)(task) for task in tasks
+    )
+    logger.info(f'results are merged into one array {len(results)}')
     # Stack results into array
     pet_data = np.vstack(results)
     pet_data = pet_data.astype(np.float32)
@@ -119,9 +120,10 @@ def calculate_pet(
         attrs={"units": "mm", "missing_value": -9999.0, "_FillValue": -9999.0},
     )
     pet_ds = xr.Dataset({"pet": pet_da})
-
+    logger.info('writing output')
     # Output
     write_xarray_to_file(pet_ds, Path(out_file))
 
     ds.close()
+    logger.info('done')
 
