@@ -96,12 +96,12 @@ def regrid_mask(
     """Regrid a xarray mask dataset mask_ds to the resolution of a second dataset ds2."""
     mask_lon = mask_ds[lon_key_mask].data
     mask_lat = mask_ds[lat_key_mask].data
-    mask_res = mask_lat[0] - mask_lat[1]
-    target_res = target_lat[0] - target_lat[1]
+    mask_res = abs(mask_lon[1] - mask_lon[0])
+    target_res = abs(target_lon[1] - target_lon[0])
     if target_res > mask_res:
         if target_res % mask_res != 0:
             logger.warning(
-                f"Target resolution is not an integer muptiple of mask resolution. Factor: {target_res / mask_res}"
+                f"Target resolution {target_res} is not an integer muptiple of mask resolution {mask_res}. Factor: {target_res / mask_res}"
             )
         results = np.full((len(target_lat), len(target_lon)), 0.0)
         for i, lat in enumerate(target_lat):
@@ -361,7 +361,7 @@ def crop_file(
     # Handling of special cases:
     ds_cropped = None
     if not no_cropping:
-        # 3. Files that are in the same folder as a header file. Typical examples are meteo datasets such as temperature or precipitation
+        # 3. Files that are in the same folder as a header file. Typical examples are meteo datasets such as temperature or precipitation, here the header is used as they might not have lat, lon coords
         if list(input_file.parent.glob("header.txt")):
             logger.debug("Cropping and writing new header file...")
             ds_cropped, header_path = crop_file_with_header(

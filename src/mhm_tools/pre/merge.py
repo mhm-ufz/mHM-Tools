@@ -123,6 +123,7 @@ def merge_files(input_path, input_file_part, output, n_cpus):
             if out_file.exists():
                 out_file.unlink()
             out_file.symlink_to(file_list[0])
+            out_files.append(out_file)
         elif len(file_list) > 1: 
             with tempfile.TemporaryDirectory(dir=out_file.parent) as tmpdir:
                 out_files.append(merge_files_from_folder(tmpdir,file_list, out_file, n_cpus))
