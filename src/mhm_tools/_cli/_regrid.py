@@ -30,4 +30,4 @@ def run(args):
         if not file.is_file():
             msg += f"{str(input)} is not a file; "
     l2 = float(args.l2)
-    regrid(input=input, output=output, mask=mask, l2=l2)
+    regrid(input=input, output=output, mask=mask, l2=l2, method=args.method)
