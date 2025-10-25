@@ -12,28 +12,35 @@ from mhm_tools.common.logger import ErrorLogger
 logger = logging.getLogger(__name__)
 
 
-def normalize_lat_lon(ds: xr.Dataset, lat: str = None, lon: str = None) -> xr.Dataset:
+def normalize_lat_lon(ds: xr.Dataset, lat: str = None, lon: str = None, raise_exceptions=True) -> xr.Dataset:
     """
     Normalize latitude and longitude dimension and coordinate names to 'lat' and 'lon'.
 
     Handles both dimensions and coordinate variables.
     """
-    rename_dict = {}
-    if lat is None:
-        lat = get_coord_key(ds, lon=True)
-    if lon is None:
-        lon = get_coord_key(ds, lon=True)
-    
-    coords_and_dims = list(ds.coords) + list(ds.dims)
+    try:
+        rename_dict = {}
+        if lat is None:
+            lat = get_coord_key(ds, lon=True)
+        if lon is None:
+            lon = get_coord_key(ds, lon=True)
+        
+        coords_and_dims = list(ds.coords) + list(ds.dims)
 
-    # Rename coordinate variables if needed
-    if lat is not None and "lat" not in coords_and_dims and lat in coords_and_dims:
-        rename_dict[lat] = "lat"
-    if lon is not None and "lon" not in coords_and_dims and lon in coords_and_dims:
-        rename_dict[lon] = "lon"
+        # Rename coordinate variables if needed
+        if lat is not None and "lat" not in coords_and_dims and lat in coords_and_dims:
+            rename_dict[lat] = "lat"
+        if lon is not None and "lon" not in coords_and_dims and lon in coords_and_dims:
+            rename_dict[lon] = "lon"
 
-    return ds.rename(rename_dict)
-
+        return ds.rename(rename_dict)
+    except Exception as e: 
+        if raise_exceptions: 
+            with ErrorLogger(logger):
+                raise(e)
+        else: 
+            logger.warning(f'Exception in normalize lat lon: {e}')
+            return ds   
 
 def get_coord_key(
     ds, lat=False, lon=False, time=False, raise_exception=True, is_retry=False
@@ -99,6 +106,10 @@ def get_single_data_var(ds):
             if coord in data_vars:
                 len_data_vars -= 1
                 data_vars.remove(coord)
+        for data_var in data_vars:
+            if 'bounds' in ds[data_var].attrs or data_var.endswith('_bnds'):
+                len_data_vars -= 1
+                data_vars.remove(data_var)
         if len_data_vars > 1:
             logger.error(f"Only single data_var allowed but has {data_vars}")
             return None
@@ -106,7 +117,7 @@ def get_single_data_var(ds):
             logger.error("No datavar that is not coordinate.")
             return None
     logger.debug(f"data_vars: {data_vars}")
-    if len(data_vars) == 1:
+    if isinstance(data_vars, list) and len(data_vars) == 1:
         return data_vars[0]
     return None
 
