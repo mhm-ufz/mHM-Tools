@@ -215,6 +215,8 @@ def get_xarray_ds_from_file(
     normalize_latlon_coords=False,
     force_decending_y=False,
     force_ascending_y=False,
+    landcover=False,
+    landcover_year_start=None,
 ):
     """Read file and return xarray dataset."""
     file_path = Path(file_path)
@@ -225,10 +227,19 @@ def get_xarray_ds_from_file(
         with ErrorLogger(logger):
             raise ValueError(msg)
     if file_path.suffix == ".asc":
-        ds_out = read_ascii_to_xarray(
-            filepath=file_path,
-            var_name=var_name,
-        )
+        if landcover:
+            logger.info(f"Reading ascii landcover file.")
+            ds_out = read_ascii_to_xarray(
+                filepath=file_path,
+                var_name=var_name,
+                landcover=landcover,
+                landcover_year_start=landcover_year_start,
+            )
+        else:
+            ds_out = read_ascii_to_xarray(
+                filepath=file_path,
+                var_name=var_name,
+            )
         chunk_type = ChunkType.SPACE
     elif file_path.suffix == ".nc":
         ds_out = read_dataset(
@@ -369,7 +380,7 @@ def write_xarray_to_ascii(dataset, filepath, data_var=None, fmt=None):
 
 
 def read_ascii_to_xarray(
-    filepath, var_name=None
+    filepath, var_name=None, landcover=False, landcover_year_start=None,
 ):
     """Read an mHM readable asci file to an xarray dataset."""
     # Read the header from the file
@@ -404,10 +415,26 @@ def read_ascii_to_xarray(
 
     # Create DataArray with lat/lon dimensions and nodata value
     name = "data" if var_name is None else var_name
+    coords = {"lon": ("lon", lon, {"axis": "X"}), "lat": ("lat", lat, {"axis": "Y"})}
+
+    # If this is a landcover file add a 1-element time coordinate
+    if landcover and landcover_year_start is not None:
+        start_ts = np.datetime64(f"{landcover_year_start}-01-01", "ns")
+        time = np.array([start_ts], dtype="datetime64[ns]")
+        coords["time"] = ("time", time)
+
+    # If we added a time coordinate, expand the data to have a leading time dim
+    if "time" in coords:
+        data_arr = np.expand_dims(data_values, axis=0)  # shape (1, nrows, ncols)
+        dims = ["time", "lat", "lon"]
+    else:
+        data_arr = data_values
+        dims = ["lat", "lon"]
+
     da = xr.DataArray(
-        data=data_values,
-        dims=["lat", "lon"],
-        coords={"lon": ("lon", lon, {"axis": "X"}), "lat": ("lat", lat, {"axis": "Y"})},
+        data=data_arr,
+        dims=dims,
+        coords=coords,
         name=name,
         attrs={"nodata_value": nodata_value, "_FillValue": nodata_value},
     )

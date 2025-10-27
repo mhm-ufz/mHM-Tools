@@ -8,6 +8,7 @@ from mhm_tools.common.logger import configure_mhm_tools_logger
 from .. import __version__
 from . import (
     _2d_map,
+    _landcover_ascii_to_nc,
     _bankfull,
     _create_catchment,
     _create_idgauges,
@@ -93,6 +94,7 @@ def _get_parser():
     add_command_from_module(subparsers, "grdc_validation", _grdc_validation)
     add_command_from_module(subparsers, "latlon", _latlon)
     add_command_from_module(subparsers, "converter_nc_ascii", _file_converter)
+    add_command_from_module(subparsers, "landcover_ascii_to_nc", _landcover_ascii_to_nc)
     add_command_from_module(subparsers, "merge_files", _merge)
     add_command_from_module(subparsers, "regrid_file", _regrid)
     add_command_from_module(subparsers, "create_catchment", _create_catchment)
