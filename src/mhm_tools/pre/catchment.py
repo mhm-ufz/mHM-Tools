@@ -32,6 +32,35 @@ OUTPUT_FTYPE = "ldd"
 CUTOFF_THRESHOLD = 175
 # FUNCTIONS
 
+def create_cell_area(ds, lat_name="lat", lon_name="lon"):
+    """Create a cell area data array in km2."""
+    logger.info("Create cell area data array.")
+    lat = ds[lat_name].data
+    lon = ds[lon_name].data
+    # calculate cellsize in kilometers
+    R = 6371  # radius of the earth in kilometers
+    lat_rad = np.deg2rad(lat)
+    lon_rad = np.deg2rad(lon)
+    dlat = np.abs(np.gradient(lat_rad))
+    dlon = np.abs(np.gradient(lon_rad))
+    # create 2D arrays for lat and lon
+    dlat_2d, dlon_2d = np.meshgrid(dlat, dlon, indexing="ij")
+    lat_2d = np.tile(lat_rad[:, np.newaxis], (1, len(lon)))
+    # calculate area
+    cell_areas = R**2 * dlat_2d * dlon_2d * np.cos(lat_2d)
+    cell_area_da = xr.DataArray(
+        cell_areas,
+        coords={lat_name: lat, lon_name: lon},
+        dims=[lat_name, lon_name],
+        name="cell_area",
+        attrs={
+            "title": "cell area",
+            "units": "km2",
+            "creator": "Department of Computational Hydrosystems",
+            "institution": "Helmholtz Centre for Environmental Research - UFZ",
+        },
+    )
+    return cell_area_da
 
 # CLASSES
 class Catchment:
@@ -179,24 +208,159 @@ class Catchment:
             )
         self.get_fdir()
 
-    def delineate_basin(self, gauge_coords, stream_order=4):
+    def calc_upstream_area(self):
+        """Use pyflwdir to calculate the upstream area from flow direction by providing cell areas."""
+        if self._fdir is None:
+            logger.error("Flow direction is not initialized.")
+            return None
+        return self._fdir.accuflux(create_cell_area(self.ds).data, nodata=-9999)
+
+    def get_best_coordinate(self, upstream_area, gauge_coords, ref_catchment_area, max_distance_cells=5, max_error=0.25):
+
+        # Determine whether gauge_coords are lat/lon floats or array indices
+        lat_vals = self.ds.lat.data
+        lon_vals = self.ds.lon.data
+
+        def coord_to_index(lat, lon):
+            """Map lat/lon to nearest row/col index in the arrays.
+
+            Returns (i, j) where i indexes latitude (row) and j indexes longitude (col).
+            """
+            # nearest index in lat (note: lat may be descending)
+            i = int(np.abs(lat_vals - lat).argmin())
+            j = int(np.abs(lon_vals - lon).argmin())
+            return i, j
+
+        # Interpret provided gauge_coords
+        if isinstance(gauge_coords[0], (float, np.floating)) or isinstance(gauge_coords[1], (float, np.floating)):
+            # assume (lat, lon)
+            gi, gj = coord_to_index(float(gauge_coords[0]), float(gauge_coords[1]))
+        else:
+            # assume integer indices already
+            gi, gj = int(gauge_coords[0]), int(gauge_coords[1])
+
+        logger.debug(f"Gauge index (row, col): {(gi, gj)}")
+
+        # We will search for candidate outlet cells within a bbox around the gauge
+        # (in degrees). These parameters are conservative defaults and can be
+        # tuned later or exposed as args.
+        
+        # Convert bbox in degrees to index ranges
+        lat_center = float(lat_vals[gi])
+        lon_center = float(lon_vals[gj])
+        lat_min = lat_center - max_distance_cells * self.l0_resolution
+        lat_max = lat_center + max_distance_cells * self.l0_resolution
+        lon_min = lon_center - max_distance_cells * self.l0_resolution
+        lon_max = lon_center + max_distance_cells * self.l0_resolution
+
+        # find index window (clamp to domain)
+        i_min = max(0, int(np.abs(lat_vals - lat_min).argmin()))
+        i_max = min(len(lat_vals) - 1, int(np.abs(lat_vals - lat_max).argmin()))
+        j_min = max(0, int(np.abs(lon_vals - lon_min).argmin()))
+        j_max = min(len(lon_vals) - 1, int(np.abs(lon_vals - lon_max).argmin()))
+
+        # Ensure min <= max
+        if i_min > i_max:
+            i_min, i_max = i_max, i_min
+        if j_min > j_max:
+            j_min, j_max = j_max, j_min
+
+        # Extract subgrid of upstream_area
+        sub = upstream_area[i_min : i_max + 1, j_min : j_max + 1]
+
+        # If subgrid is empty fallback to whole domain
+        if sub.size == 0:
+            logger.warning("Search bbox empty, falling back to full-domain search")
+            sub = upstream_area
+            i_min, j_min = 0, 0
+
+        # Search for candidate cells whose upstream area matches ref_catchment_area
+        size = float(ref_catchment_area)
+        error = 0.0
+        step = 0.01
+        candidates = None
+        while error <= max_error and (candidates is None or len(candidates[0]) == 0):
+            low = size * (1.0 - error)
+            high = size * (1.0 + error)
+            candidates = np.where((sub >= low) & (sub <= high))
+            if len(candidates[0]) == 0:
+                error += step
+
+        best_coord = None
+        if len(candidates[0]) > 0:
+            # convert sub indices to global indices
+            cand_i = candidates[0] + i_min
+            cand_j = candidates[1] + j_min
+            # choose the candidate nearest to the gauge index
+            d2 = (cand_i - gi) ** 2 + (cand_j - gj) ** 2
+            k = int(np.argmin(d2))
+            best_coord = (int(cand_i[k]), int(cand_j[k]))
+            logger.info(f"Selected outlet candidate {best_coord} with upstream area {upstream_area[best_coord]} km2 (tolerance {error:.3f})")
+        else:
+            logger.warning("No candidate found within tolerance; falling back to nearest stream cell by upstream area magnitude.")
+            # fallback: pick the cell in bbox with upstream area closest to target
+            flat = np.abs(sub - size)
+            idx = int(np.argmin(flat))
+            ri, rj = np.unravel_index(idx, sub.shape)
+            best_coord = (ri + i_min, rj + j_min)
+
+        return best_coord
+
+    def delineate_basin(self, gauge_coords, stream_order=4, ref_catchment_area=None, max_distance_cells=5, max_error=0.25):
         """Delineate the basin for a given lat and lon."""
         logger.info(f"Deliniating basin for gauge coordinates {gauge_coords}")
         gauge_coords = (gauge_coords[0], gauge_coords[1])
-        self.basin = self._fdir.basins(
-            xy=gauge_coords, streams=self._fdir.stream_order() >= stream_order
-        )
+        # Target area in km2 we want to match (can be adjusted/replaced by caller later)
+
+        # Compute upstream area (in km2) using accuflux and cell areas
+        if ref_catchment_area is not None:
+            upstream_area = None
+            try:
+                upstream_area = self.calc_upstream_area()
+            except Exception:
+                logger.exception("Failed to compute upstream area (accuflux).")
+
+            if upstream_area is None:
+                logger.error("Could not calculate upstream area. Flow direction may be uninitialized.")
+
+            outlet_coord = self.get_best_coordinate(upstream_area, gauge_coords, ref_catchment_area, max_distance_cells, max_error)
+            logger.info(f"Moved outlet longitude {gauge_coords[1]} to {outlet_coord[1]} and latitude {gauge_coords[0]} to {outlet_coord[0]}")
+            river_mask = (upstream_area > ref_catchment_area * (1 - max_error)) & (upstream_area < ref_catchment_area * (1 + max_error))
+        else:
+            logger.warning("No catchment area provided; falling back to original gauge coordinates.")
+            outlet_coord = gauge_coords
+            river_mask = None
+        # Now delineate basin using pyflwdir basins(xy=...)
+        try:
+            self.basin = self._fdir.basins(xy=outlet_coord, stream=self._fdir.stream_order() >= stream_order, mask=river_mask)
+        except Exception as e:
+            logger.exception(f"pyflwdir.basins(xy=...) failed for {outlet_coord}: {e}")
+            # try computing all basins and pick id at outlet
+            try:
+                all_basins = self._fdir.basins()
+                basin_id = int(all_basins[outlet_coord[0], outlet_coord[1]])
+                self.basin = np.where(all_basins == basin_id, basin_id, 0)
+            except Exception as e2:
+                logger.exception(f"Fallback basins() also failed: {e2}")
+                return
+
+        # finalize mask and basin fill values
         self.catchment_mask = self.basin > 0
         if np.all(~self.catchment_mask):
             if stream_order > 1:
-                self.delineate_basin(
-                    (gauge_coords[0], gauge_coords[1]), stream_order=stream_order - 1
-                )
+                # try again with a lower stream_order (legacy behavior)
+                self.delineate_basin(gauge_coords, stream_order=stream_order - 1, ref_catchment_area=ref_catchment_area, max_distance_deg=max_distance_deg, max_error=max_error)
+                return
             logger.error("No catchment found for the given coordinates")
-        if not np.any(np.isnan(self.basin)):
-            self.basin[np.where(~self.catchment_mask)] = self.VARIABLES["basin"][
-                "_FillValue"
-            ]
+            return
+
+        # set fillvalue for non-basin cells
+        try:
+            fillv = self.VARIABLES["basin"]["_FillValue"]
+            self.basin = np.where(self.catchment_mask, self.basin, fillv)
+        except Exception:
+            # best-effort: leave basin as-is
+            logger.debug("Could not set basin fill values")
 
     def get_upscaling_factor(self, max_resolution=True):
         """Create upscaling factor."""
@@ -861,6 +1025,9 @@ def create_catchment(
     upscale=False,
     latlon=True,
     available_mem=None,
+    ref_catchment_area=None,
+    max_distance_cells=5,
+    max_error=0.1,
 ):
     """Create file containing catchment ids, flowdirection and upstream area from dem or flow direction."""
     logger.info(
@@ -988,7 +1155,7 @@ def create_catchment(
                 l2_resolution=l2_resolution,
                 upscale=upscale,
             )
-            c.delineate_basin(gauge_coords)
+            c.delineate_basin(gauge_coords, ref_catchment_area=ref_catchment_area, max_distance_cells=max_distance_cells, max_error=max_error)
             if l1_resolution is not None and upscale:
                 c.upscale(var)
             else:
