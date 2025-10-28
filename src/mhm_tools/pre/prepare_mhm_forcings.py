@@ -40,7 +40,7 @@ TEMPERATURE_UNITS = [
     "fahrenheit",
 ]
 PRECIPITATION_UNITS = ["m", "kg m-2", "mm"]
-PRECIPITATION_RATE_UNITS = ["kg m-2 s-1"]
+PRECIPITATION_RATE_UNITS = ["kg m-2 s-1", "mm s-1", "mm d-1"]
 
 
 def convert_units(ds: xr.Dataset, var: str) -> xr.DataArray:
@@ -53,7 +53,7 @@ def convert_units(ds: xr.Dataset, var: str) -> xr.DataArray:
     if not units:
         msg = f"Variable '{var}' missing 'units' attribute."
         raise ValueError(msg)
-
+    logger.info(f"units are: {units}")
     # Temperature
     if units in TEMPERATURE_UNITS:
         new_var = "tavg"
@@ -77,17 +77,27 @@ def convert_units(ds: xr.Dataset, var: str) -> xr.DataArray:
         new_var = "pre"
         ds = ds.rename({var: new_var})
         freq = pd.infer_freq(ds.indexes["time"])
-        if freq and freq.startswith("D"):
-            factor = 86400
-        elif freq and freq.startswith("H"):
-            factor = 3600
-        else:
-            factor = 1
+        if 'kg' in units and "s-1" in units:
+            if freq and freq.startswith("D"):
+                factor = 86400
+            elif freq and freq.startswith("H"):
+                factor = 3600
+            else:
+                factor = 1
+        elif units == "mm d-1":
+            if freq and freq.startswith("D"):
+                factor = 1
+            elif freq and freq.startswith("H"):
+                factor = 1 / 24
+        elif units == "mm s-1":
+            if freq and freq.startswith("D"):
+                factor = 90000
+            elif freq and freq.startswith("H"):
+                factor = 3600
+            
         ds[new_var] = ds[new_var] * factor
         ds[new_var].attrs["units"] = "mm"
     else:
-        msg = f"Unexpected units '{units}' for variable '{var}'."
-        raise ValueError(msg)
         msg = f"Unexpected units '{units}' for variable '{var}'."
         raise ValueError(msg)
 
@@ -165,4 +175,5 @@ def prepare_forcings(
         name = path.name if out_file == "*" else out_file
 
         # Write output
+        logger.info(da)
         write_xarray_to_file(ds=da, file_path=Path(out_dir) / name)#, encoding=encoding)
