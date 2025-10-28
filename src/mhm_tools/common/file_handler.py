@@ -315,6 +315,22 @@ def write_xarray_to_file(ds, file_path, var_name=None, fmt=None, create_folder=T
         else:
             if encoding is None:
                 ds, encoding = move_reserved_attrs_to_encoding(ds)
+            def safe_nc_encoding(da, target_mb=32, fill=-9999.0):
+                item = np.dtype(da.dtype).itemsize
+                ny = da.sizes.get('lat', 1); nx = da.sizes.get('lon', 1)
+                per_t_bytes = ny * nx * item
+                t = max(1, int((target_mb * 1024**2) // per_t_bytes))
+                return {
+                    da.name or 'var': {
+                        'chunksizes': (min(t, da.sizes.get('time', t)), ny, nx),
+                        'zlib': True, 'complevel': 4, 'dtype': 'f4',
+                        '_FillValue': np.float32(fill), 'contiguous': False,
+                    }
+                }
+
+            logger.info(ds)
+            if var_name is not None:
+                encoding = safe_nc_encoding(ds[var_name], target_mb=32)
             try:
                 ds.to_netcdf(file_path, engine=engine, format='NETCDF4',
                             encoding=encoding)
