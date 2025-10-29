@@ -232,14 +232,28 @@ class Catchment:
 
         if isinstance(lat, (int, np.integer)):
             i = int(lat)
+            logger.debug(f"Was given latitude index {i} directly. Corresponding lat_value {lat_vals[i]}")
         else:
-            i = int(np.abs(lat_vals - float(lat)).argmin())
+            if lat < min(lat_vals) or lat > max(lat_vals):
+                logger.error(f"Given latitude {lat} is outside dataset bounds ({min(lat_vals)}, {max(lat_vals)}). Clipping to bounds.")
+                i = None
+            else:
+                i = int(np.abs(lat_vals - float(lat)).argmin())
+                logger.debug(f"Mapped latitude {float(lat)} to index {i} with lat_value {lat_vals[i]}")
 
         if isinstance(lon, (int, np.integer)):
             j = int(lon)
+            logger.debug(f"Was given longitude index {j} directly. Corresponding lon_value {lon_vals[j]}")
         else:
-            j = int(np.abs(lon_vals - float(lon)).argmin())
-
+            if lon < min(lon_vals) or lon > max(lon_vals):
+                logger.error(f"Given longitude {lon} is outside dataset bounds ({min(lon_vals)}, {max(lon_vals)}). Clipping to bounds.")
+                j = None
+            else:
+                j = int(np.abs(lon_vals - float(lon)).argmin())
+                logger.debug(f"Mapped longitude {float(lon)} to index {j} with lon_value {lon_vals[j]}")
+        if i is None or j is None:
+            with ErrorLogger(logger):
+                raise ValueError("Could not map given coordinates to valid indices within dataset bounds.")
         i = int(np.clip(i, 0, len(lat_vals) - 1))
         j = int(np.clip(j, 0, len(lon_vals) - 1))
 
@@ -321,7 +335,7 @@ class Catchment:
             ri, rj = np.unravel_index(idx, sub.shape)
             best_coord = (ri + i_min, rj + j_min)
 
-        return best_coord
+        return best_coord, error
 
     def delineate_basin(
         self,
@@ -349,7 +363,7 @@ class Catchment:
                     "Could not calculate upstream area. Flow direction may be uninitialized."
                 )
 
-            outlet_idx = self.get_best_coordinate(
+            outlet_idx, error = self.get_best_coordinate(
                 upstream_area,
                 gauge_coords,
                 ref_catchment_area,
@@ -359,10 +373,11 @@ class Catchment:
             new_lat = float(self.ds.lat.data[outlet_idx[0]])
             new_lon = float(self.ds.lon.data[outlet_idx[1]])
             logger.info(
-                f"Moved outlet longitude {gauge_coords[1]} to {new_lon} and latitude {gauge_coords[0]} to {new_lat}"
+                f"Moved outlet latitude {float(gauge_coords[0])} to {new_lat} and longitude {float(gauge_coords[1])} to {new_lon} with area error {error:.3f}%."
             )
-            river_mask = (upstream_area > ref_catchment_area * (1 - max_error)) & (
-                upstream_area < ref_catchment_area * (1 + max_error)
+
+            river_mask = (upstream_area > ref_catchment_area * (1 - error - 1e-6)) & (
+                upstream_area < ref_catchment_area * (1 + error + 1e-6)
             )
         else:
             logger.warning(
