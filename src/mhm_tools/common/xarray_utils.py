@@ -2,17 +2,19 @@
 
 import logging
 
-from mhm_tools.common.constants import LAT_KEYS, LON_KEYS, TIME_KEYS
 import numpy as np
-from scipy.stats import spearmanr
 import xarray as xr
+from scipy.stats import spearmanr
 
+from mhm_tools.common.constants import LAT_KEYS, LON_KEYS, TIME_KEYS
 from mhm_tools.common.logger import ErrorLogger
 
 logger = logging.getLogger(__name__)
 
 
-def normalize_lat_lon(ds: xr.Dataset, lat: str = None, lon: str = None, raise_exceptions=True) -> xr.Dataset:
+def normalize_lat_lon(
+    ds: xr.Dataset, lat: str = None, lon: str = None, raise_exceptions=True
+) -> xr.Dataset:
     """
     Normalize latitude and longitude dimension and coordinate names to 'lat' and 'lon'.
 
@@ -24,7 +26,7 @@ def normalize_lat_lon(ds: xr.Dataset, lat: str = None, lon: str = None, raise_ex
             lat = get_coord_key(ds, lon=True)
         if lon is None:
             lon = get_coord_key(ds, lon=True)
-        
+
         coords_and_dims = list(ds.coords) + list(ds.dims)
 
         # Rename coordinate variables if needed
@@ -34,13 +36,14 @@ def normalize_lat_lon(ds: xr.Dataset, lat: str = None, lon: str = None, raise_ex
             rename_dict[lon] = "lon"
 
         return ds.rename(rename_dict)
-    except Exception as e: 
-        if raise_exceptions: 
+    except Exception as e:
+        if raise_exceptions:
             with ErrorLogger(logger):
-                raise(e)
-        else: 
-            logger.warning(f'Exception in normalize lat lon: {e}')
-            return ds   
+                raise (e)
+        else:
+            logger.warning(f"Exception in normalize lat lon: {e}")
+            return ds
+
 
 def get_coord_key(
     ds, lat=False, lon=False, time=False, raise_exception=True, is_retry=False
@@ -107,7 +110,7 @@ def get_single_data_var(ds):
                 len_data_vars -= 1
                 data_vars.remove(coord)
         for data_var in data_vars:
-            if 'bounds' in ds[data_var].attrs or data_var.endswith('_bnds'):
+            if "bounds" in ds[data_var].attrs or data_var.endswith("_bnds"):
                 len_data_vars -= 1
                 data_vars.remove(data_var)
         if len_data_vars > 1:

@@ -40,9 +40,9 @@ def get_available_mem_in_unit(available_mem):
     mem_str = available_mem.lower().strip()
     logger.info(f"mem_string {mem_str}")
     if mem_str.endswith("kb"):
-        return int(mem_str[:-2])  // 1000_000
+        return int(mem_str[:-2]) // 1000_000
     if mem_str.endswith("mb"):
-        return int(mem_str[:-2])  // 1000
+        return int(mem_str[:-2]) // 1000
     if mem_str.endswith("gb"):
         return int(mem_str[:-2])
     return int(mem_str) * 1_000_000_000
@@ -62,10 +62,12 @@ def get_coords_from_mask(mask, mask_key=None):
         (lon_min, lon_max, lat_min, lat_max, mask_dataarray)
     """
     with get_xarray_ds_from_file(mask, normalize_latlon_coords=True) as mask_ds:
-        
-        if mask_key is None: 
+
+        if mask_key is None:
             mask_key = next(
-                key for key in ["mask", "land_mask", "mask_l2"] if key in mask_ds.data_vars
+                key
+                for key in ["mask", "land_mask", "mask_l2"]
+                if key in mask_ds.data_vars
             )
         mask_da = mask_ds[mask_key]
         lon_key = get_coord_key(mask_da, lon=True)
@@ -98,7 +100,7 @@ def get_coords_from_mask(mask, mask_key=None):
                 lon_max_target_grid,
                 lon_min_target_grid,
             )
-        
+
         return (
             lon_min_target_grid,
             lon_max_target_grid,
@@ -116,7 +118,7 @@ def get_coords(
     lat_min=None,
     lat_max=None,
     raise_exception=True,
-    mask_var=None
+    mask_var=None,
 ):
     """Get coordinate bounds from a lonlatbox string, mask file, or explicit values.
 
@@ -160,4 +162,10 @@ def get_coords(
             raise ValueError(msg)
     else:
         return None, None, None, None, None
-    return float(lon_min_val), float(lon_max_val), float(lat_min_val), float(lat_max_val), mask
+    return (
+        float(lon_min_val),
+        float(lon_max_val),
+        float(lat_min_val),
+        float(lat_max_val),
+        mask,
+    )

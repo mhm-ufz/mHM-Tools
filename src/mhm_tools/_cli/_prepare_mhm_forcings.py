@@ -21,7 +21,7 @@ def add_args(parser):
         "units as well as missing and fill values, and spatial cropping."
     )
     parser.epilog = "See mhm-tools documentation for detailed examples and usage."
-    
+
     # Required arguments
     required = parser.add_argument_group("required arguments")
     required.add_argument(
@@ -59,10 +59,34 @@ def add_args(parser):
     parser.add_argument(
         "--crop", action="store_true", help="Enable spatial cropping of the dataset"
     )
-    parser.add_argument("--lon-min", type=float, help="Minimum longitude for cropping", required=False, default=None)
-    parser.add_argument("--lon-max", type=float, help="Maximum longitude for cropping", required=False, default=None)
-    parser.add_argument("--lat-min", type=float, help="Minimum latitude for cropping", required=False, default=None)
-    parser.add_argument("--lat-max", type=float, help="Maximum latitude for cropping", required=False, default=None)
+    parser.add_argument(
+        "--lon-min",
+        type=float,
+        help="Minimum longitude for cropping",
+        required=False,
+        default=None,
+    )
+    parser.add_argument(
+        "--lon-max",
+        type=float,
+        help="Maximum longitude for cropping",
+        required=False,
+        default=None,
+    )
+    parser.add_argument(
+        "--lat-min",
+        type=float,
+        help="Minimum latitude for cropping",
+        required=False,
+        default=None,
+    )
+    parser.add_argument(
+        "--lat-max",
+        type=float,
+        help="Maximum latitude for cropping",
+        required=False,
+        default=None,
+    )
     parser.add_argument(
         "--use-mfdataset",
         type=bool,
@@ -97,5 +121,5 @@ def run(args):
         lat_min=args.lat_min,
         lat_max=args.lat_max,
         use_mfdataset=args.use_mfdataset,
-        target_frequency=args.target_frequency
+        target_frequency=args.target_frequency,
     )

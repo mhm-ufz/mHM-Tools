@@ -1,9 +1,11 @@
 import logging
-from pathlib import Path
 import math
 import tempfile
-from joblib import Parallel, delayed
+from pathlib import Path
+
 from cdo import Cdo, CDOException
+from joblib import Parallel, delayed
+
 from mhm_tools.common.logger import ErrorLogger
 
 logger = logging.getLogger(__name__)
@@ -11,12 +13,15 @@ logger = logging.getLogger(__name__)
 # _cdo = Cdo()  # requires the `cdo` binary installed
 _cdo = Cdo(returnNoneOnError=False)
 
+
 def _merge_chunk(files, out_path, options):
     try:
-        res = _cdo.mergetime(input=" ".join(map(str, files)), output=str(out_path), options=options)
+        res = _cdo.mergetime(
+            input=" ".join(map(str, files)), output=str(out_path), options=options
+        )
     except CDOException as e:
         # keep the debugging gold, but raise a picklable error#
-        logger.error(f'merge to {out_path} failed')
+        logger.error(f"merge to {out_path} failed")
         msg = (
             f"cdo mergetime failed (returncode={getattr(e, 'returncode', 'NA')})\n"
             f"STDOUT:\n{getattr(e, 'stdout', '')}\n"
@@ -24,59 +29,80 @@ def _merge_chunk(files, out_path, options):
         )
         with ErrorLogger(logger):
             raise RuntimeError(msg)
-    if res is None: 
-        logger.error(f'merge to {out_path} failed')
+    if res is None:
+        logger.error(f"merge to {out_path} failed")
         return ""
-    else: 
-        logger.debug(res)
-        return str(out_path)
+    logger.debug(res)
+    return str(out_path)
 
-def merge_files_from_folder(tmpdir, files, out_file, n_cpus, max_files=30, recursive_depth=0):
+
+def merge_files_from_folder(
+    tmpdir, files, out_file, n_cpus, max_files=30, recursive_depth=0
+):
     # Chunk the inputs ~ evenly across workers
     chunk_size = math.ceil(min(len(files) / n_cpus, max_files))
     chunks = [files[i : i + chunk_size] for i in range(0, len(files), chunk_size)]
-    logger.info(f'Found {len(files)} files in the folder. Merging them in chunks of {chunk_size}')
-    
+    logger.info(
+        f"Found {len(files)} files in the folder. Merging them in chunks of {chunk_size}"
+    )
+
     Path(tmpdir).mkdir(parents=True, exist_ok=True)
-    part_paths = [Path(tmpdir) / f"part_{i:04d}_rec{recursive_depth}.nc" for i in range(len(chunks))]
+    part_paths = [
+        Path(tmpdir) / f"part_{i:04d}_rec{recursive_depth}.nc"
+        for i in range(len(chunks))
+    ]
 
     # Merge each chunk in parallel; keep CDO single-threaded per task (-P 1)
     n_jobs = min(n_cpus, len(chunks))
-    logger.info(f'Parallelizing it on {n_jobs} jobs.')
+    logger.info(f"Parallelizing it on {n_jobs} jobs.")
     part_parts_merged = Parallel(n_jobs=n_jobs, backend="threading")(
         delayed(_merge_chunk)(chunk, part_paths[i], options="-P 1 -O")
         for i, chunk in enumerate(chunks)
     )
     part_parts_merged = [p for p in part_parts_merged if p is not None and p != ""]
-    # if len(part_parts_merged) != n_jobs: 
+    # if len(part_parts_merged) != n_jobs:
     #     raise RuntimeError('mergtime failed probably OOM Error')
     # Final merge of parts (now allow CDO to use n_cpus internally)
     if len(part_parts_merged) > max_files:
-        logger.info(f'Merged files {len(part_parts_merged)}/{max_files} increasing recursive depth to {recursive_depth+1}')
-        out_files = merge_files_from_folder(tmpdir, part_parts_merged, out_file=out_file, n_cpus=n_cpus, max_files=max_files, recursive_depth=recursive_depth+1)
-        part_parts_merged = [p for p in out_files if p is not None and p != "" and Path(p).is_file()]
+        logger.info(
+            f"Merged files {len(part_parts_merged)}/{max_files} increasing recursive depth to {recursive_depth+1}"
+        )
+        out_files = merge_files_from_folder(
+            tmpdir,
+            part_parts_merged,
+            out_file=out_file,
+            n_cpus=n_cpus,
+            max_files=max_files,
+            recursive_depth=recursive_depth + 1,
+        )
+        part_parts_merged = [
+            p for p in out_files if p is not None and p != "" and Path(p).is_file()
+        ]
         logger.debug(f"{recursive_depth} {len(out_files)} {len(part_parts_merged)}")
         if len(out_files) != len(part_parts_merged):
-            logger.error(f'out_files {out_files}')
-    if recursive_depth > 0: 
-        logger.info(f'Reducing recusive depth to {recursive_depth-1} for {len(part_parts_merged)} files')
+            logger.error(f"out_files {out_files}")
+    if recursive_depth > 0:
+        logger.info(
+            f"Reducing recusive depth to {recursive_depth-1} for {len(part_parts_merged)} files"
+        )
         return part_parts_merged
     logger.info(part_parts_merged)
     if len(part_parts_merged) == 1:
-        logger.info('Only one file that can be moved.')
+        logger.info("Only one file that can be moved.")
         # same filesystem (tmp inside out_dir), so rename is atomic/fast
         part_parts_merged[0].rename(out_file)
     else:
-        logger.info(f'Merging {len(part_parts_merged)} files')
+        logger.info(f"Merging {len(part_parts_merged)} files")
         logger.info(" ".join(map(str, part_parts_merged)))
         logger.info(str(out_file))
         _cdo.mergetime(
             input=" ".join(map(str, part_parts_merged)),
             output=str(out_file),
             env={"SKIP_SAME_TIME": "1"},
-            options=f"-O",
+            options="-O",
         )
     return list(str(out_file))
+
 
 def merge_files(input_path, input_file_part, output, n_cpus):
     """
@@ -100,12 +126,12 @@ def merge_files(input_path, input_file_part, output, n_cpus):
         raise ValueError("Output must specifiy a filename")
     # subdir_files = {'.': }
     files = sorted(in_dir.glob(input_file_part))
-    subdir_files= {'.': sorted(in_dir.glob(input_file_part))} if files else {}
-    for f in in_dir.glob('*'):
+    subdir_files = {".": sorted(in_dir.glob(input_file_part))} if files else {}
+    for f in in_dir.glob("*"):
         if not f.is_dir():
             continue
         files = sorted(f.rglob(input_file_part))
-        if files: 
+        if files:
             subdir_files[f.name] = files
     # all_files = [file for rel_path, file_list in subdir_files.items() for file in file_list]
     sum_files = 0
@@ -117,17 +143,21 @@ def merge_files(input_path, input_file_part, output, n_cpus):
         out_dir = output.parent / folder
         out_dir.mkdir(parents=True, exist_ok=True)
         out_file = out_dir / output.name
-        logger.info(f'Found {len(file_list)} files in {in_dir / folder}')
+        logger.info(f"Found {len(file_list)} files in {in_dir / folder}")
         if len(file_list) == 1:
             # _cdo.copy(input=str(files[0]), output=str(out_file), options="-O")
             if out_file.exists():
                 out_file.unlink()
             out_file.symlink_to(file_list[0])
             out_files.append(out_file)
-        elif len(file_list) > 1: 
+        elif len(file_list) > 1:
             with tempfile.TemporaryDirectory(dir=out_file.parent) as tmpdir:
-                out_files.append(merge_files_from_folder(tmpdir,file_list, out_file, n_cpus))
+                out_files.append(
+                    merge_files_from_folder(tmpdir, file_list, out_file, n_cpus)
+                )
         sum_files += len(file_list)
     if sum_files == 0:
         raise FileNotFoundError(f"No files match {in_dir}/{input_file_part}")
-    logger.info(f'Merged a total of {sum_files} into these {len(out_files)} files: {out_files}')
+    logger.info(
+        f"Merged a total of {sum_files} into these {len(out_files)} files: {out_files}"
+    )

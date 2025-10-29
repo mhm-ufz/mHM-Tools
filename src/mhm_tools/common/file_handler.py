@@ -1,14 +1,13 @@
 """File handling utils."""
 
-import contextlib
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from enum import Enum
 from pathlib import Path
 
+import dask
 import numpy as np
 import xarray as xr
-import dask
-from concurrent.futures import ThreadPoolExecutor
 
 from mhm_tools.common.logger import ErrorLogger, log_arguments
 from mhm_tools.common.netcdf import read_dataset
@@ -54,7 +53,7 @@ def create_header(ds, output_path=None, no_data_value="-9999", write=True):
         elif output_path.is_file():
             header_out_path = output_path
         else:
-            msg = f"Header output path is neither file nor directory."
+            msg = "Header output path is neither file nor directory."
             with ErrorLogger(logger):
                 raise ValueError(msg)
         logger.info(
@@ -130,7 +129,7 @@ def chunk_dataset_space_only(ds: xr.Dataset, available_mem_gib: float) -> xr.Dat
     )
     logger.debug(f"   The chunks used are {chunks}")
     return chunks
-    
+
 
 def chunk_dataset_space_and_time(ds, available_mem_gib) -> xr.Dataset:
     """Chunk dataset adjusting chunk size to avaiable memory.
@@ -139,7 +138,9 @@ def chunk_dataset_space_and_time(ds, available_mem_gib) -> xr.Dataset:
       - try to keep time chunks small (1…4)vi
       - make y/x chunks as square as possible
     """
-    logger.info(f"Chunking dataset with a max amount of mem of {available_mem_gib:.1f}Gb")
+    logger.info(
+        f"Chunking dataset with a max amount of mem of {available_mem_gib:.1f}Gb"
+    )
     # ---------------- metadata only (cheap) --------------------------------
     var_name = next(iter(ds.data_vars))  # first data variable
     var = ds[var_name]  # an xarray.Variable wrapper
@@ -187,6 +188,7 @@ class ChunkType(Enum):
     SPACE = 1
     TIME = 2
 
+
 @log_arguments()
 def chunk_dataset(ds, chunk_type, available_mem_gib):
     """Chunk xarray.DataSet depending on chunk_type and available memory."""
@@ -201,7 +203,6 @@ def chunk_dataset(ds, chunk_type, available_mem_gib):
         logger.error(ds)
         with ErrorLogger(logger):
             raise e
-
 
 
 def get_xarray_ds_from_file(
@@ -228,7 +229,7 @@ def get_xarray_ds_from_file(
             raise ValueError(msg)
     if file_path.suffix == ".asc":
         if landcover:
-            logger.info(f"Reading ascii landcover file.")
+            logger.info("Reading ascii landcover file.")
             ds_out = read_ascii_to_xarray(
                 filepath=file_path,
                 var_name=var_name,
@@ -275,7 +276,7 @@ def get_xarray_ds_from_file(
 
     if chunking and available_mem_gib is not None:
         ds_out = chunk_dataset(ds_out, chunk_type, available_mem_gib)
-    else: 
+    else:
         # if no chunking remove chunking encoding because this might cause errors while writing
         for name in list(ds_out.variables):
             enc = ds_out.variables[name].encoding
@@ -291,40 +292,62 @@ def get_xarray_ds_from_file(
     return ds_out
 
 
-def write_xarray_to_file(ds, file_path, var_name=None, fmt=None, create_folder=True, encoding=None, compute_kwargs={}, engine="netcdf4", available_mem_gib=None):
+def write_xarray_to_file(
+    ds,
+    file_path,
+    var_name=None,
+    fmt=None,
+    create_folder=True,
+    encoding=None,
+    compute_kwargs={},
+    engine="netcdf4",
+    available_mem_gib=None,
+):
     """Write xarray Datasets to file with file type depending on the file suffix."""
     file_path = Path(file_path)
     if create_folder and not file_path.parent.is_dir():
         file_path.parent.mkdir(parents=True)
     logger.info(f"Writing file to {file_path}")
     if file_path.suffix == ".asc":
-         write_xarray_to_ascii(ds, file_path, var_name, fmt)
+        write_xarray_to_ascii(ds, file_path, var_name, fmt)
     elif file_path.suffix == ".nc":
-        if available_mem_gib is not None: 
+        if available_mem_gib is not None:
             # ds = chunk_dataset(ds, ChunkType.TIME, available_mem_gib//50)
-            encoding = {v: {'zlib': True, 'complevel': 4, 'shuffle': True} for v in ds.data_vars}
-            compute_kwargs={'scheduler': 'threads', 'num_workers': 1}
-            dask.config.set({"array.slicing.split_large_chunks": True})  # also works as context manager
+            encoding = {
+                v: {"zlib": True, "complevel": 4, "shuffle": True} for v in ds.data_vars
+            }
+            compute_kwargs = {"scheduler": "threads", "num_workers": 1}
+            dask.config.set(
+                {"array.slicing.split_large_chunks": True}
+            )  # also works as context manager
             # 3) Limit threads for the local threaded scheduler
             pool = ThreadPoolExecutor(max_workers=1)
-            with dask.config.set(scheduler='threads', pool=pool):
+            with dask.config.set(scheduler="threads", pool=pool):
                 # ds.to_netcdf(file#_path, engine=engine, format='NETCDF4',
-                        # encoding=encoding)
-                delayed = ds.to_netcdf(file_path, engine="netcdf4", encoding=encoding, compute=False)
+                # encoding=encoding)
+                delayed = ds.to_netcdf(
+                    file_path, engine="netcdf4", encoding=encoding, compute=False
+                )
                 delayed.compute(scheduler="threads", num_workers=1)
         else:
             if encoding is None:
                 ds, encoding = move_reserved_attrs_to_encoding(ds)
+
             def safe_nc_encoding(da, target_mb=32, fill=-9999.0):
                 item = np.dtype(da.dtype).itemsize
-                ny = da.sizes.get('lat', 1); nx = da.sizes.get('lon', 1)
+                ny = da.sizes.get("lat", 1)
+                nx = da.sizes.get("lon", 1)
                 per_t_bytes = ny * nx * item
                 t = max(1, int((target_mb * 1024**2) // per_t_bytes))
                 return {
-                    da.name or 'var': {
-                        'chunksizes': (min(t, da.sizes.get('time', t)), ny, nx),
-                        'zlib': True, 'complevel': 4, 'dtype': 'f4',
-                        '_FillValue': np.float32(fill), 'contiguous': False,
+                    da.name
+                    or "var": {
+                        "chunksizes": (min(t, da.sizes.get("time", t)), ny, nx),
+                        "zlib": True,
+                        "complevel": 4,
+                        "dtype": "f4",
+                        "_FillValue": np.float32(fill),
+                        "contiguous": False,
                     }
                 }
 
@@ -332,13 +355,14 @@ def write_xarray_to_file(ds, file_path, var_name=None, fmt=None, create_folder=T
             if var_name is not None:
                 encoding = safe_nc_encoding(ds[var_name], target_mb=32)
             try:
-                ds.to_netcdf(file_path, engine=engine, format='NETCDF4',
-                            encoding=encoding)
-            except ValueError: 
-                logger.error(f'Error while writing to {file_path}')
+                ds.to_netcdf(
+                    file_path, engine=engine, format="NETCDF4", encoding=encoding
+                )
+            except ValueError:
+                logger.error(f"Error while writing to {file_path}")
                 logger.error(ds)
-                logger.info(f'Trying to write without encoding {encoding}')
-                ds.to_netcdf(file_path, engine=engine, format='NETCDF4')
+                logger.info(f"Trying to write without encoding {encoding}")
+                ds.to_netcdf(file_path, engine=engine, format="NETCDF4")
     else:
         msg = f"Writing to file types other than asci and netcdf is not implemented. The suffix of the file was: {file_path.suffix}"
         with ErrorLogger(logger):
@@ -396,7 +420,10 @@ def write_xarray_to_ascii(dataset, filepath, data_var=None, fmt=None):
 
 
 def read_ascii_to_xarray(
-    filepath, var_name=None, landcover=False, landcover_year_start=None,
+    filepath,
+    var_name=None,
+    landcover=False,
+    landcover_year_start=None,
 ):
     """Read an mHM readable asci file to an xarray dataset."""
     # Read the header from the file
@@ -477,10 +504,20 @@ def get_coord_values(ds, lat=False, lon=False):
 
 
 RESERVED_FOR_ENCODING = {
-    "_FillValue", "scale_factor", "add_offset", "dtype",
-    "zlib", "complevel", "shuffle", "fletcher32", "contiguous",
-    "chunksizes", "endian", "least_significant_digit"
+    "_FillValue",
+    "scale_factor",
+    "add_offset",
+    "dtype",
+    "zlib",
+    "complevel",
+    "shuffle",
+    "fletcher32",
+    "contiguous",
+    "chunksizes",
+    "endian",
+    "least_significant_digit",
 }
+
 
 def move_reserved_attrs_to_encoding(
     obj: xr.Dataset | xr.DataArray,
@@ -525,31 +562,35 @@ def move_reserved_attrs_to_encoding(
 
         # Build the global encoding dict (only include non-empty encodings)
         encoding = {
-            name: {k: v for k, v in ds.variables[name].encoding.items() if k in reserved}
+            name: {
+                k: v for k, v in ds.variables[name].encoding.items() if k in reserved
+            }
             for name in names
             if ds.variables[name].encoding
         }
         return ds, encoding
 
-    else:  # DataArray
-        da = obj.copy(deep=False)
-        _process_var(da)
-        names = [da.name] if da.name is not None else ["__dataarray__"]
+    # DataArray
+    da = obj.copy(deep=False)
+    _process_var(da)
+    names = [da.name] if da.name is not None else ["__dataarray__"]
 
-        coord_encoding = {}
-        if include_coords:
-            for cname, cvar in da.coords.variables.items():
-                _process_var(cvar)
-                if cvar.encoding:
-                    coord_encoding[cname] = {
-                        k: v for k, v in cvar.encoding.items() if k in reserved
-                    }
+    coord_encoding = {}
+    if include_coords:
+        for cname, cvar in da.coords.variables.items():
+            _process_var(cvar)
+            if cvar.encoding:
+                coord_encoding[cname] = {
+                    k: v for k, v in cvar.encoding.items() if k in reserved
+                }
 
-        data_encoding = {}
-        # Only include the data variable if it has a name (required by xarray)
-        if da.name is not None and da.encoding:
-            data_encoding[da.name] = {k: v for k, v in da.encoding.items() if k in reserved}
+    data_encoding = {}
+    # Only include the data variable if it has a name (required by xarray)
+    if da.name is not None and da.encoding:
+        data_encoding[da.name] = {
+            k: v for k, v in da.encoding.items() if k in reserved
+        }
 
-        # Merge data + coords encodings
-        encoding = {**coord_encoding, **data_encoding}
-        return da, encoding
+    # Merge data + coords encodings
+    encoding = {**coord_encoding, **data_encoding}
+    return da, encoding

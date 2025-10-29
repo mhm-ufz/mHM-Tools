@@ -32,6 +32,7 @@ OUTPUT_FTYPE = "ldd"
 CUTOFF_THRESHOLD = 175
 # FUNCTIONS
 
+
 def create_cell_area(ds, lat_name="lat", lon_name="lon"):
     """Create a cell area data array in km2."""
     logger.info("Create cell area data array.")
@@ -61,6 +62,7 @@ def create_cell_area(ds, lat_name="lat", lon_name="lon"):
         },
     )
     return cell_area_da
+
 
 # CLASSES
 class Catchment:
@@ -238,7 +240,14 @@ class Catchment:
 
         return i, j
 
-    def get_best_coordinate(self, upstream_area, gauge_coords, ref_catchment_area, max_distance_cells=5, max_error=0.25):
+    def get_best_coordinate(
+        self,
+        upstream_area,
+        gauge_coords,
+        ref_catchment_area,
+        max_distance_cells=5,
+        max_error=0.25,
+    ):
 
         # Determine whether gauge_coords are lat/lon floats or array indices
         lat_vals = self.ds.lat.data
@@ -294,9 +303,13 @@ class Catchment:
             d2 = (cand_i - gi) ** 2 + (cand_j - gj) ** 2
             k = int(np.argmin(d2))
             best_coord = (int(cand_i[k]), int(cand_j[k]))
-            logger.info(f"Selected outlet candidate {best_coord} with upstream area {upstream_area[best_coord]} km2 (tolerance {error:.3f})")
+            logger.info(
+                f"Selected outlet candidate {best_coord} with upstream area {upstream_area[best_coord]} km2 (tolerance {error:.3f})"
+            )
         else:
-            logger.warning("No candidate found within tolerance; falling back to nearest stream cell by upstream area magnitude.")
+            logger.warning(
+                "No candidate found within tolerance; falling back to nearest stream cell by upstream area magnitude."
+            )
             # fallback: pick the cell in bbox with upstream area closest to target
             flat = np.abs(sub - size)
             idx = int(np.argmin(flat))
@@ -305,7 +318,14 @@ class Catchment:
 
         return best_coord
 
-    def delineate_basin(self, gauge_coords, stream_order=4, ref_catchment_area=None, max_distance_cells=5, max_error=0.25):
+    def delineate_basin(
+        self,
+        gauge_coords,
+        stream_order=4,
+        ref_catchment_area=None,
+        max_distance_cells=5,
+        max_error=0.25,
+    ):
         """Delineate the basin for a given lat and lon."""
         logger.info(f"Deliniating basin for gauge coordinates {gauge_coords}")
         gauge_coords = (gauge_coords[0], gauge_coords[1])
@@ -320,17 +340,29 @@ class Catchment:
                 logger.exception("Failed to compute upstream area (accuflux).")
 
             if upstream_area is None:
-                logger.error("Could not calculate upstream area. Flow direction may be uninitialized.")
+                logger.error(
+                    "Could not calculate upstream area. Flow direction may be uninitialized."
+                )
 
-            outlet_idx = self.get_best_coordinate(upstream_area, gauge_coords, ref_catchment_area, max_distance_cells, max_error)
+            outlet_idx = self.get_best_coordinate(
+                upstream_area,
+                gauge_coords,
+                ref_catchment_area,
+                max_distance_cells,
+                max_error,
+            )
             new_lat = float(self.ds.lat.data[outlet_idx[0]])
             new_lon = float(self.ds.lon.data[outlet_idx[1]])
             logger.info(
                 f"Moved outlet longitude {gauge_coords[1]} to {new_lon} and latitude {gauge_coords[0]} to {new_lat}"
             )
-            river_mask = (upstream_area > ref_catchment_area * (1 - max_error)) & (upstream_area < ref_catchment_area * (1 + max_error))
+            river_mask = (upstream_area > ref_catchment_area * (1 - max_error)) & (
+                upstream_area < ref_catchment_area * (1 + max_error)
+            )
         else:
-            logger.warning("No catchment area provided; falling back to original gauge coordinates.")
+            logger.warning(
+                "No catchment area provided; falling back to original gauge coordinates."
+            )
             outlet_idx = self._coord_to_index(gauge_coords[0], gauge_coords[1])
             river_mask = None
 
@@ -394,9 +426,10 @@ class Catchment:
                         self.l2_resolution,
                     ]
                     if res is not None
-                ], default=None
+                ],
+                default=None,
             )
-        if upscale_res is None: 
+        if upscale_res is None:
             return 1
         if int(upscale_res / input_res + 0.5) - (upscale_res / input_res) < 1e6:
             return int(upscale_res / input_res + 0.5)
@@ -538,7 +571,12 @@ class Catchment:
 
         for var_name in self.VARIABLES:
             data_var = self.processing_data_variable(
-                var_name, cut_by_basin, lat_slice, lon_slice, lat_slice_idx, lon_slice_idx
+                var_name,
+                cut_by_basin,
+                lat_slice,
+                lon_slice,
+                lat_slice_idx,
+                lon_slice_idx,
             )
             if data_var is None:
                 continue
@@ -568,12 +606,16 @@ class Catchment:
         }
         fname = out_path / f"{var_name}.{format}"
         if format == "nc":
-            write_xarray_to_file(data_var, fname, encoding={
+            write_xarray_to_file(
+                data_var,
+                fname,
+                encoding={
                     var_name: {
                         "dtype": data_var[var_name].dtype,
                         "_FillValue": self.VARIABLES[var_name]["_FillValue"],
                     }
-                })
+                },
+            )
         elif format == "asc":
             cellsize = cellsize or abs(float(data_var["lon"][1] - data_var["lon"][0]))
             is_ascending = bool(data_var["lat"][0] < data_var["lat"][-1])
@@ -605,7 +647,15 @@ class Catchment:
                 msg = f'Format "{format}" unknown, use one of ["nc", "asc"]'
                 raise Exception(msg)
 
-    def processing_data_variable(self, var_name, cut_by_basin, lat_slice=None, lon_slice=None, lat_slice_idx=None, lon_slice_idx=None):
+    def processing_data_variable(
+        self,
+        var_name,
+        cut_by_basin,
+        lat_slice=None,
+        lon_slice=None,
+        lat_slice_idx=None,
+        lon_slice_idx=None,
+    ):
         """Process data variable, masking it and croping it spatial dimensions."""
         logger.info(f"Processing {var_name}")
         data = getattr(self, var_name)
@@ -647,10 +697,10 @@ class Catchment:
                 "lat": lat,  # [slice(860, 870)],
             },
         )
-        if lat_slice is not None and lon_slice is not None: 
+        if lat_slice is not None and lon_slice is not None:
             logger.info(f"Cutting {var_name} data to correct spatial dimensions")
             data_var = data_var.sel(lat=lat_slice, lon=lon_slice)
-        elif lat_slice_idx is not None and lon_slice_idx is not None: 
+        elif lat_slice_idx is not None and lon_slice_idx is not None:
             logger.info(f"Cutting {var_name} data to correct spatial dimensions")
             data_var = data_var.isel(lat=lat_slice_idx, lon=lon_slice_idx)
         logger.debug(data_var)
@@ -683,7 +733,10 @@ class Catchment:
         #     ds["flwdir"], FDIR_FILLVALUE[self.ftype], FDIR_SINKVALUE[self.ftype]
         # )
         # ds["flwdir"].data[:] = fdir_filled.data[:]
-        write_xarray_to_file(ds, out_path / self.out_var_name ,encoding={
+        write_xarray_to_file(
+            ds,
+            out_path / self.out_var_name,
+            encoding={
                 var_name: {
                     "dtype": ds[var_name].dtype,
                     "_FillValue": self.VARIABLES[var_name]["_FillValue"],
@@ -693,17 +746,19 @@ class Catchment:
         )
         logger.info(f"Basin Id has been written to {out_path / self.out_var_name}")
         return ds
-    
+
     def _cell_edges(self, centers: np.ndarray) -> np.ndarray:
         """Compute edges (len=N+1) from center coords (len=N) on a regular grid."""
         c = np.asarray(centers)
         d = np.diff(c)
-        left  = c[0]  - 0.5 * d[0]
+        left = c[0] - 0.5 * d[0]
         right = c[-1] + 0.5 * d[-1]
-        mids  = (c[:-1] + c[1:]) / 2.0
+        mids = (c[:-1] + c[1:]) / 2.0
         return np.concatenate(([left], mids, [right]))
 
-    def _coarse_centers_from_edges(self, edges: np.ndarray, k: int, n_blocks: int, ascending: bool) -> np.ndarray:
+    def _coarse_centers_from_edges(
+        self, edges: np.ndarray, k: int, n_blocks: int, ascending: bool
+    ) -> np.ndarray:
         """
         Given fine-grid edges, build coarse-grid centers for block size k.
         Ensures coarse edges == fine edges over the cropped window.
@@ -711,7 +766,7 @@ class Catchment:
         # we assume you've cropped L0 so len(fine_centers) is divisible by k
         # The window's left edge and right edge are edges[0] and edges[k*n_blocks]
         left_edge = edges[0]
-        dx_coarse = (edges[k] - edges[0])  # = k * dx_fine (works for asc/desc)
+        dx_coarse = edges[k] - edges[0]  # = k * dx_fine (works for asc/desc)
         # centers are midpoints of each coarse cell
         n = np.arange(n_blocks)
         centers = left_edge + (n + 0.5) * dx_coarse
@@ -720,7 +775,7 @@ class Catchment:
         return centers
 
     def upscale_mask_with_correct_coords(
-        self,   
+        self,
         da: xr.DataArray,
         factor: int = None,
         lon_name: str = "lon",
@@ -730,7 +785,7 @@ class Catchment:
         Coarsen a 2D mask-like field by integer factor and assign correct coarse coords
         so that coarse *edges* equal fine *edges* of the cropped window.
         """
-        if factor is None: 
+        if factor is None:
             factor = self.get_upscaling_factor(max_resolution=True)
         if factor < 1:
             raise ValueError("factor must be >= 1")
@@ -744,7 +799,7 @@ class Catchment:
             coarsen_map[lat_name] = ky
 
         cond = (~xr.apply_ufunc(np.isnan, da)) | (da == 0)
-        out  = cond.coarsen(coarsen_map, boundary="trim").any().astype("int8")
+        out = cond.coarsen(coarsen_map, boundary="trim").any().astype("int8")
 
         # 2) compute correct coarse coordinates from fine edges
         lon_f = da[lon_name].values
@@ -761,11 +816,23 @@ class Catchment:
         # figure out which portion of edges we used after boundary="trim":
         # Since you cropped L0 to a multiple of factor, the coarsen starts at index 0
         # and uses exactly n_blocks*k cells. So we can take edges[0 : n_blocks*k + 1].
-        lon_edges_win = lon_edges[: n_lon_blocks * kx + 1] if asc_lon else lon_edges[-(n_lon_blocks * kx + 1):]
-        lat_edges_win = lat_edges[: n_lat_blocks * ky + 1] if asc_lat else lat_edges[-(n_lat_blocks * ky + 1):]
+        lon_edges_win = (
+            lon_edges[: n_lon_blocks * kx + 1]
+            if asc_lon
+            else lon_edges[-(n_lon_blocks * kx + 1) :]
+        )
+        lat_edges_win = (
+            lat_edges[: n_lat_blocks * ky + 1]
+            if asc_lat
+            else lat_edges[-(n_lat_blocks * ky + 1) :]
+        )
 
-        lon_coarse = self._coarse_centers_from_edges(lon_edges_win, kx, n_lon_blocks, asc_lon)
-        lat_coarse = self._coarse_centers_from_edges(lat_edges_win, ky, n_lat_blocks, asc_lat)
+        lon_coarse = self._coarse_centers_from_edges(
+            lon_edges_win, kx, n_lon_blocks, asc_lon
+        )
+        lat_coarse = self._coarse_centers_from_edges(
+            lat_edges_win, ky, n_lat_blocks, asc_lat
+        )
 
         out = out.assign_coords({lon_name: lon_coarse, lat_name: lat_coarse})
         out.name = da.name or "mask_L2"
@@ -783,7 +850,9 @@ class Catchment:
         )
         return out
 
-    def upscale_mask(self, da: xr.DataArray, factor=None, lon_name="lon", lat_name="lat") -> xr.DataArray:
+    def upscale_mask(
+        self, da: xr.DataArray, factor=None, lon_name="lon", lat_name="lat"
+    ) -> xr.DataArray:
         """
         Upscale a 2D/3D mask-like field on a regular lon/lat grid by an integer factor.
 
@@ -804,8 +873,8 @@ class Catchment:
         xr.DataArray
             Coarsened mask (0/1), aligned to the top-left of each kx×ky block.
         """
-        logger.info('Create upscaled mask')
-        if factor is None: 
+        logger.info("Create upscaled mask")
+        if factor is None:
             factor = self.get_upscaling_factor(max_resolution=True)
         if isinstance(factor, int):
             kx = ky = int(factor)
@@ -819,45 +888,61 @@ class Catchment:
         cond = (~xr.apply_ufunc(np.isnan, da)) | (da == 0)
 
         # Coarsen over lat/lon windows and take logical OR (any)
-        coarsen_map = {dim: size for dim, size in ((lon_name, kx), (lat_name, ky)) if dim in cond.dims}
+        coarsen_map = {
+            dim: size
+            for dim, size in ((lon_name, kx), (lat_name, ky))
+            if dim in cond.dims
+        }
         out = cond.coarsen(coarsen_map, boundary="trim").any().astype("int8")
 
         # Make coordinates every k-th point so grid aligns with the upscaled blocks
         if lon_name in out.dims:
-            out = out.assign_coords({lon_name: da[lon_name].isel({lon_name: slice(0, None, kx)})})
+            out = out.assign_coords(
+                {lon_name: da[lon_name].isel({lon_name: slice(0, None, kx)})}
+            )
         if lat_name in out.dims:
-            out = out.assign_coords({lat_name: da[lat_name].isel({lat_name: slice(0, None, ky)})})
+            out = out.assign_coords(
+                {lat_name: da[lat_name].isel({lat_name: slice(0, None, ky)})}
+            )
 
         out.name = da.name or "mask_L2"
         out.attrs.update(da.attrs)
-        logger.info(f"Resolution of upscaled mask: {round(abs(out.lon.data[1] - out.lon.data[0]), 6)}")
+        logger.info(
+            f"Resolution of upscaled mask: {round(abs(out.lon.data[1] - out.lon.data[0]), 6)}"
+        )
         return out
 
     def write_mask_file(self, ds, mask_file):
         """Write basin mask to specified path."""
         if mask_file is not None:
-            logger.info('Writing mask file')
+            logger.info("Writing mask file")
             # name the variable mask
             mask = ds.basin > 0
             mask_file = pl.Path(mask_file)
             mask_da = xr.DataArray(
                 mask, coords={"lat": ds.lat, "lon": ds.lon}, dims=["lat", "lon"]
             )
-            mask_da['lat'].attrs.update({"units": "degrees_north",
-                "long_name": "latitude",
-                "standard_name": "latitude",
-                "axis": "Y",
-            })
-            mask_da['lon'].attrs.update({"units": "degrees_east",
-                "long_name": "longitude",
-                "standard_name": "longitude",
-                "axis": "X",
-            })
+            mask_da["lat"].attrs.update(
+                {
+                    "units": "degrees_north",
+                    "long_name": "latitude",
+                    "standard_name": "latitude",
+                    "axis": "Y",
+                }
+            )
+            mask_da["lon"].attrs.update(
+                {
+                    "units": "degrees_east",
+                    "long_name": "longitude",
+                    "standard_name": "longitude",
+                    "axis": "X",
+                }
+            )
             if not self.do_upscale:
                 mask_upscaled = self.upscale_mask_with_correct_coords(mask_da)
-            else: 
+            else:
                 mask_upscaled = mask_da
-            mask_upscaled = mask_upscaled.rename({'lat': 'lat_l2', 'lon': 'lon_l2'})
+            mask_upscaled = mask_upscaled.rename({"lat": "lat_l2", "lon": "lon_l2"})
             mask_ds = xr.Dataset(
                 {"land_mask": mask_da, "mask": mask_da, "mask_l2": mask_upscaled},
                 # coords={"lon": ds.lon, "lat": ds.lat, "lat_l2": mask_upscaled.lat, "lon_l2": mask_upscaled.lon},
@@ -906,20 +991,22 @@ class Catchment:
         # logger.info(
         #     f"min row: {min_row} max row: {max_row} min_col: {min_col}, max_col: {max_col}"
         # )
-        logger.info(f"L0 initial window (rows, cols): [{min_row}:{max_row}], [{min_col}:{max_col}]")
+        logger.info(
+            f"L0 initial window (rows, cols): [{min_row}:{max_row}], [{min_col}:{max_col}]"
+        )
 
         factor = self.get_upscaling_factor(max_resolution=True)
         if factor > 1:
             logger.info(
                 f"Regridding to fit coarse grid with res {max([r for r in [self.l1_resolution, self.l11_resolution, self.l2_resolution] if r is not None ])} (factor {factor})"
             )
-            min_row = min_row // factor * factor 
+            min_row = min_row // factor * factor
             min_col = min_col // factor * factor
             # Calculating max_row/col it needs:
             #  +1 to include the whole last coarse grid cell -1 to not get one cell from the next block
             max_row = (max_row // factor + 1) * factor - 1
             max_col = (max_col // factor + 1) * factor - 1
-             # clamp
+            # clamp
             max_row = min(max_row, self.catchment_mask.shape[0] - 1)
             max_col = min(max_col, self.catchment_mask.shape[1] - 1)
             # if max_col >= len(cols):
@@ -935,7 +1022,7 @@ class Catchment:
         lat_slice_idx = slice(min_row, max_row + 1)
         lon_slice_idx = slice(min_col, max_col + 1)
 
-        #Sanity: cropped shape divisible by factor ---
+        # Sanity: cropped shape divisible by factor ---
         n_lat = lat_slice_idx.stop - lat_slice_idx.start
         n_lon = lon_slice_idx.stop - lon_slice_idx.start
         if factor > 1:
@@ -1173,7 +1260,12 @@ def create_catchment(
                 l2_resolution=l2_resolution,
                 upscale=upscale,
             )
-            c.delineate_basin(gauge_coords, ref_catchment_area=ref_catchment_area, max_distance_cells=max_distance_cells, max_error=max_error)
+            c.delineate_basin(
+                gauge_coords,
+                ref_catchment_area=ref_catchment_area,
+                max_distance_cells=max_distance_cells,
+                max_error=max_error,
+            )
             if l1_resolution is not None and upscale:
                 c.upscale(var)
             else:

@@ -1,8 +1,6 @@
 import unittest
 from pathlib import Path
 
-import xarray as xr
-
 import mhm_tools as mt
 from mhm_tools.common.file_handler import get_xarray_ds_from_file
 

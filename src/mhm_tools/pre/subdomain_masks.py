@@ -216,7 +216,9 @@ class CreateSubdomainMasks:
 
             # 3rd step --- write masks
             # read land_mask to intersect with subdomain_mask
-            write_xarray_to_file(ds=new_ids_remapped, file_path=file_basins_remapped, 
+            write_xarray_to_file(
+                ds=new_ids_remapped,
+                file_path=file_basins_remapped,
                 encoding={
                     new_ids_remapped.name: {"_FillValue": FILL_VALUE, "dtype": "int16"}
                 },
@@ -238,7 +240,9 @@ class CreateSubdomainMasks:
             ds_sub_ref_file = ds_ref_file.copy()
             for data_var in ds_sub_ref_file.data_vars:
                 ds_sub_ref_file[data_var].values[~sub_mask] = np.nan
-            write_xarray_to_file(ds=ds_sub_ref_file, file_path=fname, encoding=REF_FILE_ENCODING)
+            write_xarray_to_file(
+                ds=ds_sub_ref_file, file_path=fname, encoding=REF_FILE_ENCODING
+            )
             logger.info(f"Wrote to {fname}")
 
     def use_land_mask(self, lat, lon):
@@ -323,7 +327,9 @@ class CreateSubdomainMasks:
         # Write the output to a netCDF file
         fname = self.out_file_name + ".nc"
         logger.info(f"Writing to {fname}")
-        write_xarray_to_file(ds=ds_sub_ref_file, file_path=fname, encoding=REF_FILE_ENCODING)
+        write_xarray_to_file(
+            ds=ds_sub_ref_file, file_path=fname, encoding=REF_FILE_ENCODING
+        )
 
 
 @log_arguments()
