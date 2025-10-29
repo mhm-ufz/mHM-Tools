@@ -117,7 +117,12 @@ class Catchment:
             "uparea_grid": {
                 "title": "accumulated data values along the flow directions",
                 "_FillValue": FACC_FILLVALUE,
-                "units": "m2",
+                "units": "-",
+            },
+            "upgrid": {
+                "title": "upstream area",
+                "_FillValue": FACC_FILLVALUE,
+                "units": "km2",
             },
             "grdare": {
                 "title": "rectangular grid area",
@@ -488,7 +493,8 @@ class Catchment:
 
     def get_upstream_area(self):
         """Perform the calculation of the upstream catchment area."""
-        upgrid = self._fdir.upstream_area(unit="km2").astype(int)
+        # upgrid = self._fdir.upstream_area(unit="km2").astype(int)
+        self.upgrid = self.calc_upstream_area().astype(int)
 
     def get_grid_area(self):
         """Perform the calculation of the catchment area."""
@@ -1243,6 +1249,7 @@ def create_catchment(
                 c.get_facc()
             c.get_basins()
             c.get_grid_area()
+            c.get_upstream_area()
             c.write(output_path, single_file=True, mask_file=mask_file, frame=frame)
         else:
             logger.info(f"Creating catchment for gauge coordinates {gauge_coords}")
@@ -1271,6 +1278,7 @@ def create_catchment(
             else:
                 c.get_facc()
             c.get_grid_area()
+            c.get_upstream_area()
             c.write(
                 output_path,
                 single_file=True,
