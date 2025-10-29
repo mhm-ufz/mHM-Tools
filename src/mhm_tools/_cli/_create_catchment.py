@@ -170,6 +170,14 @@ def add_args(parser):
         default="5Gb",
         help=("""Available memory per cpu in Gb or Mb (default Gb)"""),
     )
+    optional_args.add_argument(
+        "-i",
+        "--gauge_id",
+        required=False,
+        default=None,
+        type=int,
+        help="If Gauge id is provided in addition to the other output a id_gauges file is created in the output_folder.",
+    )
 
 
 def run(args):
@@ -220,4 +228,5 @@ def run(args):
         ref_catchment_area=args.ref_catchment_area,
         max_distance_cells=args.max_distance_cells,
         max_error=args.max_error,
+        id_gauges=args.gauge_id,
     )

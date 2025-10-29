@@ -11,12 +11,13 @@ Authors
 import logging
 import pathlib as pl
 
+from mhm_tools.pre.create_id_gauges import write_gauge_id
 import numpy as np
 import pyflwdir
 import xarray as xr
 from scipy.ndimage import binary_dilation
 
-from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_to_file
+from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_to_ascii, write_xarray_to_file
 from mhm_tools.common.logger import ErrorLogger, log_arguments
 
 logger = logging.getLogger(__name__)
@@ -90,6 +91,8 @@ class Catchment:
         self.grdare = None
         self.elevtn = None
         self._fdir = None
+        self.gauge_lat = None
+        self.gauge_lon = None
         self.ftype = ftype
         self.catchment_mask = None
         self.l1_resolution = l1_resolution
@@ -215,11 +218,13 @@ class Catchment:
             )
         self.get_fdir()
 
-    def calc_upstream_area(self):
+    def calc_upstream_area(self, cell_area=None):
         """Use pyflwdir to calculate the upstream area from flow direction by providing cell areas."""
         if self._fdir is None:
             logger.error("Flow direction is not initialized.")
             return None
+        if cell_area is not None:
+            return self._fdir.accuflux(cell_area, nodata=-9999)
         return self._fdir.accuflux(create_cell_area(self.ds).data, nodata=-9999)
 
     def _coord_to_index(self, lat, lon):
@@ -266,7 +271,10 @@ class Catchment:
         ref_catchment_area,
         max_distance_cells=5,
         max_error=0.25,
+        recursion=False,
     ):
+        if not recursion:
+            max_distance_cells = max_distance_cells // 2
 
         # Determine whether gauge_coords are lat/lon floats or array indices
         lat_vals = self.ds.lat.data
@@ -329,11 +337,21 @@ class Catchment:
             logger.warning(
                 "No candidate found within tolerance; falling back to nearest stream cell by upstream area magnitude."
             )
+            if not recursion:
+                return self.get_best_coordinate(
+                    upstream_area,
+                    gauge_coords,
+                    ref_catchment_area,
+                    max_distance_cells,
+                    max_error,
+                    recursion=True
+                )
             # fallback: pick the cell in bbox with upstream area closest to target
             flat = np.abs(sub - size)
             idx = int(np.argmin(flat))
             ri, rj = np.unravel_index(idx, sub.shape)
             best_coord = (ri + i_min, rj + j_min)
+            logger.info(f"The selected outlet candidate is {best_coord} with upstream area {upstream_area[best_coord]} km2 resulting in error {(ref_catchment_area - upstream_area[best_coord]) / ref_catchment_area:.3f}.")
 
         return best_coord, error
 
@@ -352,9 +370,10 @@ class Catchment:
 
         # Compute upstream area (in km2) using accuflux and cell areas
         if ref_catchment_area is not None:
+            cell_area = create_cell_area(self.ds).data
             upstream_area = None
             try:
-                upstream_area = self.calc_upstream_area()
+                upstream_area = self.calc_upstream_area(cell_area=cell_area)
             except Exception:
                 logger.exception("Failed to compute upstream area (accuflux).")
 
@@ -372,8 +391,10 @@ class Catchment:
             )
             new_lat = float(self.ds.lat.data[outlet_idx[0]])
             new_lon = float(self.ds.lon.data[outlet_idx[1]])
+            self.gauge_lat = new_lat
+            self.gauge_lon = new_lon
             logger.info(
-                f"Moved outlet latitude {float(gauge_coords[0])} to {new_lat} and longitude {float(gauge_coords[1])} to {new_lon} with area error {error:.3f}%."
+                f"Moved outlet latitude {float(gauge_coords[0])} to {new_lat} and longitude {float(gauge_coords[1])} to {new_lon}."
             )
 
             river_mask = (upstream_area > ref_catchment_area * (1 - error - 1e-6)) & (
@@ -407,9 +428,55 @@ class Catchment:
             except Exception as e2:
                 logger.exception(f"Fallback basins() also failed: {e2}")
                 return
-
-        # finalize mask and basin fill values
+        
         self.catchment_mask = self.basin > 0
+        # logging and sanity checks
+        mean_cell_area = float(np.mean(cell_area)) if cell_area is not None else np.nan
+        unique_vals = np.unique(self.basin[self.catchment_mask])
+        cell_count = int(np.sum(self.catchment_mask))
+        delineated_area = float(np.sum(cell_area[self.catchment_mask])) if cell_area is not None else np.nan
+        uparea_at_outlet = upstream_area[outlet_idx] if upstream_area is not None else np.nan
+        area_error = (delineated_area - ref_catchment_area) / ref_catchment_area
+
+        logger.info(
+            "Basin unique values: %s | cells in basin: %d | mean cell area: %.6f km2",
+            unique_vals,
+            cell_count,
+            mean_cell_area,
+        )
+        logger.info(
+            "Delineated basin area (sum of cell_area[basin>0]) = %.2f km2; "
+            "reference area = %.2f km2; error = %.2f%%",
+            delineated_area,
+            ref_catchment_area,
+            area_error * 100.0,
+        )
+        logger.info(
+            "Upstream area reported at selected outlet cell = %.2f km2. "
+            "Difference (sum_cells - upstream_at_outlet) = %.2f km2 (%.2f%%).",
+            uparea_at_outlet,
+            delineated_area - uparea_at_outlet,
+            (delineated_area - uparea_at_outlet) / uparea_at_outlet * 100.0
+            if uparea_at_outlet != 0
+            else np.nan,
+            )
+        if abs(area_error) > max_error*2:
+            with ErrorLogger(logger):
+                msg = f"Delineated basin area ({delineated_area:2f} km2) differs from reference area ({ref_catchment_area:2f} km2) by more than twice the max error {max_error*100:.2f}%. Adjust max_error or max_distance_cells."
+                raise ValueError(
+                    msg
+                )
+            # warn if the two area measures disagree substantially
+        if not np.isclose(delineated_area, uparea_at_outlet, rtol=0.02, atol=1e-6):
+            with ErrorLogger(logger):
+                msg = f"Sum of cell areas inside the basin ({delineated_area:2f} km2) differs from " 
+                msg += f"upstream area at outlet ({uparea_at_outlet:2f} km2). Investigate flow-direction "
+                msg += "masking, nodata handling or area units."
+                raise ValueError(
+                    msg
+                )
+        # finalize mask and basin fill values
+        
         if np.all(~self.catchment_mask):
             if stream_order > 1:
                 # try again with a lower stream_order (legacy behavior)
@@ -577,6 +644,7 @@ class Catchment:
         mask_file=None,
         frame=1,
         buffer=0,
+        gauge_id=None,
     ):
         """Write the produced data to one or multiple files."""
         data_vars = {}
@@ -611,6 +679,13 @@ class Catchment:
             ds = self.write_basin_id_file(data_vars, frame, out_path)
             # use basin_id to create a mask file
             self.write_mask_file(ds, mask_file)
+            if gauge_id is not None:
+                # create empty ds with mask l0 extend and fill the data_var called data with -9999 values
+                ds_id = xr.Dataset()
+                ds_id["data"] = (("lat", "lon"), np.full((self.grid_shape), -9999, dtype=int))
+                ds_id = write_gauge_id(ds_id, gauge_id, self.gauge_lat, self.gauge_lon)  # , thre
+                write_xarray_to_ascii(ds_id, out_path / 'gauges_id.asc', "data", fmt="%.0f")
+
 
     def write_single_variable_file(
         self, data_var, var_name, out_path, cellsize, format

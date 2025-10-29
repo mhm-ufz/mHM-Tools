@@ -5,7 +5,7 @@ from pathlib import Path
 
 from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_to_ascii
 from mhm_tools.common.logger import ErrorLogger, log_arguments
-from mhm_tools.common.xarray_utils import get_coord_key
+from mhm_tools.common.xarray_utils import get_coord_key, get_single_data_var
 
 logger = logging.getLogger(__name__)
 
@@ -34,9 +34,14 @@ def write_gauge_id(
         logger.info(f"Max facc coords {x_coord} / {y_coord}")
         lat = y_coord
         lon = x_coord
+        
     lon_key = get_coord_key(ds, lon=True)
     lat_key = get_coord_key(ds, lat=True)
-    ds.loc[ds.sel({lat_key: lat, lon_key: lon}, method="nearest").coords] = id
+    data_var = get_single_data_var(ds)
+    if data_var is not None:
+        ds[data_var].loc[ds.sel({lat_key: lat, lon_key: lon}, method="nearest").coords] = id
+    else:
+        ds.loc[ds.sel({lat_key: lat, lon_key: lon}, method="nearest").coords] = id
     return ds
 
 
