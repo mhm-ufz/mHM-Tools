@@ -171,7 +171,6 @@ def add_args(parser):
         help=("""Available memory per cpu in Gb or Mb (default Gb)"""),
     )
     optional_args.add_argument(
-        "-i",
         "--gauge_id",
         required=False,
         default=None,
