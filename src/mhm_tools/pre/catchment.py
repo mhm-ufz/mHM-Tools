@@ -681,10 +681,12 @@ class Catchment:
             self.write_mask_file(ds, mask_file)
             if gauge_id is not None:
                 # create empty ds with mask l0 extend and fill the data_var called data with -9999 values
-                ds_id = xr.Dataset()
-                ds_id["data"] = (("lat", "lon"), np.full((self.grid_shape), -9999, dtype=int))
-                ds_id = write_gauge_id(ds_id, gauge_id, self.gauge_lat, self.gauge_lon)  # , thre
-                write_xarray_to_ascii(ds_id, out_path / 'gauges_id.asc', "data", fmt="%.0f")
+                id_da = xr.DataArray(
+                    np.full(ds.basin.shape, -9999, dtype=int), coords={"lat": ds.lat, "lon": ds.lon}, dims=["lat", "lon"]
+                )
+                id_ds = id_da.to_dataset(name="data")
+                id_ds = write_gauge_id(id_ds, gauge_id, self.gauge_lat, self.gauge_lon)
+                write_xarray_to_ascii(id_ds, out_path / 'gauges_id.asc', "data", fmt="%.0f")
 
 
     def write_single_variable_file(
