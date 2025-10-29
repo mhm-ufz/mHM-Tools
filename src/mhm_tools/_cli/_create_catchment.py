@@ -166,7 +166,8 @@ def add_args(parser):
     optional_args.add_argument(
         "--available_mem",
         required=False,
-        default="5",
+        type=str,
+        default="5Gb",
         help=("""Available memory per cpu in Gb or Mb (default Gb)"""),
     )
 
@@ -188,7 +189,7 @@ def run(args):
                 msg = "You can't use --gauge_coords and --lonlatbox at the same time."
                 raise ValueError(msg)
         lat, lon = map(float, args.gauge_coords.split(","))
-        gauge_coords = (np.array([lon]), np.array([lat]))
+        gauge_coords = (np.array([lat]), np.array([lon]))
         logger.info(f"using gauge coordinates {gauge_coords}")
     elif args.lonlatbox is not None:
         lonmin, lonmax, latmin, latmax, resl0 = map(float, args.lonlatbox.split(","))
