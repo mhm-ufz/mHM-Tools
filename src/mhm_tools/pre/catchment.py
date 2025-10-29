@@ -1229,6 +1229,7 @@ def create_catchment(
     ref_catchment_area=None,
     max_distance_cells=5,
     max_error=0.1,
+    gauge_id=None,
 ):
     """Create file containing catchment ids, flowdirection and upstream area from dem or flow direction."""
     logger.info(
@@ -1376,4 +1377,5 @@ def create_catchment(
                 mask_file=mask_file,
                 frame=frame,
                 buffer=frame,
+                gauge_id=gauge_id
             )

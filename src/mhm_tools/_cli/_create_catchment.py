@@ -227,5 +227,5 @@ def run(args):
         ref_catchment_area=args.ref_catchment_area,
         max_distance_cells=args.max_distance_cells,
         max_error=args.max_error,
-        id_gauges=args.gauge_id,
+        gauge_id=args.gauge_id,
     )
