@@ -174,7 +174,11 @@ class TestCatchment(unittest.TestCase):
 
     # Replace these placeholders with your real test inputs before running.
     FDIR_PATH = Path(HERE, "files", "test_create_catchment",  "fdir.nc")
-    FDIR_VAR = "flwdir"  # change to the variable name in your file if different
+    FDIR_VAR = "fdir"  # change to the variable name in your file if different
+    # GAUGE_LAT = [48.445978]
+    # GAUGE_LON = [8.70628]
+    # REF_AREA = [1123.61]  # optional reference area in km2, e.g. 25400
+
     GAUGE_LAT = [49.292013, 48.445978]
     GAUGE_LON = [8.679113, 8.70628]
     REF_AREA = [113.33, 1123.61]  # optional reference area in km2, e.g. 25400
@@ -191,8 +195,8 @@ class TestCatchment(unittest.TestCase):
         lat_key = get_coord_key(ds, lat=True, raise_exception=False)
         lon_key = get_coord_key(ds, lon=True, raise_exception=False)
 
-        for lat, lon in zip(self.GAUGE_LAT, self.GAUGE_LON):
-            c = catchment.Catchment(ds, var_name, var="fdir", ftype="d8", transform=None, latlon=True)
+        for lat, lon, ref_area in zip(self.GAUGE_LAT, self.GAUGE_LON, self.REF_AREA):
+            c = catchment.Catchment(ds, var_name, var="fdir", ftype="d8", transform=self.transform, latlon=True)
             c.delineate_basin((lat, lon))
 
             self.assertIsNotNone(c.basin)
@@ -202,8 +206,9 @@ class TestCatchment(unittest.TestCase):
             cell_area = catchment.create_cell_area(ds, lat_name=lat_key, lon_name=lon_key).data
             area_km2 = float(np.sum(cell_area[c.catchment_mask]))
             self.assertGreater(area_km2, 0.0)
-            rel_diff = abs(area_km2 - float(self.REF_AREA)) / float(self.REF_AREA)
-            self.assertLessEqual(rel_diff, 0.05, f"Delineated area {area_km2} differs more than 5% from REF_AREA {self.REF_AREA}")
+            rel_diff = abs(area_km2 - float(ref_area)) / float(ref_area)
+            self.assertLessEqual(rel_diff, 0.05, f"Delineated area {area_km2} differs more than 5% from REF_AREA {ref_area}")
+            print(f"No ref Delineated area: {area_km2} km², Reference area: {ref_area} km², Relative difference: {rel_diff*100:.2f}%")
 
 
     def test_delineate_basin_with_ref(self):
@@ -217,9 +222,9 @@ class TestCatchment(unittest.TestCase):
         lat_key = get_coord_key(ds, lat=True, raise_exception=False)
         lon_key = get_coord_key(ds, lon=True, raise_exception=False)
 
-        for lat, lon in zip(self.GAUGE_LAT, self.GAUGE_LON):
-            c = catchment.Catchment(ds, var_name, var="fdir", ftype="d8", transform=None, latlon=True)
-            c.delineate_basin((lat, lon), ref_catchment_area=float(self.REF_AREA))
+        for lat, lon, ref_area in zip(self.GAUGE_LAT, self.GAUGE_LON, self.REF_AREA):
+            c = catchment.Catchment(ds, var_name, var="fdir", ftype="d8", transform=self.transform, latlon=True)
+            c.delineate_basin((lat, lon), ref_catchment_area=float(ref_area), max_distance_cells=10, max_error=0.05)
 
             self.assertIsNotNone(c.basin)
             self.assertTrue(np.any(c.catchment_mask), "No catchment cells found for provided gauge coordinates and ref area")
@@ -228,9 +233,9 @@ class TestCatchment(unittest.TestCase):
             area_km2 = float(np.sum(cell_area[c.catchment_mask]))
 
             # check that computed area is reasonably close to the reference (5% tolerance)
-            rel_diff = abs(area_km2 - float(self.REF_AREA)) / float(self.REF_AREA)
-            self.assertLessEqual(rel_diff, 0.05, f"Delineated area {area_km2} differs more than 5% from REF_AREA {self.REF_AREA}")
-
+            rel_diff = abs(area_km2 - float(ref_area)) / float(ref_area)
+            self.assertLessEqual(rel_diff, 0.05, f"Delineated area {area_km2} differs more than 5% from REF_AREA {ref_area}")
+            print(f"With ref Delineated area: {area_km2} km², Reference area: {ref_area} km², Relative difference: {rel_diff*100:.2f}%")
 
 if __name__ == "__main__":
     unittest.main()

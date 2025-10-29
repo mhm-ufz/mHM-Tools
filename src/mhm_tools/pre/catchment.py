@@ -215,49 +215,48 @@ class Catchment:
             return None
         return self._fdir.accuflux(create_cell_area(self.ds).data, nodata=-9999)
 
+    def _coord_to_index(self, lat, lon):
+        """Map latitude/longitude or indices to integer grid indices."""
+        if "lat" not in self.ds.coords or "lon" not in self.ds.coords:
+            with ErrorLogger(logger):
+                raise ValueError("Dataset is missing latitude/longitude coordinates.")
+        lat_vals = self.ds.lat.data
+        lon_vals = self.ds.lon.data
+
+        if isinstance(lat, (int, np.integer)):
+            i = int(lat)
+        else:
+            i = int(np.abs(lat_vals - float(lat)).argmin())
+
+        if isinstance(lon, (int, np.integer)):
+            j = int(lon)
+        else:
+            j = int(np.abs(lon_vals - float(lon)).argmin())
+
+        i = int(np.clip(i, 0, len(lat_vals) - 1))
+        j = int(np.clip(j, 0, len(lon_vals) - 1))
+
+        return i, j
+
     def get_best_coordinate(self, upstream_area, gauge_coords, ref_catchment_area, max_distance_cells=5, max_error=0.25):
 
         # Determine whether gauge_coords are lat/lon floats or array indices
         lat_vals = self.ds.lat.data
         lon_vals = self.ds.lon.data
-
-        def coord_to_index(lat, lon):
-            """Map lat/lon to nearest row/col index in the arrays.
-
-            Returns (i, j) where i indexes latitude (row) and j indexes longitude (col).
-            """
-            # nearest index in lat (note: lat may be descending)
-            i = int(np.abs(lat_vals - lat).argmin())
-            j = int(np.abs(lon_vals - lon).argmin())
-            return i, j
-
-        # Interpret provided gauge_coords
-        if isinstance(gauge_coords[0], (float, np.floating)) or isinstance(gauge_coords[1], (float, np.floating)):
-            # assume (lat, lon)
-            gi, gj = coord_to_index(float(gauge_coords[0]), float(gauge_coords[1]))
-        else:
-            # assume integer indices already
-            gi, gj = int(gauge_coords[0]), int(gauge_coords[1])
+        gi, gj = self._coord_to_index(gauge_coords[0], gauge_coords[1])
 
         logger.debug(f"Gauge index (row, col): {(gi, gj)}")
 
         # We will search for candidate outlet cells within a bbox around the gauge
         # (in degrees). These parameters are conservative defaults and can be
         # tuned later or exposed as args.
-        
-        # Convert bbox in degrees to index ranges
-        lat_center = float(lat_vals[gi])
-        lon_center = float(lon_vals[gj])
-        lat_min = lat_center - max_distance_cells * self.l0_resolution
-        lat_max = lat_center + max_distance_cells * self.l0_resolution
-        lon_min = lon_center - max_distance_cells * self.l0_resolution
-        lon_max = lon_center + max_distance_cells * self.l0_resolution
+        max_cells = int(max(0, round(max_distance_cells)))
 
         # find index window (clamp to domain)
-        i_min = max(0, int(np.abs(lat_vals - lat_min).argmin()))
-        i_max = min(len(lat_vals) - 1, int(np.abs(lat_vals - lat_max).argmin()))
-        j_min = max(0, int(np.abs(lon_vals - lon_min).argmin()))
-        j_max = min(len(lon_vals) - 1, int(np.abs(lon_vals - lon_max).argmin()))
+        i_min = max(0, gi - max_cells)
+        i_max = min(len(lat_vals) - 1, gi + max_cells)
+        j_min = max(0, gj - max_cells)
+        j_max = min(len(lon_vals) - 1, gj + max_cells)
 
         # Ensure min <= max
         if i_min > i_max:
@@ -323,22 +322,35 @@ class Catchment:
             if upstream_area is None:
                 logger.error("Could not calculate upstream area. Flow direction may be uninitialized.")
 
-            outlet_coord = self.get_best_coordinate(upstream_area, gauge_coords, ref_catchment_area, max_distance_cells, max_error)
-            logger.info(f"Moved outlet longitude {gauge_coords[1]} to {outlet_coord[1]} and latitude {gauge_coords[0]} to {outlet_coord[0]}")
+            outlet_idx = self.get_best_coordinate(upstream_area, gauge_coords, ref_catchment_area, max_distance_cells, max_error)
+            new_lat = float(self.ds.lat.data[outlet_idx[0]])
+            new_lon = float(self.ds.lon.data[outlet_idx[1]])
+            logger.info(
+                f"Moved outlet longitude {gauge_coords[1]} to {new_lon} and latitude {gauge_coords[0]} to {new_lat}"
+            )
             river_mask = (upstream_area > ref_catchment_area * (1 - max_error)) & (upstream_area < ref_catchment_area * (1 + max_error))
         else:
             logger.warning("No catchment area provided; falling back to original gauge coordinates.")
-            outlet_coord = gauge_coords
+            outlet_idx = self._coord_to_index(gauge_coords[0], gauge_coords[1])
             river_mask = None
-        # Now delineate basin using pyflwdir basins(xy=...)
+
+        outlet_linear_idx = np.ravel_multi_index(outlet_idx, self._fdir.shape)
+
+        # Now delineate basin using pyflwdir basins()
+        streams_mask = self._fdir.stream_order() >= stream_order
+        if river_mask is not None:
+            streams_mask = np.logical_and(streams_mask, river_mask.astype(bool))
         try:
-            self.basin = self._fdir.basins(xy=outlet_coord, stream=self._fdir.stream_order() >= stream_order, mask=river_mask)
+            self.basin = self._fdir.basins(
+                idxs=np.array([outlet_linear_idx], dtype=np.int64),
+                streams=streams_mask,
+            )
         except Exception as e:
-            logger.exception(f"pyflwdir.basins(xy=...) failed for {outlet_coord}: {e}")
+            logger.exception(f"pyflwdir.basins(idxs=...) failed for {outlet_idx}: {e}")
             # try computing all basins and pick id at outlet
             try:
                 all_basins = self._fdir.basins()
-                basin_id = int(all_basins[outlet_coord[0], outlet_coord[1]])
+                basin_id = int(all_basins[outlet_idx])
                 self.basin = np.where(all_basins == basin_id, basin_id, 0)
             except Exception as e2:
                 logger.exception(f"Fallback basins() also failed: {e2}")
@@ -349,7 +361,13 @@ class Catchment:
         if np.all(~self.catchment_mask):
             if stream_order > 1:
                 # try again with a lower stream_order (legacy behavior)
-                self.delineate_basin(gauge_coords, stream_order=stream_order - 1, ref_catchment_area=ref_catchment_area, max_distance_deg=max_distance_deg, max_error=max_error)
+                self.delineate_basin(
+                    gauge_coords,
+                    stream_order=stream_order - 1,
+                    ref_catchment_area=ref_catchment_area,
+                    max_distance_cells=max_distance_cells,
+                    max_error=max_error,
+                )
                 return
             logger.error("No catchment found for the given coordinates")
             return
