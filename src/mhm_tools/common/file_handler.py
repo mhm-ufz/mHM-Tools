@@ -4,6 +4,8 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 from enum import Enum
 from pathlib import Path
+from textwrap import dedent
+from textwrap import dedent
 
 import dask
 import numpy as np
@@ -39,14 +41,14 @@ def create_header(ds, output_path=None, no_data_value="-9999", write=True):
 
     ncols = len(x)
     nrows = len(y)
-    header_str = f"""
+    header_str = dedent(f"""
         ncols                {ncols}
         nrows                {nrows}
         xllcorner            {xllcorner:.6f}
         yllcorner            {yllcorner:.6f}
         cellsize             {cellsize:.6f}
         NODATA_value         {no_data_value}
-        """
+        """)
     if write:
         if output_path.is_dir():
             header_out_path = output_path / "header.txt"
