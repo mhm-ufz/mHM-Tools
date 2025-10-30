@@ -11,6 +11,7 @@ Authors
 import logging
 import pathlib as pl
 
+from mhm_tools.common.netcdf import generate_bounds
 from mhm_tools.pre.create_id_gauges import write_gauge_id
 import numpy as np
 import pyflwdir
@@ -1036,15 +1037,25 @@ class Catchment:
                     "axis": "X",
                 }
             )
-            if not self.do_upscale:
+
+            mask_upscaled = None
+            if not self.do_upscale and self.l2_resolution is not None:
                 mask_upscaled = self.upscale_mask_with_correct_coords(mask_da)
             else:
                 mask_upscaled = mask_da
-            mask_upscaled = mask_upscaled.rename({"lat": "lat_l2", "lon": "lon_l2"})
             mask_ds = xr.Dataset(
-                {"land_mask": mask_da, "mask": mask_da, "mask_l2": mask_upscaled},
-                # coords={"lon": ds.lon, "lat": ds.lat, "lat_l2": mask_upscaled.lat, "lon_l2": mask_upscaled.lon},
+                {"land_mask": mask_da, "mask": mask_da}
             )
+            if mask_upscaled is not None:
+                mask_upscaled = mask_upscaled.rename({"lat": "lat_l2", "lon": "lon_l2"})
+                mask_ds["land_mask_l2"] = mask_upscaled
+            dims = set(mask_ds.dims)
+            all_coords = set(mask_ds.coords)
+            dim_coords = all_coords & dims  # intersection
+            for var in dim_coords:
+                bounds_name = f"{var}_bnds"
+                mask_ds.coords[bounds_name] = generate_bounds(mask_ds[var])
+                mask_ds[var].attrs["bounds"] = bounds_name
             write_xarray_to_file(mask_ds, mask_file)
             logger.info(f"Mask file has been written to {mask_file}")
         else:
