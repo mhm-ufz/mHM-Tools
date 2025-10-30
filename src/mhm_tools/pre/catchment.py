@@ -1037,15 +1037,14 @@ class Catchment:
                     "axis": "X",
                 }
             )
-
-            mask_upscaled = None
-            if not self.do_upscale and self.l2_resolution is not None:
-                mask_upscaled = self.upscale_mask_with_correct_coords(mask_da)
-            else:
-                mask_upscaled = mask_da
             mask_ds = xr.Dataset(
                 {"land_mask": mask_da, "mask": mask_da}
             )
+            mask_upscaled = None
+            if self.do_upscale:
+                mask_upscaled = mask_da
+            elif self.l2_resolution is not None:
+                mask_upscaled = self.upscale_mask_with_correct_coords(mask_da)
             if mask_upscaled is not None:
                 mask_upscaled = mask_upscaled.rename({"lat": "lat_l2", "lon": "lon_l2"})
                 mask_ds["land_mask_l2"] = mask_upscaled
