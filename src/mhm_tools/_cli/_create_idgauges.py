@@ -34,7 +34,7 @@ def add_args(parser):
         "--output",
         dest="out_file",
         required=False,
-        default="gauges_id.asc",
+        default="idgauges.asc",
         help="The name of the output file.",
     )
     parser.add_argument(

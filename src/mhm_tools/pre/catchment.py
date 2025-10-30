@@ -687,7 +687,7 @@ class Catchment:
                 )
                 id_ds = id_da.to_dataset(name="data")
                 id_ds = write_gauge_id(id_ds, gauge_id, self.gauge_lat, self.gauge_lon)
-                write_xarray_to_ascii(id_ds, out_path / 'gauges_id.asc', "data", fmt="%.0f")
+                write_xarray_to_ascii(id_ds, out_path / 'idgauges.asc', "data", fmt="%.0f")
 
 
     def write_single_variable_file(
@@ -1045,6 +1045,7 @@ class Catchment:
                 mask_upscaled = mask_da
             elif self.l2_resolution is not None:
                 mask_upscaled = self.upscale_mask_with_correct_coords(mask_da)
+            
             if mask_upscaled is not None:
                 mask_upscaled = mask_upscaled.rename({"lat": "lat_l2", "lon": "lon_l2"})
                 mask_ds["land_mask_l2"] = mask_upscaled
