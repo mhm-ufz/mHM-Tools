@@ -13,7 +13,7 @@ import numpy as np
 import xarray as xr
 
 from mhm_tools.common.logger import ErrorLogger, log_arguments, log_errors
-from mhm_tools.common.netcdf import read_dataset, set_netcdf_encoding, 
+from mhm_tools.common.netcdf import read_dataset, set_netcdf_encoding
 from mhm_tools.common.xarray_utils import (
     get_coord_key,
     get_single_data_var,
