@@ -11,6 +11,7 @@ Authors
 import logging
 import pathlib as pl
 
+from mhm_tools.common.constants import NC_ENCODE_MASK
 from mhm_tools.common.netcdf import generate_bounds
 from mhm_tools.pre.create_id_gauges import write_gauge_id
 import numpy as np
@@ -1056,7 +1057,10 @@ class Catchment:
                 bounds_name = f"{var}_bnds"
                 mask_ds.coords[bounds_name] = generate_bounds(mask_ds[var])
                 mask_ds[var].attrs["bounds"] = bounds_name
-            write_xarray_to_file(mask_ds, mask_file)
+            encoding = {
+                v: {"zlib": True, "complevel": 4, "shuffle": True, **NC_ENCODE_MASK} for v in mask_ds.data_vars
+            }
+            write_xarray_to_file(mask_ds, mask_file, encoding=encoding)
             logger.info(f"Mask file has been written to {mask_file}")
         else:
             logger.info("No mask file path specified.")
