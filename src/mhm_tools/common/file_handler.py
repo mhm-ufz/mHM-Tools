@@ -557,7 +557,10 @@ def move_reserved_attrs_to_encoding(
             for name in names
             if ds.variables[name].encoding
         }
-        encoding = {**(encoding_in or {}), **encoding}
+        for name, env in encoding.items():
+            for key, val in encoding_in.items():
+                if key not in env:
+                    encoding[name][key] = val
         return ds, encoding
 
     # DataArray
