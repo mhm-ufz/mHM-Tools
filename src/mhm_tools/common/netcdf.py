@@ -180,10 +180,30 @@ def sanitize_nc_encoding(ds: "xr.Dataset", encoding: dict) -> dict:
                 e.pop(k, None)
 
         # Clean any leftover attrs that might have been set earlier
-        # (especially important for boolean vars)
-        for k in ("missing_value", "_FillValue"):
-            if k in da.attrs and da.dtype == np.bool_:
-                da.attrs.pop(k, None)
+        # (especially important for boolean vars) and avoid conflicts
+        # between variable attributes and encoding entries (xarray will
+        # raise if both provide _FillValue). If a fill/missing value is
+        # present in attrs, prefer moving it into encoding (if not already
+        # present) and then remove from attrs to avoid clashes.
+        mv = da.attrs.pop("missing_value", None)
+        fv = da.attrs.pop("_FillValue", None)
+        # If encoding does not already specify _FillValue, prefer the
+        # attribute value (if available) and cast it to the variable dtype.
+        if fv is not None and "_FillValue" not in e and da.dtype != np.bool_:
+            try:
+                e["_FillValue"] = np.array(fv).astype(da.dtype).item()
+            except Exception:
+                # if casting fails, drop the fill value
+                e.pop("_FillValue", None)
+        # If mv (missing_value) exists and encoding doesn't include it,
+        # move it to attrs (ensuring dtype match) — this keeps netCDF CF legacy
+        # but avoids placing it into encoding where it can conflict.
+        if mv is not None and "missing_value" not in e:
+            try:
+                da.attrs["missing_value"] = np.array(mv).astype(da.dtype).item()
+            except Exception:
+                # drop if cannot cast
+                da.attrs.pop("missing_value", None)
 
         if da.dtype == np.bool_:
             # Booleans: do NOT set fill attributes at all

@@ -19,6 +19,7 @@ from mhm_tools.common.logger import ErrorLogger, log_arguments
 from mhm_tools.common.xarray_utils import (
     crop_ds,
     get_coord_key,
+    get_dtype,
     get_single_data_var,
     induce_data_var_from_file_name,
 )
@@ -175,19 +176,27 @@ def crop_file_with_header(ds_in, file_path, output_path, lonslice, latslice):
     yll = header_information["yllcorner"] + header_information["cellsize"] * (
         header_information["nrows"] - index_y_max
     )
-
     new_header_information = {
-        "ncols": index_x_max - index_x_min,
-        "nrows": index_y_max - index_y_min,
-        "xllcorner": xll,
-        "yllcorner": yll,
-        "cellsize": header_information["cellsize"],
-        "nodata_value": header_information["nodata_value"],
+        "ncols":                index_x_max - index_x_min,
+        "nrows":                index_y_max - index_y_min,
+        "xllcorner":            xll,
+        "yllcorner":            yll,
+        "cellsize":             header_information["cellsize"],
+        "NODATA_value":         header_information["nodata_value"],
     }
+    # new_header_information = dedent(f"""
+    #     ncols                {index_x_max - index_x_min}
+    #     nrows                {index_y_max - index_y_min}
+    #     xllcorner            {xll:.6f}
+    #     yllcorner            {yll:.6f}
+    #     cellsize             {header_information["cellsize"]}
+    #     NODATA_value         {header_information["nodata_value"]}
+    #     """)
     logger.info(
         f"Writing header file to {header_out_path} with header: {new_header_information}"
     )
-    write_header(header_out_path, new_header_information)
+    dtype = get_dtype(ds_in)
+    write_header(header_out_path, new_header_information, dtype)
     try:
         data = ds_in[data_var].isel(
             {
