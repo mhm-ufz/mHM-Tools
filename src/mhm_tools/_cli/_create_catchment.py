@@ -1,6 +1,7 @@
 """Create basin id file and deliniate catchments."""
 
 import logging
+from pathlib import Path
 
 import numpy as np
 
@@ -132,8 +133,8 @@ def add_args(parser):
     )
     optional_args.add_argument(
         "--mask_file",
-        default=None,
-        help=("Path where to save the mask file"),
+        default='mask.nc',
+        help=("Path where to save the mask file. Default saving to output_path/mask.nc"),
     )
     optional_args.add_argument(
         "--frame",
@@ -208,6 +209,10 @@ def run(args):
         msg = "If upscaling is enabled l1_resolution must be provided."
         raise ValueError(msg)
     available_mem = get_available_mem_in_unit(args.available_mem)
+    if Path(args.mask_file).name == str(Path(args.mask_file)):
+        mask_file = str(Path(args.output_path) / Path(args.mask_file))
+    else:
+        mask_file = args.mask_file
     create_catchment(
         input_file=args.input_file,
         output_path=args.output_path,
@@ -216,7 +221,7 @@ def run(args):
         ftype=args.ftp,
         gauge_coords=gauge_coords,
         coordinate_slices=coordinate_slices,
-        mask_file=args.mask_file,
+        mask_file=mask_file,
         l1_resolution=args.l1_resolution,
         l11_resolution=args.l11_resolution,
         l2_resolution=args.l2_resolution,
