@@ -16,9 +16,7 @@ from mhm_tools.common.netcdf import read_dataset, sanitize_nc_encoding, set_netc
 from mhm_tools.common.xarray_utils import (
     get_coord_key,
     get_single_data_var,
-    is_dask_chunked,
     normalize_lat_lon,
-    xr_nbytes,
 )
 
 logger = logging.getLogger(__name__)
@@ -40,8 +38,7 @@ def create_header(ds, output_path=None, no_data_value="-9999", write=True):
     cellsize = abs(x[1] - x[0])
     xllcorner = np.nanmin(x) - 0.5 * cellsize
     yllcorner = np.nanmin(y) - 0.5 * cellsize
-    logger.debug(x)
-    logger.debug(y)
+
     ncols = len(x)
     nrows = len(y)
     header_str = dedent(f"""
