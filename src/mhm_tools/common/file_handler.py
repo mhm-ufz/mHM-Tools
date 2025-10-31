@@ -357,8 +357,8 @@ def write_xarray_to_file(
             # if var_name is not None:
                 # encoding = generate_safe_nc_encoding(ds[var_name])
             try:
-                logger.info(f"Using encoding: {encoding}")
                 encoding = sanitize_nc_encoding(ds, encoding)
+                logger.info(f"Using encoding: {encoding}")
                 set_netcdf_encoding(ds, encoding)
                 ds.to_netcdf(
                     file_path, engine=engine, format="NETCDF4", encoding=encoding
