@@ -5,8 +5,9 @@ from pathlib import Path
 from typing import Any, List, Optional, Union
 
 import xarray as xr
+import numpy as np
 
-from .constants import NC_ENCODE_DEFAULTS, WILDCARDS
+from .constants import NC_ENCODE_DEFAULTS, NO_DATA, WILDCARDS
 
 logger = logging.getLogger(__name__)
 
@@ -163,6 +164,67 @@ def set_netcdf_encoding(
     for name in dim_coords | bnds:
         ds[name].encoding = {"_FillValue": None}
 
+def sanitize_nc_encoding(ds: "xr.Dataset", encoding: dict) -> dict:
+    """Return a safe encoding dict and clean ds attrs so netCDF4 won't error."""
+    enc_out = {}
+    for name in ds.data_vars:
+        if name not in encoding:
+            continue
+        da = ds[name]
+        e = dict(encoding[name])  # shallow copy
+
+        # Always keep compression settings
+        for k in list(e.keys()):
+            if k not in {"zlib", "complevel", "shuffle", "_FillValue"}:
+                # 'missing_value' and any other stray keys should not live in 'encoding'
+                e.pop(k, None)
+
+        # Clean any leftover attrs that might have been set earlier
+        # (especially important for boolean vars)
+        for k in ("missing_value", "_FillValue"):
+            if k in da.attrs and da.dtype == np.bool_:
+                da.attrs.pop(k, None)
+
+        if da.dtype == np.bool_:
+            # Booleans: do NOT set fill attributes at all
+            e.pop("_FillValue", None)
+        else:
+            # Cast _FillValue to the variable dtype if present
+            if "_FillValue" in e:
+                try:
+                    e["_FillValue"] = np.array(e["_FillValue"]).astype(da.dtype).item()
+                except Exception:
+                    # If casting fails, drop it rather than erroring out
+                    e.pop("_FillValue", None)
+
+            # If you *must* also expose 'missing_value' (CF legacy), put it in attrs
+            # with matching dtype (commented out by default):
+            # mv = da.attrs.get("missing_value", None)
+            # if mv is not None:
+            #     da.attrs["missing_value"] = np.array(mv).astype(da.dtype).item()
+
+        enc_out[name] = e
+
+    return enc_out
+
+# def generate_safe_nc_encoding(da, target_mb=320, fill=NO_DATA):
+#     item = np.dtype(da.dtype).itemsize
+#     ny = da.sizes.get("lat", 1)
+#     nx = da.sizes.get("lon", 1)
+#     per_t_bytes = ny * nx * item
+#     t = max(1, int((target_mb * 1024**2) // per_t_bytes))
+#     return {
+#         da.name
+#         or "var": {
+#             "chunksizes": (min(t, da.sizes.get("time", t)), ny, nx),
+#             "zlib": True,
+#             "complevel": 4,
+#             "dtype": "f4",
+#             "_FillValue": fill,
+#             "missing_value": fill,
+#             "contiguous": False,
+#         }
+#     }
 
 def generate_bounds(
     da: xr.DataArray,
