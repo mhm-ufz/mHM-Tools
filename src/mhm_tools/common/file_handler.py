@@ -332,31 +332,14 @@ def write_xarray_to_file(
                 )
                 delayed.compute(scheduler="threads", num_workers=1)
         else:
+            encoding = NC_ENCODE_DEFAULTS.copy()
             if encoding is None:
-                ds, encoding = move_reserved_attrs_to_encoding(ds)
-
-            def safe_nc_encoding(da, target_mb=32, fill=-9999.0):
-                item = np.dtype(da.dtype).itemsize
-                ny = da.sizes.get("lat", 1)
-                nx = da.sizes.get("lon", 1)
-                per_t_bytes = ny * nx * item
-                t = max(1, int((target_mb * 1024**2) // per_t_bytes))
-                return {
-                    da.name
-                    or "var": {
-                        "chunksizes": (min(t, da.sizes.get("time", t)), ny, nx),
-                        "zlib": True,
-                        "complevel": 4,
-                        "dtype": "f4",
-                        "_FillValue": np.float32(fill),
-                        "contiguous": False,
-                    }
-                }
-
+                ds, encoding = move_reserved_attrs_to_encoding(ds, encoding=encoding)
             logger.info(ds)
-            if var_name is not None:
-                encoding = safe_nc_encoding(ds[var_name], target_mb=32)
+            # if var_name is not None:
+                # encoding = generate_safe_nc_encoding(ds[var_name])
             try:
+                set_netcdf_encoding(ds, encoding)
                 ds.to_netcdf(
                     file_path, engine=engine, format="NETCDF4", encoding=encoding
                 )
@@ -525,6 +508,7 @@ def move_reserved_attrs_to_encoding(
     obj: xr.Dataset | xr.DataArray,
     include_coords: bool = True,
     extra_reserved: set[str] | None = None,
+    encoding_in: dict | None = None,
 ):
     """
     Move reserved serialization keys from .attrs to .encoding and return:
@@ -539,7 +523,8 @@ def move_reserved_attrs_to_encoding(
         If True, also process coordinate variables.
     extra_reserved : set[str] | None
         Additional keys to treat as reserved (moved to encoding).
-
+    encoding_in : dict | None
+        Initial encoding dict to update. If None, starts empty.
     Returns
     -------
     cleaned_obj : same type as `obj`
@@ -549,7 +534,8 @@ def move_reserved_attrs_to_encoding(
     reserved = set(RESERVED_FOR_ENCODING)
     if extra_reserved:
         reserved |= set(extra_reserved)
-
+    
+    @log_errors(raise_exceptions=False)
     def _process_var(var):
         # Move reserved keys from attrs -> encoding
         for k in list(var.attrs.keys()):
@@ -570,6 +556,7 @@ def move_reserved_attrs_to_encoding(
             for name in names
             if ds.variables[name].encoding
         }
+        encoding = {**(encoding_in or {}), **encoding}
         return ds, encoding
 
     # DataArray
