@@ -10,6 +10,7 @@ from pathlib import Path
 
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
+from mhm_tools.common.utils import dict_to_multiline_string
 import numpy as np
 from matplotlib import gridspec
 
@@ -933,9 +934,9 @@ class Hydrograph:
 
     def write_output(self):
         out_dict = {k: [v] for k, v in {**self.objectives.__dict__}.items()}
-        logger.info(f"generated metrics: {out_dict}")
         if id is not None:
             out_dict["id"] = str(id)
+        logger.info(f"generated metrics: {dict_to_multiline_string(out_dict)}")
         create_csv_from_dict(out_dict, self.output_file.parent / "kge.csv")
 
 
