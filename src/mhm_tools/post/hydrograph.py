@@ -892,7 +892,7 @@ class Hydrograph:
         )
         if self.catchment.area:
             fig.text(
-                s=f"Area = {self.catchment.area:.2f}" + r"$km^2$",
+                s=f"Area = {self.catchment.area}" + r"$km^2$",
                 x=0.5,
                 y=0.97,
                 horizontalalignment="center",
