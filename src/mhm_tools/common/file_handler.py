@@ -69,10 +69,10 @@ def create_header(ds, output_path=None, no_data_value="-9999", write=True):
             msg = "Header output path is neither file nor directory."
             with ErrorLogger(logger):
                 raise ValueError(msg)
+        header_str = write_header(header_out_path, header_dict, dtype)
         logger.info(
             f"Writing header file to {header_out_path} with header str: {header_str}"
         )
-        header_str = write_header(header_out_path, header_dict, dtype)
     else: 
         header_dict = standardize_header(header_dict)
         typ = int if issubclass(np.dtype(dtype).type, np.integer) else float
