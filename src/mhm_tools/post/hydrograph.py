@@ -422,7 +422,10 @@ class Hydrograph:
             TypeError: If the variable name in the discharge dataset is not a string.
         """
         path = Path(path)
-        discharge_file = path / "discharge.nc"
+        if path.is_dir():
+            discharge_file = path / "discharge.nc"
+        else:
+            discharge_file = path 
         if discharge_file.is_file():
             with get_xarray_ds_from_file(path / "discharge.nc") as ds:
                 discharge_data = ds.load()
