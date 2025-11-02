@@ -343,14 +343,14 @@ def write_xarray_to_file(
     elif file_path.suffix == ".nc":
         if isinstance(ds, xr.DataArray):
             var_name = ds.name
-            print(f"var {var_name}")
+            logger.debug(f"var {var_name}")
             ds = ds.to_dataset(name=var_name) 
             data_vars = [var_name]
         elif var_name is None: 
             data_vars = list(ds.data_vars)
         else: 
             data_vars = [var_name]
-        print(f"data vars: {data_vars}")
+        logger.debug(f"data vars: {data_vars}")
         if encoding is None:
             encoding = {
                 v: {"zlib": True, "complevel": 4, "shuffle": True, **NC_ENCODE_DEFAULTS} for v in data_vars
