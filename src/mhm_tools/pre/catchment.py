@@ -36,7 +36,7 @@ CUTOFF_THRESHOLD = 175
 # FUNCTIONS
 
 
-def create_cell_area(ds, lat_name="lat", lon_name="lon"):
+def create_cell_area(self, ds, lat_name="lat", lon_name="lon"):
     """Create a cell area data array in km2."""
     logger.info("Create cell area data array.")
     lat = ds[lat_name].data
@@ -92,6 +92,7 @@ class Catchment:
         self.uparea_grid = None
         self.grdare = None
         self.elevtn = None
+        self.cell_area = None
         self._fdir = None
         self.gauge_lat = None
         self.gauge_lon = None
@@ -227,7 +228,9 @@ class Catchment:
             return None
         if cell_area is not None:
             return self._fdir.accuflux(cell_area, nodata=-9999)
-        return self._fdir.accuflux(create_cell_area(self.ds).data, nodata=-9999)
+        if self.cell_area is None:
+            self.cell_area = create_cell_area(self.ds).data
+        return self._fdir.accuflux(self.cell_area, nodata=-9999)
 
     def _coord_to_index(self, lat, lon):
         """Map latitude/longitude or indices to integer grid indices."""
@@ -372,10 +375,11 @@ class Catchment:
 
         # Compute upstream area (in km2) using accuflux and cell areas
         if ref_catchment_area is not None:
-            cell_area = create_cell_area(self.ds).data
+            if self.cell_area is None:
+                self.cell_area = create_cell_area(self.ds).data
             upstream_area = None
             try:
-                upstream_area = self.calc_upstream_area(cell_area=cell_area)
+                upstream_area = self.calc_upstream_area()
             except Exception:
                 logger.exception("Failed to compute upstream area (accuflux).")
 
