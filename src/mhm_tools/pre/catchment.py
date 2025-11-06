@@ -36,7 +36,7 @@ CUTOFF_THRESHOLD = 175
 # FUNCTIONS
 
 
-def create_cell_area(self, ds, lat_name="lat", lon_name="lon"):
+def create_cell_area(ds, lat_name="lat", lon_name="lon"):
     """Create a cell area data array in km2."""
     logger.info("Create cell area data array.")
     lat = ds[lat_name].data
