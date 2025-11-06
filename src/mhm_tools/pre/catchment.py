@@ -435,10 +435,10 @@ class Catchment:
         
         self.catchment_mask = self.basin > 0
         # logging and sanity checks
-        mean_cell_area = float(np.mean(cell_area)) if cell_area is not None else np.nan
+        mean_cell_area = float(np.mean(self.cell_area)) if self.cell_area is not None else np.nan
         unique_vals = np.unique(self.basin[self.catchment_mask])
         cell_count = int(np.sum(self.catchment_mask))
-        delineated_area = float(np.sum(cell_area[self.catchment_mask])) if cell_area is not None else np.nan
+        delineated_area = float(np.sum(self.cell_area[self.catchment_mask])) if self.cell_area is not None else np.nan
         uparea_at_outlet = upstream_area[outlet_idx] if upstream_area is not None else np.nan
         area_error = (delineated_area - ref_catchment_area) / ref_catchment_area
 
