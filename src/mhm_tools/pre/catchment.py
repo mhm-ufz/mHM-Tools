@@ -226,8 +226,6 @@ class Catchment:
         if self._fdir is None:
             logger.error("Flow direction is not initialized.")
             return None
-        if cell_area is not None:
-            return self._fdir.accuflux(cell_area, nodata=-9999)
         if self.cell_area is None:
             self.cell_area = create_cell_area(self.ds).data
         return self._fdir.accuflux(self.cell_area, nodata=-9999)
@@ -1261,13 +1259,16 @@ def create_catchment(
         with ErrorLogger(logger):
             msg = f"Unexpected value for var={var}, must be 'fdir' or 'dem'"
             raise ValueError(msg)
+    
 
+    chunking = True if available_mem is not None else False
     with get_xarray_ds_from_file(
         input_file,
         var_name,
         normalize_latlon_coords=True,
         force_decending_y=True,
         available_mem_gib=available_mem,
+        chunking=chunking
     ) as input_ds:
         # transform
         transform = get_transformation_matrix_nc(input_ds, var_name)

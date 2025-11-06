@@ -168,7 +168,7 @@ def add_args(parser):
         "--available_mem",
         required=False,
         type=str,
-        default="5Gb",
+        default=None,
         help=("""Available memory per cpu in Gb or Mb (default Gb)"""),
     )
     optional_args.add_argument(
