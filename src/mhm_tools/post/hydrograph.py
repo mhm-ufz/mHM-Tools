@@ -929,6 +929,7 @@ class Hydrograph:
         return True
 
     def write_output(self):
+        """Write calculated objective metrics to CSV."""
         out_dict = {k: [v] for k, v in {**self.objectives.__dict__}.items()}
         logger.info(f"generated metrics: {out_dict}")
         if id is not None:
@@ -952,12 +953,11 @@ def get_hydrograph_from_path(
     if output_file.suffix and output_file.parent.exists():
         hydro.output_file = output_file
     else:
-        if output_file.suffix: 
+        if output_file.suffix:
             output_file = output_file.parent
         if not output_file.is_dir():
             output_file.mkdir(parents=True)
         hydro.output_file = output_file / "hydrograph.png"
-            
 
     hydro.title = title
     hydro.show = show

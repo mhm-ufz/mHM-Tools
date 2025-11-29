@@ -257,7 +257,7 @@ def call_create_latlon(
     latlon_output_file,
     meteo_header_path,
     crs,
-    chunking=True
+    chunking=True,
 ):
     """Create lat/lon headers for multiple resolutions and write the latlon file.
 
@@ -318,7 +318,7 @@ def crop_file(
     overwrite,
     available_mem_gib,
     force_header_creation=False,
-    chunking=False
+    chunking=False,
 ):
     """Crops one file by lat and lon slice and may mask it with the mask dataarray."""
     logger.info(f"Cropping the file {input_file}")
@@ -439,13 +439,14 @@ def crop_file(
         for var_name in ds_cropped.data_vars:
             ds_cropped[var_name] = ds_cropped[var_name].astype(float)
         write_to_file(ds_cropped, output_file)
-        if force_header_creation and not (output_file.parent / 'header.txt').is_file():
-            create_header(ds_cropped, output_path=output_file.parent / 'header.txt', write=True)
+        if force_header_creation and not (output_file.parent / "header.txt").is_file():
+            create_header(
+                ds_cropped, output_path=output_file.parent / "header.txt", write=True
+            )
 
     logger.info(f"Written to {output_file}")
-    if force_header_creation:
-        if not (output_file.parent / 'header.txt').is_file():
-            create_header(ds_cropped, output_path=output_file.parent, write=True)
+    if force_header_creation and not (output_file.parent / "header.txt").is_file():
+        create_header(ds_cropped, output_path=output_file.parent, write=True)
     return latlon_files
 
 
@@ -465,7 +466,7 @@ def crop_mhm_setup(
     recursive_depth=5,
     available_mem_gib=5,
     force_header_creation=False,
-    chunking=False
+    chunking=False,
 ):
     """Cut out an existing mhm domain setup using a mask file."""
     # check if the input is correct
@@ -494,7 +495,7 @@ def crop_mhm_setup(
             overwrite=overwrite,
             available_mem_gib=available_mem_gib,
             force_header_creation=force_header_creation,
-            chunking=chunking
+            chunking=chunking,
         )
         for f in files
     )
@@ -509,5 +510,5 @@ def crop_mhm_setup(
             latlon_files.latlon_output_file,
             latlon_files.meteo_header_path,
             crs,
-            chunking=chunking
+            chunking=chunking,
         )

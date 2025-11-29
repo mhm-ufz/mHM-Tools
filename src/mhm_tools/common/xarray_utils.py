@@ -1,18 +1,21 @@
 """Provides basic xarray utils."""
 
 import logging
+from typing import Optional
+
+import numpy as np
+import xarray as xr
+from scipy.stats import spearmanr
 
 from mhm_tools.common.constants import LAT_KEYS, LON_KEYS, TIME_KEYS
-import numpy as np
-from scipy.stats import spearmanr
-import xarray as xr
-
 from mhm_tools.common.logger import ErrorLogger
 
 logger = logging.getLogger(__name__)
 
 
-def normalize_lat_lon(ds: xr.Dataset, lat: str = None, lon: str = None) -> xr.Dataset:
+def normalize_lat_lon(
+    ds: xr.Dataset, lat: Optional[str] = None, lon: Optional[str] = None
+) -> xr.Dataset:
     """
     Normalize latitude and longitude dimension and coordinate names to 'lat' and 'lon'.
 
@@ -23,7 +26,7 @@ def normalize_lat_lon(ds: xr.Dataset, lat: str = None, lon: str = None) -> xr.Da
         lat = get_coord_key(ds, lon=True)
     if lon is None:
         lon = get_coord_key(ds, lon=True)
-    
+
     coords_and_dims = list(ds.coords) + list(ds.dims)
 
     # Rename coordinate variables if needed

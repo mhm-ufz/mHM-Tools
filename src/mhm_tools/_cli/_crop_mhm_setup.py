@@ -134,9 +134,7 @@ def add_args(parser):
         required=False,
         default=False,
         action="store_true",
-        help=(
-            """Force creation of header file for all files."""
-        ),
+        help=("""Force creation of header file for all files."""),
     )
 
 
@@ -180,5 +178,5 @@ def run(args):
         recursive_depth=args.folder_recursion_depth,
         available_mem_gib=available_mem,
         force_header_creation=args.create_header,
-        chunking=args.chunking
+        chunking=args.chunking,
     )

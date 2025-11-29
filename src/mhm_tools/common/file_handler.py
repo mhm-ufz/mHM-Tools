@@ -52,7 +52,7 @@ def create_header(ds, output_path=None, no_data_value="-9999", write=True):
         elif output_path.is_file():
             header_out_path = output_path
         else:
-            msg = f"Header output path is neither file nor directory."
+            msg = "Header output path is neither file nor directory."
             with ErrorLogger(logger):
                 raise ValueError(msg)
         logger.info(
@@ -142,7 +142,9 @@ def chunk_dataset_space_and_time(ds, available_mem_gib) -> xr.Dataset:
       - try to keep time chunks small (1…4)vi
       - make y/x chunks as square as possible
     """
-    logger.info(f"Chunking dataset with a max amount of mem of {available_mem_gib / 1_000_000_000 :.1f}Gb")
+    logger.info(
+        f"Chunking dataset with a max amount of mem of {available_mem_gib / 1_000_000_000 :.1f}Gb"
+    )
     # ---------------- metadata only (cheap) --------------------------------
     var_name = next(iter(ds.data_vars))  # first data variable
     var = ds[var_name]  # an xarray.Variable wrapper
@@ -239,13 +241,13 @@ def get_xarray_ds_from_file(
     lat_key = get_coord_key(ds_out, lat=True, raise_exception=False)
     lon_key = get_coord_key(ds_out, lon=True, raise_exception=False)
     # force correct order of y coordinate
-    if lat_key is not None:
-        if (
-            force_decending_y and ds_out[lat_key].values[0] < ds_out[lat_key].values[-1]
-        ) or (
+    if lat_key is not None and (
+        (force_decending_y and ds_out[lat_key].values[0] < ds_out[lat_key].values[-1])
+        or (
             force_ascending_y and ds_out[lat_key].values[0] > ds_out[lat_key].values[-1]
-        ):
-            ds_out = ds_out.sel({lat_key: slice(None, None, -1)})
+        )
+    ):
+        ds_out = ds_out.sel({lat_key: slice(None, None, -1)})
     logger.debug(ds_out)
     logger.debug(lat_key)
     logger.debug(lon_key)
@@ -333,9 +335,7 @@ def write_xarray_to_ascii(dataset, filepath, data_var=None, fmt=None):
         logger.info(f"Writting file to {filepath}")
 
 
-def read_ascii_to_xarray(
-    filepath, var_name=None
-):
+def read_ascii_to_xarray(filepath, var_name=None):
     """Read an mHM readable asci file to an xarray dataset."""
     # Read the header from the file
     with filepath.open("r") as f:

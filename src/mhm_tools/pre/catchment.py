@@ -425,7 +425,9 @@ class Catchment:
                 msg = f'Format "{format}" unknown, use one of ["nc", "asc"]'
                 raise Exception(msg)
 
-    def processing_data_variable(self, var_name, cut_by_basin, lat_slice=None, lon_slice=None):
+    def processing_data_variable(
+        self, var_name, cut_by_basin, lat_slice=None, lon_slice=None
+    ):
         """Process data variable, masking it and croping it spatial dimensions."""
         logger.info(f"Processing {var_name}")
         data = getattr(self, var_name)
@@ -467,7 +469,7 @@ class Catchment:
                 "lat": lat,  # [slice(860, 870)],
             },
         )
-        if lat_slice is not None and lon_slice is not None: 
+        if lat_slice is not None and lon_slice is not None:
             logger.info(f"Cutting {var_name} data to correct spatial dimensions")
             data_var = data_var.sel(lat=lat_slice, lon=lon_slice)
         logger.debug(data_var)
@@ -571,7 +573,7 @@ class Catchment:
                 logger.info(
                     f"Regridding to fit coarse grid with res {self.l1_resolution} (factor {factor})"
                 )
-                min_row = min_row // factor * factor 
+                min_row = min_row // factor * factor
                 min_col = min_col // factor * factor
                 # Calculating max_row/col it needs:
                 #  +1 to include the whole last coarse grid cell -1 to not get one cell from the next block

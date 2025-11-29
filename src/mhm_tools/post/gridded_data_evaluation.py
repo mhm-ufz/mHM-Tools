@@ -22,11 +22,11 @@ from mhm_tools.common.file_handler import (
 from mhm_tools.common.logger import ErrorLogger, log_arguments, log_errors
 from mhm_tools.common.spatial_metrics import create_results_csv
 from mhm_tools.common.xarray_utils import (
+    get_clim_from_ds,
     get_coord_key,
     get_overlapping_time_slice,
+    spearman_correlation,
     timedelta_to_alias,
-    get_clim_from_ds,
-    spearman_correlation
 )
 
 logger = logging.getLogger(__name__)
@@ -113,6 +113,7 @@ def spearman_spatial_joblib(
         pval[i, j] = p
 
     return res, pval
+
 
 def get_std_from_ds(ds, input_var=None, clim=None, factor=1):
     """Calculate maps of temporal standard deviation from an DataArray.
@@ -813,7 +814,7 @@ def get_stats(
     return stats_ds
 
 
-def compare_input_with_ref(  # noqa: PLR0913
+def compare_input_with_ref(  # noqa: PLR0912, PLR0913
     input_path,
     input_var,
     output_path,
