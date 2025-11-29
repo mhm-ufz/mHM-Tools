@@ -39,14 +39,16 @@ def create_header(ds, output_path=None, no_data_value="-9999", write=True):
 
     ncols = len(x)
     nrows = len(y)
-    header_str = dedent(f"""
+    header_str = dedent(
+        f"""
         ncols                {ncols}
         nrows                {nrows}
         xllcorner            {xllcorner:.6f}
         yllcorner            {yllcorner:.6f}
         cellsize             {cellsize:.6f}
         NODATA_value         {no_data_value}
-        """)
+        """
+    )
     if not write:
         return header_str
 

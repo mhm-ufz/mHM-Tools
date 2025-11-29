@@ -13,13 +13,14 @@ import xarray as xr
 import mhm_tools.common.file_handler as fh
 import mhm_tools.post.GRDC_validation as gv
 
-
 # -----------------------------
 # Small helpers to make datasets
 # -----------------------------
 
 
-def make_observed_data(ids, times, xs, ys, facc, var="runoff_mean_mm", values=None, nan_mask=False):
+def make_observed_data(
+    ids, times, xs, ys, facc, var="runoff_mean_mm", values=None, nan_mask=False
+):
     """Observed discharge dataset expected by Q_data_to_xarray (second open)."""
     if values is None:
         rng = np.random.RandomState(0)
@@ -125,7 +126,9 @@ class TestQDataToXarray(unittest.TestCase):
         self.sim_times = pd.date_range("2001-01-01", periods=4, freq="3H")
 
         # datasets for mocked file reads
-        self.obs_ds = make_observed_data(self.ids, self.obs_times, self.xs, self.ys, self.facc, var="runoff_mean_mm")
+        self.obs_ds = make_observed_data(
+            self.ids, self.obs_times, self.xs, self.ys, self.facc, var="runoff_mean_mm"
+        )
         self.sim_ds = make_sim_data(self.sim_times, var="Qrouted")
 
     def _mock_overlapping_time_slice(self, sim_ds, obs_ds):

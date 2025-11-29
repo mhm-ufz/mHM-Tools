@@ -41,7 +41,7 @@ class TestCreateHeader(unittest.TestCase, BaseDatasetMixin):
         print(header)
         header_dict = {}
         for line in header.strip().splitlines():
-            if not line: 
+            if not line:
                 continue
             print(line)
             line_split = [cell for cell in line.strip().split() if cell]
@@ -51,8 +51,12 @@ class TestCreateHeader(unittest.TestCase, BaseDatasetMixin):
         self.assertEqual(header_dict["ncols"], str(ds.sizes["lon"]))
         self.assertEqual(header_dict["nrows"], str(ds.sizes["lat"]))
         self.assertAlmostEqual(float(header_dict["cellsize"]), 1.0)
-        self.assertAlmostEqual(float(header_dict["xllcorner"]), ds["lon"].values.min() - 0.5)
-        self.assertAlmostEqual(float(header_dict["yllcorner"]), ds["lat"].values.min() - 0.5)
+        self.assertAlmostEqual(
+            float(header_dict["xllcorner"]), ds["lon"].values.min() - 0.5
+        )
+        self.assertAlmostEqual(
+            float(header_dict["yllcorner"]), ds["lat"].values.min() - 0.5
+        )
         self.assertEqual(header_dict["NODATA_value"], "-9999")
 
     def test_create_header_writes_file(self):
@@ -77,7 +81,7 @@ class TestCreateHeader(unittest.TestCase, BaseDatasetMixin):
             self.assertEqual(header_dict["ncols"], str(ds.sizes["lon"]))
             self.assertEqual(header_dict["nrows"], str(ds.sizes["lat"]))
             self.assertEqual(header_dict["NODATA_value"], "NA")
-        
+
 
 class TestChunkHelpers(unittest.TestCase, BaseDatasetMixin):
     def test_chunk_dataset_space_only_with_time(self):
