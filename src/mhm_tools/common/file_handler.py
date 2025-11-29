@@ -4,6 +4,7 @@ import contextlib
 import logging
 from enum import Enum
 from pathlib import Path
+from textwrap import dedent
 
 import numpy as np
 import xarray as xr
@@ -38,47 +39,54 @@ def create_header(ds, output_path=None, no_data_value="-9999", write=True):
 
     ncols = len(x)
     nrows = len(y)
-    header_str = f"""
+    header_str = dedent(f"""
         ncols                {ncols}
         nrows                {nrows}
         xllcorner            {xllcorner:.6f}
         yllcorner            {yllcorner:.6f}
         cellsize             {cellsize:.6f}
         NODATA_value         {no_data_value}
-        """
-    if write:
-        if output_path.is_dir():
-            header_out_path = output_path / "header.txt"
-        elif output_path.is_file():
-            header_out_path = output_path
-        else:
-            msg = "Header output path is neither file nor directory."
-            with ErrorLogger(logger):
-                raise ValueError(msg)
-        logger.info(
-            f"Writing header file to {header_out_path} with header str: {header_str}"
-        )
-        with header_out_path.open("w") as hf:
-            hf.write(header_str)
+        """)
+    if not write:
+        return header_str
+
+    if output_path.is_dir():
+        header_out_path = output_path / "header.txt"
+    elif output_path.is_file():
+        header_out_path = output_path
+    else:
+        msg = "Header output path is neither file nor directory."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    logger.info(
+        f"Writing header file to {header_out_path} with header str: {header_str}"
+    )
+    with header_out_path.open("w") as hf:
+        hf.write(header_str)
     return header_str
 
 
 def crop_file_by_mask(ds, mask_file):
     """Crop file by mask."""
-    with xr.open_dataset(mask_file) as mask:
-        lat_key_mask = get_coord_key(mask, lat=True)
-        lon_key_mask = get_coord_key(mask, lon=True)
-        lat_key = get_coord_key(ds, lat=True)
-        lon_key = get_coord_key(ds, lon=True)
-        return ds.sel(
-            {
-                lat_key: slice(mask[lat_key_mask].max(), mask[lat_key_mask].min()),
-                lon_key: slice(mask[lon_key_mask].min(), mask[lon_key_mask].max()),
-            }
-        )
+    if isinstance(mask_file, xr.Dataset):
+        mask = mask_file
+    else:
+        mask = get_xarray_ds_from_file(mask_file)
+    lat_key_mask = get_coord_key(mask, lat=True)
+    lon_key_mask = get_coord_key(mask, lon=True)
+    lat_key = get_coord_key(ds, lat=True)
+    lon_key = get_coord_key(ds, lon=True)
+    return ds.sel(
+        {
+            lat_key: slice(mask[lat_key_mask].max(), mask[lat_key_mask].min()),
+            lon_key: slice(mask[lon_key_mask].min(), mask[lon_key_mask].max()),
+        }
+    )
 
 
-def chunk_dataset_space_only(ds: xr.Dataset, available_mem_gib: float) -> xr.Dataset:
+def chunk_dataset_space_only(
+    ds: xr.Dataset, available_mem_gib: float
+) -> dict[str, int]:
     """Chunk only in space (lat/lon), leaving time whole, sized to available memory.
 
     - Uses 80% of available_mem_gib for a single chunk.
@@ -117,7 +125,7 @@ def chunk_dataset_space_only(ds: xr.Dataset, available_mem_gib: float) -> xr.Dat
     y_chunk = min(ny, side)
     x_chunk = min(nx, side)
 
-    chunks = {lat_key: y_chunk, lon_key: x_chunk}
+    chunks = {lat_key: int(y_chunk), lon_key: int(x_chunk)}
     if time_key:
         # -1 means “take all” for that dim
         chunks[time_key] = -1
@@ -126,16 +134,10 @@ def chunk_dataset_space_only(ds: xr.Dataset, available_mem_gib: float) -> xr.Dat
         f"Chunk sizes → time: {chunks.get(time_key, '—')}, "
         f"{lat_key}: {y_chunk}, {lon_key}: {x_chunk}"
     )
-    try:
-        return ds.chunk(chunks)
-    except Exception as e:
-        logger.error(chunks)
-        logger.error(ds)
-        with ErrorLogger(logger):
-            raise e
+    return chunks
 
 
-def chunk_dataset_space_and_time(ds, available_mem_gib) -> xr.Dataset:
+def chunk_dataset_space_and_time(ds, available_mem_gib) -> dict[str, int]:
     """Chunk dataset adjusting chunk size to avaiable memory.
 
     Simple heuristic:
@@ -173,13 +175,13 @@ def chunk_dataset_space_and_time(ds, available_mem_gib) -> xr.Dataset:
     y_chunk = min(ny, side)
     x_chunk = min(nx, side)
 
-    chunks = {lat_key: y_chunk, lon_key: x_chunk}
+    chunks = {lat_key: int(y_chunk), lon_key: int(x_chunk)}
     if time_key:
-        t_chunk = max_cells // (y_chunk * x_chunk)
-        chunks[time_key] = t_chunk
+        t_chunk = max(1, max_cells // max(1, y_chunk * x_chunk))
+        chunks[time_key] = int(t_chunk)
     logger.debug(f"   The chunks used are {chunks}")
 
-    return ds.chunk(chunks)
+    return chunks
 
 
 class ChunkType(Enum):
@@ -379,12 +381,6 @@ def read_ascii_to_xarray(filepath, var_name=None):
 
     # Convert to Dataset
     ds = da.to_dataset()
-
-    # Add axis attributes
-    if "x" in ds.coords:
-        ds.coords["x"].attrs["axis"] = "X"
-    if "y" in ds.coords:
-        ds.coords["y"].attrs["axis"] = "Y"
 
     # Drop spatial_ref if present
     if "spatial_ref" in ds.coords:

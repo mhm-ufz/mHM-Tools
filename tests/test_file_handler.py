@@ -34,34 +34,50 @@ class BaseDatasetMixin:
 
 class TestCreateHeader(unittest.TestCase, BaseDatasetMixin):
 
-    def test_create_header_returns_dict_without_write(self):
+    def test_create_header_returns_str_without_write(self):
         ds = self.make_simple_ds()
         header = fh.create_header(ds, write=False, no_data_value="-9999")
-        self.assertEqual(header["ncols"], ds.sizes["lon"])
-        self.assertEqual(header["nrows"], ds.sizes["lat"])
-        self.assertAlmostEqual(header["cellsize"], 1.0)
-        self.assertAlmostEqual(header["xllcorner"], ds["lon"].values.min() - 0.5)
-        self.assertAlmostEqual(header["yllcorner"], ds["lat"].values.min() - 0.5)
-        self.assertEqual(header["NODATA_value"], "-9999")
+        self.assertIsInstance(header, str)
+        print(header)
+        header_dict = {}
+        for line in header.strip().splitlines():
+            if not line: 
+                continue
+            print(line)
+            line_split = [cell for cell in line.strip().split() if cell]
+            key = line_split[0]
+            value = line_split[1]
+            header_dict[key] = value
+        self.assertEqual(header_dict["ncols"], str(ds.sizes["lon"]))
+        self.assertEqual(header_dict["nrows"], str(ds.sizes["lat"]))
+        self.assertAlmostEqual(float(header_dict["cellsize"]), 1.0)
+        self.assertAlmostEqual(float(header_dict["xllcorner"]), ds["lon"].values.min() - 0.5)
+        self.assertAlmostEqual(float(header_dict["yllcorner"]), ds["lat"].values.min() - 0.5)
+        self.assertEqual(header_dict["NODATA_value"], "-9999")
 
     def test_create_header_writes_file(self):
         ds = self.make_simple_ds()
-        captured = {}
-
-        def fake_write_header(path, hdr):
-            captured["path"] = Path(path)
-            captured["hdr"] = hdr
-
-        with tempfile.TemporaryDirectory() as td, patch.object(
-            fh, "write_header", side_effect=fake_write_header
-        ):
-            out = fh.create_header(
+        with tempfile.TemporaryDirectory() as td:
+            expected_path = Path(td) / "header.txt"
+            self.assertFalse(expected_path.is_file())
+            header_str = fh.create_header(
                 ds, output_path=Path(td), write=True, no_data_value="NA"
             )
-            self.assertEqual(out, Path(td) / "header.txt")
-            self.assertEqual(captured["path"], Path(td) / "header.txt")
-            self.assertEqual(captured["hdr"]["NODATA_value"], "NA")
+            self.assertTrue(expected_path.is_file())
 
+            header_dict = {}
+            read_str = expected_path.read_text()
+            self.assertEqual(read_str, header_str)
+            for line in read_str.splitlines():
+                if not line.strip():
+                    continue
+                key, value = [cell for cell in line.strip().split() if cell][:2]
+                header_dict[key] = value
+
+            self.assertEqual(header_dict["ncols"], str(ds.sizes["lon"]))
+            self.assertEqual(header_dict["nrows"], str(ds.sizes["lat"]))
+            self.assertEqual(header_dict["NODATA_value"], "NA")
+        
 
 class TestChunkHelpers(unittest.TestCase, BaseDatasetMixin):
     def test_chunk_dataset_space_only_with_time(self):
@@ -139,8 +155,8 @@ class TestAsciiReadWrite(unittest.TestCase, BaseDatasetMixin):
             # read back via helper
             ds_back = fh.read_ascii_to_xarray(asc_path, var_name="var")
             self.assertIn("var", ds_back.data_vars)
-            self.assertIn("x", ds_back.coords)
-            self.assertIn("y", ds_back.coords)
+            self.assertIn("lat", ds_back.coords)
+            self.assertIn("lon", ds_back.coords)
             self.assertEqual(ds_back["var"].shape, ds["var"].shape)
 
     def test_write_xarray_to_ascii_formats_strings(self):
@@ -250,8 +266,8 @@ class TestGetXarrayDsFromFile(unittest.TestCase, BaseDatasetMixin):
             )
             print(out.chunks)
             self.assertIn("var", out)
-            self.assertIn("x", out.coords)
-            self.assertIn("y", out.coords)
+            self.assertIn("lon", out.coords)
+            self.assertIn("lat", out.coords)
             for var in out.data_vars:
                 self.assertIsNone(out[var].chunks)
 
