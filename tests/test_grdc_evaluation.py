@@ -17,19 +17,9 @@ import mhm_tools.post.GRDC_validation as gv
 # -----------------------------
 # Small helpers to make datasets
 # -----------------------------
-def make_gauge_info(ids, xs, ys, facc):
-    """Gauge metadata dataset expected by Q_data_to_xarray (first open)."""
-    return xr.Dataset(
-        {
-            "geo_x": (("id",), np.array(xs, dtype=float)),
-            "geo_y": (("id",), np.array(ys, dtype=float)),
-            "area": (("id",), np.array(facc, dtype=float)),
-        },
-        coords={"id": np.array(ids, dtype=int)},
-    )
 
 
-def make_observed_data(ids, times, var="runoff_mean_mm", values=None, nan_mask=False):
+def make_observed_data(ids, times, xs, ys, facc, var="runoff_mean_mm", values=None, nan_mask=False):
     """Observed discharge dataset expected by Q_data_to_xarray (second open)."""
     if values is None:
         rng = np.random.RandomState(0)
@@ -42,7 +32,15 @@ def make_observed_data(ids, times, var="runoff_mean_mm", values=None, nan_mask=F
     )
     if nan_mask:
         da = da.where(~np.isnan(da), other=np.nan)
-    ds = da.to_dataset()
+    ds = xr.Dataset(
+        {
+            "geo_x": (("id",), np.array(xs, dtype=float)),
+            "runoff_mean_mm": da,
+            "geo_y": (("id",), np.array(ys, dtype=float)),
+            "area": (("id",), np.array(facc, dtype=float)),
+        },
+        coords={"id": np.array(ids, dtype=int), "time": times},
+    )
     ds.attrs["which"] = "obs"  # marker for timedelta_to_alias mock
     return ds
 
@@ -127,8 +125,7 @@ class TestQDataToXarray(unittest.TestCase):
         self.sim_times = pd.date_range("2001-01-01", periods=4, freq="3H")
 
         # datasets for mocked file reads
-        self.gauge_info = make_gauge_info(self.ids, self.xs, self.ys, self.facc)
-        self.obs_ds = make_observed_data(self.ids, self.obs_times, var="runoff_mean_mm")
+        self.obs_ds = make_observed_data(self.ids, self.obs_times, self.xs, self.ys, self.facc, var="runoff_mean_mm")
         self.sim_ds = make_sim_data(self.sim_times, var="Qrouted")
 
     def _mock_overlapping_time_slice(self, sim_ds, obs_ds):
@@ -141,14 +138,12 @@ class TestQDataToXarray(unittest.TestCase):
             td = Path(td)
 
             # Prepare a sequenced side_effect for get_xarray_ds_from_file:
-            # call 1: observed_data_path (gauge_info)
+            # call 1: observed_data_path again (observed data)
             # call 2: model_data_path (sim data)
-            # call 3: observed_data_path again (observed data)
-            # call 4: mrm_restart_file (we won't use; mock get_gauge_coords instead)
+            # call 3: mrm_restart_file (we won't use; mock get_gauge_coords instead)
             sequence = [
-                cm_enter(self.gauge_info),
-                cm_enter(self.sim_ds),
                 cm_enter(self.obs_ds),
+                cm_enter(self.sim_ds),
                 cm_enter(xr.Dataset()),  # dummy restart
             ]
             gi = iter(sequence)
