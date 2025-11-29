@@ -53,7 +53,7 @@ def add_args(parser):
         default=None,
         help=(
             "Coordinates reference system (e.g. 'epsg:3035'). Needed to create a new latlon file."
-            "If not given, headers will be intncverpreted as given in lat-lon ('epsg:4326')."
+            "If not given, headers will be interpreted as given in lat-lon ('epsg:4326')."
         ),
     )
     parser.add_argument(
@@ -84,6 +84,11 @@ def add_args(parser):
         required=False,
         default="5",
         help=("""Available memory per cpu in Gb or Mb (default Gb)"""),
+    )
+    parser.add_argument(
+        "--chunking",
+        action="store_true",
+        help=("""Set if each dataset should be read as a chunked dask array."""),
     )
     parser.add_argument(
         "--lon_min",
@@ -123,6 +128,13 @@ def add_args(parser):
             """maximum latitude of the target grid
             required unless --mask_file is provided"""
         ),
+    )
+    parser.add_argument(
+        "--create_header",
+        required=False,
+        default=False,
+        action="store_true",
+        help=("""Force creation of header file for all files."""),
     )
 
 
@@ -165,4 +177,6 @@ def run(args):
         filename=args.file_name,
         recursive_depth=args.folder_recursion_depth,
         available_mem_gib=available_mem,
+        force_header_creation=args.create_header,
+        chunking=args.chunking,
     )

@@ -1,5 +1,4 @@
-r"""
-Create the catchment file for mRM.
+"""Create the catchment file for mRM.
 
 Authors
 -------
@@ -63,8 +62,12 @@ class Catchment:
         self.ftype = ftype
         self.catchment_mask = None
         self.l1_resolution = l1_resolution
-        self.l11_resolution = l11_resolution if l11_resolution is not None else l1_resolution
-        self.l2_resolution = l2_resolution if l2_resolution is not None else l1_resolution
+        self.l11_resolution = (
+            l11_resolution if l11_resolution is not None else l1_resolution
+        )
+        self.l2_resolution = (
+            l2_resolution if l2_resolution is not None else l1_resolution
+        )
         self.do_upscale = upscale
         self.out_var_name = (
             out_var_name if out_var_name is not None else f"{var_name}.nc"
@@ -177,7 +180,7 @@ class Catchment:
         self.get_fdir()
 
     def delineate_basin(self, gauge_coords, stream_order=4):
-        """Deliniate the basin for a given lat and lon."""
+        """Delineate the basin for a given lat and lon."""
         logger.info(f"Deliniating basin for gauge coordinates {gauge_coords}")
         gauge_coords = (gauge_coords[0], gauge_coords[1])
         self.basin = self._fdir.basins(
@@ -195,16 +198,23 @@ class Catchment:
                 "_FillValue"
             ]
 
-    def get_upscaling_factor(self, max_resolution=False):
+    def get_upscaling_factor(self, max_resolution=True):
         """Create upscaling factor."""
         input_res = round(abs(self.ds.lon.data[1] - self.ds.lon.data[0]), 6)
         upscale_res = self.l1_resolution
         if max_resolution:
-            upscale_res = max([res for res in [self.l1_resolution, self.l11_resolution, self.l2_resolution] if res is not None ])
-        if (
-            int(upscale_res / input_res + 0.5) - (upscale_res / input_res)
-            < 1e6
-        ):
+            upscale_res = max(
+                [
+                    res
+                    for res in [
+                        self.l1_resolution,
+                        self.l11_resolution,
+                        self.l2_resolution,
+                    ]
+                    if res is not None
+                ]
+            )
+        if int(upscale_res / input_res + 0.5) - (upscale_res / input_res) < 1e6:
             return int(upscale_res / input_res + 0.5)
         not_int_multiple_msg = f"Upscaling only works if L1 resolution is integer muplipe of L0 resolution but L1 = {self.l1_resolution / input_res:.4f} * L0"
         raise ValueError(not_int_multiple_msg)
@@ -238,7 +248,7 @@ class Catchment:
             lat_size, lon_size = self.input_da.shape
             # Ensure the dimensions are evenly divisible by the factor
             if lat_size % factor != 0 or lon_size % factor != 0:
-                msg = f"Data dimensions must be divisible by the upscaling factor of {factor}. Lat ({lat_size}/{factor})={lat_size/factor:.2f}; Lon ({lon_size}/{factor})={lon_size/factor:.2f}"
+                msg = f"Data dimensions must be divisible by the upscaling factor of {factor}. Lat ({lat_size}/{factor})={lat_size / factor:.2f}; Lon ({lon_size}/{factor})={lon_size / factor:.2f}"
                 with ErrorLogger(logger):
                     raise ValueError(msg)
 
@@ -261,10 +271,14 @@ class Catchment:
 
     def get_upstream_area(self):
         """Perform the calculation of the upstream catchment area."""
-        self.upgrid = self._fdir.upstream_area(unit="km2").astype(int)
+        upgrid = self._fdir.upstream_area(unit="km2").astype(int)
+        logger.error(np.max(upgrid))
+        logger.error(np.mean(upgrid))
+        logger.error(np.min(upgrid))
 
     def get_grid_area(self):
         """Perform the calculation of the catchment area."""
+        self.get_upstream_area()
         self.grdare = self._fdir.area.astype(int)
 
     def get_facc(self):
@@ -290,8 +304,7 @@ class Catchment:
         return ds
 
     def fill_adjacent_missing_with_sink(self, da, fill_value, sink_value):
-        """
-        Replace all missing values adjacent to non-missing values with 0 in an xarray Dataset.
+        """Replace all missing values adjacent to non-missing values with 0 in an xarray Dataset.
 
         Parameters
         ----------
@@ -412,7 +425,9 @@ class Catchment:
                 msg = f'Format "{format}" unknown, use one of ["nc", "asc"]'
                 raise Exception(msg)
 
-    def processing_data_variable(self, var_name, cut_by_basin, lat_slice, lon_slice):
+    def processing_data_variable(
+        self, var_name, cut_by_basin, lat_slice=None, lon_slice=None
+    ):
         """Process data variable, masking it and croping it spatial dimensions."""
         logger.info(f"Processing {var_name}")
         data = getattr(self, var_name)
@@ -433,14 +448,14 @@ class Catchment:
                     f"Creating lon and lat arrays from l1_resolution {self.l1_resolution}"
                 )
                 lon = np.arange(
-                    lon.min() - input_res / 2 + self.l1_resolution / 2,
-                    lon.max() + self.l1_resolution / 2,
-                    self.l1_resolution,
+                    lon.min() - input_res / 2 + self.l2_resolution / 2,
+                    lon.max() + self.l2_resolution / 2,
+                    self.l2_resolution,
                 )
                 lat = np.arange(
-                    lat.max() + input_res / 2 - self.l1_resolution / 2,
-                    lat.min() - self.l1_resolution / 2,
-                    -self.l1_resolution,
+                    lat.max() + input_res / 2 - self.l2_resolution / 2,
+                    lat.min() - self.l2_resolution / 2,
+                    -self.l2_resolution,
                 )
         logger.debug(
             f"lon_min {np.min(lon):.3f}, lon_max {np.max(lon):.3f}, resulution: {self.l1_resolution}"
@@ -454,8 +469,9 @@ class Catchment:
                 "lat": lat,  # [slice(860, 870)],
             },
         )
-        logger.info(f"Cutting {var_name} data to correct spatial dimensions")
-        data_var = data_var.sel(lat=lat_slice, lon=lon_slice)
+        if lat_slice is not None and lon_slice is not None:
+            logger.info(f"Cutting {var_name} data to correct spatial dimensions")
+            data_var = data_var.sel(lat=lat_slice, lon=lon_slice)
         logger.debug(data_var)
         return data_var
 
@@ -671,7 +687,7 @@ def create_catchment(
     frame=1,
     upscale=False,
     latlon=True,
-    available_mem=None
+    available_mem=None,
 ):
     """Create file containing catchment ids, flowdirection and upstream area from dem or flow direction."""
     logger.info(
@@ -684,7 +700,11 @@ def create_catchment(
             raise ValueError(msg)
 
     with get_xarray_ds_from_file(
-        input_file, var_name, normalize_latlon_coords=True, force_decending_y=True, available_mem_gib=available_mem
+        input_file,
+        var_name,
+        normalize_latlon_coords=True,
+        force_decending_y=True,
+        available_mem_gib=available_mem,
     ) as input_ds:
         # transform
         transform = get_transformation_matrix_nc(input_ds, var_name)
@@ -733,7 +753,7 @@ def create_catchment(
                     c.get_facc()
                 c.get_basins()
                 c.get_grid_area()
-                # c.get_upstream_area()
+                c.get_upstream_area()
                 c.write(output_path, single_file=True, frame=frame, mask_file=mask_file)
             # add paths to the temp files
             temp_file1 = pl.Path(output_path, "hydro1.nc")
@@ -752,8 +772,12 @@ def create_catchment(
             input_ds_sliced = input_ds.sel(
                 lat=coordinate_slices["lat"], lon=coordinate_slices["lon"]
             )
-            logger.info(f"lat {input_ds_sliced.lat.data[0]}, {input_ds_sliced.lat.data[-1]}")
-            logger.info(f"lon {input_ds_sliced.lon.data[0]}, {input_ds_sliced.lon.data[-1]}")
+            logger.info(
+                f"lat {input_ds_sliced.lat.data[0]}, {input_ds_sliced.lat.data[-1]}"
+            )
+            logger.info(
+                f"lon {input_ds_sliced.lon.data[0]}, {input_ds_sliced.lon.data[-1]}"
+            )
             c = Catchment(
                 ds=input_ds_sliced,
                 var_name=var_name,

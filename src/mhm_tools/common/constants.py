@@ -1,5 +1,4 @@
-"""
-Common constants.
+"""Common constants.
 
 Constants
 =========
@@ -19,7 +18,6 @@ Constants
 .. autodata:: ESRI_TYPES
 
 .. autodata:: ESRI_REQ
-
 """
 
 __all__ = ["NC_ENCODE_DEFAULTS", "NO_DATA"]
@@ -40,7 +38,7 @@ ESRI_TYPES = {
     "cellsize": float,
     "nodata_value": float,
 }
-"""types for ESRI ASCII grid header information."""
+"""Types for ESRI ASCII grid header information."""
 
 ESRI_REQ = {"ncols", "nrows", "xllcorner", "yllcorner", "cellsize"}
 """Required ESRI ASCII grid header information."""
@@ -69,3 +67,9 @@ LOG_LEVEL_STR = {
 
 # Characters indicating wildcard patterns in NetCDF filenames
 WILDCARDS = ("*", "?", "[", "]")
+
+
+# possible coordinate keys
+LAT_KEYS = ["lat", "latitude", "northing", "y", "new_y", "Y", "geo_y"]
+LON_KEYS = ["lon", "longitude", "easting", "x", "new_x", "X", "geo_x"]
+TIME_KEYS = ["time", "month_of_year"]

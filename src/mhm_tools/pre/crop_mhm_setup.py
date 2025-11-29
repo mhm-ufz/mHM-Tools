@@ -129,7 +129,10 @@ def regrid_mask(
 
 
 def write_to_file(ds, output_file: Path):
-    """Take xarray Dataset and write it to file. File type depends on path suffix."""
+    """Take xarray Dataset and write it to file.
+
+    File type depends on path suffix.
+    """
     logger.info(f"Writing to file {output_file}")
     logger.debug(f"Content is: {ds}")
     suffix = output_file.suffix
@@ -146,7 +149,7 @@ def crop_file_with_header(ds_in, file_path, output_path, lonslice, latslice):
     header = file_path.parent / "header.txt"
     # read header
     header_information = read_header(header)
-    logger.info(header_information)
+    logger.info(f"Read in header: {header_information}")
     # obtain data variable from dataset
     data_var = get_single_data_var(ds_in)
     if data_var is None:
@@ -157,7 +160,7 @@ def crop_file_with_header(ds_in, file_path, output_path, lonslice, latslice):
             )
             return None, None
         logger.debug(f"Found data_var={data_var}")
-    logger.info(ds_in[data_var].shape)
+    logger.debug(f"Read in dataset shape: {ds_in[data_var].shape}")
     lon_key = get_coord_key(ds_in, lon=True, raise_exception=True)
     lat_key = get_coord_key(ds_in, lat=True, raise_exception=True)
     # x values
@@ -239,6 +242,7 @@ def crop_file_with_header(ds_in, file_path, output_path, lonslice, latslice):
         ds_out = data_array.to_dataset()
         ds_out.attrs.update(ds_in.attrs)
         logger.debug(f"cropped ds {ds_out}")
+        logger.info(f"Shape of cropped ds: {ds_out[data_var].shape}")
         return ds_out, header_out_path
     except IndexError as e:
         with ErrorLogger(logger):
@@ -253,12 +257,20 @@ def call_create_latlon(
     latlon_output_file,
     meteo_header_path,
     crs,
+    chunking=True,
 ):
-    """Create header dictionaries for the different resolutions and call create latlon to create a latlon file for the setup."""
+    """Create lat/lon headers for multiple resolutions and write the latlon file.
+
+    Builds L0, L1, and optionally L11 headers from the DEM and requested
+    resolutions, then calls `create_latlon` with the given CRS and meteo header.
+    """
     # create new latlon file
     logger.info("Creating new latlon file")
     with get_xarray_ds_from_file(
-        dem_output_file, chunking=True, normalize_latlon_coords=True
+        dem_output_file,
+        chunking=chunking,
+        normalize_latlon_coords=True,
+        force_decending_y=True,
     ) as ds_dem:
         l0 = create_header(ds_dem, None, write=False)
     logger.debug(f"L0: {l0}")
@@ -305,6 +317,8 @@ def crop_file(
     input_path,
     overwrite,
     available_mem_gib,
+    force_header_creation=False,
+    chunking=False,
 ):
     """Crops one file by lat and lon slice and may mask it with the mask dataarray."""
     logger.info(f"Cropping the file {input_file}")
@@ -314,19 +328,35 @@ def crop_file(
     if output_file.is_file() and not overwrite:
         logger.info("Target file already exists. Cropping is skipped.")
         return latlon_files
+        # 1. latlon file: The latlon file is not croped but its relative location is saved and the latlon file is newly created after all files are croped
+    if "latlon" in input_file.name.lower():
+        logger.info(
+            "Latlon cropping depreciated will implement new latlon creation using the mhm-tools latlon functionality."
+        )
+        latlon_files.set_latlon_output_file(output_file)
+        return latlon_files
+    # 2. Restart files are complex and are not yet implemented. mHM restart files can be croped, mRM restart files can't (?).
+    if "restart" in input_file.name.lower():
+        logger.warning(
+            f"Restart file {input_file} could not be copied as that is not yet implemented."
+        )
+        return latlon_files
     if input_file.suffix in [".asc", ".nc"]:
         try:
             ds = get_xarray_ds_from_file(
                 input_file,
-                chunking=True,
+                chunking=chunking,
                 available_mem_gib=available_mem_gib,
                 normalize_latlon_coords=True,
+                force_decending_y=True,
             )
-        except ValueError:
+        except ValueError as ve:
             logger.error(
                 f"File {input_file} could not be read. It probably does not have the right format."
             )
-            return latlon_files
+            raise ve
+            # logger.error(ve)
+            # return latlon_files
     else:
         # header files are not copied but recreated as they change
         # other txt and markdown files are copied as they nomaly contain description or class definitions but do not change with domain cropping
@@ -340,19 +370,6 @@ def crop_file(
     logger.debug(f"read in dataset: {ds}")
     # Handling of special cases:
     ds_cropped = None
-    # 1. latlon file: The latlon file is not croped but its relative location is saved and the latlon file is newly created after all files are croped
-    if "latlon" in input_file.name.lower():
-        logger.info(
-            "Latlon cropping depreciated will implement new latlon creation using the mhm-tools latlon functionality."
-        )
-        latlon_files.set_latlon_output_file(output_file)
-        return latlon_files
-    # 2. Restart files are complex and are not yet implemented. mHM restart files can be croped, mRM restart files can't (?).
-    if "restart" in input_file.name.lower():
-        logger.warning(
-            f"Restart file {input_file} could not be copied as that is not yet implemented."
-        )
-        return latlon_files
     # 3. Files that are in the same folder as a header file. Typical examples are meteo datasets such as temperature or precipitation
     if list(input_file.parent.glob("header.txt")):
         logger.debug("Cropping and writing new header file...")
@@ -422,7 +439,14 @@ def crop_file(
         for var_name in ds_cropped.data_vars:
             ds_cropped[var_name] = ds_cropped[var_name].astype(float)
         write_to_file(ds_cropped, output_file)
+        if force_header_creation and not (output_file.parent / "header.txt").is_file():
+            create_header(
+                ds_cropped, output_path=output_file.parent / "header.txt", write=True
+            )
+
     logger.info(f"Written to {output_file}")
+    if force_header_creation and not (output_file.parent / "header.txt").is_file():
+        create_header(ds_cropped, output_path=output_file.parent, write=True)
     return latlon_files
 
 
@@ -441,6 +465,8 @@ def crop_mhm_setup(
     filename="*.*",
     recursive_depth=5,
     available_mem_gib=5,
+    force_header_creation=False,
+    chunking=False,
 ):
     """Cut out an existing mhm domain setup using a mask file."""
     # check if the input is correct
@@ -468,6 +494,8 @@ def crop_mhm_setup(
             input_path=input_path,
             overwrite=overwrite,
             available_mem_gib=available_mem_gib,
+            force_header_creation=force_header_creation,
+            chunking=chunking,
         )
         for f in files
     )
@@ -482,4 +510,5 @@ def crop_mhm_setup(
             latlon_files.latlon_output_file,
             latlon_files.meteo_header_path,
             crs,
+            chunking=chunking,
         )

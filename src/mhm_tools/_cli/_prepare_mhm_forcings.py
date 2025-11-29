@@ -72,14 +72,12 @@ def add_args(parser):
 
 
 def run(args):
-    """
-    Run script to convert input forcings into the right mHM format.
+    """Run script to convert input forcings into the right mHM format.
 
     Parameters
     ----------
     args : argparse.Namespace
         parsed command line arguments
-
     """
     prepare_forcings(
         in_dir=args.in_dir,

@@ -1,5 +1,4 @@
-"""
-Calculate the river discharge at bankfull conditions and the bankfull width.
+"""Calculate the river discharge at bankfull conditions and the bankfull width.
 
 Authors
 -------

@@ -2,9 +2,9 @@
 
 import logging
 
-from mhm_tools.common.cli_utils import get_available_mem_in_unit
 import numpy as np
 
+from mhm_tools.common.cli_utils import get_available_mem_in_unit
 from mhm_tools.common.logger import ErrorLogger
 
 from ..pre import create_catchment
@@ -104,14 +104,18 @@ def add_args(parser):
         required=False,
         type=float,
         default=None,
-        help=("""Resolution of the mRM routing resolution. Only used to extend the grid to cleanly fit this data."""),
+        help=(
+            """Resolution of the mRM routing resolution. Only used to extend the grid to cleanly fit this data."""
+        ),
     )
     parser.add_argument(
         "--l2_resolution",
         required=False,
         type=float,
         default=None,
-        help=("""Resolution of the mHM meteo input resolution. Only used to extend the grid to cleanly fit this data."""),
+        help=(
+            """Resolution of the mHM meteo input resolution. Only used to extend the grid to cleanly fit this data."""
+        ),
     )
     parser.add_argument(
         "--upscale",
@@ -156,6 +160,7 @@ def run(args):
     """
     gauge_coords = None
     coordinate_slices = None
+
     if args.gauge_coords is not None:
         if args.lonlatbox is not None:
             with ErrorLogger(logger):
@@ -189,5 +194,5 @@ def run(args):
         frame=args.frame,
         upscale=args.upscale,
         latlon=args.coords_are_not_latlon,
-        available_mem=available_mem
+        available_mem=available_mem,
     )

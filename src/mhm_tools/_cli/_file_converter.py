@@ -60,5 +60,7 @@ def run(args):
         var_name = input.stem
     elif args.varname_eq_out_filename:
         var_name = output.stem
-    ds = get_xarray_ds_from_file(input, var_name=var_name, normalize_latlon_coords=args.latlon)
+    ds = get_xarray_ds_from_file(
+        input, var_name=var_name, normalize_latlon_coords=args.latlon
+    )
     write_xarray_to_file(ds, output, var_name=var_name)
