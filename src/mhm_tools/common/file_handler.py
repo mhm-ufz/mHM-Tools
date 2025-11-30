@@ -590,9 +590,7 @@ def move_reserved_attrs_to_encoding(
     data_encoding = {}
     # Only include the data variable if it has a name (required by xarray)
     if da.name is not None and da.encoding:
-        data_encoding[da.name] = {
-            k: v for k, v in da.encoding.items() if k in reserved
-        }
+        data_encoding[da.name] = {k: v for k, v in da.encoding.items() if k in reserved}
 
     # Merge data + coords encodings
     encoding = {**coord_encoding, **data_encoding}

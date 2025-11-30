@@ -7,10 +7,6 @@ import numpy as np
 import xarray as xr
 from scipy.stats import spearmanr
 
-import numpy as np
-import xarray as xr
-from scipy.stats import spearmanr
-
 from mhm_tools.common.constants import LAT_KEYS, LON_KEYS, TIME_KEYS
 from mhm_tools.common.logger import ErrorLogger
 
@@ -18,7 +14,10 @@ logger = logging.getLogger(__name__)
 
 
 def normalize_lat_lon(
-    ds: xr.Dataset, lat: Optional[str] = None, lon: Optional[str] = None, raise_exceptions: bool = False
+    ds: xr.Dataset,
+    lat: Optional[str] = None,
+    lon: Optional[str] = None,
+    raise_exceptions: bool = False,
 ) -> xr.Dataset:
     """
     Normalize latitude and longitude dimension and coordinate names to 'lat' and 'lon'.

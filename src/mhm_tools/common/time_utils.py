@@ -211,9 +211,7 @@ def resample_to_daily_or_hourly_adaptive(
             if upsample_for_intensive == "nearest":
                 return da.resample(time="1H").nearest()
         else:
-            return _distribute_extensive_to_finer(
-                da, alias_in=alias_in, alias_out="1H"
-            )
+            return _distribute_extensive_to_finer(da, alias_in=alias_in, alias_out="1H")
 
     if isinstance(obj, xr.DataArray):
         out = _resample_da(obj)
