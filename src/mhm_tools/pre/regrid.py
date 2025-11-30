@@ -2,6 +2,7 @@
 
 """
 Regrid an input NetCDF to an L2 grid that is an integer multiple of the L0 grid in mask.nc.
+
 Prefers keeping the L2 grid aligned to the L0 grid.
 
 USAGE:
@@ -25,6 +26,7 @@ Notes
 """
 
 import logging
+import os
 import tempfile
 from pathlib import Path
 
@@ -32,13 +34,14 @@ import numpy as np
 import xarray as xr
 
 from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_to_file
+from mhm_tools.common.logger import ErrorLogger
 from mhm_tools.common.xarray_utils import get_coord_key
 
 logger = logging.getLogger(__name__)
 
 # Optional CDO support
 try:
-    from cdo import Cdo  # type: ignore
+    from cdo import Cdo  # type: ignore[import-untyped]
 
     _CDO = Cdo()
 except Exception:
@@ -62,7 +65,7 @@ def _parse_res(s: str):
 
 def _check_integer_multiple(l2, l0, tol=1e-9):
     k = l2 / l0
-    return abs(k - round(k)) <= tol, int(round(k))
+    return abs(k - round(k)) <= tol, round(k)
 
 
 def _build_aligned_coords(vmin, vmax, step):
@@ -85,11 +88,12 @@ def _make_cdo_grid_file(lon, lat, path):
         f"yinc    = {yinc}\n"
     )
     logger.info(f"cdo grid: {txt}")
-    with open(path, "w") as f:
+    with Path(path).open("w") as f:
         f.write(txt)
 
 
 def regrid_xarray(ds, lon_name, lat_name, lon_target, lat_target, method, var=None):
+    """Regrid an xarray Dataset using xarray interpolation."""
     # Select variables to regrid
     if var:
         dvs = [var]
@@ -120,6 +124,7 @@ def regrid_xarray(ds, lon_name, lat_name, lon_target, lat_target, method, var=No
 
 
 def regrid_cdo(in_file, out_file, lon_target, lat_target, method):
+    """Regrid using CDO remap operators."""
     assert _CDO is not None
     with tempfile.TemporaryDirectory() as tmpd:
         gridfile = Path(tmpd) / "grid.txt"
@@ -133,7 +138,7 @@ def regrid_cdo(in_file, out_file, lon_target, lat_target, method):
 
 
 def regrid_file(input, mask, output, l2, method="nearest", var=None):
-
+    """Regrid a single file to L2 grid using CDO or xarray."""
     # p.add_argument("--var", default=None, help="Single variable to regrid (default: all 2D/3D lon-lat vars)")
 
     # Load mask to infer L0 grid
@@ -153,7 +158,9 @@ def regrid_file(input, mask, output, l2, method="nearest", var=None):
         lon0 = dsm[lon_name].values
         lat0 = dsm[lat_name].values
         if lon0.ndim != 1 or lat0.ndim != 1:
-            raise ValueError("This script assumes 1D lon/lat coordinates.")
+            msg = "This script assumes 1D lon/lat coordinates."
+            with ErrorLogger(logger):
+                raise ValueError(msg)
         l0_dx = _delta_from_coords(lon0)
         l0_dy = _delta_from_coords(lat0)
 
@@ -162,9 +169,12 @@ def regrid_file(input, mask, output, l2, method="nearest", var=None):
         okx, kx = _check_integer_multiple(l2, l0_dx)
         oky, ky = _check_integer_multiple(l2, l0_dy)
         if not (okx and oky):
-            raise ValueError(
-                f"L2 ({l2},{l2}) must be integer multiples of L0 ({l0_dx:.12g},{l0_dy:.12g})."
+            msg = (
+                "L2 "
+                f"({l2},{l2}) must be integer multiples of L0 ({l0_dx:.12g},{l0_dy:.12g})."
             )
+            with ErrorLogger(logger):
+                raise ValueError(msg)
 
         # Build aligned L2 coords covering the same extent as mask grid
         lonL2 = _build_aligned_coords(lon0.min(), lon0.max(), l2)
@@ -178,7 +188,6 @@ def regrid_file(input, mask, output, l2, method="nearest", var=None):
     if _CDO is not None and method in ("bilinear",) and var is None:
         # Write temp input (ensure lon/lat names are lon/lat for CDO best behavior)
         # If names differ, rename temporarily
-        rename_map = {}
         if lon_name not in dsi.coords:
             # try to find lon/lat names in input; fall back to mask names
             try:
@@ -194,14 +203,16 @@ def regrid_file(input, mask, output, l2, method="nearest", var=None):
         renamed = False
         if (in_lon, in_lat) != ("lon", "lat"):
             dsi_renamed = dsi.rename({in_lon: "lon", in_lat: "lat"})
-            tmp_in = tempfile.mktsemp(suffix=".nc")
+            tmp_fd, tmp_in = tempfile.mkstemp(suffix=".nc")
             write_xarray_to_file(ds=dsi_renamed, file_path=tmp_in)
+            os.close(tmp_fd)
             renamed = True
 
-        tmp_out = tempfile.mkstemp(suffix=".nc")
+        tmp_out_fd, tmp_out = tempfile.mkstemp(suffix=".nc")
         logger.info(f"Regridding with cdo {method} interpolation")
         regrid_cdo(tmp_in, tmp_out, lonL2, latL2, method)
         out = get_xarray_ds_from_file(tmp_out)
+        os.close(tmp_out_fd)
         # Rename back if needed
         if renamed:
             out = out.rename({"lon": in_lon, "lat": in_lat})
@@ -221,10 +232,11 @@ def regrid_file(input, mask, output, l2, method="nearest", var=None):
         encoding = {v: {"zlib": True, "complevel": 4} for v in out.data_vars}
         logger.info(out)
         write_xarray_to_file(out, output, encoding)
-        print(f"Wrote {output}")
+        logger.info(f"Wrote {output}")
 
 
 def regrid(input, mask, output, l2=None, method="nearest", var=None):
+    """Regrid file(s) to an L2 grid."""
     input = Path(input)
     if input.is_dir():
         input_dir = input
@@ -233,7 +245,9 @@ def regrid(input, mask, output, l2=None, method="nearest", var=None):
         input_dir = input.parent
         files = [input]
     else:
-        raise ValueError("Input is neither file nor dir.")
+        msg = "Input is neither file nor dir."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
     for file_input in files:
         output_name = file_input.name
         output_path = output
@@ -243,5 +257,5 @@ def regrid(input, mask, output, l2=None, method="nearest", var=None):
         file_output = (
             output_path / file_input.parent.relative_to(input_dir) / output_name
         )
-        print(file_input, file_output)
+        logger.info(f"{file_input} -> {file_output}")
         regrid_file(file_input, mask, file_output, l2, method, var)

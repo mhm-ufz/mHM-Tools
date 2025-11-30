@@ -308,7 +308,7 @@ def write_xarray_to_file(
     fmt=None,
     create_folder=True,
     encoding=None,
-    compute_kwargs={},
+    compute_kwargs=None,
     engine="netcdf4",
     available_mem_gib=None,
 ):
@@ -325,7 +325,6 @@ def write_xarray_to_file(
             encoding = {
                 v: {"zlib": True, "complevel": 4, "shuffle": True} for v in ds.data_vars
             }
-            compute_kwargs = {"scheduler": "threads", "num_workers": 1}
             dask.config.set(
                 {"array.slicing.split_large_chunks": True}
             )  # also works as context manager
@@ -337,7 +336,11 @@ def write_xarray_to_file(
                 delayed = ds.to_netcdf(
                     file_path, engine="netcdf4", encoding=encoding, compute=False
                 )
-                delayed.compute(scheduler="threads", num_workers=1)
+                delayed.compute(
+                    scheduler="threads",
+                    num_workers=1,
+                    **(compute_kwargs or {}),
+                )
         else:
             if encoding is None:
                 ds, encoding = move_reserved_attrs_to_encoding(ds)
@@ -528,7 +531,9 @@ def move_reserved_attrs_to_encoding(
     extra_reserved: set[str] | None = None,
 ):
     """
-    Move reserved serialization keys from .attrs to .encoding and return:
+    Move reserved serialization keys from .attrs to .encoding and return.
+
+    Return:
       - a (shallow-copied) xarray object with cleaned attrs
       - an `encoding` dict suitable for xarray.to_netcdf(encoding=encoding)
 

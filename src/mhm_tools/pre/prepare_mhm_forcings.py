@@ -124,14 +124,14 @@ def prepare_forcings(
     in_file: str,
     out_dir: str,
     out_file: str,
-    var: str = None,
+    var: Optional[str] = None,
     crop: bool = False,
     lon_min: Optional[float] = None,
     lon_max: Optional[float] = None,
     lat_min: Optional[float] = None,
     lat_max: Optional[float] = None,
     use_mfdataset: bool = False,
-    target_frequency: str = None,
+    target_frequency: Optional[str] = None,
 ) -> None:
     """Loop through all files matching in_file in in_dir, convert units.
 

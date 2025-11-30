@@ -294,7 +294,7 @@ def call_create_latlon(
     logger.info(f"Latlon file written to {latlon_output_file}")
 
 
-def crop_file(
+def crop_file(  # noqa: PLR0912
     input_file,
     mask_da,
     latslice,
@@ -443,14 +443,13 @@ def crop_file(
         )
 
     logger.info(f"Written to {output_file}")
-    if force_header_creation:
-        if not (output_file.parent / "header.txt").is_file():
-            create_header(ds_cropped, output_path=output_file.parent, write=True)
+    if force_header_creation and not (output_file.parent / "header.txt").is_file():
+        create_header(ds_cropped, output_path=output_file.parent, write=True)
     return latlon_files
 
 
 @log_arguments()
-def crop_mhm_setup(
+def crop_mhm_setup(  # noqa: PLR0913
     mask_da,
     output_path,
     input_path,

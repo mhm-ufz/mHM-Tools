@@ -183,7 +183,6 @@ def run(args):
     lonslice = slice(lon_min_target_grid, lon_max_target_grid)
     # l0_resolution = float(args.lonlatbox.split(",")[4])
     available_mem = get_available_mem_in_unit(args.available_mem)
-    only_header = True if args.no_cropping else args.only_header
     crop_mhm_setup(
         input_path=args.input_path,
         output_path=args.output_path,

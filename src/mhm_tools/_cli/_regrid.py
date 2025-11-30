@@ -1,4 +1,4 @@
-"""Regrid to L2 aligned with L0 grid from mask.nc"""
+"""Regrid to L2 aligned with L0 grid from mask.nc."""
 
 from pathlib import Path
 
