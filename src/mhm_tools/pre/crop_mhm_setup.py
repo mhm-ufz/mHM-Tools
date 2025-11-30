@@ -13,7 +13,6 @@ from mhm_tools.common.file_handler import (
     ChunkType,
     create_header,
     get_xarray_ds_from_file,
-    write_xarray_to_ascii,
     write_xarray_to_file,
 )
 from mhm_tools.common.logger import ErrorLogger, log_arguments
@@ -129,6 +128,7 @@ def regrid_mask(
     results[~mask] = 0
     return results
 
+
 def crop_file_with_header(ds_in, file_path, output_path, lonslice, latslice):
     """Crop the nc file and create a new header file for the new coordinates."""
     pres = 1e-9
@@ -243,7 +243,7 @@ def call_create_latlon(
     latlon_output_file,
     meteo_header_path,
     crs,
-    chunking=True
+    chunking=True,
 ):
     """Create lat/lon headers for multiple resolutions and write the latlon file.
 
@@ -307,7 +307,7 @@ def crop_file(
     chunking=False,
     output_var=None,
     only_create_header=False,
-    no_cropping=False
+    no_cropping=False,
 ):
     """Crops one file by lat and lon slice and may mask it with the mask dataarray."""
     logger.info(f"Cropping the file {input_file}")
@@ -335,10 +335,10 @@ def crop_file(
             ds = get_xarray_ds_from_file(
                 input_file,
                 chunking=chunking,
-                available_mem_gib=available_mem_gib//3,
+                available_mem_gib=available_mem_gib // 3,
                 normalize_latlon_coords=True,
                 force_decending_y=True,
-                chunk_type=ChunkType.TIME
+                chunk_type=ChunkType.TIME,
             )
         except ValueError as ve:
             logger.error(
@@ -422,25 +422,31 @@ def crop_file(
             ds_cropped = ds_cropped.where(mask_regridded == 1, np.nan)
         else:
             logger.info("Can't mask dem file because no mask was provided.")
-    if output_var is not None: 
+    if output_var is not None:
         try:
             data_var = get_single_data_var(ds_cropped)
             ds_cropped = ds_cropped.rename({data_var: output_var})
-        except ValueError: 
-            logger.warning(f'Could not rename data_var to specified output variable name {output_var}')
+        except ValueError:
+            logger.warning(
+                f"Could not rename data_var to specified output variable name {output_var}"
+            )
     if not only_create_header:
         try:
-            write_xarray_to_file(ds_cropped, output_file, available_mem_gib=available_mem_gib)
+            write_xarray_to_file(
+                ds_cropped, output_file, available_mem_gib=available_mem_gib
+            )
         except Exception as e:
             logger.warning(f"First try writing the file failed: {e}")
             logger.info("Changing datatype to float")
             for var_name in ds_cropped.data_vars:
                 ds_cropped[var_name] = ds_cropped[var_name].astype(float)
-            write_xarray_to_file(ds_cropped, output_file, available_mem_gib=available_mem_gib)
+            write_xarray_to_file(
+                ds_cropped, output_file, available_mem_gib=available_mem_gib
+            )
 
     logger.info(f"Written to {output_file}")
     if force_header_creation or only_create_header:
-        if not (output_file.parent / 'header.txt').is_file():
+        if not (output_file.parent / "header.txt").is_file():
             create_header(ds_cropped, output_path=output_file.parent, write=True)
     return latlon_files
 
@@ -463,7 +469,7 @@ def crop_mhm_setup(
     chunking=False,
     output_var=None,
     only_create_header=False,
-    no_cropping=False
+    no_cropping=False,
 ):
     """Cut out an existing mhm domain setup using a mask file."""
     # check if the input is correct
@@ -494,7 +500,7 @@ def crop_mhm_setup(
             chunking=chunking,
             output_var=output_var,
             only_create_header=only_create_header,
-            no_cropping=no_cropping
+            no_cropping=no_cropping,
         )
         for f in files
     )
@@ -509,5 +515,5 @@ def crop_mhm_setup(
             latlon_files.latlon_output_file,
             latlon_files.meteo_header_path,
             crs,
-            chunking=chunking
+            chunking=chunking,
         )

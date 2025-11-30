@@ -24,10 +24,8 @@ from mhm_tools.common.xarray_utils import (
     get_clim_from_ds,
     get_coord_key,
     get_overlapping_time_slice,
-    timedelta_to_alias,
-)
-from mhm_tools.common.xarray_utils import (
     spearman_correlation,
+    timedelta_to_alias,
 )
 from mhm_tools.post.hydrograph import gen_hydrograph_by_data_sets
 
@@ -265,7 +263,7 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915
             gauge_ids = gauge_ids.where(slicing_condition, drop=True)
         logger.info(f"There are {len(gauge_ids.values)} gauges in total.")
 
-         # prepare for later resampling
+        # prepare for later resampling
         with load_ds(model_data_path) as sim_data_in:
             hours_sim, alias_sim = timedelta_to_alias(sim_data_in)
             hours_obs, alias_obs = timedelta_to_alias(observed_data_in)

@@ -37,7 +37,6 @@ def parse_nml_for_landcover(
     Also validates that successive [year_start, year_end] blocks are
     continuous (no gaps) and non-overlapping. Raises ValueError if invalid.
     """
-
     # dir_LCover(i) = "path"
     dir_regex = re.compile(r"dir_LCover\(\s*(\d+)\s*\)\s*=\s*['\"]([^'\"]+)['\"]")
     dir_matches = [(int(m.group(1)), m.group(2)) for m in dir_regex.finditer(nml_text)]
@@ -145,16 +144,15 @@ def add_time_bounds_cf(
 
     The last bound upper edge is (max(year_end)+1)-01-01T00:00:00.
     """
-
     # sort/normalize to datetime64[ns]
     time_vals = np.sort(ds["time"].values.astype("datetime64[ns]"))
 
     # compute the final (last) interval end bound:
     # max(year_end) + 1, Jan-01 of that next year
     last_year_end = max(info["year_end"] for info in input_infos.values())
-    final_bound_dt = np.datetime64(
-        f"{last_year_end + 1}-01-01T00:00:00"
-    ).astype("datetime64[ns]")
+    final_bound_dt = np.datetime64(f"{last_year_end + 1}-01-01T00:00:00").astype(
+        "datetime64[ns]"
+    )
 
     # build upper bounds:
     # for each time[i], upper bound is time[i+1], except the last which goes to final_bound_dt
@@ -233,7 +231,6 @@ def _build_input_infos(
         ...
     }
     """
-
     input_infos: Dict[int, dict] = {}
 
     for idx in sorted(entries.keys()):
@@ -246,14 +243,13 @@ def _build_input_infos(
             if n_domains == 1 and 1 in dir_map:
                 # special case: single-domain namelist -> always use dir_LCover(1)
                 chosen_dir = dir_map[1]
+            # prefer dir_LCover(idx), else dir_LCover(1), else first available
+            elif idx in dir_map:
+                chosen_dir = dir_map[idx]
+            elif 1 in dir_map:
+                chosen_dir = dir_map[1]
             else:
-                # prefer dir_LCover(idx), else dir_LCover(1), else first available
-                if idx in dir_map:
-                    chosen_dir = dir_map[idx]
-                elif 1 in dir_map:
-                    chosen_dir = dir_map[1]
-                else:
-                    chosen_dir = next(iter(dir_map.values()))
+                chosen_dir = next(iter(dir_map.values()))
 
         # resolve relative dirs against the namelist location
         if chosen_dir:
@@ -297,7 +293,6 @@ def convert_lc_ascii_to_nc(
     - By default the data variable is called 'land_cover'. You can override
       that with `var_name=...`.
     """
-
     # read & parse namelist
     nml_path = Path(input_nml)
     if not nml_path.exists():

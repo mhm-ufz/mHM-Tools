@@ -16,11 +16,11 @@ from pathlib import Path
 from typing import Optional
 
 import pandas as pd
-from mhm_tools.common.time_utils import resample_to_daily_or_hourly_adaptive
 import xarray as xr
 
 from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_to_file
 from mhm_tools.common.logger import ErrorLogger
+from mhm_tools.common.time_utils import resample_to_daily_or_hourly_adaptive
 from mhm_tools.common.xarray_utils import crop_ds, get_single_data_var
 
 logger = logging.getLogger(__name__)
@@ -77,7 +77,7 @@ def convert_units(ds: xr.Dataset, var: str) -> xr.DataArray:
         new_var = "pre"
         ds = ds.rename({var: new_var})
         freq = pd.infer_freq(ds.indexes["time"])
-        if 'kg' in units and "s-1" in units:
+        if "kg" in units and "s-1" in units:
             if freq and freq.startswith("D"):
                 factor = 86400
             elif freq and freq.startswith("H"):
@@ -94,7 +94,7 @@ def convert_units(ds: xr.Dataset, var: str) -> xr.DataArray:
                 factor = 90000
             elif freq and freq.startswith("H"):
                 factor = 3600
-            
+
         ds[new_var] = ds[new_var] * factor
         ds[new_var].attrs["units"] = "mm"
     else:
@@ -131,7 +131,7 @@ def prepare_forcings(
     lat_min: Optional[float] = None,
     lat_max: Optional[float] = None,
     use_mfdataset: bool = False,
-    target_frequency: str = None
+    target_frequency: str = None,
 ) -> None:
     """Loop through all files matching in_file in in_dir, convert units.
 
@@ -151,7 +151,7 @@ def prepare_forcings(
             use_mfdataset=use_mfdataset,
             normalize_latlon_coords=True,
         )
-        if var is None: 
+        if var is None:
             var = get_single_data_var(ds)
         # Sort lat/lon if needed
         ds = ensure_lat_lon_order(ds)
@@ -159,7 +159,7 @@ def prepare_forcings(
         # needs to be before unit conversion because that changes rates to quantities
         if target_frequency is not None:
             ds = resample_to_daily_or_hourly_adaptive(ds, target_frequency)
-        
+
         # Convert units and get DataArray
         da, encoding = convert_units(ds, var)
 
@@ -176,4 +176,6 @@ def prepare_forcings(
 
         # Write output
         logger.info(da)
-        write_xarray_to_file(ds=da, file_path=Path(out_dir) / name)#, encoding=encoding)
+        write_xarray_to_file(
+            ds=da, file_path=Path(out_dir) / name
+        )  # , encoding=encoding)

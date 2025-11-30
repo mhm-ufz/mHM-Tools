@@ -134,9 +134,7 @@ def add_args(parser):
         required=False,
         default=False,
         action="store_true",
-        help=(
-            """Force creation of header file for all files."""
-        ),
+        help=("""Force creation of header file for all files."""),
     )
     parser.add_argument(
         "--only_header",
@@ -158,17 +156,13 @@ def add_args(parser):
     )
     parser.add_argument(
         "--output_var",
-        required=False, 
-        default=None, 
-        help=("""Output variable name for single data var""")
+        required=False,
+        default=None,
+        help=("""Output variable name for single data var"""),
     )
     parser.add_argument(
-        "--mask_var",
-        required=False, 
-        default='mask', 
-        help=("""Mask variable name.""")
+        "--mask_var", required=False, default="mask", help=("""Mask variable name.""")
     )
-
 
 
 def run(args):
@@ -192,7 +186,7 @@ def run(args):
         args.lon_max,
         args.lat_min,
         args.lat_max,
-        mask_var=args.mask_var
+        mask_var=args.mask_var,
     )
     latslice = slice(lat_max_target_grid, lat_min_target_grid)
     lonslice = slice(lon_min_target_grid, lon_max_target_grid)
@@ -215,5 +209,5 @@ def run(args):
         chunking=args.chunking,
         output_var=args.output_var,
         only_create_header=only_header,
-        no_cropping=args.no_cropping
+        no_cropping=args.no_cropping,
     )
