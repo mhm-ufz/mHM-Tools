@@ -815,7 +815,7 @@ def get_stats(
     return stats_ds
 
 
-def compare_input_with_ref(  # noqa: PLR0913
+def compare_input_with_ref(  # noqa: PLR0912, PLR0913
     input_path,
     input_var,
     output_path,
