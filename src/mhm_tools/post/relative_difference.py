@@ -21,6 +21,7 @@ from typing import Optional
 import numpy as np
 import xarray as xr
 
+from mhm_tools.common.file_handler import write_xarray_to_file
 from mhm_tools.common.netcdf import read_dataset
 from mhm_tools.common.plotter import plot_map
 from mhm_tools.common.xarray_utils import get_coord_key, normalize_lat_lon
@@ -92,4 +93,4 @@ def calc_rel_diff(  # noqa: PLR0913
 
     # If set, saves rel. diff file
     if save_ncfile:
-        diff.to_netcdf(out_path_dir / output_file_nc)
+        write_xarray_to_file(ds=diff, file_path=out_path_dir / output_file_nc)

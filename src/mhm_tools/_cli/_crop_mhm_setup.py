@@ -136,6 +136,24 @@ def add_args(parser):
         action="store_true",
         help=("""Force creation of header file for all files."""),
     )
+    parser.add_argument(
+        "--no_cropping",
+        required=False,
+        default=False,
+        action="store_true",
+        help=(
+            """Do not crop the file but only writes a header. This activate the forced header creation and only header functions."""
+        ),
+    )
+    parser.add_argument(
+        "--output_var",
+        required=False,
+        default=None,
+        help=("""Output variable name for single data var"""),
+    )
+    parser.add_argument(
+        "--mask_var", required=False, default="mask", help=("""Mask variable name.""")
+    )
 
 
 def run(args):
@@ -159,6 +177,7 @@ def run(args):
         args.lon_max,
         args.lat_min,
         args.lat_max,
+        mask_var=args.mask_var,
     )
     latslice = slice(lat_max_target_grid, lat_min_target_grid)
     lonslice = slice(lon_min_target_grid, lon_max_target_grid)
@@ -175,8 +194,9 @@ def run(args):
         crs=args.crs,
         n_jobs=args.ncpus,
         filename=args.file_name,
-        recursive_depth=args.folder_recursion_depth,
         available_mem_gib=available_mem,
         force_header_creation=args.create_header,
         chunking=args.chunking,
+        output_var=args.output_var,
+        no_cropping=args.no_cropping,
     )

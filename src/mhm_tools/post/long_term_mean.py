@@ -24,7 +24,12 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from cdo import Cdo
+try:
+    from cdo import Cdo
+
+    cdo = Cdo()
+except Exception:
+    cdo = None
 
 from mhm_tools.common.logger import ErrorLogger
 from mhm_tools.pre.crop_mhm_setup import crop_file

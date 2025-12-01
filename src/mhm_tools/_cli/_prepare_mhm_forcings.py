@@ -39,10 +39,10 @@ def add_args(parser):
     required.add_argument(
         "-o", "--out-dir", required=True, help="Output directory for processed files"
     )
-    required.add_argument(
+    parser.add_argument(
         "-v",
         "--var",
-        required=True,
+        required=False,
         help="Variable name to convert: 2t (temperature), tp (total precipitation), tprate (precipitation rate)",
     )
 
@@ -59,15 +59,45 @@ def add_args(parser):
     parser.add_argument(
         "--crop", action="store_true", help="Enable spatial cropping of the dataset"
     )
-    parser.add_argument("--lon-min", type=float, help="Minimum longitude for cropping")
-    parser.add_argument("--lon-max", type=float, help="Maximum longitude for cropping")
-    parser.add_argument("--lat-min", type=float, help="Minimum latitude for cropping")
-    parser.add_argument("--lat-max", type=float, help="Maximum latitude for cropping")
+    parser.add_argument(
+        "--lon-min",
+        type=float,
+        help="Minimum longitude for cropping",
+        required=False,
+        default=None,
+    )
+    parser.add_argument(
+        "--lon-max",
+        type=float,
+        help="Maximum longitude for cropping",
+        required=False,
+        default=None,
+    )
+    parser.add_argument(
+        "--lat-min",
+        type=float,
+        help="Minimum latitude for cropping",
+        required=False,
+        default=None,
+    )
+    parser.add_argument(
+        "--lat-max",
+        type=float,
+        help="Maximum latitude for cropping",
+        required=False,
+        default=None,
+    )
     parser.add_argument(
         "--use-mfdataset",
         type=bool,
         default=False,
         help="Use xarray.open_mfdataset for multi-file datasets",
+    )
+    parser.add_argument(
+        "--target_frequency",
+        type=str,
+        default=None,
+        help="Resample the dataset to this target frequency (hourly, daily).",
     )
 
 
@@ -91,4 +121,5 @@ def run(args):
         lat_min=args.lat_min,
         lat_max=args.lat_max,
         use_mfdataset=args.use_mfdataset,
+        target_frequency=args.target_frequency,
     )

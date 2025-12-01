@@ -1,5 +1,4 @@
 # tests/test_grdc_eval_unittest.py
-import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,7 +9,6 @@ import pandas as pd
 import xarray as xr
 
 # Adjust this import to your actual module path/name
-import mhm_tools.common.file_handler as fh
 import mhm_tools.post.GRDC_validation as gv
 
 # -----------------------------

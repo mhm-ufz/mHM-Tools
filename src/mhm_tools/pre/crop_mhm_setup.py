@@ -10,14 +10,16 @@ from joblib import Parallel, delayed
 
 from mhm_tools.common.esri_grid import read_header, write_header
 from mhm_tools.common.file_handler import (
+    ChunkType,
     create_header,
     get_xarray_ds_from_file,
-    write_xarray_to_ascii,
+    write_xarray_to_file,
 )
 from mhm_tools.common.logger import ErrorLogger, log_arguments
 from mhm_tools.common.xarray_utils import (
     crop_ds,
     get_coord_key,
+    get_dtype,
     get_single_data_var,
     induce_data_var_from_file_name,
 )
@@ -94,12 +96,12 @@ def regrid_mask(
     """Regrid a xarray mask dataset mask_ds to the resolution of a second dataset ds2."""
     mask_lon = mask_ds[lon_key_mask].data
     mask_lat = mask_ds[lat_key_mask].data
-    mask_res = mask_lat[0] - mask_lat[1]
-    target_res = target_lat[0] - target_lat[1]
+    mask_res = abs(mask_lon[1] - mask_lon[0])
+    target_res = abs(target_lon[1] - target_lon[0])
     if target_res > mask_res:
         if target_res % mask_res != 0:
             logger.warning(
-                f"Target resolution is not an integer muptiple of mask resolution. Factor: {target_res / mask_res}"
+                f"Target resolution {target_res} is not an integer muptiple of mask resolution {mask_res}. Factor: {target_res / mask_res}"
             )
         results = np.full((len(target_lat), len(target_lon)), 0.0)
         for i, lat in enumerate(target_lat):
@@ -126,21 +128,6 @@ def regrid_mask(
     results[mask] = 1
     results[~mask] = 0
     return results
-
-
-def write_to_file(ds, output_file: Path):
-    """Take xarray Dataset and write it to file.
-
-    File type depends on path suffix.
-    """
-    logger.info(f"Writing to file {output_file}")
-    logger.debug(f"Content is: {ds}")
-    suffix = output_file.suffix
-    if suffix == ".asc":
-        write_xarray_to_ascii(ds, output_file)
-        # ds.to_netcdf(output_file.with_suffix('.nc'))
-    elif suffix == ".nc":
-        ds.to_netcdf(output_file)
 
 
 def crop_file_with_header(ds_in, file_path, output_path, lonslice, latslice):
@@ -189,7 +176,6 @@ def crop_file_with_header(ds_in, file_path, output_path, lonslice, latslice):
     yll = header_information["yllcorner"] + header_information["cellsize"] * (
         header_information["nrows"] - index_y_max
     )
-
     new_header_information = {
         "ncols": index_x_max - index_x_min,
         "nrows": index_y_max - index_y_min,
@@ -201,7 +187,8 @@ def crop_file_with_header(ds_in, file_path, output_path, lonslice, latslice):
     logger.info(
         f"Writing header file to {header_out_path} with header: {new_header_information}"
     )
-    write_header(header_out_path, new_header_information)
+    dtype = get_dtype(ds_in)
+    write_header(header_out_path, new_header_information, dtype)
     try:
         data = ds_in[data_var].isel(
             {
@@ -308,7 +295,7 @@ def call_create_latlon(
     logger.info(f"Latlon file written to {latlon_output_file}")
 
 
-def crop_file(
+def crop_file(  # noqa: PLR0912
     input_file,
     mask_da,
     latslice,
@@ -319,6 +306,8 @@ def crop_file(
     available_mem_gib,
     force_header_creation=False,
     chunking=False,
+    output_var=None,
+    no_cropping=False,
 ):
     """Crops one file by lat and lon slice and may mask it with the mask dataarray."""
     logger.info(f"Cropping the file {input_file}")
@@ -346,9 +335,10 @@ def crop_file(
             ds = get_xarray_ds_from_file(
                 input_file,
                 chunking=chunking,
-                available_mem_gib=available_mem_gib,
+                available_mem_gib=available_mem_gib // 3,
                 normalize_latlon_coords=True,
                 force_decending_y=True,
+                chunk_type=ChunkType.TIME,
             )
         except ValueError as ve:
             logger.error(
@@ -370,42 +360,43 @@ def crop_file(
     logger.debug(f"read in dataset: {ds}")
     # Handling of special cases:
     ds_cropped = None
-    # 3. Files that are in the same folder as a header file. Typical examples are meteo datasets such as temperature or precipitation
-    if list(input_file.parent.glob("header.txt")):
-        logger.debug("Cropping and writing new header file...")
-        ds_cropped, header_path = crop_file_with_header(
-            ds,
-            input_file,
-            output_path / input_file.parent.relative_to(input_path),
-            lonslice=lonslice,
-            latslice=latslice,
-        )
-        if not (ds_cropped is None and header_path is None):
-            lat_key = get_coord_key(ds_cropped, lat=True)
-            lon_key = get_coord_key(ds_cropped, lon=True)
-            if input_file.stem in ["pre", "pet", "tavg"]:
-                latlon_files.set_meteo_header_path(header_path)
-    # 4. All other netcdf files containing mostly morphological data.
-    else:
-        lat_key = get_coord_key(ds, lat=True)
-        lon_key = get_coord_key(ds, lon=True)
+    if not no_cropping:
+        # 3. Files that are in the same folder as a header file. Typical examples are meteo datasets such as temperature or precipitation, here the header is used as they might not have lat, lon coords
+        if list(input_file.parent.glob("header.txt")):
+            logger.debug("Cropping and writing new header file...")
+            ds_cropped, header_path = crop_file_with_header(
+                ds,
+                input_file,
+                output_path / input_file.parent.relative_to(input_path),
+                lonslice=lonslice,
+                latslice=latslice,
+            )
+            if not (ds_cropped is None and header_path is None):
+                lat_key = get_coord_key(ds_cropped, lat=True)
+                lon_key = get_coord_key(ds_cropped, lon=True)
+                if input_file.stem in ["pre", "pet", "tavg"]:
+                    latlon_files.set_meteo_header_path(header_path)
+        # 4. All other netcdf files containing mostly morphological data.
+        else:
+            lat_key = get_coord_key(ds, lat=True)
+            lon_key = get_coord_key(ds, lon=True)
 
-        # extract lon-lat bounds
-        lon_start, lon_stop = float(lonslice.start), float(lonslice.stop)
-        lat_start, lat_stop = float(latslice.start), float(latslice.stop)
+            # extract lon-lat bounds
+            lon_start, lon_stop = float(lonslice.start), float(lonslice.stop)
+            lat_start, lat_stop = float(latslice.start), float(latslice.stop)
 
-        logger.debug(
-            f"Selecting {input_file.name} using lon:{lonslice} and lat:{latslice}"
-        )
-        ds_cropped = crop_ds(
-            ds=ds,
-            lon_min=lon_start,
-            lon_max=lon_stop,
-            lat_min=lat_start,
-            lat_max=lat_stop,
-            lon_name=lon_key,
-            lat_name=lat_key,
-        )
+            logger.debug(
+                f"Selecting {input_file.name} using lon:{lonslice} and lat:{latslice}"
+            )
+            ds_cropped = crop_ds(
+                ds=ds,
+                lon_min=lon_start,
+                lon_max=lon_stop,
+                lat_min=lat_start,
+                lat_max=lat_stop,
+                lon_name=lon_key,
+                lat_name=lat_key,
+            )
 
     # check for emptiness or insufficient grid points
     if ds_cropped.sizes[lat_key] < 1 or ds_cropped.sizes[lon_key] < 1:
@@ -431,18 +422,26 @@ def crop_file(
             ds_cropped = ds_cropped.where(mask_regridded == 1, np.nan)
         else:
             logger.info("Can't mask dem file because no mask was provided.")
+    if output_var is not None:
+        try:
+            data_var = get_single_data_var(ds_cropped)
+            ds_cropped = ds_cropped.rename({data_var: output_var})
+        except ValueError:
+            logger.warning(
+                f"Could not rename data_var to specified output variable name {output_var}"
+            )
     try:
-        write_to_file(ds_cropped, output_file)
+        write_xarray_to_file(
+            ds_cropped, output_file  # , available_mem_gib=available_mem_gib
+        )
     except Exception as e:
         logger.warning(f"First try writing the file failed: {e}")
         logger.info("Changing datatype to float")
         for var_name in ds_cropped.data_vars:
             ds_cropped[var_name] = ds_cropped[var_name].astype(float)
-        write_to_file(ds_cropped, output_file)
-        if force_header_creation and not (output_file.parent / "header.txt").is_file():
-            create_header(
-                ds_cropped, output_path=output_file.parent / "header.txt", write=True
-            )
+        write_xarray_to_file(
+            ds_cropped, output_file  # , available_mem_gib=available_mem_gib
+        )
 
     logger.info(f"Written to {output_file}")
     if force_header_creation and not (output_file.parent / "header.txt").is_file():
@@ -451,7 +450,7 @@ def crop_file(
 
 
 @log_arguments()
-def crop_mhm_setup(
+def crop_mhm_setup(  # noqa: PLR0913
     mask_da,
     output_path,
     input_path,
@@ -463,10 +462,11 @@ def crop_mhm_setup(
     crs=None,
     n_jobs=1,
     filename="*.*",
-    recursive_depth=5,
     available_mem_gib=5,
     force_header_creation=False,
     chunking=False,
+    output_var=None,
+    no_cropping=False,
 ):
     """Cut out an existing mhm domain setup using a mask file."""
     # check if the input is correct
@@ -478,8 +478,7 @@ def crop_mhm_setup(
     )
     files = []
     if input_path.is_dir():
-        for depth in range(recursive_depth):
-            files.extend(input_path.glob("*/" * depth + filename))
+        files.extend(input_path.rglob(filename))
     else:
         files = [input_path]
 
@@ -496,6 +495,8 @@ def crop_mhm_setup(
             available_mem_gib=available_mem_gib,
             force_header_creation=force_header_creation,
             chunking=chunking,
+            output_var=output_var,
+            no_cropping=no_cropping,
         )
         for f in files
     )

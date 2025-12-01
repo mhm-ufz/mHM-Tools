@@ -2,7 +2,7 @@
 
 import argparse
 
-from mhm_tools._cli import _file_converter
+from mhm_tools._cli import _calculate_pet
 from mhm_tools.common.logger import configure_mhm_tools_logger
 
 from .. import __version__
@@ -15,13 +15,17 @@ from . import (
     _create_subdomain_masks,
     _crop_mhm_setup,
     _difference,
+    _file_converter,
     _grdc_validation,
     _gridded_data_evaluation,
     _hydrograph,
+    _landcover_ascii_to_nc,
     _latlon,
     _long_term_mean,
+    _merge,
     _prepare_mhm_forcings,
     _ratio,
+    _regrid,
     _relative_difference,
     _taylor_diagram,
 )
@@ -90,9 +94,13 @@ def _get_parser():
     add_command_from_module(subparsers, "grdc_validation", _grdc_validation)
     add_command_from_module(subparsers, "latlon", _latlon)
     add_command_from_module(subparsers, "converter_nc_ascii", _file_converter)
+    add_command_from_module(subparsers, "landcover_ascii_to_nc", _landcover_ascii_to_nc)
+    add_command_from_module(subparsers, "merge_files", _merge)
+    add_command_from_module(subparsers, "regrid_file", _regrid)
     add_command_from_module(subparsers, "create_catchment", _create_catchment)
     add_command_from_module(subparsers, "crop_mhm_setup", _crop_mhm_setup)
     add_command_from_module(subparsers, "prepare_mhm_forcings", _prepare_mhm_forcings)
+    add_command_from_module(subparsers, "calculate_pet", _calculate_pet)
     add_command_from_module(subparsers, "create_id_gauges", _create_idgauges)
     add_command_from_module(
         subparsers, "create_subdomain_masks", _create_subdomain_masks

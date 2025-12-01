@@ -14,28 +14,39 @@ logger = logging.getLogger(__name__)
 
 
 def normalize_lat_lon(
-    ds: xr.Dataset, lat: Optional[str] = None, lon: Optional[str] = None
+    ds: xr.Dataset,
+    lat: Optional[str] = None,
+    lon: Optional[str] = None,
+    raise_exceptions: bool = False,
 ) -> xr.Dataset:
     """
     Normalize latitude and longitude dimension and coordinate names to 'lat' and 'lon'.
 
     Handles both dimensions and coordinate variables.
     """
-    rename_dict = {}
-    if lat is None:
-        lat = get_coord_key(ds, lon=True)
-    if lon is None:
-        lon = get_coord_key(ds, lon=True)
+    try:
+        rename_dict = {}
+        if lat is None:
+            lat = get_coord_key(ds, lon=True)
+        if lon is None:
+            lon = get_coord_key(ds, lon=True)
 
-    coords_and_dims = list(ds.coords) + list(ds.dims)
+        coords_and_dims = list(ds.coords) + list(ds.dims)
 
-    # Rename coordinate variables if needed
-    if lat is not None and "lat" not in coords_and_dims and lat in coords_and_dims:
-        rename_dict[lat] = "lat"
-    if lon is not None and "lon" not in coords_and_dims and lon in coords_and_dims:
-        rename_dict[lon] = "lon"
+        # Rename coordinate variables if needed
+        if lat is not None and "lat" not in coords_and_dims and lat in coords_and_dims:
+            rename_dict[lat] = "lat"
+        if lon is not None and "lon" not in coords_and_dims and lon in coords_and_dims:
+            rename_dict[lon] = "lon"
 
-    return ds.rename(rename_dict)
+        return ds.rename(rename_dict)
+    except Exception as e:
+        if raise_exceptions:
+            with ErrorLogger(logger):
+                raise (e)
+        else:
+            logger.warning(f"Exception in normalize lat lon: {e}")
+            return ds
 
 
 def get_coord_key(
@@ -102,6 +113,10 @@ def get_single_data_var(ds):
             if coord in data_vars:
                 len_data_vars -= 1
                 data_vars.remove(coord)
+        for data_var in data_vars:
+            if "bounds" in ds[data_var].attrs or data_var.endswith("_bnds"):
+                len_data_vars -= 1
+                data_vars.remove(data_var)
         if len_data_vars > 1:
             logger.error(f"Only single data_var allowed but has {data_vars}")
             return None
@@ -109,7 +124,7 @@ def get_single_data_var(ds):
             logger.error("No datavar that is not coordinate.")
             return None
     logger.debug(f"data_vars: {data_vars}")
-    if len(data_vars) == 1:
+    if isinstance(data_vars, list) and len(data_vars) == 1:
         return data_vars[0]
     return None
 
@@ -241,3 +256,31 @@ def spearman_correlation(data1, data2):
     # Calculate Spearman rank correlation using scipy
     corr, p_value = spearmanr(data1, data2)
     return corr, p_value
+
+
+def get_dtype(ds):
+    """Return a simple dtype string for the dataset/dataarray."""
+    try:
+        if isinstance(ds, xr.Dataset):
+            v = get_single_data_var(ds)
+            da = ds[v]
+        elif isinstance(ds, xr.DataArray):
+            da = ds
+        else:
+            msg = f"Unsupported type {type(ds)}"
+            raise ValueError(msg)
+        arr = np.asarray(da)
+        dt = arr.dtype
+        # Map numpy dtype to simple esri dtype strings
+        if np.issubdtype(dt, np.floating):
+            dtype = "f4" if dt.itemsize <= 4 else "f8"
+        elif np.issubdtype(dt, np.integer) or np.issubdtype(dt, np.unsignedinteger):
+            # prefer signed integers for ASCII grid
+            dtype = "i4" if dt.itemsize <= 4 else "i8"
+        else:
+            msg = f"write_grid: cannot infer dtype from data with numpy dtype {dt}"
+            with ErrorLogger(logger):
+                raise ValueError(msg)
+        return dtype
+    except Exception:
+        return "f4"
