@@ -184,14 +184,6 @@ def crop_file_with_header(ds_in, file_path, output_path, lonslice, latslice):
         "cellsize":             header_information["cellsize"],
         "NODATA_value":         header_information["nodata_value"],
     }
-    # new_header_information = dedent(f"""
-    #     ncols                {index_x_max - index_x_min}
-    #     nrows                {index_y_max - index_y_min}
-    #     xllcorner            {xll:.6f}
-    #     yllcorner            {yll:.6f}
-    #     cellsize             {header_information["cellsize"]}
-    #     NODATA_value         {header_information["nodata_value"]}
-    #     """)
     logger.info(
         f"Writing header file to {header_out_path} with header: {new_header_information}"
     )
@@ -303,7 +295,7 @@ def call_create_latlon(
     logger.info(f"Latlon file written to {latlon_output_file}")
 
 
-def crop_file(
+def crop_file(  # noqa: PLR0912
     input_file,
     mask_da,
     latslice,
@@ -315,7 +307,6 @@ def crop_file(
     force_header_creation=False,
     chunking=False,
     output_var=None,
-    only_create_header=False,
     no_cropping=False,
 ):
     """Crops one file by lat and lon slice and may mask it with the mask dataarray."""
@@ -435,33 +426,26 @@ def crop_file(
         try:
             data_var = get_single_data_var(ds_cropped)
             ds_cropped = ds_cropped.rename({data_var: output_var})
-        except ValueError:
-            logger.warning(
-                f"Could not rename data_var to specified output variable name {output_var}"
-            )
-    if not only_create_header:
-        try:
-            write_xarray_to_file(
-                ds_cropped, output_file, available_mem_gib=available_mem_gib
-            )
-        except Exception as e:
-            logger.warning(f"First try writing the file failed: {e}")
-            logger.info("Changing datatype to float")
-            for var_name in ds_cropped.data_vars:
-                ds_cropped[var_name] = ds_cropped[var_name].astype(float)
-            write_xarray_to_file(
-                ds_cropped, output_file, available_mem_gib=available_mem_gib
-            )
+        except ValueError: 
+            logger.warning(f'Could not rename data_var to specified output variable name {output_var}')
+    try:
+        write_xarray_to_file(ds_cropped, output_file, available_mem_gib=available_mem_gib)
+    except Exception as e:
+        logger.warning(f"First try writing the file failed: {e}")
+        logger.info("Changing datatype to float")
+        for var_name in ds_cropped.data_vars:
+            ds_cropped[var_name] = ds_cropped[var_name].astype(float)
+        write_xarray_to_file(ds_cropped, output_file, available_mem_gib=available_mem_gib)
 
     logger.info(f"Written to {output_file}")
-    if force_header_creation or only_create_header:
-        if not (output_file.parent / "header.txt").is_file():
+    if force_header_creation:
+        if not (output_file.parent / 'header.txt').is_file():
             create_header(ds_cropped, output_path=output_file.parent, write=True)
     return latlon_files
 
 
 @log_arguments()
-def crop_mhm_setup(
+def crop_mhm_setup(  # noqa: PLR0913
     mask_da,
     output_path,
     input_path,
@@ -477,8 +461,7 @@ def crop_mhm_setup(
     force_header_creation=False,
     chunking=False,
     output_var=None,
-    only_create_header=False,
-    no_cropping=False,
+    no_cropping=False
 ):
     """Cut out an existing mhm domain setup using a mask file."""
     # check if the input is correct
@@ -508,8 +491,7 @@ def crop_mhm_setup(
             force_header_creation=force_header_creation,
             chunking=chunking,
             output_var=output_var,
-            only_create_header=only_create_header,
-            no_cropping=no_cropping,
+            no_cropping=no_cropping
         )
         for f in files
     )

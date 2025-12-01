@@ -1,9 +1,12 @@
+"""Time-related helpers for resampling datasets."""
+
 import logging
 from typing import Literal, Union
 
 import pandas as pd
 import xarray as xr
 
+from mhm_tools.common.logger import ErrorLogger
 from mhm_tools.common.xarray_utils import timedelta_to_alias
 
 logger = logging.getLogger(__name__)
@@ -19,18 +22,24 @@ def _pick_da(obj: Union[xr.DataArray, xr.Dataset]) -> xr.DataArray:
     if isinstance(obj, xr.DataArray):
         return obj
     if not obj.data_vars:
-        raise ValueError("Dataset has no data variables.")
-    return obj[list(obj.data_vars)[0]]
+        msg = "Dataset has no data variables."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    return obj[next(iter(obj.data_vars))]
+
 
 
 def _ensure_time(obj):
     if "time" not in obj.dims and "time" not in obj.coords:
-        raise ValueError("Object needs a 'time' dimension.")
+        msg = "Object needs a 'time' dimension."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
 
 
-def _is_intensive(var: xr.DataArray) -> bool:
+def _is_intensive(var: xr.DataArray) -> bool:  # noqa: PLR0911
     """
     Heuristic: True = intensive, False = extensive.
+
     - If units include '/s', ' s-1', '/h', ' h-1' -> intensive (rate)
     - If CF names suggest totals (amount) -> extensive
     - If units look like pure totals per step (mm, kg m-2) -> extensive
@@ -89,12 +98,16 @@ def _offset_for_alias(alias: str) -> pd.DateOffset:
     # e.g., "3H", "1H"
     if alias.endswith("H"):
         return pd.offsets.Hour(int(alias[:-1]))
-    raise ValueError(f"Unsupported alias '{alias}'")
+    msg = f"Unsupported alias '{alias}'"
+    with ErrorLogger(logger):
+        raise ValueError(msg)
+
 
 
 def _per_step_duration_index(time: xr.DataArray, alias_in: str) -> pd.TimedeltaIndex:
     """
-    Duration of each *source* step (right-open interval) as TimedeltaIndex,
+    Duration of each *source* step (right-open interval) as TimedeltaIndex.
+
     handling variable-length months when alias_in == 'ME'.
     """
     t = pd.DatetimeIndex(time.values)
@@ -104,8 +117,8 @@ def _per_step_duration_index(time: xr.DataArray, alias_in: str) -> pd.TimedeltaI
         return pd.to_timedelta([])
     # last step: extend by one calendar step
     dt_last = _offset_for_alias(alias_in)
-    dt = dt.append(pd.TimedeltaIndex([pd.Timedelta(dt_last)]))
-    return dt
+    return dt.append(pd.TimedeltaIndex([pd.Timedelta(dt_last)]))
+
 
 
 def _distribute_extensive_to_finer(
@@ -115,6 +128,7 @@ def _distribute_extensive_to_finer(
 ) -> xr.DataArray:
     """
     Sum-preserving upsample for extensive variables.
+
     Evenly distributes each coarse-step total into its child finer bins.
     """
     # how many target bins per source step?
@@ -127,8 +141,8 @@ def _distribute_extensive_to_finer(
         bins_per.values, dims=["time"], coords={"time": da.time}
     )
     # now replicate into finer grid by resampling with ffill
-    out = per_bin.resample(time=alias_out).ffill()
-    return out
+    return per_bin.resample(time=alias_out).ffill()
+
 
 
 # ---------------------- public function ----------------------
@@ -140,7 +154,8 @@ def resample_to_daily_or_hourly_adaptive(
     upsample_for_intensive: Literal["linear", "ffill", "nearest"] = "linear",
 ) -> Union[xr.DataArray, xr.Dataset]:
     """
-    Resample to daily or hourly with **adaptive** choice of aggregation:
+    Resample to daily or hourly with **adaptive** choice of aggregation.
+
       * Intensive vars → downsample = mean; upsample = interpolate/fill.
       * Extensive vars → downsample = sum;  upsample = sum-preserving distribution.
 
@@ -170,7 +185,7 @@ def resample_to_daily_or_hourly_adaptive(
     going_coarser = in_hours < tgt_hours  # e.g., 1H -> D
     going_finer = in_hours > tgt_hours  # e.g., D/ME/W/3H -> 1H or D
 
-    def _resample_da(da: xr.DataArray) -> xr.DataArray:
+    def _resample_da(da: xr.DataArray) -> xr.DataArray:  # noqa: PLR0911
         intensive = _is_intensive(da)
 
         if going_coarser:
@@ -188,9 +203,9 @@ def resample_to_daily_or_hourly_adaptive(
                     return da.resample(time=alias_tgt).ffill()
                 if upsample_for_intensive == "nearest":
                     return da.resample(time=alias_tgt).nearest()
-                raise ValueError(
-                    f"Unknown upsample_for_intensive='{upsample_for_intensive}'"
-                )
+                msg = "Unknown upsample_for_intensive=" f"'{upsample_for_intensive}'"
+                with ErrorLogger(logger):
+                    raise ValueError(msg)
             # extensive → distribute evenly across finer bins (sum-preserving)
             return _distribute_extensive_to_finer(
                 da, alias_in=alias_in, alias_out=alias_tgt
@@ -210,10 +225,10 @@ def resample_to_daily_or_hourly_adaptive(
                 return da.resample(time="1H").ffill()
             if upsample_for_intensive == "nearest":
                 return da.resample(time="1H").nearest()
-        else:
-            return _distribute_extensive_to_finer(
-                da, alias_in=alias_in, alias_out="1H"
-            )
+            msg = "Unknown upsample_for_intensive=" f"'{upsample_for_intensive}'"
+            with ErrorLogger(logger):
+                raise ValueError(msg)
+        return _distribute_extensive_to_finer(da, alias_in=alias_in, alias_out="1H")
 
     if isinstance(obj, xr.DataArray):
         out = _resample_da(obj)
@@ -226,7 +241,7 @@ def resample_to_daily_or_hourly_adaptive(
         # carry coordinates (besides resampled time) from original dataset
         for cname, coord in obj.coords.items():
             if cname == "time":
-                out = out.assign_coords(time=out[list(out_vars)[0]].time)
+                out = out.assign_coords(time=out[next(iter(out_vars))].time)
             elif cname not in out.coords:
                 out = out.assign_coords({cname: coord})
         out.attrs = obj.attrs

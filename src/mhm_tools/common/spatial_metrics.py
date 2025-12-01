@@ -1,5 +1,6 @@
+"""Compute spatial metrics for comparing gridded datasets."""
+
 import logging
-import math
 
 # import required modules
 import numpy as np
@@ -9,20 +10,21 @@ from scipy.stats import spearmanr
 logger = logging.getLogger(__name__)
 
 
-######################################################################################################################
 def filter_nan(s, o):
+    """Remove rows containing NaNs from paired arrays."""
     data = np.transpose(np.array([s.flatten(), o.flatten()]))
     data = data[~np.isnan(data).any(1)]
     return data[:, 0], data[:, 1]
 
 
-######################################################################################################################
-def objective_functions(s, o, metrics=["pearson", "bias", "variance"], param=""):
+def objective_functions(s, o, metrics=None, param=""):
+    """Calculate requested objective metrics for paired arrays."""
+    if metrics is None:
+        metrics = ["pearson", "bias", "variance"]
     result = {}
     # remove NANs
     s, o = filter_nan(s, o)
 
-    bins = int(np.around(math.sqrt(len(o)), 0))
     # compute corr coeff
     param = param + "-" if param != "" else param
     if "pearson" in metrics:
@@ -64,6 +66,7 @@ def create_dic_of_objective_functions(arr_s, arr_o, metrics, func=nothing, param
 def calculate_objectives_for_gridded_data(
     map1, map2, ds1_name, ds2_name, eval_params=None
 ):
+    """Calculate evaluation metrics for two gridded datasets."""
     if eval_params is None:
         eval_params = {
             "general": {"metrics": ["bias"], "func": nothing},  # $E_{i,t}$

@@ -1,3 +1,5 @@
+"""Utilities to merge NetCDF files using CDO."""
+
 import logging
 import math
 import tempfile
@@ -28,7 +30,7 @@ def _merge_chunk(files, out_path, options):
             f"STDERR:\n{getattr(e, 'stderr', '')}"
         )
         with ErrorLogger(logger):
-            raise RuntimeError(msg)
+            raise RuntimeError(msg) from e
     if res is None:
         logger.error(f"merge to {out_path} failed")
         return ""
@@ -39,6 +41,7 @@ def _merge_chunk(files, out_path, options):
 def merge_files_from_folder(
     tmpdir, files, out_file, n_cpus, max_files=30, recursive_depth=0
 ):
+    """Merge files from a folder in chunks, writing intermediates to tmpdir."""
     # Chunk the inputs ~ evenly across workers
     chunk_size = math.ceil(min(len(files) / n_cpus, max_files))
     chunks = [files[i : i + chunk_size] for i in range(0, len(files), chunk_size)]
@@ -107,6 +110,7 @@ def merge_files_from_folder(
 def merge_files(input_path, input_file_part, output, n_cpus):
     """
     Merge NetCDF files along time using CDO via its Python API.
+
     - Assumes files share the same grid and DO NOT overlap in time.
     - Parallelizes by merging chunks in parallel with joblib, then merges parts.
 
@@ -123,7 +127,9 @@ def merge_files(input_path, input_file_part, output, n_cpus):
     in_dir = Path(input_path)
     output = Path(output)
     if not output.suffix:
-        raise ValueError("Output must specifiy a filename")
+        msg = "Output must specifiy a filename"
+        with ErrorLogger(logger):
+            raise ValueError(msg)
     # subdir_files = {'.': }
     files = sorted(in_dir.glob(input_file_part))
     subdir_files = {".": sorted(in_dir.glob(input_file_part))} if files else {}
@@ -157,7 +163,9 @@ def merge_files(input_path, input_file_part, output, n_cpus):
                 )
         sum_files += len(file_list)
     if sum_files == 0:
-        raise FileNotFoundError(f"No files match {in_dir}/{input_file_part}")
+        msg = f"No files match {in_dir}/{input_file_part}"
+        with ErrorLogger(logger):
+            raise FileNotFoundError(msg)
     logger.info(
         f"Merged a total of {sum_files} into these {len(out_files)} files: {out_files}"
     )

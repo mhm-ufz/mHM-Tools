@@ -178,6 +178,7 @@ def get_gauge_coords(
 
 
 def load_ds(file_path):
+    """Load an xarray dataset from disk."""
     return get_xarray_ds_from_file(file_path)
 
 
@@ -265,22 +266,18 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915
         with load_ds(model_data_path) as sim_data_in:
             hours_sim, alias_sim = timedelta_to_alias(sim_data_in)
             hours_obs, alias_obs = timedelta_to_alias(observed_data_in)
+            obs_resampled = observed_data_in
             if hours_sim > hours_obs:
                 # resample the datasets for them to have the same temporal resolution
                 logger.info(
                     f"The observation dataset is resampled to fit the simulation dataset with a temporal resolution of {alias_sim}"
                 )
-                observed_data_in = observed_data_in.resample(time=alias_sim).mean()
-            obs_discharge_data = observed_data_in[observed_variable]
+                obs_resampled = observed_data_in.resample(time=alias_sim).mean()
+            obs_discharge_data = obs_resampled[observed_variable]
             obs_discharge_data = obs_discharge_data.sel(time=date_slice)
 
         # work on copies, not the with-bound names
-        obs_rs = observed_data_in
-        if hours_sim > hours_obs:
-            logger.info(
-                f"Resampling observation data to {alias_sim} to match simulation."
-            )
-            obs_rs = observed_data_in.resample(time=alias_sim).mean()
+        obs_rs = obs_resampled
         obs_discharge_data = obs_rs[observed_variable].sel(time=date_slice)
 
         sim_rs = sim_data_in

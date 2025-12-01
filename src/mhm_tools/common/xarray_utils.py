@@ -1,6 +1,7 @@
 """Provides basic xarray utils."""
 
 import logging
+from typing import Optional
 
 import numpy as np
 import xarray as xr
@@ -13,7 +14,10 @@ logger = logging.getLogger(__name__)
 
 
 def normalize_lat_lon(
-    ds: xr.Dataset, lat: str = None, lon: str = None, raise_exceptions=True
+    ds: xr.Dataset,
+    lat: Optional[str] = None,
+    lon: Optional[str] = None,
+    raise_exceptions: bool = False,
 ) -> xr.Dataset:
     """
     Normalize latitude and longitude dimension and coordinate names to 'lat' and 'lon'.

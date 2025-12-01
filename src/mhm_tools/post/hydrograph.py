@@ -933,6 +933,7 @@ class Hydrograph:
         return True
 
     def write_output(self):
+        """Write calculated objective metrics to CSV."""
         out_dict = {k: [v] for k, v in {**self.objectives.__dict__}.items()}
         if id is not None:
             out_dict["id"] = str(id)

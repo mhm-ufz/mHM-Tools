@@ -1,6 +1,9 @@
+"""PET calculation helpers (Hargreaves & Samani)."""
+
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -26,9 +29,7 @@ def pet_calculator(
     l_heat: float = 2.26,
     w_density: float = 977.0,
 ) -> np.ndarray:
-    """
-    Calculate potential evapotranspiration (PET) based on Hargreaves & Samani equation (1985).
-    """
+    """Calculate PET via Hargreaves & Samani (1985)."""
     e_rad = e_rad_calculator(time, lat)
     pet = (e_rad / (l_heat * w_density)) * ((tavg + 5) / 100)
     pet = pet * 1000
@@ -37,9 +38,7 @@ def pet_calculator(
 
 
 def e_rad_calculator(time: datetime, lat: np.ndarray) -> np.ndarray:
-    """
-    Calculate extraterrestrial radiation (MJ/m²/day) for a given day and latitude.
-    """
+    """Calculate extraterrestrial radiation (MJ/m²/day) for a given day/lat."""
     doy = pd.Timestamp(time).day_of_year - 1
     dist = 1 + (0.033 * np.cos((2 * np.pi * doy) / 365))
     dec = np.radians(-23.44 * np.cos(np.radians((360 / 365) * (doy + 10))))
@@ -53,6 +52,7 @@ def e_rad_calculator(time: datetime, lat: np.ndarray) -> np.ndarray:
 def _compute_pet(args):
     """
     Worker helper to calculate PET for a single time slice.
+
     args: tuple(tavg_array, lat_array, time_val, stat_freq)
     """
     tavg_slice, lat_array, time_val, stat_freq = args
@@ -63,17 +63,17 @@ def _compute_pet(args):
 def calculate_pet(
     tavg_file: str,
     out_file: str,
-    lon_number: int = None,
-    stat_freq: str = None,
+    lon_number: Optional[int] = None,
+    stat_freq: Optional[str] = None,
     max_workers: int = 1,
 ) -> None:
-    """
-    Calculate PET in parallel across time dimension and save to NetCDF.
-    """
+    """Calculate PET in parallel across time dimension and save to NetCDF."""
     # Load dataset
     tavg_file = Path(tavg_file)
     if not tavg_file.is_file():
-        raise ValueError("Tavg file is not a file.")
+        msg = "Tavg file is not a file."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
     ds = get_xarray_ds_from_file(tavg_file)
     data_var = get_single_data_var(ds)
     tavg = ds.tavg if "tavg" in ds else ds[data_var]  # (time, lat, lon)

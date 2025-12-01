@@ -10,6 +10,7 @@ Authors
 
 import logging
 import pathlib as pl
+from typing import Optional
 
 from mhm_tools.common.constants import NC_ENCODE_MASK
 from mhm_tools.common.netcdf import generate_bounds
@@ -849,6 +850,7 @@ class Catchment:
         logger.info(f"Basin Id has been written to {out_path / self.out_var_name}")
         return ds
 
+
     def _cell_edges(self, centers: np.ndarray) -> np.ndarray:
         """Compute edges (len=N+1) from center coords (len=N) on a regular grid."""
         c = np.asarray(centers)
@@ -863,6 +865,7 @@ class Catchment:
     ) -> np.ndarray:
         """
         Given fine-grid edges, build coarse-grid centers for block size k.
+
         Ensures coarse edges == fine edges over the cropped window.
         """
         # we assume you've cropped L0 so len(fine_centers) is divisible by k
@@ -879,18 +882,21 @@ class Catchment:
     def upscale_mask_with_correct_coords(
         self,
         da: xr.DataArray,
-        factor: int = None,
+        factor: Optional[int] = None,
         lon_name: str = "lon",
         lat_name: str = "lat",
     ) -> xr.DataArray:
         """
-        Coarsen a 2D mask-like field by integer factor and assign correct coarse coords
+        Coarsen a 2D mask-like field by integer factor and assign correct coarse coords.
+
         so that coarse *edges* equal fine *edges* of the cropped window.
         """
         if factor is None:
             factor = self.get_upscaling_factor(max_resolution=True)
         if factor < 1:
-            raise ValueError("factor must be >= 1")
+            msg = "factor must be >= 1"
+            with ErrorLogger(logger):
+                raise ValueError(msg)
 
         # 1) coarsen over lon/lat windows
         kx = ky = int(factor)
@@ -928,7 +934,6 @@ class Catchment:
             if asc_lat
             else lat_edges[-(n_lat_blocks * ky + 1) :]
         )
-
         lon_coarse = self._coarse_centers_from_edges(
             lon_edges_win, kx, n_lon_blocks, asc_lon
         )
@@ -973,7 +978,7 @@ class Catchment:
         Returns
         -------
         xr.DataArray
-            Coarsened mask (0/1), aligned to the top-left of each kx×ky block.
+            Coarsened mask (0/1), aligned to the top-left of each kx x ky block.
         """
         logger.info("Create upscaled mask")
         if factor is None:
@@ -984,7 +989,9 @@ class Catchment:
             kx, ky = map(int, factor)
 
         if kx < 1 or ky < 1:
-            raise ValueError("factor must be >= 1")
+            msg = "factor must be >= 1"
+            with ErrorLogger(logger):
+                raise ValueError(msg)
 
         # Condition: non-masked (not NaN) OR equals 0
         cond = (~xr.apply_ufunc(np.isnan, da)) | (da == 0)
@@ -1094,18 +1101,7 @@ class Catchment:
             min_col = max(0, min_col - buffer)
             max_row = min(self.catchment_mask.shape[0] - 1, max_row + buffer)
             max_col = min(self.catchment_mask.shape[1] - 1, max_col + buffer)
-
-            # min_row = min_row - buffer if min_row > 0 else min_row
-            # min_col = min_col - buffer if min_col > 0 else min_col
-            # max_row = (
-            #     max_row + buffer if max_row < self.catchment_mask.shape[0] else max_row
-            # )
-            # max_col = (
-            #     max_col + buffer if max_col < self.catchment_mask.shape[1] else max_col
-            # )
-        # logger.info(
-        #     f"min row: {min_row} max row: {max_row} min_col: {min_col}, max_col: {max_col}"
-        # )
+        
         logger.info(
             f"L0 initial window (rows, cols): [{min_row}:{max_row}], [{min_col}:{max_col}]"
         )
@@ -1140,11 +1136,13 @@ class Catchment:
         # Sanity: cropped shape divisible by factor ---
         n_lat = lat_slice_idx.stop - lat_slice_idx.start
         n_lon = lon_slice_idx.stop - lon_slice_idx.start
-        if factor > 1:
-            if (n_lat % factor) != 0 or (n_lon % factor) != 0:
-                raise AssertionError(
-                    f"Cropped L0 shape ({n_lat}, {n_lon}) not divisible by factor={factor}"
-                )
+        if factor > 1 and ((n_lat % factor) != 0 or (n_lon % factor) != 0):
+            msg = (
+                "Cropped L0 shape "
+                f"({n_lat}, {n_lon}) not divisible by factor={factor}"
+            )
+            with ErrorLogger(logger):
+                raise AssertionError(msg)
 
         # # Slice the array to extract the filled part
         # lon_min, lon_max = (
@@ -1401,3 +1399,4 @@ def create_catchment(
                 buffer=frame,
                 gauge_id=gauge_id
             )
+

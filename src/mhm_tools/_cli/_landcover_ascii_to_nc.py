@@ -92,7 +92,8 @@ def _resolve_var_name(
 
 def run(args: Namespace) -> None:
     """
-    Execute the conversion: read ASCII landcover grids, build a CF-compliant
+    Execute the conversion: read ASCII landcover grids, build a CF-compliant.
+
     time axis with bounds, and write NetCDF.
 
     Parameters

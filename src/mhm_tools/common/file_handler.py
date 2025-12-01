@@ -7,7 +7,7 @@ from pathlib import Path
 from textwrap import dedent
 
 import dask
-from mhm_tools.common.constants import NC_ENCODE_DEFAULTS, NO_DATA
+from mhm_tools.common.constants import NC_ENCODE_DEFAULTS, NO_DATA, NO_DATA_INT
 from mhm_tools.common.esri_grid import standardize_header, write_header
 import numpy as np
 import xarray as xr
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 ######
 
 
-def create_header(ds, output_path=None, no_data_value="-9999", write=True):
+def create_header(ds, output_path=None, no_data_value=NO_DATA_INT, write=True):
     """Write a header file from a dataset.
 
     Takes an xarray Dataset and writes the ASCII header needed for GIS tools.
@@ -51,14 +51,6 @@ def create_header(ds, output_path=None, no_data_value="-9999", write=True):
         'cellsize': cellsize,
         'NODATA_value': no_data_value
     }
-    # header_str = dedent(f"""
-    #     ncols                {ncols}
-    #     nrows                {nrows}
-    #     xllcorner            {xllcorner:.6f}
-    #     yllcorner            {yllcorner:.6f}
-    #     cellsize             {cellsize:.6f}
-    #     NODATA_value         {no_data_value}
-    #     """)
     dtype = get_dtype(ds)
     if write:
         if output_path.is_dir():
@@ -89,20 +81,25 @@ def create_header(ds, output_path=None, no_data_value="-9999", write=True):
 
 def crop_file_by_mask(ds, mask_file):
     """Crop file by mask."""
-    with xr.open_dataset(mask_file) as mask:
-        lat_key_mask = get_coord_key(mask, lat=True)
-        lon_key_mask = get_coord_key(mask, lon=True)
-        lat_key = get_coord_key(ds, lat=True)
-        lon_key = get_coord_key(ds, lon=True)
-        return ds.sel(
-            {
-                lat_key: slice(mask[lat_key_mask].max(), mask[lat_key_mask].min()),
-                lon_key: slice(mask[lon_key_mask].min(), mask[lon_key_mask].max()),
-            }
-        )
+    if isinstance(mask_file, xr.Dataset):
+        mask = mask_file
+    else:
+        mask = get_xarray_ds_from_file(mask_file)
+    lat_key_mask = get_coord_key(mask, lat=True)
+    lon_key_mask = get_coord_key(mask, lon=True)
+    lat_key = get_coord_key(ds, lat=True)
+    lon_key = get_coord_key(ds, lon=True)
+    return ds.sel(
+        {
+            lat_key: slice(mask[lat_key_mask].max(), mask[lat_key_mask].min()),
+            lon_key: slice(mask[lon_key_mask].min(), mask[lon_key_mask].max()),
+        }
+    )
 
 
-def chunk_dataset_space_only(ds: xr.Dataset, available_mem_gib: float) -> xr.Dataset:
+def chunk_dataset_space_only(
+    ds: xr.Dataset, available_mem_gib: float
+) -> dict[str, int]:
     """Chunk only in space (lat/lon), leaving time whole, sized to available memory.
 
     - Uses 80% of available_mem_gib for a single chunk.
@@ -141,8 +138,8 @@ def chunk_dataset_space_only(ds: xr.Dataset, available_mem_gib: float) -> xr.Dat
     y_chunk = min(ny, side)
     x_chunk = min(nx, side)
 
-    chunks = {lat_key: y_chunk, lon_key: x_chunk}
-    if time_key is not None:
+    chunks = {lat_key: int(y_chunk), lon_key: int(x_chunk)}
+    if time_key:
         # -1 means “take all” for that dim
         chunks[time_key] = -1
 
@@ -150,11 +147,9 @@ def chunk_dataset_space_only(ds: xr.Dataset, available_mem_gib: float) -> xr.Dat
         f"Chunk sizes → time: {chunks.get(time_key, '—')}, "
         f"{lat_key}: {y_chunk}, {lon_key}: {x_chunk}"
     )
-    logger.debug(f"   The chunks used are {chunks}")
     return chunks
 
-
-def chunk_dataset_space_and_time(ds, available_mem_gib) -> xr.Dataset:
+def chunk_dataset_space_and_time(ds, available_mem_gib) -> dict[str, int]:
     """Chunk dataset adjusting chunk size to avaiable memory.
 
     Simple heuristic:
@@ -195,10 +190,10 @@ def chunk_dataset_space_and_time(ds, available_mem_gib) -> xr.Dataset:
     y_chunk = min(ny, side)
     x_chunk = min(nx, side)
 
-    chunks = {lat_key: y_chunk, lon_key: x_chunk}
+    chunks = {lat_key: int(y_chunk), lon_key: int(x_chunk)}
     if time_key:
-        t_chunk = max_cells // (y_chunk * x_chunk)
-        chunks[time_key] = t_chunk
+        t_chunk = max(1, max_cells // max(1, y_chunk * x_chunk))
+        chunks[time_key] = int(t_chunk)
     logger.debug(f"   The chunks used are {chunks}")
 
     return chunks
@@ -281,13 +276,13 @@ def get_xarray_ds_from_file(
     lat_key = get_coord_key(ds_out, lat=True, raise_exception=False)
     lon_key = get_coord_key(ds_out, lon=True, raise_exception=False)
     # force correct order of y coordinate
-    if lat_key is not None:
-        if (
-            force_decending_y and ds_out[lat_key].values[0] < ds_out[lat_key].values[-1]
-        ) or (
+    if lat_key is not None and (
+        (force_decending_y and ds_out[lat_key].values[0] < ds_out[lat_key].values[-1])
+        or (
             force_ascending_y and ds_out[lat_key].values[0] > ds_out[lat_key].values[-1]
-        ):
-            ds_out = ds_out.sel({lat_key: slice(None, None, -1)})
+        )
+    ):
+        ds_out = ds_out.sel({lat_key: slice(None, None, -1)})
     logger.debug(ds_out)
     logger.debug(lat_key)
     logger.debug(lon_key)
@@ -325,7 +320,7 @@ def write_xarray_to_file(
     fmt=None,
     create_folder=True,
     encoding=None,
-    compute_kwargs={},
+    compute_kwargs=None,
     engine="netcdf4",
     available_mem_gib=None,
 ):
@@ -357,7 +352,6 @@ def write_xarray_to_file(
             }
         if False and available_mem_gib is not None:
             # ds = chunk_dataset(ds, ChunkType.TIME, available_mem_gib//50)
-            compute_kwargs = {"scheduler": "threads", "num_workers": 1}
             dask.config.set(
                 {"array.slicing.split_large_chunks": True}
             )  # also works as context manager
@@ -369,10 +363,15 @@ def write_xarray_to_file(
                 delayed = ds.to_netcdf(
                     file_path, engine="netcdf4", encoding=encoding, compute=False
                 )
-                delayed.compute(scheduler="threads", num_workers=1)
+                delayed.compute(
+                    scheduler="threads",
+                    num_workers=1,
+                    **(compute_kwargs or {}),
+                )
         else:
             # if encoding is None:
             #     ds, encoding = move_reserved_attrs_to_encoding(ds, encoding=encoding)
+
             logger.info(ds)
             # if var_name is not None:
                 # encoding = generate_safe_nc_encoding(ds[var_name])
@@ -474,7 +473,7 @@ def write_xarray_to_ascii(dataset, filepath, data_var=None, fmt=None):
     data = dataset[data_var]
     lat = dataset["lat"].values
     lon = dataset["lon"].values
-    nodata_value = dataset[data_var].attrs.get("nodata_value", -9999)
+    nodata_value = dataset[data_var].attrs.get("nodata_value", NO_DATA_INT)
 
     # Calculate header information
     nrows, ncols = data.shape
@@ -577,12 +576,6 @@ def read_ascii_to_xarray(
     # Convert to Dataset
     ds = da.to_dataset()
 
-    # Add axis attributes
-    if "x" in ds.coords:
-        ds.coords["x"].attrs["axis"] = "X"
-    if "y" in ds.coords:
-        ds.coords["y"].attrs["axis"] = "Y"
-
     # Drop spatial_ref if present
     if "spatial_ref" in ds.coords:
         ds = ds.reset_coords("spatial_ref", drop=True)
@@ -618,7 +611,9 @@ def move_reserved_attrs_to_encoding(
     encoding_in: dict | None = None,
 ):
     """
-    Move reserved serialization keys from .attrs to .encoding and return:
+    Move reserved serialization keys from .attrs to .encoding and return.
+
+    Return:
       - a (shallow-copied) xarray object with cleaned attrs
       - an `encoding` dict suitable for xarray.to_netcdf(encoding=encoding)
 

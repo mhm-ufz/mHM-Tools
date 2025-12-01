@@ -13,6 +13,7 @@ from mhm_tools.common.file_handler import (
     get_xarray_ds_from_file,
     write_xarray_to_file,
 )
+from mhm_tools.common.logger import ErrorLogger
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ def parse_nml_for_landcover(
     # dir_LCover(i) = "path"
     dir_regex = re.compile(r"dir_LCover\(\s*(\d+)\s*\)\s*=\s*['\"]([^'\"]+)['\"]")
     dir_matches = [(int(m.group(1)), m.group(2)) for m in dir_regex.finditer(nml_text)]
-    dir_map = {idx: path for idx, path in dir_matches}
+    dir_map = dict(dir_matches)
     if not dir_map:
         logger.error("No dir_LCover entries found in namelist file")
 
@@ -49,7 +50,7 @@ def parse_nml_for_landcover(
     fname_matches = [
         (int(m.group(1)), m.group(2)) for m in fname_regex.finditer(nml_text)
     ]
-    fname_map = {idx: fn for idx, fn in fname_matches}
+    fname_map = dict(fname_matches)
 
     # LCoverYearStart(i) = YYYY
     # LCoverYearEnd(i)   = YYYY
@@ -105,20 +106,24 @@ def parse_nml_for_landcover(
             if start > prev_end + 1:
                 missing_start = prev_end + 1
                 missing_end = start - 1
-                raise ValueError(
+                msg = (
                     "Landcover coverage incomplete: missing years "
                     f"{missing_start}..{missing_end} between entries "
                     f"{prev_idx} ({prev_start}-{prev_end}) and "
                     f"{idx} ({start}-{end})"
                 )
+                with ErrorLogger(logger):
+                    raise ValueError(msg)
 
             # overlap? (e.g. prev 1981-1990, next 1989-2000)
             if start <= prev_end:
-                raise ValueError(
+                msg = (
                     "Landcover coverage overlapping: entry "
                     f"{idx} starts at {start} which is <= previous "
                     f"end {prev_end} (entry {prev_idx})"
                 )
+                with ErrorLogger(logger):
+                    raise ValueError(msg)
 
             prev_start, prev_end, prev_idx = start, end, idx
 
@@ -130,7 +135,8 @@ def add_time_bounds_cf(
     input_infos: Dict[int, dict],
 ) -> xr.Dataset:
     """
-    Take a dataset with a datetime64 'time' coordinate
+    Take a dataset with a datetime64 'time' coordinate.
+
     (e.g. [1981-01-01, 1991-01-01])
     and return a new dataset with:
 
@@ -157,7 +163,7 @@ def add_time_bounds_cf(
     # build upper bounds:
     # for each time[i], upper bound is time[i+1], except the last which goes to final_bound_dt
     upper_bounds = np.array(
-        list(time_vals[1:]) + [final_bound_dt],
+        [*list(time_vals[1:]), final_bound_dt],
         dtype="datetime64[ns]",
     )
 
@@ -220,7 +226,8 @@ def _build_input_infos(
     n_domains: int | None,
 ) -> Dict[int, dict]:
     """
-    For each landcover block index, build:
+    For each landcover block index, build.
+
     {
         idx: {
             "path": absolute Path to ASCII file,
@@ -279,7 +286,8 @@ def convert_lc_ascii_to_nc(
     normalize_latlon: bool = False,
 ) -> None:
     """
-    Workflow:
+    Workflow for converting landcover ASCII files to NetCDF.
+
     1. Parse mHM namelist for landcover blocks (paths, years).
     2. Read each ASCII landcover file into xarray.
     3. Concatenate along new 'time' dimension.
@@ -296,13 +304,17 @@ def convert_lc_ascii_to_nc(
     # read & parse namelist
     nml_path = Path(input_nml)
     if not nml_path.exists():
-        raise FileNotFoundError(f"NML file not found: {nml_path}")
+        msg = f"NML file not found: {nml_path}"
+        with ErrorLogger(logger):
+            raise FileNotFoundError(msg)
 
     nml_text = nml_path.read_text()
     dir_map, entries, fname_map, n_domains = parse_nml_for_landcover(nml_text)
 
     if not entries:
-        raise ValueError("No LCoverfName entries found in the provided .nml file")
+        msg = "No LCoverfName entries found in the provided .nml file"
+        with ErrorLogger(logger):
+            raise ValueError(msg)
 
     # resolve actual input files and their metadata
     input_infos = _build_input_infos(
