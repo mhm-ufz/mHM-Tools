@@ -26,9 +26,10 @@ from typing import Optional
 
 try:
     from cdo import Cdo
+
     cdo = Cdo()
 except Exception:
-    cdo = None  
+    cdo = None
 
 from mhm_tools.common.logger import ErrorLogger
 from mhm_tools.pre.crop_mhm_setup import crop_file
