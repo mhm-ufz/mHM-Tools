@@ -503,8 +503,7 @@ class Catchment:
                     msg = f"Delineated basin area ({delineated_area:2f} km2) differs from reference area ({ref_catchment_area:2f} km2) by more than twice the max error {max_error*100:.2f}%. Adjust max_error or max_distance_cells."
                     if raise_on_sanity_check:
                         raise ValueError(msg)
-                    else:
-                        logger.warning(msg)
+                    logger.warning(msg)
                 # warn if the two area measures disagree substantially
         else:
             logger.warning(
@@ -517,8 +516,7 @@ class Catchment:
                 msg += "masking, nodata handling or area units."
                 if raise_on_sanity_check:
                     raise ValueError(msg)
-                else:
-                    logger.warning(msg)
+                logger.warning(msg)
         # finalize mask and basin fill values
 
         if np.all(~self.catchment_mask):
@@ -733,7 +731,7 @@ class Catchment:
                 id_ds = id_da.to_dataset(name="data")
                 id_ds = write_gauge_id(id_ds, gauge_id, self.gauge_lat, self.gauge_lon)
                 write_xarray_to_ascii(
-                    id_ds, out_path / "idgauges.asc", "data", fmt="%.0f"
+                    id_ds, out_path / "idgauges.asc", "data"  # , fmt="%.0f"
                 )
 
     def write_single_variable_file(

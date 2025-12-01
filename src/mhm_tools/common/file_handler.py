@@ -3,7 +3,6 @@
 import logging
 from enum import Enum
 from pathlib import Path
-from textwrap import dedent
 
 import numpy as np
 import xarray as xr
@@ -30,11 +29,13 @@ logger = logging.getLogger(__name__)
 ######
 
 
-def create_header(ds, output_path=None, no_data_value=NO_DATA, write=True) -> dict:
+def create_header(ds, output_path=None, no_data_value=None, write=True) -> dict:
     """Write a header file from a dataset.
 
     Takes an xarray Dataset and writes the ASCII header needed for GIS tools.
     """
+    if no_data_value is None:
+        no_data_value = NO_DATA
     lat_key = get_coord_key(ds, lat=True)
     lon_key = get_coord_key(ds, lon=True)
     x = ds[lon_key].values
@@ -312,7 +313,7 @@ def write_xarray_to_file(  # noqa: PLR0912
     ds,
     file_path,
     var_name=None,
-    fmt=None,
+    # fmt=None,
     create_folder=True,
     encoding=None,
     engine="netcdf4",
@@ -329,7 +330,7 @@ def write_xarray_to_file(  # noqa: PLR0912
     # ds = chunk_if_too_big(ds)
     # ds = ds.chunk({'time': 512, 'lat': 121, 'lon': 131})
     if file_path.suffix == ".asc":
-        write_xarray_to_ascii(ds, file_path, var_name, fmt)
+        write_xarray_to_ascii(ds, file_path, var_name)
     elif file_path.suffix == ".nc":
         if isinstance(ds, xr.DataArray):
             var_name = ds.name
@@ -472,9 +473,7 @@ def write_xarray_to_file(  # noqa: PLR0912
             raise NotImplementedError(msg)
 
 
-def write_xarray_to_ascii(
-    dataset, filepath, data_var=None, fmt=None, nodata_value=None
-):
+def write_xarray_to_ascii(dataset, filepath, data_var=None, nodata_value=None):
     """Write xarray Dataset to an ASCII file that can be read by mHM."""
     # Extract the data, coordinates, and nodata value from the Dataset
     if data_var is None:
@@ -485,30 +484,8 @@ def write_xarray_to_ascii(
             )
             return
     data = dataset[data_var]
-    # lat = dataset["lat"].values
-    # lon = dataset["lon"].values
-    # if nodata_value is None:
-    #     nodata_value = dataset[data_var].attrs.get("nodata_value", NO_DATA)
-    #     # derive type from dtype
-    #     if data.dtype.kind in ["i", "u"]:  # i=int, u=unsigned
-    #         nodata_value = int(nodata_value)
-
-    # Calculate header information
-    header = create_header(dataset, write=False)
-    # Replace NaN values with nodata_value in data
-
-    # if data.dtype.kind in ["i", "u", "f"]:  # i=int, u=unsigned, f=float
-    #     data_to_write = np.where(np.isnan(data.values), nodata_value, data)
-    #     default_fmt="%g"
-    # else:
-    #     data_to_write = data
-    #     default_fmt="%s"
+    header = create_header(dataset, write=False, no_data_value=nodata_value)
     write_grid(filepath, header, dtype=data.dtype, data=data)
-    # Write header and data to ASCII file
-    # with filepath.open("w") as f:
-    #     f.write(header)
-    #     np.savetxt(f, data_to_write, fmt=fmt or default_fmt)
-    #     logger.info(f"Writting file to {filepath}")
 
 
 def read_ascii_to_xarray(
@@ -521,17 +498,16 @@ def read_ascii_to_xarray(
     # Read the header from the file
     with filepath.open("r") as f:
         header = {}
-        logger.debug(f"File {filepath.name}:")
+
         for i, line in enumerate(f.readlines()):
-            line = line.strip()
-            if not line:
+            line_striped = line.strip()
+            if not line_striped:
                 continue
-            logger.debug(f"                      {line}")
-            key, value = line.split()
+            logger.debug(f"File {filepath.name} {i}: {line_striped}")
+            key, value = line_striped.split()
             header[key.lower()] = float(value) if "." in value else int(value)
             if len(header) == 6:
                 break
-        print(header)
         # Extract header information
         ncols = header["ncols"]
         nrows = header["nrows"]

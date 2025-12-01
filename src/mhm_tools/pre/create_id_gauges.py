@@ -72,6 +72,6 @@ def create_id_gauges(
             ds_with_id = write_gauge_id(
                 ds, id, lat, lon, facc_file
             )  # , threshold, facc_value)
-            write_xarray_to_ascii(ds_with_id, out_path, data_name, fmt="%.0f")
+            write_xarray_to_ascii(ds_with_id, out_path, data_name)  # , fmt="%.0f")
         else:
             logger.info("Id {id} is already in {file}.")

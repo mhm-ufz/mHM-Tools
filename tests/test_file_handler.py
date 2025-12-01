@@ -144,6 +144,9 @@ class TestAsciiReadWrite(unittest.TestCase, BaseDatasetMixin):
             self.assertIn("lat", ds_back.coords)
             self.assertIn("lon", ds_back.coords)
             self.assertEqual(ds_back["var"].shape, ds["var"].shape)
+            self.assertEqual(ds_back["var"].mean(), ds["var"].mean())
+            self.assertEqual(ds_back["var"].max(), ds["var"].max())
+            self.assertEqual(ds_back["var"].min(), ds["var"].min())
 
     # def test_write_xarray_to_ascii_formats_strings(self):
     #     lat = np.array([2, 1])

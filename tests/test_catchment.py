@@ -207,7 +207,9 @@ class TestCatchment(unittest.TestCase):
             transform=self.transform,
             latlon=True,
         )
-        c.delineate_basin((self.GAUGE_LAT[1], self.GAUGE_LON[1]), raise_on_sanity_check=False)
+        c.delineate_basin(
+            (self.GAUGE_LAT[1], self.GAUGE_LON[1]), raise_on_sanity_check=False
+        )
 
         self.assertIsNotNone(c.basin)
         self.assertTrue(
@@ -265,8 +267,8 @@ class TestCatchment(unittest.TestCase):
                 ref_catchment_area=float(ref_area),
                 max_distance_cells=10,
                 max_error=0.05,
-                raise_on_sanity_check=False)
-
+                raise_on_sanity_check=False,
+            )
 
             self.assertIsNotNone(c.basin)
             self.assertTrue(
