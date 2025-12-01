@@ -42,7 +42,6 @@ logger = logging.getLogger(__name__)
 # Optional CDO support
 try:
     from cdo import Cdo  # type: ignore[import-untyped]
-
     _CDO = Cdo()
 except Exception:
     _CDO = None

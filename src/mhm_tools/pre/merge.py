@@ -4,8 +4,12 @@ import logging
 import math
 import tempfile
 from pathlib import Path
-
-from cdo import Cdo, CDOException
+from cdo import CDOException
+try:
+    from cdo import Cdo
+    cdo = Cdo()
+except Exception:
+    cdo = None  
 from joblib import Parallel, delayed
 
 from mhm_tools.common.logger import ErrorLogger
