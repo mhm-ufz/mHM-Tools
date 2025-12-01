@@ -278,5 +278,5 @@ def get_dtype(ds):
             with ErrorLogger(logger):
                 raise ValueError(msg)
     except:
-        dtype = 'f4'
+        dtype = "f4"
     return dtype

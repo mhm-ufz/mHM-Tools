@@ -4,10 +4,10 @@ import logging
 from pathlib import Path
 from typing import Any, List, Optional, Union
 
-import xarray as xr
 import numpy as np
+import xarray as xr
 
-from .constants import NC_ENCODE_DEFAULTS, NO_DATA, WILDCARDS
+from .constants import NC_ENCODE_DEFAULTS, WILDCARDS
 
 logger = logging.getLogger(__name__)
 
@@ -164,6 +164,7 @@ def set_netcdf_encoding(
     for name in dim_coords | bnds:
         ds[name].encoding = {"_FillValue": None}
 
+
 def sanitize_nc_encoding(ds: "xr.Dataset", encoding: dict) -> dict:
     """Return a safe encoding dict and clean ds attrs so netCDF4 won't error."""
     enc_out = {}
@@ -208,14 +209,13 @@ def sanitize_nc_encoding(ds: "xr.Dataset", encoding: dict) -> dict:
         if da.dtype == np.bool_:
             # Booleans: do NOT set fill attributes at all
             e.pop("_FillValue", None)
-        else:
-            # Cast _FillValue to the variable dtype if present
-            if "_FillValue" in e:
-                try:
-                    e["_FillValue"] = np.array(e["_FillValue"]).astype(da.dtype).item()
-                except Exception:
-                    # If casting fails, drop it rather than erroring out
-                    e.pop("_FillValue", None)
+        # Cast _FillValue to the variable dtype if present
+        elif "_FillValue" in e:
+            try:
+                e["_FillValue"] = np.array(e["_FillValue"]).astype(da.dtype).item()
+            except Exception:
+                # If casting fails, drop it rather than erroring out
+                e.pop("_FillValue", None)
 
             # If you *must* also expose 'missing_value' (CF legacy), put it in attrs
             # with matching dtype (commented out by default):
@@ -226,6 +226,7 @@ def sanitize_nc_encoding(ds: "xr.Dataset", encoding: dict) -> dict:
         enc_out[name] = e
 
     return enc_out
+
 
 # def generate_safe_nc_encoding(da, target_mb=320, fill=NO_DATA):
 #     item = np.dtype(da.dtype).itemsize
@@ -245,6 +246,7 @@ def sanitize_nc_encoding(ds: "xr.Dataset", encoding: dict) -> dict:
 #             "contiguous": False,
 #         }
 #     }
+
 
 def generate_bounds(
     da: xr.DataArray,

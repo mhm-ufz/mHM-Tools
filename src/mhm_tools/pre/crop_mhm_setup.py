@@ -177,12 +177,12 @@ def crop_file_with_header(ds_in, file_path, output_path, lonslice, latslice):
         header_information["nrows"] - index_y_max
     )
     new_header_information = {
-        "ncols":                index_x_max - index_x_min,
-        "nrows":                index_y_max - index_y_min,
-        "xllcorner":            xll,
-        "yllcorner":            yll,
-        "cellsize":             header_information["cellsize"],
-        "NODATA_value":         header_information["nodata_value"],
+        "ncols": index_x_max - index_x_min,
+        "nrows": index_y_max - index_y_min,
+        "xllcorner": xll,
+        "yllcorner": yll,
+        "cellsize": header_information["cellsize"],
+        "NODATA_value": header_information["nodata_value"],
     }
     logger.info(
         f"Writing header file to {header_out_path} with header: {new_header_information}"
@@ -426,20 +426,26 @@ def crop_file(  # noqa: PLR0912
         try:
             data_var = get_single_data_var(ds_cropped)
             ds_cropped = ds_cropped.rename({data_var: output_var})
-        except ValueError: 
-            logger.warning(f'Could not rename data_var to specified output variable name {output_var}')
+        except ValueError:
+            logger.warning(
+                f"Could not rename data_var to specified output variable name {output_var}"
+            )
     try:
-        write_xarray_to_file(ds_cropped, output_file, available_mem_gib=available_mem_gib)
+        write_xarray_to_file(
+            ds_cropped, output_file, available_mem_gib=available_mem_gib
+        )
     except Exception as e:
         logger.warning(f"First try writing the file failed: {e}")
         logger.info("Changing datatype to float")
         for var_name in ds_cropped.data_vars:
             ds_cropped[var_name] = ds_cropped[var_name].astype(float)
-        write_xarray_to_file(ds_cropped, output_file, available_mem_gib=available_mem_gib)
+        write_xarray_to_file(
+            ds_cropped, output_file, available_mem_gib=available_mem_gib
+        )
 
     logger.info(f"Written to {output_file}")
     if force_header_creation:
-        if not (output_file.parent / 'header.txt').is_file():
+        if not (output_file.parent / "header.txt").is_file():
             create_header(ds_cropped, output_path=output_file.parent, write=True)
     return latlon_files
 
@@ -461,7 +467,7 @@ def crop_mhm_setup(  # noqa: PLR0913
     force_header_creation=False,
     chunking=False,
     output_var=None,
-    no_cropping=False
+    no_cropping=False,
 ):
     """Cut out an existing mhm domain setup using a mask file."""
     # check if the input is correct
@@ -491,7 +497,7 @@ def crop_mhm_setup(  # noqa: PLR0913
             force_header_creation=force_header_creation,
             chunking=chunking,
             output_var=output_var,
-            no_cropping=no_cropping
+            no_cropping=no_cropping,
         )
         for f in files
     )

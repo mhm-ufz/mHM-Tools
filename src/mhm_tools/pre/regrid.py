@@ -68,8 +68,6 @@ def _check_integer_multiple(l2, l0, tol=1e-9):
     return abs(k - round(k)) <= tol, round(k)
 
 
-
-
 def _build_aligned_coords(vmin, vmax, step):
     # Build coordinates aligned to vmin with spacing `step`, stopping before overshoot.
     n = int(np.floor((vmax - vmin) / step + 0.5)) + 1

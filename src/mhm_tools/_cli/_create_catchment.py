@@ -133,8 +133,10 @@ def add_args(parser):
     )
     optional_args.add_argument(
         "--mask_file",
-        default='mask.nc',
-        help=("Path where to save the mask file. Default saving to output_path/mask.nc"),
+        default="mask.nc",
+        help=(
+            "Path where to save the mask file. Default saving to output_path/mask.nc"
+        ),
     )
     optional_args.add_argument(
         "--frame",

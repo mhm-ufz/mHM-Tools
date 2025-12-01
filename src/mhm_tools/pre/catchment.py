@@ -12,16 +12,20 @@ import logging
 import pathlib as pl
 from typing import Optional
 
-from mhm_tools.common.constants import NC_ENCODE_MASK
-from mhm_tools.common.netcdf import generate_bounds
-from mhm_tools.pre.create_id_gauges import write_gauge_id
 import numpy as np
 import pyflwdir
 import xarray as xr
 from scipy.ndimage import binary_dilation
 
-from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_to_ascii, write_xarray_to_file
+from mhm_tools.common.constants import NC_ENCODE_MASK
+from mhm_tools.common.file_handler import (
+    get_xarray_ds_from_file,
+    write_xarray_to_ascii,
+    write_xarray_to_file,
+)
 from mhm_tools.common.logger import ErrorLogger, log_arguments
+from mhm_tools.common.netcdf import generate_bounds
+from mhm_tools.pre.create_id_gauges import write_gauge_id
 
 logger = logging.getLogger(__name__)
 
@@ -241,28 +245,40 @@ class Catchment:
 
         if isinstance(lat, (int, np.integer)):
             i = int(lat)
-            logger.debug(f"Was given latitude index {i} directly. Corresponding lat_value {lat_vals[i]}")
+            logger.debug(
+                f"Was given latitude index {i} directly. Corresponding lat_value {lat_vals[i]}"
+            )
+        elif lat < min(lat_vals) or lat > max(lat_vals):
+            logger.error(
+                f"Given latitude {lat} is outside dataset bounds ({min(lat_vals)}, {max(lat_vals)}). Clipping to bounds."
+            )
+            i = None
         else:
-            if lat < min(lat_vals) or lat > max(lat_vals):
-                logger.error(f"Given latitude {lat} is outside dataset bounds ({min(lat_vals)}, {max(lat_vals)}). Clipping to bounds.")
-                i = None
-            else:
-                i = int(np.abs(lat_vals - float(lat)).argmin())
-                logger.debug(f"Mapped latitude {float(lat)} to index {i} with lat_value {lat_vals[i]}")
+            i = int(np.abs(lat_vals - float(lat)).argmin())
+            logger.debug(
+                f"Mapped latitude {float(lat)} to index {i} with lat_value {lat_vals[i]}"
+            )
 
         if isinstance(lon, (int, np.integer)):
             j = int(lon)
-            logger.debug(f"Was given longitude index {j} directly. Corresponding lon_value {lon_vals[j]}")
+            logger.debug(
+                f"Was given longitude index {j} directly. Corresponding lon_value {lon_vals[j]}"
+            )
+        elif lon < min(lon_vals) or lon > max(lon_vals):
+            logger.error(
+                f"Given longitude {lon} is outside dataset bounds ({min(lon_vals)}, {max(lon_vals)}). Clipping to bounds."
+            )
+            j = None
         else:
-            if lon < min(lon_vals) or lon > max(lon_vals):
-                logger.error(f"Given longitude {lon} is outside dataset bounds ({min(lon_vals)}, {max(lon_vals)}). Clipping to bounds.")
-                j = None
-            else:
-                j = int(np.abs(lon_vals - float(lon)).argmin())
-                logger.debug(f"Mapped longitude {float(lon)} to index {j} with lon_value {lon_vals[j]}")
+            j = int(np.abs(lon_vals - float(lon)).argmin())
+            logger.debug(
+                f"Mapped longitude {float(lon)} to index {j} with lon_value {lon_vals[j]}"
+            )
         if i is None or j is None:
             with ErrorLogger(logger):
-                raise ValueError("Could not map given coordinates to valid indices within dataset bounds.")
+                raise ValueError(
+                    "Could not map given coordinates to valid indices within dataset bounds."
+                )
         i = int(np.clip(i, 0, len(lat_vals) - 1))
         j = int(np.clip(j, 0, len(lon_vals) - 1))
 
@@ -348,14 +364,16 @@ class Catchment:
                     ref_catchment_area,
                     max_distance_cells,
                     max_error,
-                    recursion=True
+                    recursion=True,
                 )
             # fallback: pick the cell in bbox with upstream area closest to target
             flat = np.abs(sub - size)
             idx = int(np.argmin(flat))
             ri, rj = np.unravel_index(idx, sub.shape)
             best_coord = (ri + i_min, rj + j_min)
-            logger.info(f"The selected outlet candidate is {best_coord} with upstream area {upstream_area[best_coord]} km2 resulting in error {(ref_catchment_area - upstream_area[best_coord]) / ref_catchment_area:.3f}.")
+            logger.info(
+                f"The selected outlet candidate is {best_coord} with upstream area {upstream_area[best_coord]} km2 resulting in error {(ref_catchment_area - upstream_area[best_coord]) / ref_catchment_area:.3f}."
+            )
 
         return best_coord, error
 
@@ -433,14 +451,22 @@ class Catchment:
             except Exception as e2:
                 logger.exception(f"Fallback basins() also failed: {e2}")
                 return
-        
+
         self.catchment_mask = self.basin > 0
         # logging and sanity checks
-        mean_cell_area = float(np.mean(self.cell_area)) if self.cell_area is not None else np.nan
+        mean_cell_area = (
+            float(np.mean(self.cell_area)) if self.cell_area is not None else np.nan
+        )
         unique_vals = np.unique(self.basin[self.catchment_mask])
         cell_count = int(np.sum(self.catchment_mask))
-        delineated_area = float(np.sum(self.cell_area[self.catchment_mask])) if self.cell_area is not None else np.nan
-        uparea_at_outlet = upstream_area[outlet_idx] if upstream_area is not None else np.nan
+        delineated_area = (
+            float(np.sum(self.cell_area[self.catchment_mask]))
+            if self.cell_area is not None
+            else np.nan
+        )
+        uparea_at_outlet = (
+            upstream_area[outlet_idx] if upstream_area is not None else np.nan
+        )
         area_error = (delineated_area - ref_catchment_area) / ref_catchment_area
 
         logger.info(
@@ -461,27 +487,25 @@ class Catchment:
             "Difference (sum_cells - upstream_at_outlet) = %.2f km2 (%.2f%%).",
             uparea_at_outlet,
             delineated_area - uparea_at_outlet,
-            (delineated_area - uparea_at_outlet) / uparea_at_outlet * 100.0
-            if uparea_at_outlet != 0
-            else np.nan,
-            )
-        if abs(area_error) > max_error*2:
+            (
+                (delineated_area - uparea_at_outlet) / uparea_at_outlet * 100.0
+                if uparea_at_outlet != 0
+                else np.nan
+            ),
+        )
+        if abs(area_error) > max_error * 2:
             with ErrorLogger(logger):
                 msg = f"Delineated basin area ({delineated_area:2f} km2) differs from reference area ({ref_catchment_area:2f} km2) by more than twice the max error {max_error*100:.2f}%. Adjust max_error or max_distance_cells."
-                raise ValueError(
-                    msg
-                )
+                raise ValueError(msg)
             # warn if the two area measures disagree substantially
         if not np.isclose(delineated_area, uparea_at_outlet, rtol=0.02, atol=1e-6):
             with ErrorLogger(logger):
-                msg = f"Sum of cell areas inside the basin ({delineated_area:2f} km2) differs from " 
+                msg = f"Sum of cell areas inside the basin ({delineated_area:2f} km2) differs from "
                 msg += f"upstream area at outlet ({uparea_at_outlet:2f} km2). Investigate flow-direction "
                 msg += "masking, nodata handling or area units."
-                raise ValueError(
-                    msg
-                )
+                raise ValueError(msg)
         # finalize mask and basin fill values
-        
+
         if np.all(~self.catchment_mask):
             if stream_order > 1:
                 # try again with a lower stream_order (legacy behavior)
@@ -687,12 +711,15 @@ class Catchment:
             if gauge_id is not None:
                 # create empty ds with mask l0 extend and fill the data_var called data with -9999 values
                 id_da = xr.DataArray(
-                    np.full(ds.basin.shape, -9999, dtype=int), coords={"lat": ds.lat, "lon": ds.lon}, dims=["lat", "lon"]
+                    np.full(ds.basin.shape, -9999, dtype=int),
+                    coords={"lat": ds.lat, "lon": ds.lon},
+                    dims=["lat", "lon"],
                 )
                 id_ds = id_da.to_dataset(name="data")
                 id_ds = write_gauge_id(id_ds, gauge_id, self.gauge_lat, self.gauge_lon)
-                write_xarray_to_ascii(id_ds, out_path / 'idgauges.asc', "data", fmt="%.0f")
-
+                write_xarray_to_ascii(
+                    id_ds, out_path / "idgauges.asc", "data", fmt="%.0f"
+                )
 
     def write_single_variable_file(
         self, data_var, var_name, out_path, cellsize, format
@@ -849,7 +876,6 @@ class Catchment:
         )
         logger.info(f"Basin Id has been written to {out_path / self.out_var_name}")
         return ds
-
 
     def _cell_edges(self, centers: np.ndarray) -> np.ndarray:
         """Compute edges (len=N+1) from center coords (len=N) on a regular grid."""
@@ -1047,15 +1073,13 @@ class Catchment:
                     "axis": "X",
                 }
             )
-            mask_ds = xr.Dataset(
-                {"land_mask": mask_da, "mask": mask_da}
-            )
+            mask_ds = xr.Dataset({"land_mask": mask_da, "mask": mask_da})
             mask_upscaled = None
             if self.do_upscale:
                 mask_upscaled = mask_da
             elif self.l2_resolution is not None:
                 mask_upscaled = self.upscale_mask_with_correct_coords(mask_da)
-            
+
             if mask_upscaled is not None:
                 mask_upscaled = mask_upscaled.rename({"lat": "lat_l2", "lon": "lon_l2"})
                 mask_ds["land_mask_l2"] = mask_upscaled
@@ -1067,7 +1091,8 @@ class Catchment:
                 mask_ds.coords[bounds_name] = generate_bounds(mask_ds[var])
                 mask_ds[var].attrs["bounds"] = bounds_name
             encoding = {
-                v: {"zlib": True, "complevel": 4, "shuffle": True, **NC_ENCODE_MASK} for v in mask_ds.data_vars
+                v: {"zlib": True, "complevel": 4, "shuffle": True, **NC_ENCODE_MASK}
+                for v in mask_ds.data_vars
             }
             write_xarray_to_file(mask_ds, mask_file, encoding=encoding)
             logger.info(f"Mask file has been written to {mask_file}")
@@ -1101,7 +1126,7 @@ class Catchment:
             min_col = max(0, min_col - buffer)
             max_row = min(self.catchment_mask.shape[0] - 1, max_row + buffer)
             max_col = min(self.catchment_mask.shape[1] - 1, max_col + buffer)
-        
+
         logger.info(
             f"L0 initial window (rows, cols): [{min_row}:{max_row}], [{min_col}:{max_col}]"
         )
@@ -1257,7 +1282,6 @@ def create_catchment(
         with ErrorLogger(logger):
             msg = f"Unexpected value for var={var}, must be 'fdir' or 'dem'"
             raise ValueError(msg)
-    
 
     chunking = True if available_mem is not None else False
     with get_xarray_ds_from_file(
@@ -1266,7 +1290,7 @@ def create_catchment(
         normalize_latlon_coords=True,
         force_decending_y=True,
         available_mem_gib=available_mem,
-        chunking=chunking
+        chunking=chunking,
     ) as input_ds:
         # transform
         transform = get_transformation_matrix_nc(input_ds, var_name)
@@ -1397,6 +1421,5 @@ def create_catchment(
                 mask_file=mask_file,
                 frame=frame,
                 buffer=frame,
-                gauge_id=gauge_id
+                gauge_id=gauge_id,
             )
-

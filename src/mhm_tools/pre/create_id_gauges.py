@@ -34,12 +34,14 @@ def write_gauge_id(
         logger.info(f"Max facc coords {x_coord} / {y_coord}")
         lat = y_coord
         lon = x_coord
-        
+
     lon_key = get_coord_key(ds, lon=True)
     lat_key = get_coord_key(ds, lat=True)
     data_var = get_single_data_var(ds)
     if data_var is not None:
-        ds[data_var].loc[ds.sel({lat_key: lat, lon_key: lon}, method="nearest").coords] = id
+        ds[data_var].loc[
+            ds.sel({lat_key: lat, lon_key: lon}, method="nearest").coords
+        ] = id
     else:
         ds.loc[ds.sel({lat_key: lat, lon_key: lon}, method="nearest").coords] = id
     return ds

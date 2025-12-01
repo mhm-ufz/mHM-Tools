@@ -28,7 +28,6 @@ def _pick_da(obj: Union[xr.DataArray, xr.Dataset]) -> xr.DataArray:
     return obj[next(iter(obj.data_vars))]
 
 
-
 def _ensure_time(obj):
     if "time" not in obj.dims and "time" not in obj.coords:
         msg = "Object needs a 'time' dimension."
@@ -103,7 +102,6 @@ def _offset_for_alias(alias: str) -> pd.DateOffset:
         raise ValueError(msg)
 
 
-
 def _per_step_duration_index(time: xr.DataArray, alias_in: str) -> pd.TimedeltaIndex:
     """
     Duration of each *source* step (right-open interval) as TimedeltaIndex.
@@ -118,7 +116,6 @@ def _per_step_duration_index(time: xr.DataArray, alias_in: str) -> pd.TimedeltaI
     # last step: extend by one calendar step
     dt_last = _offset_for_alias(alias_in)
     return dt.append(pd.TimedeltaIndex([pd.Timedelta(dt_last)]))
-
 
 
 def _distribute_extensive_to_finer(
@@ -142,7 +139,6 @@ def _distribute_extensive_to_finer(
     )
     # now replicate into finer grid by resampling with ffill
     return per_bin.resample(time=alias_out).ffill()
-
 
 
 # ---------------------- public function ----------------------

@@ -4,6 +4,7 @@ import logging
 import warnings
 from pathlib import Path
 from textwrap import dedent
+
 import numpy as np
 
 from mhm_tools.common.logger import ErrorLogger
@@ -201,19 +202,22 @@ def write_grid(file, header, data=None, dtype="f4"):
     header_path = Path(file)
     header_path.parent.mkdir(parents=True, exist_ok=True)
     typ = int if is_int else float
-    header_str = dedent(f"""
+    header_str = dedent(
+        f"""
         ncols                {header["ncols"]}
         nrows                {header["nrows"]}
         xllcorner            {header["xllcorner"]}
         yllcorner            {header["yllcorner"]}
         cellsize             {header["cellsize"]}
         nodata_value         {typ(header["nodata_value"])}
-    """)
+    """
+    )
     with header_path.open("w") as f:
         f.write(header_str)
         if data is not None:
             np.savetxt(f, data, fmt="%i" if is_int else "%f")
     return header_str
+
 
 def check_resolutions(
     cellsize_1, cellsize_2, first_finer=False, name_1="LA", name_2="LB"
