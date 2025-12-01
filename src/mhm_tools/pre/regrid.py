@@ -220,6 +220,10 @@ def regrid_file(input, mask, output, l2, method="nearest", var=None):
             out = out.rename({"lon": in_lon, "lat": in_lat})
         write_xarray_to_file(ds=out, file_path=output)
         logger.info(f"Wrote {output}")
+        if Path(tmp_in).exists():
+            Path(tmp_in).unlink()
+        if Path(tmp_out).exists():
+            Path(tmp_out).unlink()
     else:
         # xarray path (nearest/linear; bilinear falls back to linear)
         method = method if method != "bilinear" else "linear"
