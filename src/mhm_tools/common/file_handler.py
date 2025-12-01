@@ -1,12 +1,10 @@
 """File handling utils."""
 
 import logging
-from concurrent.futures import ThreadPoolExecutor
 from enum import Enum
 from pathlib import Path
 from textwrap import dedent
 
-import dask
 import numpy as np
 import xarray as xr
 
@@ -320,16 +318,16 @@ def get_xarray_ds_from_file(
     return ds_out
 
 
-def write_xarray_to_file(
+def write_xarray_to_file(  # noqa: PLR0912
     ds,
     file_path,
     var_name=None,
     fmt=None,
     create_folder=True,
     encoding=None,
-    compute_kwargs=None,
     engine="netcdf4",
-    available_mem_gib=None,
+    # available_mem_gib=None,
+    # compute_kwargs=None,
 ):
     """Write xarray Datasets to file with file type depending on the file suffix."""
     file_path = Path(file_path)
@@ -358,127 +356,126 @@ def write_xarray_to_file(
                 v: {"zlib": True, "complevel": 4, "shuffle": True, **NC_ENCODE_DEFAULTS}
                 for v in data_vars
             }
-        if False and available_mem_gib is not None:
-            # ds = chunk_dataset(ds, ChunkType.TIME, available_mem_gib//50)
-            dask.config.set(
-                {"array.slicing.split_large_chunks": True}
-            )  # also works as context manager
-            # 3) Limit threads for the local threaded scheduler
-            pool = ThreadPoolExecutor(max_workers=1)
-            with dask.config.set(scheduler="threads", pool=pool):
-                # ds.to_netcdf(file#_path, engine=engine, format='NETCDF4',
-                # encoding=encoding)
-                delayed = ds.to_netcdf(
-                    file_path, engine="netcdf4", encoding=encoding, compute=False
-                )
-                delayed.compute(
-                    scheduler="threads",
-                    num_workers=1,
-                    **(compute_kwargs or {}),
-                )
-        else:
-            # if encoding is None:
-            #     ds, encoding = move_reserved_attrs_to_encoding(ds, encoding=encoding)
+        # if False and available_mem_gib is not None:
+        #     # ds = chunk_dataset(ds, ChunkType.TIME, available_mem_gib//50)
+        #     dask.config.set(
+        #         {"array.slicing.split_large_chunks": True}
+        #     )  # also works as context manager
+        #     # 3) Limit threads for the local threaded scheduler
+        #     pool = ThreadPoolExecutor(max_workers=1)
+        #     with dask.config.set(scheduler="threads", pool=pool):
+        #         # ds.to_netcdf(file#_path, engine=engine, format='NETCDF4',
+        #         # encoding=encoding)
+        #         delayed = ds.to_netcdf(
+        #             file_path, engine="netcdf4", encoding=encoding, compute=False
+        #         )
+        #         delayed.compute(
+        #             scheduler="threads",
+        #             num_workers=1,
+        #             **(compute_kwargs or {}),
+        #         )
+        # else:
+        #     ds, encoding = move_reserved_attrs_to_encoding(ds, encoding=encoding)
 
-            logger.info(ds)
-            # if var_name is not None:
-            # encoding = generate_safe_nc_encoding(ds[var_name])
-            try:
+        logger.info(ds)
+        # if var_name is not None:
+        # encoding = generate_safe_nc_encoding(ds[var_name])
+        try:
 
-                # Ensure variable attrs do not contain encoding-only keys that
-                # xarray/netCDF4 will reject when encoding is also provided.
-                # Do a forceful, best-effort clean of both attrs and any
-                # inconsistent encoding entries to avoid the
-                # "failed to prevent overwriting existing key _FillValue" error.
-                for name in list(ds.variables):
-                    try:
-                        # operate on the underlying Variable.attrs dict to ensure
-                        # we modify in-place for both DataArray and Dataset views
-                        vattrs = ds.variables[name].attrs
-                        if "_FillValue" in vattrs:
-                            del vattrs["_FillValue"]
-                        if "missing_value" in vattrs:
-                            del vattrs["missing_value"]
-                    except Exception:
-                        # best-effort: ignore failures popping attrs
-                        logger.debug(
-                            f"Could not pop reserved attrs for variable {name}",
-                            exc_info=True,
-                        )
-
-                    # Also ensure any encoding present is consistent with the variable dtype.
-                    try:
-                        venc = ds.variables[name].encoding
-                        if "_FillValue" in venc:
-                            # try to cast to the variable dtype, otherwise drop
-                            try:
-                                venc["_FillValue"] = (
-                                    np.array(venc["_FillValue"])
-                                    .astype(ds.variables[name].dtype)
-                                    .item()
-                                )
-                            except Exception:
-                                venc.pop("_FillValue", None)
-                        if "missing_value" in venc:
-                            try:
-                                venc["missing_value"] = (
-                                    np.array(venc["missing_value"])
-                                    .astype(ds.variables[name].dtype)
-                                    .item()
-                                )
-                            except Exception:
-                                venc.pop("missing_value", None)
-                    except Exception:
-                        logger.debug(
-                            f"Could not normalize encoding for variable {name}",
-                            exc_info=True,
-                        )
-
-                # Move any reserved attrs into encoding (this returns a shallow
-                # copy of the dataset with those attrs removed and a per-variable
-                # encoding dict). This is more robust than trying to pop attrs
-                # in-place because xarray may hold multiple views/copies.
+            # Ensure variable attrs do not contain encoding-only keys that
+            # xarray/netCDF4 will reject when encoding is also provided.
+            # Do a forceful, best-effort clean of both attrs and any
+            # inconsistent encoding entries to avoid the
+            # "failed to prevent overwriting existing key _FillValue" error.
+            for name in list(ds.variables):
                 try:
-                    ds_clean, moved_encoding = move_reserved_attrs_to_encoding(
-                        ds, include_coords=True, encoding_in=encoding or {}
-                    )
-                    logger.debug(
-                        f"Moved reserved attrs into encoding for variables: {list(moved_encoding.keys())}"
-                    )
+                    # operate on the underlying Variable.attrs dict to ensure
+                    # we modify in-place for both DataArray and Dataset views
+                    vattrs = ds.variables[name].attrs
+                    if "_FillValue" in vattrs:
+                        del vattrs["_FillValue"]
+                    if "missing_value" in vattrs:
+                        del vattrs["missing_value"]
                 except Exception:
-                    # Fall back to the original ds if something goes wrong.
+                    # best-effort: ignore failures popping attrs
                     logger.debug(
-                        "move_reserved_attrs_to_encoding failed; falling back",
+                        f"Could not pop reserved attrs for variable {name}",
                         exc_info=True,
                     )
-                    ds_clean = ds
-                    moved_encoding = encoding or {}
 
-                # Merge moved_encoding (from attrs) with provided encoding, giving
-                # precedence to values already present in moved_encoding.
-                merged_encoding = {}
-                for name in set(
-                    list(moved_encoding.keys()) + list((encoding or {}).keys())
-                ):
-                    merged_encoding[name] = {}
-                    # start from provided encoding (lowest precedence)
-                    if encoding and name in encoding:
-                        merged_encoding[name].update(encoding[name])
-                    # then overlay moved encoding (higher precedence)
-                    if name in moved_encoding:
-                        merged_encoding[name].update(moved_encoding[name])
+                # Also ensure any encoding present is consistent with the variable dtype.
+                try:
+                    venc = ds.variables[name].encoding
+                    if "_FillValue" in venc:
+                        # try to cast to the variable dtype, otherwise drop
+                        try:
+                            venc["_FillValue"] = (
+                                np.array(venc["_FillValue"])
+                                .astype(ds.variables[name].dtype)
+                                .item()
+                            )
+                        except Exception:
+                            venc.pop("_FillValue", None)
+                    if "missing_value" in venc:
+                        try:
+                            venc["missing_value"] = (
+                                np.array(venc["missing_value"])
+                                .astype(ds.variables[name].dtype)
+                                .item()
+                            )
+                        except Exception:
+                            venc.pop("missing_value", None)
+                except Exception:
+                    logger.debug(
+                        f"Could not normalize encoding for variable {name}",
+                        exc_info=True,
+                    )
 
-                encoding = sanitize_nc_encoding(ds_clean, merged_encoding)
-                logger.info(f"Using encoding: {encoding}")
-                set_netcdf_encoding(ds_clean, encoding)
-                ds_clean.to_netcdf(
-                    file_path, engine=engine, format="NETCDF4", encoding=encoding
+            # Move any reserved attrs into encoding (this returns a shallow
+            # copy of the dataset with those attrs removed and a per-variable
+            # encoding dict). This is more robust than trying to pop attrs
+            # in-place because xarray may hold multiple views/copies.
+            try:
+                ds_clean, moved_encoding = move_reserved_attrs_to_encoding(
+                    ds, include_coords=True, encoding_in=encoding or {}
                 )
-            except ValueError:
-                logger.error(f"Error while writing to {file_path}")
-                logger.error(ds)
-                logger.info(f"Trying to write without encoding {encoding}")
-                ds.to_netcdf(file_path, engine=engine, format="NETCDF4")
+                logger.debug(
+                    f"Moved reserved attrs into encoding for variables: {list(moved_encoding.keys())}"
+                )
+            except Exception:
+                # Fall back to the original ds if something goes wrong.
+                logger.debug(
+                    "move_reserved_attrs_to_encoding failed; falling back",
+                    exc_info=True,
+                )
+                ds_clean = ds
+                moved_encoding = encoding or {}
+
+            # Merge moved_encoding (from attrs) with provided encoding, giving
+            # precedence to values already present in moved_encoding.
+            merged_encoding = {}
+            for name in set(
+                list(moved_encoding.keys()) + list((encoding or {}).keys())
+            ):
+                merged_encoding[name] = {}
+                # start from provided encoding (lowest precedence)
+                if encoding and name in encoding:
+                    merged_encoding[name].update(encoding[name])
+                # then overlay moved encoding (higher precedence)
+                if name in moved_encoding:
+                    merged_encoding[name].update(moved_encoding[name])
+
+            encoding = sanitize_nc_encoding(ds_clean, merged_encoding)
+            logger.info(f"Using encoding: {encoding}")
+            set_netcdf_encoding(ds_clean, encoding)
+            ds_clean.to_netcdf(
+                file_path, engine=engine, format="NETCDF4", encoding=encoding
+            )
+        except ValueError:
+            logger.error(f"Error while writing to {file_path}")
+            logger.error(ds)
+            logger.info(f"Trying to write without encoding {encoding}")
+            ds.to_netcdf(file_path, engine=engine, format="NETCDF4")
     else:
         msg = f"Writing to file types other than asci and netcdf is not implemented. The suffix of the file was: {file_path.suffix}"
         with ErrorLogger(logger):
@@ -716,7 +713,8 @@ def move_reserved_attrs_to_encoding(
         # Merge data + coords encodings
         encoding = {**coord_encoding, **data_encoding}
         return da, encoding
-    raise ValueError(f"wrong type {obj}")
+    msg = f"wrong type {obj}"
+    raise ValueError(msg)
     # Merge data + coords encodings
     encoding = {**coord_encoding, **data_encoding}
     return da, encoding

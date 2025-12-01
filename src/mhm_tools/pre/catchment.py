@@ -57,7 +57,7 @@ def create_cell_area(ds, lat_name="lat", lon_name="lon"):
     lat_2d = np.tile(lat_rad[:, np.newaxis], (1, len(lon)))
     # calculate area
     cell_areas = R**2 * dlat_2d * dlon_2d * np.cos(lat_2d)
-    cell_area_da = xr.DataArray(
+    return xr.DataArray(
         cell_areas,
         coords={lat_name: lat, lon_name: lon},
         dims=[lat_name, lon_name],
@@ -69,7 +69,6 @@ def create_cell_area(ds, lat_name="lat", lon_name="lon"):
             "institution": "Helmholtz Centre for Environmental Research - UFZ",
         },
     )
-    return cell_area_da
 
 
 # CLASSES
@@ -226,7 +225,7 @@ class Catchment:
             )
         self.get_fdir()
 
-    def calc_upstream_area(self, cell_area=None):
+    def calc_upstream_area(self):
         """Use pyflwdir to calculate the upstream area from flow direction by providing cell areas."""
         if self._fdir is None:
             logger.error("Flow direction is not initialized.")
@@ -238,8 +237,9 @@ class Catchment:
     def _coord_to_index(self, lat, lon):
         """Map latitude/longitude or indices to integer grid indices."""
         if "lat" not in self.ds.coords or "lon" not in self.ds.coords:
+            msg = "Dataset is missing latitude/longitude coordinates."
             with ErrorLogger(logger):
-                raise ValueError("Dataset is missing latitude/longitude coordinates.")
+                raise ValueError(msg)
         lat_vals = self.ds.lat.data
         lon_vals = self.ds.lon.data
 
@@ -275,10 +275,12 @@ class Catchment:
                 f"Mapped longitude {float(lon)} to index {j} with lon_value {lon_vals[j]}"
             )
         if i is None or j is None:
+            msg = (
+                "Could not map given coordinates to valid indices within "
+                "dataset bounds."
+            )
             with ErrorLogger(logger):
-                raise ValueError(
-                    "Could not map given coordinates to valid indices within dataset bounds."
-                )
+                raise ValueError(msg)
         i = int(np.clip(i, 0, len(lat_vals) - 1))
         j = int(np.clip(j, 0, len(lon_vals) - 1))
 
@@ -293,6 +295,7 @@ class Catchment:
         max_error=0.25,
         recursion=False,
     ):
+        """Find best coordinate given gauge location and target area."""
         if not recursion:
             max_distance_cells = max_distance_cells // 2
 
@@ -1252,7 +1255,7 @@ def is_data_global(ds, coordinate_slice):
 
 
 @log_arguments()
-def create_catchment(
+def create_catchment(  # noqa: PLR0913
     input_file,
     output_path,
     var_name,
@@ -1283,7 +1286,7 @@ def create_catchment(
             msg = f"Unexpected value for var={var}, must be 'fdir' or 'dem'"
             raise ValueError(msg)
 
-    chunking = True if available_mem is not None else False
+    chunking = available_mem is not None
     with get_xarray_ds_from_file(
         input_file,
         var_name,

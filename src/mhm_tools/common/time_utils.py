@@ -199,7 +199,7 @@ def resample_to_daily_or_hourly_adaptive(
                     return da.resample(time=alias_tgt).ffill()
                 if upsample_for_intensive == "nearest":
                     return da.resample(time=alias_tgt).nearest()
-                msg = "Unknown upsample_for_intensive=" f"'{upsample_for_intensive}'"
+                msg = f"Unknown upsample_for_intensive='{upsample_for_intensive}'"
                 with ErrorLogger(logger):
                     raise ValueError(msg)
             # extensive → distribute evenly across finer bins (sum-preserving)
@@ -221,7 +221,7 @@ def resample_to_daily_or_hourly_adaptive(
                 return da.resample(time="1H").ffill()
             if upsample_for_intensive == "nearest":
                 return da.resample(time="1H").nearest()
-            msg = "Unknown upsample_for_intensive=" f"'{upsample_for_intensive}'"
+            msg = f"Unknown upsample_for_intensive='{upsample_for_intensive}'"
             with ErrorLogger(logger):
                 raise ValueError(msg)
         return _distribute_extensive_to_finer(da, alias_in=alias_in, alias_out="1H")

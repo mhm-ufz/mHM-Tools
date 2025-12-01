@@ -432,7 +432,7 @@ def crop_file(  # noqa: PLR0912
             )
     try:
         write_xarray_to_file(
-            ds_cropped, output_file, available_mem_gib=available_mem_gib
+            ds_cropped, output_file  # , available_mem_gib=available_mem_gib
         )
     except Exception as e:
         logger.warning(f"First try writing the file failed: {e}")
@@ -440,13 +440,12 @@ def crop_file(  # noqa: PLR0912
         for var_name in ds_cropped.data_vars:
             ds_cropped[var_name] = ds_cropped[var_name].astype(float)
         write_xarray_to_file(
-            ds_cropped, output_file, available_mem_gib=available_mem_gib
+            ds_cropped, output_file  # , available_mem_gib=available_mem_gib
         )
 
     logger.info(f"Written to {output_file}")
-    if force_header_creation:
-        if not (output_file.parent / "header.txt").is_file():
-            create_header(ds_cropped, output_path=output_file.parent, write=True)
+    if force_header_creation and not (output_file.parent / "header.txt").is_file():
+        create_header(ds_cropped, output_path=output_file.parent, write=True)
     return latlon_files
 
 
