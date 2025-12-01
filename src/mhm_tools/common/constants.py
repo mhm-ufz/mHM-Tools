@@ -26,6 +26,7 @@ NO_DATA = -9999.0
 """Default no data value for mHM."""
 
 NC_ENCODE_DEFAULTS = {"_FillValue": NO_DATA, "missing_value": NO_DATA}
+NC_ENCODE_MASK = {"_FillValue": 0, "missing_value": 0}
 """Default netcdf encoding settings."""
 
 ESRI_TYPES = {

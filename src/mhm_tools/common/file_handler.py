@@ -1,19 +1,23 @@
 """File handling utils."""
 
 import logging
-from concurrent.futures import ThreadPoolExecutor
 from enum import Enum
 from pathlib import Path
-from textwrap import dedent
 
-import dask
 import numpy as np
 import xarray as xr
 
-from mhm_tools.common.logger import ErrorLogger, log_arguments
-from mhm_tools.common.netcdf import read_dataset
+from mhm_tools.common.constants import NC_ENCODE_DEFAULTS, NO_DATA
+from mhm_tools.common.esri_grid import standardize_header, write_grid, write_header
+from mhm_tools.common.logger import ErrorLogger, log_arguments, log_errors
+from mhm_tools.common.netcdf import (
+    read_dataset,
+    sanitize_nc_encoding,
+    set_netcdf_encoding,
+)
 from mhm_tools.common.xarray_utils import (
     get_coord_key,
+    get_dtype,
     get_single_data_var,
     normalize_lat_lon,
 )
@@ -25,11 +29,13 @@ logger = logging.getLogger(__name__)
 ######
 
 
-def create_header(ds, output_path=None, no_data_value="-9999", write=True):
+def create_header(ds, output_path=None, no_data_value=None, write=True) -> dict:
     """Write a header file from a dataset.
 
     Takes an xarray Dataset and writes the ASCII header needed for GIS tools.
     """
+    if no_data_value is None:
+        no_data_value = NO_DATA
     lat_key = get_coord_key(ds, lat=True)
     lon_key = get_coord_key(ds, lon=True)
     x = ds[lon_key].values
@@ -40,33 +46,32 @@ def create_header(ds, output_path=None, no_data_value="-9999", write=True):
 
     ncols = len(x)
     nrows = len(y)
-    header_str = dedent(
-        f"""
-        ncols                {ncols}
-        nrows                {nrows}
-        xllcorner            {xllcorner:.6f}
-        yllcorner            {yllcorner:.6f}
-        cellsize             {cellsize:.6f}
-        NODATA_value         {no_data_value}
-        """
-    )
-    if not write:
-        return header_str
+    dtype = get_dtype(ds)
+    typ = int if issubclass(np.dtype(dtype).type, np.integer) else float
+    header_dict = {
+        "ncols": ncols,
+        "nrows": nrows,
+        "xllcorner": xllcorner,
+        "yllcorner": yllcorner,
+        "cellsize": cellsize,
+        "nodata_value": typ(no_data_value),
+    }
+    header_dict = standardize_header(header_dict)
 
-    if output_path.is_dir():
-        header_out_path = output_path / "header.txt"
-    elif output_path.is_file():
-        header_out_path = output_path
-    else:
-        msg = "Header output path is neither file nor directory."
-        with ErrorLogger(logger):
-            raise ValueError(msg)
-    logger.info(
-        f"Writing header file to {header_out_path} with header str: {header_str}"
-    )
-    with header_out_path.open("w") as hf:
-        hf.write(header_str)
-    return header_str
+    if write:
+        if output_path.is_dir():
+            header_out_path = output_path / "header.txt"
+        elif output_path.is_file():
+            header_out_path = output_path
+        else:
+            msg = "Header output path is neither file nor directory."
+            with ErrorLogger(logger):
+                raise ValueError(msg)
+        header_str = write_header(header_out_path, header_dict, dtype)
+        logger.info(
+            f"Writing header file to {header_out_path} with header str: {header_str}"
+        )
+    return header_dict
 
 
 def crop_file_by_mask(ds, mask_file):
@@ -151,8 +156,11 @@ def chunk_dataset_space_and_time(ds, available_mem_gib) -> dict[str, int]:
         f"Chunking dataset with a max amount of mem of {available_mem_gib:.1f}Gb"
     )
     # ---------------- metadata only (cheap) --------------------------------
-    var_name = next(iter(ds.data_vars))  # first data variable
-    var = ds[var_name]  # an xarray.Variable wrapper
+    if isinstance(ds, xr.Dataset):
+        var_name = next(iter(ds.data_vars))  # first data variable
+        var = ds[var_name]  # an xarray.Variable wrapper
+    else:
+        var = ds
     dtype_sz = var.dtype.itemsize  # bytes per element
 
     lat_key = get_coord_key(ds, lat=True)
@@ -276,7 +284,7 @@ def get_xarray_ds_from_file(
     logger.debug(lon_key)
     if normalize_latlon_coords:
         # re-name input coords to lat and lon
-        ds_out = normalize_lat_lon(ds_out, lat_key, lon_key)
+        ds_out = normalize_lat_lon(ds_out, lat_key, lon_key, raise_exceptions=False)
 
     if lon_key is None and lat_key is None:
         logger.warning("Dataset does not have lon and lat key.")
@@ -301,87 +309,171 @@ def get_xarray_ds_from_file(
     return ds_out
 
 
-def write_xarray_to_file(
+def write_xarray_to_file(  # noqa: PLR0912
     ds,
     file_path,
     var_name=None,
-    fmt=None,
+    # fmt=None,
     create_folder=True,
     encoding=None,
-    compute_kwargs=None,
     engine="netcdf4",
-    available_mem_gib=None,
+    # available_mem_gib=None,
+    # compute_kwargs=None,
 ):
     """Write xarray Datasets to file with file type depending on the file suffix."""
     file_path = Path(file_path)
     if create_folder and not file_path.parent.is_dir():
         file_path.parent.mkdir(parents=True)
+    if file_path.is_file():
+        file_path.unlink()
     logger.info(f"Writing file to {file_path}")
+    # ds = chunk_if_too_big(ds)
+    # ds = ds.chunk({'time': 512, 'lat': 121, 'lon': 131})
     if file_path.suffix == ".asc":
-        write_xarray_to_ascii(ds, file_path, var_name, fmt)
+        write_xarray_to_ascii(ds, file_path, var_name)
     elif file_path.suffix == ".nc":
-        if available_mem_gib is not None:
-            # ds = chunk_dataset(ds, ChunkType.TIME, available_mem_gib//50)
-            encoding = {
-                v: {"zlib": True, "complevel": 4, "shuffle": True} for v in ds.data_vars
-            }
-            dask.config.set(
-                {"array.slicing.split_large_chunks": True}
-            )  # also works as context manager
-            # 3) Limit threads for the local threaded scheduler
-            pool = ThreadPoolExecutor(max_workers=1)
-            with dask.config.set(scheduler="threads", pool=pool):
-                # ds.to_netcdf(file#_path, engine=engine, format='NETCDF4',
-                # encoding=encoding)
-                delayed = ds.to_netcdf(
-                    file_path, engine="netcdf4", encoding=encoding, compute=False
-                )
-                delayed.compute(
-                    scheduler="threads",
-                    num_workers=1,
-                    **(compute_kwargs or {}),
-                )
+        if isinstance(ds, xr.DataArray):
+            var_name = ds.name
+            logger.debug(f"var {var_name}")
+            ds = ds.to_dataset(name=var_name)
+            data_vars = [var_name]
+        elif var_name is None:
+            data_vars = list(ds.data_vars)
         else:
-            if encoding is None:
-                ds, encoding = move_reserved_attrs_to_encoding(ds)
+            data_vars = [var_name]
+        logger.debug(f"data vars: {data_vars}")
+        if encoding is None:
+            encoding = {
+                v: {"zlib": True, "complevel": 4, "shuffle": True, **NC_ENCODE_DEFAULTS}
+                for v in data_vars
+            }
+        # if False and available_mem_gib is not None:
+        #     # ds = chunk_dataset(ds, ChunkType.TIME, available_mem_gib//50)
+        #     dask.config.set(
+        #         {"array.slicing.split_large_chunks": True}
+        #     )  # also works as context manager
+        #     # 3) Limit threads for the local threaded scheduler
+        #     pool = ThreadPoolExecutor(max_workers=1)
+        #     with dask.config.set(scheduler="threads", pool=pool):
+        #         # ds.to_netcdf(file#_path, engine=engine, format='NETCDF4',
+        #         # encoding=encoding)
+        #         delayed = ds.to_netcdf(
+        #             file_path, engine="netcdf4", encoding=encoding, compute=False
+        #         )
+        #         delayed.compute(
+        #             scheduler="threads",
+        #             num_workers=1,
+        #             **(compute_kwargs or {}),
+        #         )
+        # else:
+        #     ds, encoding = move_reserved_attrs_to_encoding(ds, encoding=encoding)
 
-            def safe_nc_encoding(da, target_mb=32, fill=-9999.0):
-                item = np.dtype(da.dtype).itemsize
-                ny = da.sizes.get("lat", 1)
-                nx = da.sizes.get("lon", 1)
-                per_t_bytes = ny * nx * item
-                t = max(1, int((target_mb * 1024**2) // per_t_bytes))
-                return {
-                    da.name
-                    or "var": {
-                        "chunksizes": (min(t, da.sizes.get("time", t)), ny, nx),
-                        "zlib": True,
-                        "complevel": 4,
-                        "dtype": "f4",
-                        "_FillValue": np.float32(fill),
-                        "contiguous": False,
-                    }
-                }
+        logger.info(ds)
+        # if var_name is not None:
+        # encoding = generate_safe_nc_encoding(ds[var_name])
+        try:
 
-            logger.info(ds)
-            if var_name is not None:
-                encoding = safe_nc_encoding(ds[var_name], target_mb=32)
+            # Ensure variable attrs do not contain encoding-only keys that
+            # xarray/netCDF4 will reject when encoding is also provided.
+            # Do a forceful, best-effort clean of both attrs and any
+            # inconsistent encoding entries to avoid the
+            # "failed to prevent overwriting existing key _FillValue" error.
+            for name in list(ds.variables):
+                try:
+                    # operate on the underlying Variable.attrs dict to ensure
+                    # we modify in-place for both DataArray and Dataset views
+                    vattrs = ds.variables[name].attrs
+                    if "_FillValue" in vattrs:
+                        del vattrs["_FillValue"]
+                    if "missing_value" in vattrs:
+                        del vattrs["missing_value"]
+                except Exception:
+                    # best-effort: ignore failures popping attrs
+                    logger.debug(
+                        f"Could not pop reserved attrs for variable {name}",
+                        exc_info=True,
+                    )
+
+                # Also ensure any encoding present is consistent with the variable dtype.
+                try:
+                    venc = ds.variables[name].encoding
+                    if "_FillValue" in venc:
+                        # try to cast to the variable dtype, otherwise drop
+                        try:
+                            venc["_FillValue"] = (
+                                np.array(venc["_FillValue"])
+                                .astype(ds.variables[name].dtype)
+                                .item()
+                            )
+                        except Exception:
+                            venc.pop("_FillValue", None)
+                    if "missing_value" in venc:
+                        try:
+                            venc["missing_value"] = (
+                                np.array(venc["missing_value"])
+                                .astype(ds.variables[name].dtype)
+                                .item()
+                            )
+                        except Exception:
+                            venc.pop("missing_value", None)
+                except Exception:
+                    logger.debug(
+                        f"Could not normalize encoding for variable {name}",
+                        exc_info=True,
+                    )
+
+            # Move any reserved attrs into encoding (this returns a shallow
+            # copy of the dataset with those attrs removed and a per-variable
+            # encoding dict). This is more robust than trying to pop attrs
+            # in-place because xarray may hold multiple views/copies.
             try:
-                ds.to_netcdf(
-                    file_path, engine=engine, format="NETCDF4", encoding=encoding
+                ds_clean, moved_encoding = move_reserved_attrs_to_encoding(
+                    ds, include_coords=True, encoding_in=encoding or {}
                 )
-            except ValueError:
-                logger.error(f"Error while writing to {file_path}")
-                logger.error(ds)
-                logger.info(f"Trying to write without encoding {encoding}")
-                ds.to_netcdf(file_path, engine=engine, format="NETCDF4")
+                logger.debug(
+                    f"Moved reserved attrs into encoding for variables: {list(moved_encoding.keys())}"
+                )
+            except Exception:
+                # Fall back to the original ds if something goes wrong.
+                logger.debug(
+                    "move_reserved_attrs_to_encoding failed; falling back",
+                    exc_info=True,
+                )
+                ds_clean = ds
+                moved_encoding = encoding or {}
+
+            # Merge moved_encoding (from attrs) with provided encoding, giving
+            # precedence to values already present in moved_encoding.
+            merged_encoding = {}
+            for name in set(
+                list(moved_encoding.keys()) + list((encoding or {}).keys())
+            ):
+                merged_encoding[name] = {}
+                # start from provided encoding (lowest precedence)
+                if encoding and name in encoding:
+                    merged_encoding[name].update(encoding[name])
+                # then overlay moved encoding (higher precedence)
+                if name in moved_encoding:
+                    merged_encoding[name].update(moved_encoding[name])
+
+            encoding = sanitize_nc_encoding(ds_clean, merged_encoding)
+            logger.info(f"Using encoding: {encoding}")
+            set_netcdf_encoding(ds_clean, encoding)
+            ds_clean.to_netcdf(
+                file_path, engine=engine, format="NETCDF4", encoding=encoding
+            )
+        except ValueError:
+            logger.error(f"Error while writing to {file_path}")
+            logger.error(ds)
+            logger.info(f"Trying to write without encoding {encoding}")
+            ds.to_netcdf(file_path, engine=engine, format="NETCDF4")
     else:
         msg = f"Writing to file types other than asci and netcdf is not implemented. The suffix of the file was: {file_path.suffix}"
         with ErrorLogger(logger):
             raise NotImplementedError(msg)
 
 
-def write_xarray_to_ascii(dataset, filepath, data_var=None, fmt=None):
+def write_xarray_to_ascii(dataset, filepath, data_var=None, nodata_value=None):
     """Write xarray Dataset to an ASCII file that can be read by mHM."""
     # Extract the data, coordinates, and nodata value from the Dataset
     if data_var is None:
@@ -392,43 +484,8 @@ def write_xarray_to_ascii(dataset, filepath, data_var=None, fmt=None):
             )
             return
     data = dataset[data_var]
-    lat = dataset["lat"].values
-    lon = dataset["lon"].values
-    nodata_value = dataset[data_var].attrs.get("nodata_value", -9999)
-
-    # Calculate header information
-    nrows, ncols = data.shape
-    cellsize = lon[1] - lon[0]  # Assuming uniform spacing in lon
-    xllcorner = lon[0] - 0.5 * cellsize
-    yllcorner = lat[-1] - 0.5 * cellsize  # lat starts at the top and descends
-
-    # Create the header
-    header = (
-        f"ncols         {ncols}\n"
-        f"nrows         {nrows}\n"
-        f"xllcorner     {xllcorner}\n"
-        f"yllcorner     {yllcorner}\n"
-        f"cellsize      {cellsize}\n"
-        f"NODATA_value  {nodata_value}\n"
-    )
-
-    # Replace NaN values with nodata_value in data
-
-    if data.dtype.kind in ["i", "u", "f"]:  # i=int, u=unsigned, f=float
-        data_to_write = np.where(np.isnan(data.values), nodata_value, data)
-    else:
-        data_to_write = data
-
-    # Write header and data to ASCII file
-    with filepath.open("w") as f:
-        f.write(header)
-        if fmt is not None:
-            np.savetxt(f, data_to_write, fmt=fmt)
-        elif data.dtype.kind in ["i", "u", "f"]:
-            np.savetxt(f, data_to_write, fmt="%g")
-        else:
-            np.savetxt(f, data_to_write, fmt="%s")
-        logger.info(f"Writting file to {filepath}")
+    header = create_header(dataset, write=False, no_data_value=nodata_value)
+    write_grid(filepath, header, dtype=data.dtype, data=data)
 
 
 def read_ascii_to_xarray(
@@ -441,12 +498,16 @@ def read_ascii_to_xarray(
     # Read the header from the file
     with filepath.open("r") as f:
         header = {}
-        for i in range(6):
-            line = f.readline().strip()
-            logger.debug(f"File {filepath.name} line {i}: {line}")
-            key, value = line.split()
-            header[key.lower()] = float(value) if "." in value else int(value)
 
+        for i, line in enumerate(f.readlines()):
+            line_striped = line.strip()
+            if not line_striped:
+                continue
+            logger.debug(f"File {filepath.name} {i}: {line_striped}")
+            key, value = line_striped.split()
+            header[key.lower()] = float(value) if "." in value else int(value)
+            if len(header) == 6:
+                break
         # Extract header information
         ncols = header["ncols"]
         nrows = header["nrows"]
@@ -456,7 +517,7 @@ def read_ascii_to_xarray(
         nodata_value = header["nodata_value"]
 
     # Load the data values
-    data_values = np.loadtxt(filepath, skiprows=6)
+    data_values = np.loadtxt(filepath, skiprows=i + 1)
 
     # Calculate latitude and longitude coordinates
     lon = np.arange(
@@ -529,6 +590,7 @@ def move_reserved_attrs_to_encoding(
     obj: xr.Dataset | xr.DataArray,
     include_coords: bool = True,
     extra_reserved: set[str] | None = None,
+    encoding_in: dict | None = None,
 ):
     """
     Move reserved serialization keys from .attrs to .encoding and return.
@@ -545,6 +607,8 @@ def move_reserved_attrs_to_encoding(
         If True, also process coordinate variables.
     extra_reserved : set[str] | None
         Additional keys to treat as reserved (moved to encoding).
+    encoding_in : dict | None
+        Initial encoding dict to update. If None, starts empty.
 
     Returns
     -------
@@ -556,6 +620,7 @@ def move_reserved_attrs_to_encoding(
     if extra_reserved:
         reserved |= set(extra_reserved)
 
+    @log_errors(raise_exceptions=False)
     def _process_var(var):
         # Move reserved keys from attrs -> encoding
         for k in list(var.attrs.keys()):
@@ -576,8 +641,16 @@ def move_reserved_attrs_to_encoding(
             for name in names
             if ds.variables[name].encoding
         }
+        for name, env in encoding.items():
+            for key, val in encoding_in.items():
+                if key not in env:
+                    encoding[name][key] = val
         return ds, encoding
 
+    if isinstance(obj, xr.DataArray):  # DataArray
+        da = obj.copy()
+        _process_var(da)
+        names = [da.name] if da.name is not None else ["__dataarray__"]
     # DataArray
     da = obj.copy(deep=False)
     _process_var(da)
@@ -597,6 +670,11 @@ def move_reserved_attrs_to_encoding(
     if da.name is not None and da.encoding:
         data_encoding[da.name] = {k: v for k, v in da.encoding.items() if k in reserved}
 
+        # Merge data + coords encodings
+        encoding = {**coord_encoding, **data_encoding}
+        return da, encoding
+    msg = f"wrong type {obj}"
+    raise ValueError(msg)
     # Merge data + coords encodings
     encoding = {**coord_encoding, **data_encoding}
     return da, encoding

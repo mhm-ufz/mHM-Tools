@@ -162,6 +162,136 @@ class TestCatchment(unittest.TestCase):
             except Exception as e:
                 print(f"Error removing file {file_path}: {e}")
 
+    # ------------------------------------------------------------------
+    # Optional integration tests for delineation using a real flow-direction
+    # file and gauge coordinates. These tests are skipped unless you provide
+    # the path to your fdir file and the gauge coordinates below.
+    # To run, set the variables FDIR_PATH, GAUGE_LAT, GAUGE_LON (and
+    # optionally REF_AREA) to appropriate values.
+    # ------------------------------------------------------------------
+
+    # Replace these placeholders with your real test inputs before running.
+    FDIR_PATH = Path(HERE, "files", "test_create_catchment", "fdir.nc")
+    FDIR_VAR = "fdir"  # change to the variable name in your file if different
+
+    GAUGE_LAT = [49.292013, 48.445978]
+    GAUGE_LON = [8.679113, 8.70628]
+    REF_AREA = [113.33, 1123.61]  # optional reference area in km2, e.g. 25400
+
+    def test_delineate_basin_without_ref(self):
+        """Integration-style test: delineate a basin using gauge coords without providing a ref area."""
+        if (
+            not self.FDIR_PATH.exists()
+            or self.GAUGE_LAT is None
+            or self.GAUGE_LON is None
+        ):
+            self.skipTest(
+                "Set FDIR_PATH, GAUGE_LAT and GAUGE_LON in this test file to run this integration test."
+            )
+
+        ds = get_xarray_ds_from_file(str(self.FDIR_PATH))
+        var_name = (
+            self.FDIR_VAR if self.FDIR_VAR in ds.data_vars else list(ds.data_vars)[0]
+        )
+
+        # get coordinate arrays and convert lat/lon to nearest indices
+        lat_key = get_coord_key(ds, lat=True, raise_exception=False)
+        lon_key = get_coord_key(ds, lon=True, raise_exception=False)
+
+        # only test on basin 2 because basin 1 can not be resolved without ref area
+        c = catchment.Catchment(
+            ds,
+            var_name,
+            var="fdir",
+            ftype="d8",
+            transform=self.transform,
+            latlon=True,
+        )
+        c.delineate_basin(
+            (self.GAUGE_LAT[1], self.GAUGE_LON[1]), raise_on_sanity_check=False
+        )
+
+        self.assertIsNotNone(c.basin)
+        self.assertTrue(
+            np.any(c.catchment_mask),
+            "No catchment cells found for provided gauge coordinates",
+        )
+
+        # compute area of resulting catchment using create_cell_area
+        cell_area = catchment.create_cell_area(
+            ds, lat_name=lat_key, lon_name=lon_key
+        ).data
+        area_km2 = float(np.sum(cell_area[c.catchment_mask]))
+        self.assertGreater(area_km2, 0.0)
+        rel_diff = abs(area_km2 - float(self.REF_AREA[1])) / float(self.REF_AREA[1])
+        self.assertLessEqual(
+            rel_diff,
+            0.05,
+            f"Delineated area {area_km2} differs more than 5% from REF_AREA {self.REF_AREA[1]}",
+        )
+        print(
+            f"No ref Delineated area: {area_km2} km², Reference area: {self.REF_AREA[1]} km², Relative difference: {rel_diff*100:.2f}%"
+        )
+
+    def test_delineate_basin_with_ref(self):
+        """Integration-style test: delineate a basin with an explicit reference area and check closeness."""
+        if (
+            not self.FDIR_PATH.exists()
+            or self.GAUGE_LAT is None
+            or self.GAUGE_LON is None
+            or self.REF_AREA is None
+        ):
+            self.skipTest(
+                "Set FDIR_PATH, GAUGE_LAT, GAUGE_LON and REF_AREA in this test file to run this integration test."
+            )
+
+        ds = get_xarray_ds_from_file(str(self.FDIR_PATH))
+        var_name = (
+            self.FDIR_VAR if self.FDIR_VAR in ds.data_vars else list(ds.data_vars)[0]
+        )
+
+        lat_key = get_coord_key(ds, lat=True, raise_exception=False)
+        lon_key = get_coord_key(ds, lon=True, raise_exception=False)
+
+        for lat, lon, ref_area in zip(self.GAUGE_LAT, self.GAUGE_LON, self.REF_AREA):
+            c = catchment.Catchment(
+                ds,
+                var_name,
+                var="fdir",
+                ftype="d8",
+                transform=self.transform,
+                latlon=True,
+            )
+            c.delineate_basin(
+                (lat, lon),
+                ref_catchment_area=float(ref_area),
+                max_distance_cells=10,
+                max_error=0.05,
+                raise_on_sanity_check=False,
+            )
+
+            self.assertIsNotNone(c.basin)
+            self.assertTrue(
+                np.any(c.catchment_mask),
+                "No catchment cells found for provided gauge coordinates and ref area",
+            )
+
+            cell_area = catchment.create_cell_area(
+                ds, lat_name=lat_key, lon_name=lon_key
+            ).data
+            area_km2 = float(np.sum(cell_area[c.catchment_mask]))
+
+            # check that computed area is reasonably close to the reference (5% tolerance)
+            rel_diff = abs(area_km2 - float(ref_area)) / float(ref_area)
+            self.assertLessEqual(
+                rel_diff,
+                0.05,
+                f"Delineated area {area_km2} differs more than 5% from REF_AREA {ref_area}",
+            )
+            print(
+                f"With ref Delineated area: {area_km2} km², Reference area: {ref_area} km², Relative difference: {rel_diff*100:.2f}%"
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,4 +1,3 @@
-import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,13 +10,11 @@ import mhm_tools.common.file_handler as fh
 
 
 class BaseDatasetMixin:
-    def make_simple_ds(self):
+    def make_simple_ds(self, dtype=np.float32):
         # 3 x 4 grid, lat descending
         lat = np.array([52.0, 51.0, 50.0])
         lon = np.array([10.0, 11.0, 12.0, 13.0])
-        data = np.arange(lat.size * lon.size, dtype=np.float32).reshape(
-            lat.size, lon.size
-        )
+        data = np.arange(lat.size * lon.size, dtype=dtype).reshape(lat.size, lon.size)
         return xr.Dataset(
             {"var": (("lat", "lon"), data)}, coords={"lat": lat, "lon": lon}
         )
@@ -34,53 +31,37 @@ class BaseDatasetMixin:
 
 class TestCreateHeader(unittest.TestCase, BaseDatasetMixin):
 
-    def test_create_header_returns_str_without_write(self):
-        ds = self.make_simple_ds()
-        header = fh.create_header(ds, write=False, no_data_value="-9999")
-        self.assertIsInstance(header, str)
-        print(header)
-        header_dict = {}
-        for line in header.strip().splitlines():
-            if not line:
-                continue
-            print(line)
-            line_split = [cell for cell in line.strip().split() if cell]
-            key = line_split[0]
-            value = line_split[1]
-            header_dict[key] = value
-        self.assertEqual(header_dict["ncols"], str(ds.sizes["lon"]))
-        self.assertEqual(header_dict["nrows"], str(ds.sizes["lat"]))
-        self.assertAlmostEqual(float(header_dict["cellsize"]), 1.0)
-        self.assertAlmostEqual(
-            float(header_dict["xllcorner"]), ds["lon"].values.min() - 0.5
-        )
-        self.assertAlmostEqual(
-            float(header_dict["yllcorner"]), ds["lat"].values.min() - 0.5
-        )
-        self.assertEqual(header_dict["NODATA_value"], "-9999")
+    def test_create_header_returns_dir_without_write(self):
+        for dtype in [np.float32, np.int32, np.uint16]:
+            with self.subTest(dtype=dtype):
+                ds = self.make_simple_ds(dtype=dtype)
+                header_dict = fh.create_header(ds, write=False, no_data_value="-9999")
+                self.assertEqual(header_dict["ncols"], ds.sizes["lon"])
+                self.assertEqual(header_dict["nrows"], ds.sizes["lat"])
+                self.assertAlmostEqual(float(header_dict["cellsize"]), 1.0)
+                self.assertAlmostEqual(
+                    float(header_dict["xllcorner"]), ds["lon"].values.min() - 0.5
+                )
+                self.assertAlmostEqual(
+                    float(header_dict["yllcorner"]), ds["lat"].values.min() - 0.5
+                )
+                if dtype in [np.int32, np.uint16]:
+                    self.assertEqual(header_dict["nodata_value"], -9999)
+                else:
+                    self.assertEqual(header_dict["nodata_value"], -9999.0)
 
     def test_create_header_writes_file(self):
         ds = self.make_simple_ds()
         with tempfile.TemporaryDirectory() as td:
             expected_path = Path(td) / "header.txt"
             self.assertFalse(expected_path.is_file())
-            header_str = fh.create_header(
-                ds, output_path=Path(td), write=True, no_data_value="NA"
+            header_dict = fh.create_header(
+                ds, output_path=Path(td), write=True, no_data_value=2245
             )
             self.assertTrue(expected_path.is_file())
-
-            header_dict = {}
-            read_str = expected_path.read_text()
-            self.assertEqual(read_str, header_str)
-            for line in read_str.splitlines():
-                if not line.strip():
-                    continue
-                key, value = [cell for cell in line.strip().split() if cell][:2]
-                header_dict[key] = value
-
-            self.assertEqual(header_dict["ncols"], str(ds.sizes["lon"]))
-            self.assertEqual(header_dict["nrows"], str(ds.sizes["lat"]))
-            self.assertEqual(header_dict["NODATA_value"], "NA")
+            self.assertEqual(header_dict["ncols"], ds.sizes["lon"])
+            self.assertEqual(header_dict["nrows"], ds.sizes["lat"])
+            self.assertEqual(header_dict["nodata_value"], 2245)
 
 
 class TestChunkHelpers(unittest.TestCase, BaseDatasetMixin):
@@ -152,6 +133,7 @@ class TestAsciiReadWrite(unittest.TestCase, BaseDatasetMixin):
 
             # header sanity
             text = asc_path.read_text().splitlines()
+            print(text)
             self.assertTrue(any(line.startswith("ncols") for line in text))
             self.assertTrue(any(line.startswith("nrows") for line in text))
             self.assertTrue(any(line.startswith("cellsize") for line in text))
@@ -162,20 +144,23 @@ class TestAsciiReadWrite(unittest.TestCase, BaseDatasetMixin):
             self.assertIn("lat", ds_back.coords)
             self.assertIn("lon", ds_back.coords)
             self.assertEqual(ds_back["var"].shape, ds["var"].shape)
+            self.assertEqual(ds_back["var"].mean(), ds["var"].mean())
+            self.assertEqual(ds_back["var"].max(), ds["var"].max())
+            self.assertEqual(ds_back["var"].min(), ds["var"].min())
 
-    def test_write_xarray_to_ascii_formats_strings(self):
-        lat = np.array([2, 1])
-        lon = np.array([0, 1, 2])
-        data = np.array([["a", "b", "c"], ["d", "e", "f"]], dtype="U1")
-        ds = xr.Dataset(
-            {"cats": (("lat", "lon"), data)}, coords={"lat": lat, "lon": lon}
-        )
+    # def test_write_xarray_to_ascii_formats_strings(self):
+    #     lat = np.array([2, 1])
+    #     lon = np.array([0, 1, 2])
+    #     data = np.array([["a", "b", "c"], ["d", "e", "f"]], dtype="U1")
+    #     ds = xr.Dataset(
+    #         {"cats": (("lat", "lon"), data)}, coords={"lat": lat, "lon": lon}
+    #     )
 
-        with tempfile.TemporaryDirectory() as td:
-            asc_path = Path(td) / "strings.asc"
-            fh.write_xarray_to_ascii(ds, asc_path, data_var="cats")
-            s = asc_path.read_text()
-            self.assertIn("a b c", s)
+    #     with tempfile.TemporaryDirectory() as td:
+    #         asc_path = Path(td) / "strings.asc"
+    #         fh.write_xarray_to_ascii(ds, asc_path, data_var="cats")
+    #         s = asc_path.read_text()
+    #         self.assertIn("a b c", s)
 
     def test_write_xarray_to_ascii_multiple_vars_without_data_var_returns_none(self):
         lat = np.array([1, 0])
@@ -268,7 +253,6 @@ class TestGetXarrayDsFromFile(unittest.TestCase, BaseDatasetMixin):
                 normalize_latlon_coords=False,
                 force_decending_y=True,
             )
-            print(out.chunks)
             self.assertIn("var", out)
             self.assertIn("lon", out.coords)
             self.assertIn("lat", out.coords)

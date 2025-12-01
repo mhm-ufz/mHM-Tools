@@ -1,8 +1,6 @@
 import unittest
 from pathlib import Path
 
-import xarray as xr
-
 import mhm_tools as mt
 from mhm_tools.common.file_handler import get_xarray_ds_from_file
 
@@ -24,7 +22,7 @@ class TestLatLon(unittest.TestCase):
             "xllcorner": 3973369,
             "yllcorner": 2735847,
             "cellsize": 500,
-            "NODATA_value": -9999,
+            "nodata_value": -9999,
         }
 
     def test_latlon(self):

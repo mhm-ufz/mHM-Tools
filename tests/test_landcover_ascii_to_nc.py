@@ -208,7 +208,7 @@ def test_convert_lc_ascii_to_nc(tmp_path: Path):
     # build namelist with continuous coverage 1981-1990, 1991-2000
     nml_content = f"""
 &directories_general
-dir_LCover(1) = "{str(luse_dir)}/"
+dir_LCover(1) = "{luse_dir!s}/"
 /
 
 &LCover

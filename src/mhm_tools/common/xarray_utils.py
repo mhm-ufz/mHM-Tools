@@ -256,3 +256,31 @@ def spearman_correlation(data1, data2):
     # Calculate Spearman rank correlation using scipy
     corr, p_value = spearmanr(data1, data2)
     return corr, p_value
+
+
+def get_dtype(ds):
+    """Return a simple dtype string for the dataset/dataarray."""
+    try:
+        if isinstance(ds, xr.Dataset):
+            v = get_single_data_var(ds)
+            da = ds[v]
+        elif isinstance(ds, xr.DataArray):
+            da = ds
+        else:
+            msg = f"Unsupported type {type(ds)}"
+            raise ValueError(msg)
+        arr = np.asarray(da)
+        dt = arr.dtype
+        # Map numpy dtype to simple esri dtype strings
+        if np.issubdtype(dt, np.floating):
+            dtype = "f4" if dt.itemsize <= 4 else "f8"
+        elif np.issubdtype(dt, np.integer) or np.issubdtype(dt, np.unsignedinteger):
+            # prefer signed integers for ASCII grid
+            dtype = "i4" if dt.itemsize <= 4 else "i8"
+        else:
+            msg = f"write_grid: cannot infer dtype from data with numpy dtype {dt}"
+            with ErrorLogger(logger):
+                raise ValueError(msg)
+        return dtype
+    except Exception:
+        return "f4"

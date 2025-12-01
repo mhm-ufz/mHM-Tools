@@ -3,6 +3,7 @@
 import logging
 import warnings
 from pathlib import Path
+from textwrap import dedent
 
 import numpy as np
 
@@ -50,6 +51,7 @@ def standardize_header(header):
     """
     header = {n: ESRI_TYPES[n](v) for (n, v) in header.items() if n in ESRI_TYPES}
     # convert cell center to corner information
+    # TODO: CHECK IF THIS IS ALREADY DONE IN CROP MHM SETUP
     if "xllcenter" in header:
         header["xllcorner"] = header["xllcenter"] - 0.5 * header.get("cellsize", 1)
         del header["xllcenter"]
@@ -147,7 +149,7 @@ def write_header(file, header, dtype="f4"):
         Needs to be integer or float and compatible with np.dtype
         (i.e. "i4", "f4", "f8"), by default "f4"
     """
-    write_grid(file, header, dtype=dtype)
+    return write_grid(file, header, dtype=dtype)
 
 
 def write_grid(file, header, data=None, dtype="f4"):
@@ -177,11 +179,13 @@ def write_grid(file, header, data=None, dtype="f4"):
         If data shape is not matching the given header.
     """
     header = standardize_header(header)
-    if not issubclass(np.dtype(dtype).type, (np.integer, np.floating)):
+    if not issubclass(
+        np.dtype(dtype).type, (np.unsignedinteger, np.integer, np.floating)
+    ):
         msg = f"write_grid: data type needs to be integer or float. Got: {dtype}"
         with ErrorLogger(logger):
             raise ValueError(msg)
-    is_int = issubclass(np.dtype(dtype).type, np.integer)
+    is_int = issubclass(np.dtype(dtype).type, (np.integer, np.unsignedinteger))
     if data is not None:
         data = np.array(data, dtype=dtype, copy=False, ndmin=2)
         if data.ndim != 2:
@@ -200,18 +204,21 @@ def write_grid(file, header, data=None, dtype="f4"):
     header_path = Path(file)
     header_path.parent.mkdir(parents=True, exist_ok=True)
     typ = int if is_int else float
-    header_str = f"""
+    header_str = dedent(
+        f"""
         ncols                {header["ncols"]}
         nrows                {header["nrows"]}
         xllcorner            {header["xllcorner"]}
         yllcorner            {header["yllcorner"]}
         cellsize             {header["cellsize"]}
         nodata_value         {typ(header["nodata_value"])}
-    """
+        """
+    ).lstrip()
     with header_path.open("w") as f:
         f.write(header_str)
         if data is not None:
             np.savetxt(f, data, fmt="%i" if is_int else "%f")
+    return header_str
 
 
 def check_resolutions(

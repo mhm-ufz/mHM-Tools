@@ -19,6 +19,7 @@ from mhm_tools.common.logger import ErrorLogger, log_arguments
 from mhm_tools.common.xarray_utils import (
     crop_ds,
     get_coord_key,
+    get_dtype,
     get_single_data_var,
     induce_data_var_from_file_name,
 )
@@ -175,7 +176,6 @@ def crop_file_with_header(ds_in, file_path, output_path, lonslice, latslice):
     yll = header_information["yllcorner"] + header_information["cellsize"] * (
         header_information["nrows"] - index_y_max
     )
-
     new_header_information = {
         "ncols": index_x_max - index_x_min,
         "nrows": index_y_max - index_y_min,
@@ -187,7 +187,8 @@ def crop_file_with_header(ds_in, file_path, output_path, lonslice, latslice):
     logger.info(
         f"Writing header file to {header_out_path} with header: {new_header_information}"
     )
-    write_header(header_out_path, new_header_information)
+    dtype = get_dtype(ds_in)
+    write_header(header_out_path, new_header_information, dtype)
     try:
         data = ds_in[data_var].isel(
             {
@@ -431,7 +432,7 @@ def crop_file(  # noqa: PLR0912
             )
     try:
         write_xarray_to_file(
-            ds_cropped, output_file, available_mem_gib=available_mem_gib
+            ds_cropped, output_file  # , available_mem_gib=available_mem_gib
         )
     except Exception as e:
         logger.warning(f"First try writing the file failed: {e}")
@@ -439,7 +440,7 @@ def crop_file(  # noqa: PLR0912
         for var_name in ds_cropped.data_vars:
             ds_cropped[var_name] = ds_cropped[var_name].astype(float)
         write_xarray_to_file(
-            ds_cropped, output_file, available_mem_gib=available_mem_gib
+            ds_cropped, output_file  # , available_mem_gib=available_mem_gib
         )
 
     logger.info(f"Written to {output_file}")

@@ -16,6 +16,7 @@ from matplotlib import gridspec
 from mhm_tools.common.file_handler import get_xarray_ds_from_file
 from mhm_tools.common.logger import ErrorLogger, log_arguments
 from mhm_tools.common.spatial_metrics import create_csv_from_dict
+from mhm_tools.common.utils import dict_to_multiline_string
 
 logger = logging.getLogger(__name__)
 
@@ -422,7 +423,7 @@ class Hydrograph:
             TypeError: If the variable name in the discharge dataset is not a string.
         """
         path = Path(path)
-        discharge_file = path / "discharge.nc"
+        discharge_file = path / "discharge.nc" if path.is_dir() else path
         if discharge_file.is_file():
             with get_xarray_ds_from_file(path / "discharge.nc") as ds:
                 discharge_data = ds.load()
@@ -889,7 +890,7 @@ class Hydrograph:
         )
         if self.catchment.area:
             fig.text(
-                s=f"Area = {self.catchment.area:.2f}" + r"$km^2$",
+                s=f"Area = {self.catchment.area}" + r"$km^2$",
                 x=0.5,
                 y=0.97,
                 horizontalalignment="center",
@@ -931,9 +932,9 @@ class Hydrograph:
     def write_output(self):
         """Write calculated objective metrics to CSV."""
         out_dict = {k: [v] for k, v in {**self.objectives.__dict__}.items()}
-        logger.info(f"generated metrics: {out_dict}")
         if id is not None:
             out_dict["id"] = str(id)
+        logger.info(f"generated metrics: {dict_to_multiline_string(out_dict)}")
         create_csv_from_dict(out_dict, self.output_file.parent / "kge.csv")
 
 

@@ -107,7 +107,6 @@ def get_gauge_coords(
     Returns lon,lat, flow accumulation.
     """
     if lonlat is not None:
-        # print('lonlat:', lonlat)
         lon = lonlat[0]
         lat = lonlat[1]
         lon_col = int((lon - ds.xllcorner_L0) / ds.cellsize_L1)
@@ -150,7 +149,6 @@ def get_gauge_coords(
             ncols1=lon_col,
             ncols11=lon_col,
         )
-        # print(ds_cut.L11_fAcc.data)
         if lonlat:
             lon_x = ds_cut.L1_domain_lon.data
             lat_y = ds_cut.L1_domain_lat.data
