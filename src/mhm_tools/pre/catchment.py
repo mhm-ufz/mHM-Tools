@@ -1095,7 +1095,7 @@ class Catchment:
 
             if mask_upscaled is not None:
                 mask_upscaled = mask_upscaled.rename({"lat": "lat_l2", "lon": "lon_l2"})
-                mask_ds["land_mask_l2"] = mask_upscaled
+                mask_ds["mask_l2"] = mask_upscaled
             dims = set(mask_ds.dims)
             all_coords = set(mask_ds.coords)
             dim_coords = all_coords & dims  # intersection
