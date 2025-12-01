@@ -182,7 +182,7 @@ def crop_file_with_header(ds_in, file_path, output_path, lonslice, latslice):
         "xllcorner": xll,
         "yllcorner": yll,
         "cellsize": header_information["cellsize"],
-        "NODATA_value": header_information["nodata_value"],
+        "nodata_value": header_information["nodata_value"],
     }
     logger.info(
         f"Writing header file to {header_out_path} with header: {new_header_information}"

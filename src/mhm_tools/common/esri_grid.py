@@ -179,11 +179,13 @@ def write_grid(file, header, data=None, dtype="f4"):
         If data shape is not matching the given header.
     """
     header = standardize_header(header)
-    if not issubclass(np.dtype(dtype).type, (np.integer, np.floating)):
+    if not issubclass(
+        np.dtype(dtype).type, (np.unsignedinteger, np.integer, np.floating)
+    ):
         msg = f"write_grid: data type needs to be integer or float. Got: {dtype}"
         with ErrorLogger(logger):
             raise ValueError(msg)
-    is_int = issubclass(np.dtype(dtype).type, np.integer)
+    is_int = issubclass(np.dtype(dtype).type, (np.integer, np.unsignedinteger))
     if data is not None:
         data = np.array(data, dtype=dtype, copy=False, ndmin=2)
         if data.ndim != 2:
@@ -210,8 +212,8 @@ def write_grid(file, header, data=None, dtype="f4"):
         yllcorner            {header["yllcorner"]}
         cellsize             {header["cellsize"]}
         nodata_value         {typ(header["nodata_value"])}
-    """
-    )
+        """
+    ).lstrip()
     with header_path.open("w") as f:
         f.write(header_str)
         if data is not None:

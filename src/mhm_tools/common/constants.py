@@ -23,7 +23,6 @@ Constants
 __all__ = ["NC_ENCODE_DEFAULTS", "NO_DATA"]
 
 NO_DATA = -9999.0
-NO_DATA_INT = -9999
 """Default no data value for mHM."""
 
 NC_ENCODE_DEFAULTS = {"_FillValue": NO_DATA, "missing_value": NO_DATA}

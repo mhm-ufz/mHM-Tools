@@ -387,6 +387,7 @@ class Catchment:
         ref_catchment_area=None,
         max_distance_cells=5,
         max_error=0.25,
+        raise_on_sanity_check=True,
     ):
         """Delineate the basin for a given lat and lon."""
         logger.info(f"Deliniating basin for gauge coordinates {gauge_coords}")
@@ -394,10 +395,10 @@ class Catchment:
         # Target area in km2 we want to match (can be adjusted/replaced by caller later)
 
         # Compute upstream area (in km2) using accuflux and cell areas
+        upstream_area = None
         if ref_catchment_area is not None:
             if self.cell_area is None:
                 self.cell_area = create_cell_area(self.ds).data
-            upstream_area = None
             try:
                 upstream_area = self.calc_upstream_area()
             except Exception:
@@ -467,10 +468,6 @@ class Catchment:
             if self.cell_area is not None
             else np.nan
         )
-        uparea_at_outlet = (
-            upstream_area[outlet_idx] if upstream_area is not None else np.nan
-        )
-        area_error = (delineated_area - ref_catchment_area) / ref_catchment_area
 
         logger.info(
             "Basin unique values: %s | cells in basin: %d | mean cell area: %.6f km2",
@@ -478,12 +475,8 @@ class Catchment:
             cell_count,
             mean_cell_area,
         )
-        logger.info(
-            "Delineated basin area (sum of cell_area[basin>0]) = %.2f km2; "
-            "reference area = %.2f km2; error = %.2f%%",
-            delineated_area,
-            ref_catchment_area,
-            area_error * 100.0,
+        uparea_at_outlet = (
+            upstream_area[outlet_idx] if upstream_area is not None else np.nan
         )
         logger.info(
             "Upstream area reported at selected outlet cell = %.2f km2. "
@@ -496,17 +489,36 @@ class Catchment:
                 else np.nan
             ),
         )
-        if abs(area_error) > max_error * 2:
-            with ErrorLogger(logger):
-                msg = f"Delineated basin area ({delineated_area:2f} km2) differs from reference area ({ref_catchment_area:2f} km2) by more than twice the max error {max_error*100:.2f}%. Adjust max_error or max_distance_cells."
-                raise ValueError(msg)
-            # warn if the two area measures disagree substantially
+        if ref_catchment_area is not None:
+            area_error = (delineated_area - ref_catchment_area) / ref_catchment_area
+            logger.info(
+                "Delineated basin area (sum of cell_area[basin>0]) = %.2f km2; "
+                "reference area = %.2f km2; error = %.2f%%",
+                delineated_area,
+                ref_catchment_area,
+                area_error * 100.0,
+            )
+            if abs(area_error) > max_error * 2:
+                with ErrorLogger(logger):
+                    msg = f"Delineated basin area ({delineated_area:2f} km2) differs from reference area ({ref_catchment_area:2f} km2) by more than twice the max error {max_error*100:.2f}%. Adjust max_error or max_distance_cells."
+                    if raise_on_sanity_check:
+                        raise ValueError(msg)
+                    else:
+                        logger.warning(msg)
+                # warn if the two area measures disagree substantially
+        else:
+            logger.warning(
+                "No reference catchment area provided; skipping area consistency check."
+            )
         if not np.isclose(delineated_area, uparea_at_outlet, rtol=0.02, atol=1e-6):
             with ErrorLogger(logger):
                 msg = f"Sum of cell areas inside the basin ({delineated_area:2f} km2) differs from "
                 msg += f"upstream area at outlet ({uparea_at_outlet:2f} km2). Investigate flow-direction "
                 msg += "masking, nodata handling or area units."
-                raise ValueError(msg)
+                if raise_on_sanity_check:
+                    raise ValueError(msg)
+                else:
+                    logger.warning(msg)
         # finalize mask and basin fill values
 
         if np.all(~self.catchment_mask):
@@ -768,7 +780,7 @@ class Catchment:
                     )
                 file_object.write(f"cellsize {cellsize}\n")
                 file_object.write(
-                    f"NODATA_value {self.VARIABLES[var_name]['_FillValue']}\n"
+                    f"nodata_value {self.VARIABLES[var_name]['_FillValue']}\n"
                 )
                 if is_ascending:
                     vals = data_var[var_name].values[::-1, :]

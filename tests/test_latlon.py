@@ -22,7 +22,7 @@ class TestLatLon(unittest.TestCase):
             "xllcorner": 3973369,
             "yllcorner": 2735847,
             "cellsize": 500,
-            "NODATA_value": -9999,
+            "nodata_value": -9999,
         }
 
     def test_latlon(self):
