@@ -187,6 +187,10 @@ class TestTimedeltaToAlias(XarrayUtilsBase):
         self.assertEqual(hours, 6)
         self.assertEqual(alias, "6H")
 
+    def test_raises_with_single_timestamp(self):
+            da = self.make_time_da("2021-01-01", periods=1, step="D")
+            with self.assertRaises(ValueError):
+                timedelta_to_alias(da)
 
 class TestGetOverlappingTimeSlice(XarrayUtilsBase):
     def test_normal_overlap(self):
