@@ -25,7 +25,7 @@ def add_args(parser):
     parser.add_argument(
         "--method",
         default="nearest",
-        choices=["nearest", "linear", "bilinear"],
+        choices=["nearest", "linear"],
         help="Regridding method",
     )
 

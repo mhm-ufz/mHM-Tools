@@ -17,7 +17,6 @@ Methods
 -------
   nearest  -> xarray .interp(method="nearest")
   linear   -> xarray .interp(method="linear")
-  bilinear -> CDO remapbil if cdo is available, else fallback to xarray "linear"
 
 Notes
 -----
@@ -33,19 +32,12 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 
+from mhm_tools.common.constants import NC_ENCODE_DEFAULTS
 from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_to_file
 from mhm_tools.common.logger import ErrorLogger
 from mhm_tools.common.xarray_utils import get_coord_key
 
 logger = logging.getLogger(__name__)
-
-# Optional CDO support
-try:
-    from cdo import Cdo  # type: ignore[import-untyped]
-
-    _CDO = Cdo()
-except Exception:
-    _CDO = None
 
 
 def _delta_from_coords(vals: np.ndarray) -> float:
@@ -74,24 +66,6 @@ def _build_aligned_coords(vmin, vmax, step):
     return vmin + step * np.arange(n, dtype=float)
 
 
-def _make_cdo_grid_file(lon, lat, path):
-    # CDO grid description (lonlat)
-    xfirst, xinc, xsize = float(lon[0]), float(lon[1] - lon[0]), len(lon)
-    yfirst, yinc, ysize = float(lat[0]), float(lat[1] - lat[0]), len(lat)
-    txt = (
-        "gridtype = lonlat\n"
-        f"xsize   = {xsize}\n"
-        f"ysize   = {ysize}\n"
-        f"xfirst  = {xfirst}\n"
-        f"xinc    = {xinc}\n"
-        f"yfirst  = {yfirst}\n"
-        f"yinc    = {yinc}\n"
-    )
-    logger.info(f"cdo grid: {txt}")
-    with Path(path).open("w") as f:
-        f.write(txt)
-
-
 def regrid_xarray(ds, lon_name, lat_name, lon_target, lat_target, method, var=None):
     """Regrid an xarray Dataset using xarray interpolation."""
     # Select variables to regrid
@@ -106,39 +80,31 @@ def regrid_xarray(ds, lon_name, lat_name, lon_target, lat_target, method, var=No
         lon_name: xr.DataArray(lon_target, dims=(lon_name,)),
         lat_name: xr.DataArray(lat_target, dims=(lat_name,)),
     }
-    # Interpolate each variable; keep others as-is
-    out_vars = {}
+    
+    # Create a DataArray for every variable, regridding those selected
+    das = []
+    interp_method = "nearest" if method == "nearest" else "linear"
     for v in ds.data_vars:
         if v in dvs:
-            out_vars[v] = ds[v].interp(
-                target, method="nearest" if method == "nearest" else "linear"
-            )
+           da = ds[v].interp(target, method=interp_method)
         else:
-            out_vars[v] = ds[v]
-    out = xr.Dataset(
-        out_vars, coords={lon_name: target[lon_name], lat_name: target[lat_name]}
-    )
+            # take the variable as-is (already a DataArray)
+            da = ds[v]
+        # ensure name consistency
+        if da.name != v:
+            da = da.rename(v)
+        das.append(da)
+        # Merge all DataArrays into a single Dataset and set target coords
+    out = xr.merge(das)
+    out = out.assign_coords({lon_name: target[lon_name], lat_name: target[lat_name]})
+
     # Copy attrs
     out.attrs.update(ds.attrs)
     return out
 
 
-def regrid_cdo(in_file, out_file, lon_target, lat_target, method):
-    """Regrid using CDO remap operators."""
-    assert _CDO is not None
-    with tempfile.TemporaryDirectory() as tmpd:
-        gridfile = Path(tmpd) / "grid.txt"
-        _make_cdo_grid_file(lon_target, lat_target, gridfile)
-        op = {
-            "nearest": _CDO.remapnn,
-            "bilinear": _CDO.remapbil,
-            "linear": _CDO.remapbil,
-        }[method]
-        op(gridfile, input=in_file, output=out_file, options="-O")
-
-
 def regrid_file(input, mask, output, l2, method="nearest", var=None):
-    """Regrid a single file to L2 grid using CDO or xarray."""
+    """Regrid a single file to L2 grid using xarray."""
     # p.add_argument("--var", default=None, help="Single variable to regrid (default: all 2D/3D lon-lat vars)")
 
     # Load mask to infer L0 grid
@@ -149,14 +115,14 @@ def regrid_file(input, mask, output, l2, method="nearest", var=None):
         logger.info(dam_l2)
         lon_name = get_coord_key(dam_l2, lon=True)
         lat_name = get_coord_key(dam_l2, lat=True)
-        lonL2 = dsm[lon_name].values
-        latL2 = dsm[lat_name].values
+        lonL2 = dsm[lon_name].data
+        latL2 = dsm[lat_name].data
 
     else:
         lon_name = get_coord_key(dsm, lon=True)
         lat_name = get_coord_key(dsm, lat=True)
-        lon0 = dsm[lon_name].values
-        lat0 = dsm[lat_name].values
+        lon0 = dsm[lon_name].data
+        lat0 = dsm[lat_name].data
         if lon0.ndim != 1 or lat0.ndim != 1:
             msg = "This script assumes 1D lon/lat coordinates."
             with ErrorLogger(logger):
@@ -184,59 +150,20 @@ def regrid_file(input, mask, output, l2, method="nearest", var=None):
     # Load input
     dsi = get_xarray_ds_from_file(input)
 
-    # If CDO available and method == bilinear, use it (fast & robust); else use xarray
-    if _CDO is not None and method in ("bilinear",) and var is None:
-        # Write temp input (ensure lon/lat names are lon/lat for CDO best behavior)
-        # If names differ, rename temporarily
-        if lon_name not in dsi.coords:
-            # try to find lon/lat names in input; fall back to mask names
-            try:
-                in_lon, in_lat = get_coord_key(dsi, lon=True), get_coord_key(
-                    dsi, lat=True
-                )
-            except Exception:
-                in_lon, in_lat = lon_name, lat_name
-        else:
-            in_lon, in_lat = lon_name, lat_name
-
-        tmp_in = input
-        renamed = False
-        if (in_lon, in_lat) != ("lon", "lat"):
-            dsi_renamed = dsi.rename({in_lon: "lon", in_lat: "lat"})
-            tmp_fd, tmp_in = tempfile.mkstemp(suffix=".nc")
-            write_xarray_to_file(ds=dsi_renamed, file_path=tmp_in)
-            os.close(tmp_fd)
-            renamed = True
-
-        tmp_out_fd, tmp_out = tempfile.mkstemp(suffix=".nc")
-        logger.info(f"Regridding with cdo {method} interpolation")
-        regrid_cdo(tmp_in, tmp_out, lonL2, latL2, method)
-        out = get_xarray_ds_from_file(tmp_out)
-        os.close(tmp_out_fd)
-        # Rename back if needed
-        if renamed:
-            out = out.rename({"lon": in_lon, "lat": in_lat})
-        write_xarray_to_file(ds=out, file_path=output)
-        logger.info(f"Wrote {output}")
-        if Path(tmp_in).exists():
-            Path(tmp_in).unlink()
-        if Path(tmp_out).exists():
-            Path(tmp_out).unlink()
-    else:
-        # xarray path (nearest/linear; bilinear falls back to linear)
-        method = method if method != "bilinear" else "linear"
-        # Align input lon/lat names for xarray
-        try:
-            in_lon = get_coord_key(dsi, lon=True)
-            in_lat = get_coord_key(dsi, lat=True)
-        except Exception:
-            in_lon, in_lat = lon_name, lat_name
-        logger.info(f"regrid with xarray {method} interpolation")
-        out = regrid_xarray(dsi, in_lon, in_lat, lonL2, latL2, method, var=var)
-        encoding = {v: {"zlib": True, "complevel": 4} for v in out.data_vars}
-        logger.info(out)
-        write_xarray_to_file(out, output, encoding=encoding)
-        logger.info(f"Wrote {output}")
+    # xarray path (nearest/linear; bilinear falls back to linear)
+    method = method if method != "bilinear" else "linear"
+    # Align input lon/lat names for xarray
+    try:
+        in_lon = get_coord_key(dsi, lon=True)
+        in_lat = get_coord_key(dsi, lat=True)
+    except Exception:
+        in_lon, in_lat = lon_name, lat_name
+    logger.info(f"regrid with xarray {method} interpolation")
+    out = regrid_xarray(dsi, in_lon, in_lat, lonL2, latL2, method, var=var)
+    encoding = {v: {"zlib": True, "complevel": 4} for v in out.data_vars}
+    logger.info(out)
+    write_xarray_to_file(out, output, encoding=encoding)
+    logger.info(f"Wrote {output}")
 
 
 def regrid(input, mask, output, l2=None, method="nearest", var=None):
