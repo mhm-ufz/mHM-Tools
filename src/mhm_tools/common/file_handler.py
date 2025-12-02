@@ -475,21 +475,30 @@ def write_xarray_to_file(  # noqa: PLR0912
 
 def write_xarray_to_ascii(dataset, filepath, data_var=None, nodata_value=None):
     """Write xarray Dataset to an ASCII file that can be read by mHM."""
-    # Extract the data, coordinates, and nodata value from the Dataset
+    
+    # check if a data_var can be optained for writing the data
+    if data_var is None and isinstance(dataset, xr.Dataset):
+        data_var = get_single_data_var(dataset)
+        if data_var is None:
+            logger.error(
+                f"Data can not be written to {filepath} as the dataset has multiple data_vars, which is incompatible with asci or no datavar exists."
+            )
+            return
+    # get the data from the dataset
+    if isinstance(dataset, xr.Dataset):
+        data = dataset[data_var]
+    else:
+        data = dataset
+
+    # set the nodata value
     dtype = data.dtype
     if nodata_value is None:
         is_int = issubclass(np.dtype(dtype).type, (np.integer, np.unsignedinteger))
         typ = int if is_int else float
         nodata_value = typ(NO_DATA)
-    if data_var is None:
-        data_var = get_single_data_var(dataset)
-        if data_var is None:
-            logger.error(
-                f"Data can not be written to {filepath} as the dataset has multiple data_vars which is incompatible with asci or no datavar exists."
-            )
-            return
-    data = dataset[data_var]
+    
     header = create_header(dataset, write=False, no_data_value=nodata_value)
+    
     data_to_write = data
     if isinstance(data_to_write, xr.DataArray):
         data_to_write = data_to_write.data
