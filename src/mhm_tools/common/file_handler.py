@@ -38,8 +38,8 @@ def create_header(ds, output_path=None, no_data_value=None, write=True) -> dict:
         no_data_value = NO_DATA
     lat_key = get_coord_key(ds, lat=True)
     lon_key = get_coord_key(ds, lon=True)
-    x = ds[lon_key].values
-    y = ds[lat_key].values
+    x = ds[lon_key].data
+    y = ds[lat_key].data
     cellsize = abs(x[1] - x[0])
     xllcorner = np.nanmin(x) - 0.5 * cellsize
     yllcorner = np.nanmin(y) - 0.5 * cellsize
@@ -273,9 +273,9 @@ def get_xarray_ds_from_file(
     lon_key = get_coord_key(ds_out, lon=True, raise_exception=False)
     # force correct order of y coordinate
     if lat_key is not None and (
-        (force_decending_y and ds_out[lat_key].values[0] < ds_out[lat_key].values[-1])
+        (force_decending_y and ds_out[lat_key].data[0] < ds_out[lat_key].data[-1])
         or (
-            force_ascending_y and ds_out[lat_key].values[0] > ds_out[lat_key].values[-1]
+            force_ascending_y and ds_out[lat_key].data[0] > ds_out[lat_key].data[-1]
         )
     ):
         ds_out = ds_out.sel({lat_key: slice(None, None, -1)})
