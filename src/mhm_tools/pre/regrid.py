@@ -235,7 +235,7 @@ def regrid_file(input, mask, output, l2, method="nearest", var=None):
         out = regrid_xarray(dsi, in_lon, in_lat, lonL2, latL2, method, var=var)
         encoding = {v: {"zlib": True, "complevel": 4} for v in out.data_vars}
         logger.info(out)
-        write_xarray_to_file(out, output, encoding)
+        write_xarray_to_file(out, output, encoding=encoding)
         logger.info(f"Wrote {output}")
 
 
