@@ -25,6 +25,7 @@ from mhm_tools.common.file_handler import (
 )
 from mhm_tools.common.logger import ErrorLogger, log_arguments
 from mhm_tools.common.netcdf import generate_bounds
+from mhm_tools.common.xarray_utils import get_dtype
 from mhm_tools.pre.create_id_gauges import write_gauge_id
 
 logger = logging.getLogger(__name__)
@@ -754,7 +755,7 @@ class Catchment:
                 fname,
                 encoding={
                     var_name: {
-                        "dtype": data_var[var_name].dtype,
+                        "dtype": get_dtype(data_var[var_name]),
                         "_FillValue": self.VARIABLES[var_name]["_FillValue"],
                     }
                 },
@@ -881,7 +882,7 @@ class Catchment:
             out_path / self.out_var_name,
             encoding={
                 var_name: {
-                    "dtype": ds[var_name].dtype,
+                    "dtype": get_dtype(ds[var_name]),
                     "_FillValue": self.VARIABLES[var_name]["_FillValue"],
                 }
                 for var_name in ds.data_vars
@@ -981,7 +982,7 @@ class Catchment:
         )
 
         out = out.assign_coords({lon_name: lon_coarse, lat_name: lat_coarse})
-        out.name = da.name or "mask_L2"
+        out.name = "mask_L2"
 
         # 3) (optional) log edges for verification
         lon_edges_coarse = self._cell_edges(out[lon_name].values)
