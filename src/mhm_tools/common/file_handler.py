@@ -485,7 +485,14 @@ def write_xarray_to_ascii(dataset, filepath, data_var=None, nodata_value=None):
             return
     data = dataset[data_var]
     header = create_header(dataset, write=False, no_data_value=nodata_value)
-    write_grid(filepath, header, dtype=data.dtype, data=data)
+    data_to_write = data
+    if isinstance(data_to_write, xr.DataArray):
+        data_to_write = data_to_write.data
+
+    if data_to_write.dtype.kind in ["i", "u", "f"]:  # i=int, u=unsigned, f=float
+        data_to_write = np.where(np.isnan(data_to_write), nodata_value, data_to_write)
+
+    write_grid(filepath, header, dtype=data.dtype, data=data_to_write)
 
 
 def read_ascii_to_xarray(
