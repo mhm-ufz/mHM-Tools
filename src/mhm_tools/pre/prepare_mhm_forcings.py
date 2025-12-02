@@ -19,7 +19,7 @@ import pandas as pd
 import xarray as xr
 
 from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_to_file
-from mhm_tools.common.logger import ErrorLogger
+from mhm_tools.common.logger import ErrorLogger, log_arguments
 from mhm_tools.common.time_utils import resample_to_daily_or_hourly_adaptive
 from mhm_tools.common.xarray_utils import crop_ds, get_single_data_var
 
@@ -106,19 +106,7 @@ def convert_units(ds: xr.Dataset, var: str) -> xr.DataArray:
     ds[new_var].attrs.update({"_FillValue": mv, "missing_value": mv})
     return ds[new_var], encoding
 
-
-def ensure_lat_lon_order(ds: xr.Dataset) -> xr.Dataset:
-    """Ensure latitude and longitude axes are ordered correctly.
-
-    Latitudes will be sorted descending if needed, and longitudes ascending.
-    """
-    if not (ds["lat"].values[1:] < ds["lat"].values[:-1]).all():
-        ds = ds.sortby("lat", ascending=False)
-    if not (ds["lon"].values[1:] > ds["lon"].values[:-1]).all():
-        ds = ds.sortby("lon", ascending=True)
-    return ds
-
-
+@log_arguments("DEBUG")
 def prepare_forcings(
     in_dir: str,
     in_file: str,
@@ -150,15 +138,14 @@ def prepare_forcings(
             file_path=str(path),
             use_mfdataset=use_mfdataset,
             normalize_latlon_coords=True,
+            force_decending_y=True
         )
         if var is None:
             var = get_single_data_var(ds)
-        # Sort lat/lon if needed
-        ds = ensure_lat_lon_order(ds)
 
         # needs to be before unit conversion because that changes rates to quantities
         if target_frequency is not None:
-            ds = resample_to_daily_or_hourly_adaptive(ds, target_frequency)
+            ds = resample_to_daily_or_hourly_adaptive(in_obj=ds, target=target_frequency, var=var)
 
         # Convert units and get DataArray
         da, encoding = convert_units(ds, var)
