@@ -368,7 +368,6 @@ def write_xarray_to_file(  # noqa: PLR0912
         # else:
         #     ds, encoding = move_reserved_attrs_to_encoding(ds, encoding=encoding)
 
-        logger.info(ds)
         # if var_name is not None:
         # encoding = generate_safe_nc_encoding(ds[var_name])
         try:
@@ -402,7 +401,7 @@ def write_xarray_to_file(  # noqa: PLR0912
                         try:
                             venc["_FillValue"] = (
                                 np.array(venc["_FillValue"])
-                                .astype(ds.variables[name].dtype)
+                                .astype(get_dtype(ds.variables[name]))
                                 .item()
                             )
                         except Exception:
@@ -411,7 +410,7 @@ def write_xarray_to_file(  # noqa: PLR0912
                         try:
                             venc["missing_value"] = (
                                 np.array(venc["missing_value"])
-                                .astype(ds.variables[name].dtype)
+                                .astype(get_dtype(ds.variables[name]))
                                 .item()
                             )
                         except Exception:
@@ -491,7 +490,7 @@ def write_xarray_to_ascii(dataset, filepath, data_var=None, nodata_value=None):
         data = dataset
 
     # set the nodata value
-    dtype = data.dtype
+    dtype = get_dtype(data)
     if nodata_value is None:
         is_int = issubclass(np.dtype(dtype).type, (np.integer, np.unsignedinteger))
         typ = int if is_int else float
