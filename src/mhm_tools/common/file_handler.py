@@ -476,6 +476,11 @@ def write_xarray_to_file(  # noqa: PLR0912
 def write_xarray_to_ascii(dataset, filepath, data_var=None, nodata_value=None):
     """Write xarray Dataset to an ASCII file that can be read by mHM."""
     # Extract the data, coordinates, and nodata value from the Dataset
+    dtype = data.dtype
+    if nodata_value is None:
+        is_int = issubclass(np.dtype(dtype).type, (np.integer, np.unsignedinteger))
+        typ = int if is_int else float
+        nodata_value = typ(NO_DATA)
     if data_var is None:
         data_var = get_single_data_var(dataset)
         if data_var is None:
@@ -492,7 +497,7 @@ def write_xarray_to_ascii(dataset, filepath, data_var=None, nodata_value=None):
     if data_to_write.dtype.kind in ["i", "u", "f"]:  # i=int, u=unsigned, f=float
         data_to_write = np.where(np.isnan(data_to_write), nodata_value, data_to_write)
 
-    write_grid(filepath, header, dtype=data.dtype, data=data_to_write)
+    write_grid(filepath, header, dtype=dtype, data=data_to_write)
 
 
 def read_ascii_to_xarray(
