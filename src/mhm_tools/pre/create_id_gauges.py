@@ -40,7 +40,6 @@ def write_gauge_id(
     lon_key = get_coord_key(ds, lon=True)
     lat_key = get_coord_key(ds, lat=True)
     if isinstance(ds, xr.Dataset):
-        ds = ds[data_var]
         if data_var is None:
             data_var = get_single_data_var(ds)
             if data_var is None:
