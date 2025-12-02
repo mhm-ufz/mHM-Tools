@@ -152,7 +152,22 @@ def timedelta_to_alias(ds: xr.DataArray) -> str:
     - otherwise: fall back to '<N>H'
 
     """
-    median_delta = ds.time.diff("time").median()
+    time = getattr(ds, "time", None)
+    if time is None:
+        with ErrorLogger(logger):
+            raise ValueError("Object has no 'time' coordinate.")
+    if time.size < 2:
+        msg = (
+            "Cannot infer time frequency because only "
+            f"{time.size} timestamp{'s' if time.size != 1 else ''} are present."
+        )
+        raise ValueError(msg)
+    try:
+        median_delta = ds.time.diff("time").median()
+    except Exception as e: 
+        logger.error(ds)
+        with ErrorLogger(logger):
+            raise e
     days = median_delta / np.timedelta64(1, "D")
     hours = int(median_delta / np.timedelta64(1, "h"))
     if abs(days - 1) < 0.5:
@@ -204,8 +219,8 @@ def crop_ds(
     lat_low, lat_high = sorted([lat_min, lat_max])
 
     # grab the coordinate arrays by name
-    lon_vals = ds[lon_name].values
-    lat_vals = ds[lat_name].values
+    lon_vals = ds[lon_name].data
+    lat_vals = ds[lat_name].data
 
     # if the coordinate axis is ascending, slice low->high; else high->low
     if lon_vals[0] <= lon_vals[-1]:
