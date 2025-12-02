@@ -28,8 +28,12 @@ def _pick_da(obj: Union[xr.DataArray, xr.Dataset]) -> xr.DataArray:
     return obj[next(iter(obj.data_vars))]
 
 
-def _ensure_time(obj):
-    if "time" not in obj.dims and "time" not in obj.coords:
+def _ensure_time(obj, var=None):
+    if var is not None: 
+        try_obj = obj[var]
+    else: 
+        try_obj = obj
+    if "time" not in try_obj.dims and "time" not in try_obj.coords:
         msg = "Object needs a 'time' dimension."
         with ErrorLogger(logger):
             raise ValueError(msg)
@@ -108,7 +112,7 @@ def _per_step_duration_index(time: xr.DataArray, alias_in: str) -> pd.TimedeltaI
 
     handling variable-length months when alias_in == 'ME'.
     """
-    t = pd.DatetimeIndex(time.values)
+    t = pd.DatetimeIndex(time.data)
     # duration to the next stamp
     dt = t[1:] - t[:-1]
     if len(t) == 0:
@@ -145,9 +149,10 @@ def _distribute_extensive_to_finer(
 
 
 def resample_to_daily_or_hourly_adaptive(
-    obj: Union[xr.DataArray, xr.Dataset],
+    in_obj: Union[xr.DataArray, xr.Dataset],
     target: Literal["daily", "hourly"],
     upsample_for_intensive: Literal["linear", "ffill", "nearest"] = "linear",
+    var: str | None = None,
 ) -> Union[xr.DataArray, xr.Dataset]:
     """
     Resample to daily or hourly with **adaptive** choice of aggregation.
@@ -157,25 +162,53 @@ def resample_to_daily_or_hourly_adaptive(
 
     Parameters
     ----------
-    obj : xr.DataArray | xr.Dataset
+    in_obj : xr.DataArray | xr.Dataset
     target : 'daily' | 'hourly'
     upsample_for_intensive : fill method for intensive vars when going finer.
+    var : str | None
 
     Returns
     -------
     Same type as input, resampled to calendar-aware 'D' or '1H'.
     """
-    _ensure_time(obj)
+    in_obj = in_obj.copy()
+    sample = _pick_da(in_obj) if isinstance(in_obj, xr.Dataset) else in_obj
+    _ensure_time(sample)
+    time_len = sample.sizes.get("time", 0)
+    if time_len < 2:
+        logger.warning(
+            "Skipping adaptive resampling: object only has %s timestamp(s), "
+            "so cadence cannot be inferred.",
+            time_len,
+        )
+        return in_obj
 
+    # If Dataset, keep only data_vars that have a time dimension/coord
+    if isinstance(in_obj, xr.Dataset):
+        if var:
+            in_obj = in_obj[var]
+        else:
+            vars_with_time = []
+            for name, da in in_obj.data_vars.items():
+                try:
+                    _ensure_time(da)
+                    vars_with_time.append(name)
+                except ValueError:
+                    logger.debug(f"Variable '{name}' has no 'time' dimension; removing from object")
+            if not vars_with_time:
+                with ErrorLogger(logger):
+                    raise ValueError("Dataset has no variables with a 'time' dimension.")
+            in_obj = in_obj[vars_with_time]
+    _ensure_time(in_obj)
     alias_tgt = _target_alias(target)
     tgt_hours = 24 if target == "daily" else 1
-    in_hours, alias_in = _alias_and_hours(obj)
+    in_hours, alias_in = _alias_and_hours(in_obj)
 
     # If already at target cadence (1H or D), return
     if (target == "hourly" and in_hours == 1) or (
         target == "daily" and alias_in == "D"
     ):
-        return obj
+        return in_obj
 
     logger.info(f"Adaptive regridding from {alias_in} to {target}")
     going_coarser = in_hours < tgt_hours  # e.g., 1H -> D
@@ -226,21 +259,21 @@ def resample_to_daily_or_hourly_adaptive(
                 raise ValueError(msg)
         return _distribute_extensive_to_finer(da, alias_in=alias_in, alias_out="1H")
 
-    if isinstance(obj, xr.DataArray):
-        out = _resample_da(obj)
+    if isinstance(in_obj, xr.DataArray):
+        out = _resample_da(in_obj)
     else:
         # Dataset: apply variable-wise, preserving coords/attrs
         out_vars = {}
-        for name, da in obj.data_vars.items():
+        for name, da in in_obj.data_vars.items():
             out_vars[name] = _resample_da(da)
         out = xr.Dataset(out_vars)
         # carry coordinates (besides resampled time) from original dataset
-        for cname, coord in obj.coords.items():
+        for cname, coord in in_obj.coords.items():
             if cname == "time":
                 out = out.assign_coords(time=out[next(iter(out_vars))].time)
             elif cname not in out.coords:
                 out = out.assign_coords({cname: coord})
-        out.attrs = obj.attrs
-    in_hours, alias_in = _alias_and_hours(obj)
+        out.attrs = in_obj.attrs
+    in_hours, alias_in = _alias_and_hours(in_obj)
     logger.info(f"New resolution {alias_in} meaning {in_hours} hours per timestep")
     return out
