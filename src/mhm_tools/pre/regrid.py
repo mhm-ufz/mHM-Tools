@@ -25,8 +25,6 @@ Notes
 """
 
 import logging
-import os
-import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -80,16 +78,16 @@ def regrid_xarray(ds, lon_name, lat_name, lon_target, lat_target, method, var=No
         lon_name: xr.DataArray(lon_target, dims=(lon_name,)),
         lat_name: xr.DataArray(lat_target, dims=(lat_name,)),
     }
-    
+
     # Create a DataArray for every variable, regridding those selected
     das = []
     interp_method = "nearest" if method == "nearest" else "linear"
     for v in ds.data_vars:
-        if v in dvs:
-           da = ds[v].interp(target, method=interp_method)
-        else:
-            # take the variable as-is (already a DataArray)
-            da = ds[v]
+        da = (
+            ds[v].interp(target, method=interp_method)
+            if v in dvs
+            else ds[v]
+        )
         # ensure name consistency
         if da.name != v:
             da = da.rename(v)
@@ -160,7 +158,7 @@ def regrid_file(input, mask, output, l2, method="nearest", var=None):
         in_lon, in_lat = lon_name, lat_name
     logger.info(f"regrid with xarray {method} interpolation")
     out = regrid_xarray(dsi, in_lon, in_lat, lonL2, latL2, method, var=var)
-    encoding = {v: {"zlib": True, "complevel": 4} for v in out.data_vars}
+    encoding = {v: {"zlib": True, "complevel": 4, **NC_ENCODE_DEFAULTS} for v in out.data_vars}
     logger.info(out)
     write_xarray_to_file(out, output, encoding=encoding)
     logger.info(f"Wrote {output}")

@@ -29,10 +29,7 @@ def _pick_da(obj: Union[xr.DataArray, xr.Dataset]) -> xr.DataArray:
 
 
 def _ensure_time(obj, var=None):
-    if var is not None: 
-        try_obj = obj[var]
-    else: 
-        try_obj = obj
+    try_obj = obj[var] if var is not None else obj
     if "time" not in try_obj.dims and "time" not in try_obj.coords:
         msg = "Object needs a 'time' dimension."
         with ErrorLogger(logger):
@@ -194,10 +191,13 @@ def resample_to_daily_or_hourly_adaptive(
                     _ensure_time(da)
                     vars_with_time.append(name)
                 except ValueError:
-                    logger.debug(f"Variable '{name}' has no 'time' dimension; removing from object")
+                    logger.debug(
+                        f"Variable '{name}' has no 'time' dimension; removing from object"
+                    )
             if not vars_with_time:
+                msg = "Dataset has no variables with a 'time' dimension."
                 with ErrorLogger(logger):
-                    raise ValueError("Dataset has no variables with a 'time' dimension.")
+                    raise ValueError(msg)
             in_obj = in_obj[vars_with_time]
     _ensure_time(in_obj)
     alias_tgt = _target_alias(target)

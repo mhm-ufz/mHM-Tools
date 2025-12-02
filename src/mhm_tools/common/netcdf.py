@@ -7,6 +7,8 @@ from typing import Any, List, Optional, Union
 import numpy as np
 import xarray as xr
 
+from mhm_tools.common.xarray_utils import get_dtype
+
 from .constants import NC_ENCODE_DEFAULTS, WILDCARDS
 
 logger = logging.getLogger(__name__)
@@ -190,9 +192,9 @@ def sanitize_nc_encoding(ds: "xr.Dataset", encoding: dict) -> dict:
         fv = da.attrs.pop("_FillValue", None)
         # If encoding does not already specify _FillValue, prefer the
         # attribute value (if available) and cast it to the variable dtype.
-        if fv is not None and "_FillValue" not in e and da.dtype != np.bool_:
+        if fv is not None and "_FillValue" not in e and get_dtype(da) != np.bool_:
             try:
-                e["_FillValue"] = np.array(fv).astype(da.dtype).item()
+                e["_FillValue"] = np.array(fv).astype(get_dtype(da)).item()
             except Exception:
                 # if casting fails, drop the fill value
                 e.pop("_FillValue", None)
@@ -201,18 +203,18 @@ def sanitize_nc_encoding(ds: "xr.Dataset", encoding: dict) -> dict:
         # but avoids placing it into encoding where it can conflict.
         if mv is not None and "missing_value" not in e:
             try:
-                da.attrs["missing_value"] = np.array(mv).astype(da.dtype).item()
+                da.attrs["missing_value"] = np.array(mv).astype(get_dtype(da)).item()
             except Exception:
                 # drop if cannot cast
                 da.attrs.pop("missing_value", None)
 
-        if da.dtype == np.bool_:
+        if get_dtype(da) == np.bool_:
             # Booleans: do NOT set fill attributes at all
             e.pop("_FillValue", None)
         # Cast _FillValue to the variable dtype if present
         elif "_FillValue" in e:
             try:
-                e["_FillValue"] = np.array(e["_FillValue"]).astype(da.dtype).item()
+                e["_FillValue"] = np.array(e["_FillValue"]).astype(get_dtype(da)).item()
             except Exception:
                 # If casting fails, drop it rather than erroring out
                 e.pop("_FillValue", None)

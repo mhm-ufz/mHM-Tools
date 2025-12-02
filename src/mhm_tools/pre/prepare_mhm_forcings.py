@@ -106,6 +106,7 @@ def convert_units(ds: xr.Dataset, var: str) -> xr.DataArray:
     ds[new_var].attrs.update({"_FillValue": mv, "missing_value": mv})
     return ds[new_var], encoding
 
+
 @log_arguments("DEBUG")
 def prepare_forcings(
     in_dir: str,
@@ -138,14 +139,16 @@ def prepare_forcings(
             file_path=str(path),
             use_mfdataset=use_mfdataset,
             normalize_latlon_coords=True,
-            force_decending_y=True
+            force_decending_y=True,
         )
         if var is None:
             var = get_single_data_var(ds)
 
         # needs to be before unit conversion because that changes rates to quantities
         if target_frequency is not None:
-            ds = resample_to_daily_or_hourly_adaptive(in_obj=ds, target=target_frequency, var=var)
+            ds = resample_to_daily_or_hourly_adaptive(
+                in_obj=ds, target=target_frequency, var=var
+            )
 
         # Convert units and get DataArray
         da, encoding = convert_units(ds, var)

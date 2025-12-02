@@ -48,10 +48,10 @@ def flatten_list(nested_list):
 def gen_list_of_result_dicts(data, id, datatype="", facc=None):
     """Generate result dicts with time, id, discharge, and year."""
     # Check if all values in the array are NaN
-    discharge = data.values
+    discharge = data.data
     are_all_nan = np.all(np.isnan(discharge))
-    time = data.time.values
-    year = data.time.dt.year.values
+    time = data.time.data
+    year = data.time.dt.year.data
 
     if not are_all_nan:
         logger.info(f" values found at gauge number: {id}...\n")
@@ -126,7 +126,7 @@ def get_gauge_coords(
         abs_diff = np.abs(ds_cut.L11_fAcc - facc)
         try:
             min_index = np.unravel_index(
-                np.argmin(abs_diff.values), ds_cut.L11_fAcc.shape
+                np.argmin(abs_diff.data), ds_cut.L11_fAcc.shape
             )
         except ValueError as ve:
             logger.error(str(ve))
@@ -260,7 +260,7 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915
             y = y.where(slicing_condition, drop=True)
             facc = facc.where(slicing_condition, drop=True)
             gauge_ids = gauge_ids.where(slicing_condition, drop=True)
-        logger.info(f"There are {len(gauge_ids.values)} gauges in total.")
+        logger.info(f"There are {len(gauge_ids.data)} gauges in total.")
 
         # prepare for later resampling
         with load_ds(model_data_path) as sim_data_in:
@@ -307,10 +307,10 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915
             sim_data_cropped = sim_data_cropped.sel(time=overlapping_time_slice)
     if not obs_output_file.is_file() or overwrite:
         # observed_data = observed_data.rename({observed_variable: "discharge"})
-        obs_discharge_data = obs_discharge_data.sel(id=gauge_ids.values)
-        obs_discharge_data = obs_discharge_data.reindex(id=gauge_ids.values)
+        obs_discharge_data = obs_discharge_data.sel(id=gauge_ids.data)
+        obs_discharge_data = obs_discharge_data.reindex(id=gauge_ids.data)
         facc_da = xr.DataArray(
-            facc, name="facc", dims=["id"], coords={"id": gauge_ids.values}
+            facc, name="facc", dims=["id"], coords={"id": gauge_ids.data}
         )
         observed_data = xr.Dataset({"facc": facc_da, "discharge": obs_discharge_data})
 
@@ -341,7 +341,7 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915
                 x_new.append(xn)
                 y_new.append(yn)
                 facc_new.append(fan)
-                gauge_ids_with_values.append(gauge_ids.values[i])
+                gauge_ids_with_values.append(gauge_ids.data[i])
         if len(x_new) == 0:
             msg = "There are no gauges that could be found."
             with ErrorLogger(logger):

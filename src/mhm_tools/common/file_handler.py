@@ -274,9 +274,7 @@ def get_xarray_ds_from_file(
     # force correct order of y coordinate
     if lat_key is not None and (
         (force_decending_y and ds_out[lat_key].data[0] < ds_out[lat_key].data[-1])
-        or (
-            force_ascending_y and ds_out[lat_key].data[0] > ds_out[lat_key].data[-1]
-        )
+        or (force_ascending_y and ds_out[lat_key].data[0] > ds_out[lat_key].data[-1])
     ):
         ds_out = ds_out.sel({lat_key: slice(None, None, -1)})
     logger.debug(ds_out)
@@ -337,10 +335,13 @@ def write_xarray_to_file(  # noqa: PLR0912
             logger.debug(f"var {var_name}")
             ds = ds.to_dataset(name=var_name)
             data_vars = [var_name]
+            logger.debug(f"Creating data vars from dataarray name: {data_vars}")
         elif var_name is None:
+            logger.info(f"Taking data vars from list of ds.data_vars {ds.data_vars}")
             data_vars = list(ds.data_vars)
         else:
             data_vars = [var_name]
+            logger.info(f"Setting data vars as input varname [var_name]: {data_vars}")
         logger.debug(f"data vars: {data_vars}")
         if encoding is None:
             encoding = {
@@ -474,7 +475,6 @@ def write_xarray_to_file(  # noqa: PLR0912
 
 def write_xarray_to_ascii(dataset, filepath, data_var=None, nodata_value=None):
     """Write xarray Dataset to an ASCII file that can be read by mHM."""
-    
     # check if a data_var can be optained for writing the data
     if data_var is None and isinstance(dataset, xr.Dataset):
         data_var = get_single_data_var(dataset)
@@ -484,10 +484,7 @@ def write_xarray_to_ascii(dataset, filepath, data_var=None, nodata_value=None):
             )
             return
     # get the data from the dataset
-    if isinstance(dataset, xr.Dataset):
-        data = dataset[data_var]
-    else:
-        data = dataset
+    data = dataset[data_var] if isinstance(dataset, xr.Dataset) else dataset
 
     # set the nodata value
     dtype = get_dtype(data)
@@ -495,9 +492,9 @@ def write_xarray_to_ascii(dataset, filepath, data_var=None, nodata_value=None):
         is_int = issubclass(np.dtype(dtype).type, (np.integer, np.unsignedinteger))
         typ = int if is_int else float
         nodata_value = typ(NO_DATA)
-    
+
     header = create_header(dataset, write=False, no_data_value=nodata_value)
-    
+
     data_to_write = data
     if isinstance(data_to_write, xr.DataArray):
         data_to_write = data_to_write.data
@@ -505,9 +502,12 @@ def write_xarray_to_ascii(dataset, filepath, data_var=None, nodata_value=None):
     if data_to_write.dtype.kind in ["i", "u", "f"]:  # i=int, u=unsigned, f=float
         data_to_write = np.where(np.isnan(data_to_write), nodata_value, data_to_write)
 
-    out_header_str = write_grid(file=filepath, header=header, dtype=dtype, data=data_to_write)
+    out_header_str = write_grid(
+        file=filepath, header=header, dtype=dtype, data=data_to_write
+    )
     logger.info(f"Writting file to {filepath}")
     logger.debug(f"Header written:\n{out_header_str}")
+
 
 def read_ascii_to_xarray(
     filepath,

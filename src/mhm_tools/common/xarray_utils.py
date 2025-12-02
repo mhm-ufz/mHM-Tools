@@ -154,8 +154,9 @@ def timedelta_to_alias(ds: xr.DataArray) -> str:
     """
     time = getattr(ds, "time", None)
     if time is None:
+        msg = "Object has no 'time' coordinate."
         with ErrorLogger(logger):
-            raise ValueError("Object has no 'time' coordinate.")
+            raise ValueError(msg)
     if time.size < 2:
         msg = (
             "Cannot infer time frequency because only "
@@ -164,7 +165,7 @@ def timedelta_to_alias(ds: xr.DataArray) -> str:
         raise ValueError(msg)
     try:
         median_delta = ds.time.diff("time").median()
-    except Exception as e: 
+    except Exception as e:
         logger.error(ds)
         with ErrorLogger(logger):
             raise e
@@ -282,9 +283,9 @@ def get_dtype(ds):
                 try:
                     dt = ds.dtype # check if dataset has single dtype
                     da = ds # use dataset directly
-                except AttributeError:
+                except AttributeError as e:
                     msg = "Dataset has no single data variable to inspect."
-                    raise ValueError(msg)
+                    raise ValueError(msg) from e
             else:
                 da = ds[v]
         elif isinstance(ds, xr.DataArray):
@@ -299,9 +300,7 @@ def get_dtype(ds):
 
         if np.issubdtype(dt, np.floating):
             return "f4" if dt.itemsize <= 4 else "f8"
-        if np.issubdtype(dt, np.integer) or np.issubdtype(
-            dt, np.unsignedinteger
-        ):
+        if np.issubdtype(dt, np.integer) or np.issubdtype(dt, np.unsignedinteger):
             # prefer signed integers for ASCII grid
             return "i4" if dt.itemsize <= 4 else "i8"
 

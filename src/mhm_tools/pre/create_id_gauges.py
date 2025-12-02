@@ -1,8 +1,9 @@
 """Create id gauges file."""
 
 import logging
-import xarray as xr
 from pathlib import Path
+
+import xarray as xr
 
 from mhm_tools.common.constants import NO_DATA
 from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_to_ascii
@@ -51,11 +52,11 @@ def write_gauge_id(
             ] = id
     else:
         ds.loc[ds.sel({lat_key: lat, lon_key: lon}, method="nearest").coords] = id
-        if data_var is None: 
+        if data_var is None:
             data_var = ds.name if ds.name else "data"
         ds = ds.to_dataset(name=data_var)
-    ds = ds.astype({data_var: int})
-    return ds
+    return ds.astype({data_var: int})
+
 
 @log_arguments()
 def create_id_gauges(

@@ -190,12 +190,15 @@ def crop_file_with_header(ds_in, file_path, output_path, lonslice, latslice):
     dtype = get_dtype(ds_in)
     write_header(header_out_path, new_header_information, dtype)
     try:
+        logger.info("Cropping dataarray...")
         data = ds_in[data_var].isel(
             {
                 lat_key: slice(index_y_min, index_y_max),
                 lon_key: slice(index_x_min, index_x_max),
             }
         )
+        logger.debug(f"Cropped dataarray: {data}")
+        logger.info("Creating new dataset...")
         if "time" in ds_in.dims:
             data_array = xr.DataArray(
                 data=data,

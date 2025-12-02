@@ -80,7 +80,7 @@ def calculate_pet(
     lat = ds.lat if "lat" in ds.coords else ds[get_coord_key(ds, lat=True)]
     lon = ds.lon if "lon" in ds.coords else ds[get_coord_key(ds, lat=True)]
 
-    times = ds.time.values
+    times = ds.time.data
     logger.info(f"Creating pet from tavg ds with shape {tavg.shape}")
     if stat_freq is None:
         hours, time_id = timedelta_to_alias(ds)
@@ -106,7 +106,7 @@ def calculate_pet(
     for idx, t in enumerate(times):
         # convert timestamp to datetime
         current_time = datetime.fromtimestamp(int(t) / 1e9, tz=timezone.utc)
-        tarr = tavg.isel(time=idx).values[np.newaxis, :, :]
+        tarr = tavg.isel(time=idx).data[np.newaxis, :, :]
         tasks.append((tarr, lat3d, current_time, stat_freq))
 
     logger.info(f"Calculating pet in parallel on {max_workers} cores")
