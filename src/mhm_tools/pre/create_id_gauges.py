@@ -76,12 +76,12 @@ def create_id_gauges(
             for var_name in ds.data_vars:
                 # Set every element of this variable to missing_value:
                 ds[var_name].values[:] = missing_value
-                contains_value = False
+            contains_value = False
         else:
             contains_value = bool(ds[data_name] == float(id)).any()
         if not contains_value:
             ds_with_id = write_gauge_id(
-                ds, id, lat, lon, facc_file
+                ds, id, lat, lon, facc_file, data_var=data_name
             )  # , threshold, facc_value)
             write_xarray_to_ascii(ds_with_id, out_path, data_name)  # , fmt="%.0f")
         else:
