@@ -259,28 +259,39 @@ def spearman_correlation(data1, data2):
 
 
 def get_dtype(ds):
-    """Return a simple dtype string for the dataset/dataarray."""
+    """Return a simple dtype string without forcing data into memory."""
     try:
         if isinstance(ds, xr.Dataset):
             v = get_single_data_var(ds)
-            da = ds[v]
+            if v is None:
+                try:
+                    dt = ds.dtype # check if dataset has single dtype
+                    da = ds # use dataset directly
+                except AttributeError:
+                    msg = "Dataset has no single data variable to inspect."
+                    raise ValueError(msg)
+            else:
+                da = ds[v]
         elif isinstance(ds, xr.DataArray):
             da = ds
         else:
             msg = f"Unsupported type {type(ds)}"
             raise ValueError(msg)
-        arr = np.asarray(da)
-        dt = arr.dtype
-        # Map numpy dtype to simple esri dtype strings
+
+        dt = da.dtype  # cheap: does not load data
+        if dt is None:
+            return "f4"
+
         if np.issubdtype(dt, np.floating):
-            dtype = "f4" if dt.itemsize <= 4 else "f8"
-        elif np.issubdtype(dt, np.integer) or np.issubdtype(dt, np.unsignedinteger):
+            return "f4" if dt.itemsize <= 4 else "f8"
+        if np.issubdtype(dt, np.integer) or np.issubdtype(
+            dt, np.unsignedinteger
+        ):
             # prefer signed integers for ASCII grid
-            dtype = "i4" if dt.itemsize <= 4 else "i8"
-        else:
-            msg = f"write_grid: cannot infer dtype from data with numpy dtype {dt}"
-            with ErrorLogger(logger):
-                raise ValueError(msg)
-        return dtype
+            return "i4" if dt.itemsize <= 4 else "i8"
+
+        msg = f"write_grid: cannot infer dtype from data with numpy dtype {dt}"
+        with ErrorLogger(logger):
+            raise ValueError(msg)
     except Exception:
         return "f4"
