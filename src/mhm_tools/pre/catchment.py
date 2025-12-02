@@ -729,7 +729,7 @@ class Catchment:
                     dims=["lat", "lon"],
                 )
                 id_ds = id_da.to_dataset(name="data")
-                id_ds = write_gauge_id(id_ds, gauge_id, self.gauge_lat, self.gauge_lon)
+                id_ds = write_gauge_id(ds=id_ds, id=gauge_id, lat=self.gauge_lat, lon=self.gauge_lon, data_var="data")
                 write_xarray_to_ascii(
                     id_ds, out_path / "idgauges.asc", "data"  # , fmt="%.0f"
                 )
