@@ -281,8 +281,8 @@ def get_dtype(ds):
             v = get_single_data_var(ds)
             if v is None:
                 try:
-                    dt = ds.dtype # check if dataset has single dtype
-                    da = ds # use dataset directly
+                    dt = ds.dtype  # check if dataset has single dtype
+                    da = ds  # use dataset directly
                 except AttributeError as e:
                     msg = "Dataset has no single data variable to inspect."
                     raise ValueError(msg) from e
