@@ -49,6 +49,8 @@ def convert_units(ds: xr.Dataset, var: str) -> xr.DataArray:
     Temperature variables are converted to degrees Celsius (degC),
     and precipitation variables are converted to millimeters (mm).
     """
+    logger.info(f"Converting units for variable '{var}'")
+    logger.debug(f"Original dataset: {ds}")
     units = ds[var].attrs.get("units")
     if not units:
         msg = f"Variable '{var}' missing 'units' attribute."
@@ -104,6 +106,7 @@ def convert_units(ds: xr.Dataset, var: str) -> xr.DataArray:
     mv = -9999.0
     encoding = {"_FillValue": mv, "missing_value": mv}
     ds[new_var].attrs.update({"_FillValue": mv, "missing_value": mv})
+    logger.info(f"Converted variable '{var}' to '{new_var}' with units {ds[new_var].attrs['units']}")
     return ds[new_var], encoding
 
 
@@ -141,7 +144,7 @@ def prepare_forcings(
             normalize_latlon_coords=True,
             force_decending_y=True,
         )
-        
+
         if var is None:
             var = get_single_data_var(ds)
 
