@@ -47,9 +47,9 @@ def write_gauge_id(
                 msg = "Dataset has multiple data_vars which is incompatible."
                 with ErrorLogger(logger):
                     raise ValueError(msg)
-            ds[data_var].loc[
-                ds.sel({lat_key: lat, lon_key: lon}, method="nearest").coords
-            ] = id
+        ds[data_var].loc[
+            ds.sel({lat_key: lat, lon_key: lon}, method="nearest").coords
+        ] = id
     else:
         ds.loc[ds.sel({lat_key: lat, lon_key: lon}, method="nearest").coords] = id
         if data_var is None:
