@@ -13,7 +13,7 @@ Authors
 
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 import pandas as pd
 import xarray as xr
@@ -43,7 +43,7 @@ PRECIPITATION_UNITS = ["m", "kg m-2", "mm"]
 PRECIPITATION_RATE_UNITS = ["kg m-2 s-1", "mm s-1", "mm d-1"]
 
 
-def convert_units(ds: xr.Dataset, var: str) -> xr.DataArray:
+def convert_units(ds: Union[xr.Dataset, xr.DataArray], var: str) -> xr.DataArray:
     """Convert variable to standard units.
 
     Temperature variables are converted to degrees Celsius (degC),
@@ -51,34 +51,36 @@ def convert_units(ds: xr.Dataset, var: str) -> xr.DataArray:
     """
     logger.info(f"Converting units for variable '{var}'")
     logger.debug(f"Original dataset: {ds}")
-    units = ds[var].attrs.get("units")
+    if isinstance(ds, xr.Dataset):
+        if var not in ds:
+            msg = f"Variable '{var}' not found in dataset."
+            raise ValueError(msg)
+        da = ds[var]
+    else:
+        da = ds
+    units = da.attrs.get("units")
     if not units:
         msg = f"Variable '{var}' missing 'units' attribute."
         raise ValueError(msg)
     logger.info(f"units are: {units}")
     # Temperature
     if units in TEMPERATURE_UNITS:
-        new_var = "tavg"
-        ds = ds.rename({var: new_var})
         if units in ["K", "Kelvin", "kelvin"]:
-            ds[new_var] = ds[new_var] - 273.15
+            da = da - 273.15
         elif units in ["F", "°F", "degF", "fahrenheit"]:
-            ds[new_var] = (ds[new_var] - 32) * (5 / 9)
-        ds[new_var].attrs["units"] = "degC"
-
+            da = (da - 32) * (5 / 9)
+        da.attrs["units"] = "degC"
     # Total precipitation
     elif units in PRECIPITATION_UNITS:
         new_var = "pre"
-        ds = ds.rename({var: new_var})
         if units in ["m", "kg m-2"]:
-            ds[new_var] = ds[new_var] * 1000
-        ds[new_var].attrs["units"] = "mm"
+            da = da * 1000
+        da.attrs["units"] = "mm"
 
     # Precipitation rate
     elif units in PRECIPITATION_RATE_UNITS:
         new_var = "pre"
-        ds = ds.rename({var: new_var})
-        freq = pd.infer_freq(ds.indexes["time"])
+        freq = pd.infer_freq(da.indexes["time"])
         if "kg" in units and "s-1" in units:
             if freq and freq.startswith("D"):
                 factor = 86400
@@ -97,17 +99,17 @@ def convert_units(ds: xr.Dataset, var: str) -> xr.DataArray:
             elif freq and freq.startswith("H"):
                 factor = 3600
 
-        ds[new_var] = ds[new_var] * factor
-        ds[new_var].attrs["units"] = "mm"
+        da = da * factor
+        da.attrs["units"] = "mm"
     else:
         msg = f"Unexpected units '{units}' for variable '{var}'."
         raise ValueError(msg)
 
     mv = -9999.0
     encoding = {"_FillValue": mv, "missing_value": mv}
-    ds[new_var].attrs.update({"_FillValue": mv, "missing_value": mv})
-    logger.info(f"Converted variable '{var}' to '{new_var}' with units {ds[new_var].attrs['units']}")
-    return ds[new_var], encoding
+    da.attrs.update({"_FillValue": mv, "missing_value": mv})
+    logger.info(f"Converted variable '{var}' with units {da.attrs['units']}")
+    return da, encoding
 
 
 @log_arguments("DEBUG")
