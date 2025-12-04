@@ -180,7 +180,6 @@ def resample_to_daily_or_hourly_adaptive(
                     f"Provided variable '{var}' has less than 2 time steps; cannot resample"
                 )
                 return in_obj  # nothing to resample
-            in_obj = in_obj[var]
         else:
             vars_with_time = []
             for name, da in in_obj.data_vars.items():
