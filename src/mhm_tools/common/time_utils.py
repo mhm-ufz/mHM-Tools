@@ -171,13 +171,15 @@ def resample_to_daily_or_hourly_adaptive(
     in_obj = in_obj.copy()
     logger.info(f"Starting adaptive resampling to {target}")
     logger.info(f"Input object: {in_obj}")
-    # sample = _pick_da(in_obj) if isinstance(in_obj, xr.Dataset) else in_obj
-    # _ensure_time(sample)
-    time_len = sample.sizes.get("time", 0)
     
     # If Dataset, keep only data_vars that have a time dimension/coord
     if isinstance(in_obj, xr.Dataset):
         if var:
+            if in_obj[var].sizes.get("time", 0) < 2:
+                logger.info(
+                    f"Provided variable '{var}' has less than 2 time steps; cannot resample"
+                )
+                return in_obj  # nothing to resample
             in_obj = in_obj[var]
         else:
             vars_with_time = []
@@ -198,6 +200,9 @@ def resample_to_daily_or_hourly_adaptive(
                 msg = "Dataset has no variables with a 'time' dimension."
                 with ErrorLogger(logger):
                     raise ValueError(msg)
+            if not vars_with_time:
+                logger.info("No variables with sufficient time steps; cannot resample")
+                return in_obj  # nothing to resample
             in_obj = in_obj[vars_with_time]
     _ensure_time(in_obj)
     alias_tgt = _target_alias(target)
