@@ -141,6 +141,7 @@ def prepare_forcings(
             normalize_latlon_coords=True,
             force_decending_y=True,
         )
+        
         if var is None:
             var = get_single_data_var(ds)
 
