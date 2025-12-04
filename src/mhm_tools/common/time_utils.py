@@ -169,17 +169,12 @@ def resample_to_daily_or_hourly_adaptive(
     Same type as input, resampled to calendar-aware 'D' or '1H'.
     """
     in_obj = in_obj.copy()
-    sample = _pick_da(in_obj) if isinstance(in_obj, xr.Dataset) else in_obj
-    _ensure_time(sample)
+    logger.info(f"Starting adaptive resampling to {target}")
+    logger.info(f"Input object: {in_obj}")
+    # sample = _pick_da(in_obj) if isinstance(in_obj, xr.Dataset) else in_obj
+    # _ensure_time(sample)
     time_len = sample.sizes.get("time", 0)
-    if time_len < 2:
-        logger.warning(
-            "Skipping adaptive resampling: object only has %s timestamp(s), "
-            "so cadence cannot be inferred.",
-            time_len,
-        )
-        return in_obj
-
+    
     # If Dataset, keep only data_vars that have a time dimension/coord
     if isinstance(in_obj, xr.Dataset):
         if var:
@@ -189,9 +184,14 @@ def resample_to_daily_or_hourly_adaptive(
             for name, da in in_obj.data_vars.items():
                 try:
                     _ensure_time(da)
-                    vars_with_time.append(name)
+                    if da.sizes.get("time", 0)  >= 2:
+                        vars_with_time.append(name)
+                    else:
+                        logger.info(
+                            f"Variable '{name}' has less than 2 time steps; removing from object"
+                        )
                 except ValueError:
-                    logger.debug(
+                    logger.info(
                         f"Variable '{name}' has no 'time' dimension; removing from object"
                     )
             if not vars_with_time:
@@ -276,4 +276,5 @@ def resample_to_daily_or_hourly_adaptive(
         out.attrs = in_obj.attrs
     in_hours, alias_in = _alias_and_hours(in_obj)
     logger.info(f"New resolution {alias_in} meaning {in_hours} hours per timestep")
+    logger.debug(f"Resampled object: {out}")
     return out
