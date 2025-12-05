@@ -99,7 +99,7 @@ def regrid_mask(
     mask_res = abs(mask_lon[1] - mask_lon[0])
     target_res = abs(target_lon[1] - target_lon[0])
     if (target_res - mask_res) > 1e-5:
-        if target_res % mask_res != 0:
+        if target_res % mask_res > 1e-5:
             logger.warning(
                 f"Target resolution {target_res} is not an integer muptiple of mask resolution {mask_res}. Factor: {target_res / mask_res}"
             )
@@ -119,8 +119,39 @@ def regrid_mask(
         results /= np.nanmax(results)
         mask = results > 1e-3
     elif abs(target_res - mask_res) <= 1e-5:
-        logger.debug("Target resolution equals mask resolution.")
-        return mask_ds
+        logger.debug("Target resolution equals mask resolution (within tolerance).")
+        # If coords differ only by floating error, snap mask grid to target grid
+        # so alignment in subsequent operations does not fail.
+        try:
+            # quick path: if coords already almost equal, reuse mask as-is
+            if (
+                len(mask_lon) == len(target_lon)
+                and len(mask_lat) == len(target_lat)
+                and np.allclose(mask_lon, target_lon, rtol=0, atol=1e-9)
+                and np.allclose(mask_lat, target_lat, rtol=0, atol=1e-9)
+            ):
+                return mask_ds
+
+            tol = max(mask_res, target_res) * 1e-3  # generous but safe snapping tol
+            reindexed = mask_ds.reindex(
+                {
+                    lat_key_mask: xr.DataArray(target_lat, dims=[lat_key_mask]),
+                    lon_key_mask: xr.DataArray(target_lon, dims=[lon_key_mask]),
+                },
+                method="nearest",
+                tolerance=tol,
+            )
+            min_lon = min(len(mask_lon), len(target_lon))
+            min_lat = min(len(mask_lat), len(target_lat))
+            logger.debug(
+                f"Reindexed mask to target grid with tolerance {tol}; "
+                f"delta lon={float(np.nanmax(np.abs(mask_lon[:min_lon] - target_lon[:min_lon]))):.3g}, "
+                f"delta lat={float(np.nanmax(np.abs(mask_lat[:min_lat] - target_lat[:min_lat]))):.3g}"
+            )
+            return reindexed
+        except Exception:
+            logger.debug("Mask reindex to target grid failed; using original mask", exc_info=True)
+            return mask_ds
     else:
         msg = "mask coarser than file not yet implemented"
         with ErrorLogger(logger):
