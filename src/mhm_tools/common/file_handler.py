@@ -3,6 +3,7 @@
 import logging
 from enum import Enum
 from pathlib import Path
+from typing import Dict
 
 import numpy as np
 import xarray as xr
@@ -94,7 +95,7 @@ def crop_file_by_mask(ds, mask_file):
 
 def chunk_dataset_space_only(
     ds: xr.Dataset, available_mem_gib: float
-) -> dict[str, int]:
+) -> Dict[str, int]:
     """Chunk only in space (lat/lon), leaving time whole, sized to available memory.
 
     - Uses 80% of available_mem_gib for a single chunk.
@@ -145,7 +146,7 @@ def chunk_dataset_space_only(
     return chunks
 
 
-def chunk_dataset_space_and_time(ds, available_mem_gib) -> dict[str, int]:
+def chunk_dataset_space_and_time(ds, available_mem_gib) -> Dict[str, int]:
     """Chunk dataset adjusting chunk size to avaiable memory.
 
     Simple heuristic:
