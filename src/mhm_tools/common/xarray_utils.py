@@ -106,25 +106,33 @@ def get_coord_key(
 
 def get_single_data_var(ds):
     """Get the data var name from a dataset that only contains one data variable."""
-    data_vars = list(ds.data_vars)
-    len_data_vars = len(data_vars)
-    if len_data_vars > 1:
-        for coord in LAT_KEYS + LON_KEYS + TIME_KEYS:
-            if coord in data_vars:
-                len_data_vars -= 1
-                data_vars.remove(coord)
-                logger.debug(f"Removing coordinate data_var {coord} from consideration.")
+    data_vars = list(ds.data_vars)  # shallow copy is enough; entries are strings
+    if len(data_vars) > 1:
+        # remove coords without mutating while iterating
+        coords = [coord for coord in LAT_KEYS + LON_KEYS + TIME_KEYS if coord in data_vars]
+        for coord in coords:
+            logger.debug(f"Removing coordinate data_var {coord} from consideration.")
+        data_vars = [dv for dv in data_vars if dv not in coords]
         logger.debug(f"data_vars after removing coords: {data_vars}")
-        for data_var in data_vars:
-            if "bounds" in ds[data_var].attrs or data_var.strip().endswith("_bnds"):
-                len_data_vars -= 1
-                data_vars.remove(data_var)
-                logger.debug(f"Removing bounds data_var {data_var} from consideration.")
+
+        # remove bounds variables; iterate over snapshot to avoid skipping
+        bounds_removed = []
+        filtered = []
+        for data_var in data_vars.copy():
+            if "bounds" in ds[data_var].attrs or data_var.endswith("_bnds"):
+                bounds_removed.append(data_var)
+            else:
+                filtered.append(data_var)
+                logger.debug(f"Keeping data_var {data_var}.")
+        for bnd in bounds_removed:
+            logger.debug(f"Removing bounds data_var {bnd} from consideration.")
+        data_vars = filtered
         logger.debug(f"data_vars after removing bounds: {data_vars}")
-        if len_data_vars > 1:
+
+        if len(data_vars) > 1:
             logger.error(f"Only single data_var allowed but has {data_vars}")
             return None
-        if len_data_vars == 0:
+        if len(data_vars) == 0:
             logger.error("No datavar that is not coordinate.")
             return None
     logger.debug(f"data_vars: {data_vars}")
