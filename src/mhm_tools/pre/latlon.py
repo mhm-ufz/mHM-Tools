@@ -13,7 +13,7 @@ import numpy as np
 import xarray as xr
 from pyproj import Proj
 
-from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_to_file
+from mhm_tools.common.file_handler import create_header, get_coord_values, get_xarray_ds_from_file, write_xarray_to_file
 from mhm_tools.common.logger import log_arguments
 
 from ..common import (
@@ -133,15 +133,7 @@ def create_latlon(
         level0 = Path(level0)
         if level0.suffix.lower() == ".nc":
             with get_xarray_ds_from_file(level0) as ds:
-                level0 = {
-                    "ncols": ds.dims["xc"],
-                    "nrows": ds.dims["yc"],
-                    "xllcorner": float(ds["xc"].values[0]) - 0.5
-                    * (float(ds["xc"].values[1]) - float(ds["xc"].values[0])),
-                    "yllcorner": float(ds["yc"].values[-1]) - 0.5
-                    * (float(ds["yc"].values[-1]) - float(ds["yc"].values[-2])),
-                    "cellsize": float(ds["xc"].values[1]) - float(ds["xc"].values[0]),
-                }
+                level0 = create_header(ds, write=False)
         elif level0.suffix.lower() in [".asc", ".hdr", ".txt"]:
             level0 = read_header(level0)
     level0 = standardize_header(level0)
