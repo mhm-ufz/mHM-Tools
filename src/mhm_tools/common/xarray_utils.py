@@ -113,10 +113,14 @@ def get_single_data_var(ds):
             if coord in data_vars:
                 len_data_vars -= 1
                 data_vars.remove(coord)
+                logger.debug(f"Removing coordinate data_var {coord} from consideration.")
+        logger.debug(f"data_vars after removing coords: {data_vars}")
         for data_var in data_vars:
-            if "bounds" in ds[data_var].attrs or data_var.endswith("_bnds"):
+            if "bounds" in ds[data_var].attrs or data_var.strip().endswith("_bnds"):
                 len_data_vars -= 1
                 data_vars.remove(data_var)
+                logger.debug(f"Removing bounds data_var {data_var} from consideration.")
+        logger.debug(f"data_vars after removing bounds: {data_vars}")
         if len_data_vars > 1:
             logger.error(f"Only single data_var allowed but has {data_vars}")
             return None
