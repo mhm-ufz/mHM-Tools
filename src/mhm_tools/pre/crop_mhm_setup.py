@@ -98,7 +98,7 @@ def regrid_mask(
     mask_lat = mask_ds[lat_key_mask].data
     mask_res = abs(mask_lon[1] - mask_lon[0])
     target_res = abs(target_lon[1] - target_lon[0])
-    if target_res > mask_res:
+    if (target_res - mask_res) > 1e-5:
         if target_res % mask_res != 0:
             logger.warning(
                 f"Target resolution {target_res} is not an integer muptiple of mask resolution {mask_res}. Factor: {target_res / mask_res}"
@@ -118,7 +118,7 @@ def regrid_mask(
                             results[i][j] += mask_ds.data[n, m]
         results /= np.nanmax(results)
         mask = results > 1e-3
-    elif target_res == mask_res:
+    elif abs(target_res - mask_res) <= 1e-5:
         logger.debug("Target resolution equals mask resolution.")
         return mask_ds
     else:
