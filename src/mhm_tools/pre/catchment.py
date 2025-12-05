@@ -859,6 +859,7 @@ class Catchment:
     def write_basin_id_file(self, data_vars, frame, out_path):
         """Write the basin_id file to specified path and set a sink value frame if specified."""
         logger.info("Write to single file.")
+        logger.debug(f"data_vars: {data_vars}")
         ds = xr.merge(data_vars.values())
         # set some attributes
         for coord in ds.coords:

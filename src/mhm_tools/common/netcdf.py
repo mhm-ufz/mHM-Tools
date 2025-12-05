@@ -159,7 +159,14 @@ def set_netcdf_encoding(
     coords = set(ds.coords)
     dim_coords = coords & dims
     aux_coords = coords - dims
-    bnds = {ds[c].attrs.get("bounds") for c in coords if "bounds" in ds[c].attrs}
+    # collect bounds variables referenced by coords, but only keep ones actually present
+    bnds_all = {ds[c].attrs.get("bounds") for c in coords if "bounds" in ds[c].attrs}
+    bnds = {b for b in bnds_all if b in ds}
+    missing_bnds = bnds_all - bnds
+    if missing_bnds:
+        logger.debug(
+            f"Ignoring missing bounds variables referenced in attrs: {sorted(missing_bnds)}"
+        )
     data_vars = set(ds.data_vars) - bnds
     for name in aux_coords | data_vars:
         ds[name].encoding = encoding
