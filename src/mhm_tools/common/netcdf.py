@@ -154,6 +154,8 @@ def set_netcdf_encoding(
     var_encoding: Optional[dict] = None,
 ) -> None:
     """Set default NetCDF encoding settings on an xarray Dataset."""
+    # Ensure missing bounds variables are generated before encoding.
+    _ensure_bounds_exist(ds)
     encoding = var_encoding or NC_ENCODE_DEFAULTS
     dims = set(ds.dims)
     coords = set(ds.coords)
@@ -173,6 +175,55 @@ def set_netcdf_encoding(
     for name in dim_coords | bnds:
         ds[name].encoding = {"_FillValue": None}
 
+
+def _ensure_bounds_exist(ds: xr.Dataset, bounds_dim: str = "bnds") -> None:
+    """
+    Create bounds variables for 1D coordinates if missing.
+
+    - If a coordinate already declares a 'bounds' attribute but the
+      referenced variable is absent, the bounds variable is created.
+    - If a coordinate lacks 'bounds', a new bounds variable named
+      '{coord}_bnds' is generated (unless it already exists).
+
+    Bounds generation uses `generate_bounds` and is skipped for
+    coordinates with fewer than two points or with more than one
+    dimension.
+    """
+    created: List[str] = []
+    skipped: List[str] = []
+    for coord in ds.coords:
+        da = ds[coord]
+        # only handle 1D coordinates with at least two points
+        if da.ndim != 1 or da.sizes[da.dims[0]] < 2:
+            skipped.append(coord)
+            continue
+
+        bounds_name = da.attrs.get("bounds", f"{coord}_bnds")
+        has_bounds_var = bounds_name in ds
+
+        # If bounds already exist, just ensure attr is set
+        if has_bounds_var:
+            if "bounds" not in da.attrs:
+                da.attrs["bounds"] = bounds_name
+            continue
+
+        # Bounds missing: try to generate and attach
+        try:
+            ds.coords[bounds_name] = generate_bounds(da, bounds_dim=bounds_dim)
+            ds[coord].attrs["bounds"] = bounds_name
+            created.append(bounds_name)
+        except Exception:
+            logger.debug(
+                f"Could not generate bounds for coordinate '{coord}'", exc_info=True
+            )
+            skipped.append(coord)
+
+    if created:
+        logger.debug(f"Generated bounds for coordinates: {sorted(created)}")
+    if skipped:
+        logger.debug(
+            f"Skipped bounds generation for coordinates (non-1D or too short): {sorted(skipped)}"
+        )
 
 def sanitize_nc_encoding(ds: "xr.Dataset", encoding: dict) -> dict:
     """Return a safe encoding dict and clean ds attrs so netCDF4 won't error."""
