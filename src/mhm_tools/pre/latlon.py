@@ -6,13 +6,14 @@ Authors
 """
 
 import logging
+from pathlib import Path
 import time
 
 import numpy as np
 import xarray as xr
 from pyproj import Proj
 
-from mhm_tools.common.file_handler import write_xarray_to_file
+from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_to_file
 from mhm_tools.common.logger import log_arguments
 
 from ..common import (
@@ -129,7 +130,20 @@ def create_latlon(
 
     # read header information
     if not isinstance(level0, dict):
-        level0 = read_header(level0)
+        level0 = Path(level0)
+        if level0.suffix.lower() == ".nc":
+            with get_xarray_ds_from_file(level0) as ds:
+                level0 = {
+                    "ncols": ds.dims["xc"],
+                    "nrows": ds.dims["yc"],
+                    "xllcorner": float(ds["xc"].values[0]) - 0.5
+                    * (float(ds["xc"].values[1]) - float(ds["xc"].values[0])),
+                    "yllcorner": float(ds["yc"].values[-1]) - 0.5
+                    * (float(ds["yc"].values[-1]) - float(ds["yc"].values[-2])),
+                    "cellsize": float(ds["xc"].values[1]) - float(ds["xc"].values[0]),
+                }
+        elif level0.suffix.lower() in [".asc", ".hdr", ".txt"]:
+            level0 = read_header(level0)
     level0 = standardize_header(level0)
     if isinstance(level1, (int, float)):
         level1 = rescale_grid(level0, level1, in_name="L0", out_name="L1")
