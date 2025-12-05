@@ -10,13 +10,28 @@ Includes functions for plotting:
 from pathlib import Path
 from typing import Optional
 
-import cartopy.crs as ccrs
-import cartopy.feature as cfeature
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 from matplotlib.colors import BoundaryNorm, ListedColormap
+
+try:  # cartopy is optional
+    import cartopy.crs as ccrs
+    import cartopy.feature as cfeature
+except ImportError:  # pragma: no cover - cartopy may be absent in some installs
+    ccrs = None
+    cfeature = None
+
+
+def _require_cartopy() -> None:
+    """Raise an informative error if cartopy is not installed."""
+    if ccrs is None or cfeature is None:
+        msg = (
+            "cartopy is required for geospatial plotting but is not installed. "
+            "Install with `pip install cartopy` to enable plotting functions."
+        )
+        raise ImportError(msg)
 
 
 def plot_constant_data_map(
@@ -34,6 +49,8 @@ def plot_constant_data_map(
 
     Creates a uniform-colored map with a legend patch instead of a colorbar.
     """
+    _require_cartopy()
+
     base_cmap = plt.get_cmap(cmap)
     single_color = base_cmap(0.5)  # middle color
 
@@ -88,6 +105,8 @@ def plot_discrete_data_map(
 
     Uses Cartopy for geographic projection and Matplotlib for color mapping.
     """
+    _require_cartopy()
+
     # Determine how the colorbar should handle data outside [vmin, vmax]
     extend = "neither"
     if np.nanmin(arr) < vmin and np.nanmax(arr) > vmax:
@@ -189,6 +208,8 @@ def plot_map(
     vmin, vmax : float, optional
         Color scale limits. If not provided, data min/max are used.
     """
+    _require_cartopy()
+
     # Extract longitude, latitude, and data values
     lon = data["lon"].values
     lat = data["lat"].values

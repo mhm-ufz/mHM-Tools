@@ -50,7 +50,6 @@ dependencies = [
   "seaborn",
   "netCDF4",
   "easy_mpl",
-  "cartopy",
   "cdo"
 ]
 
@@ -76,6 +75,9 @@ check = [
   "black>=24,<25",
   "isort[colors]",
   "ruff>=0.4,<0.5",
+]
+plot = [
+  "cartopy",
 ]
 
 [project.scripts]
@@ -165,4 +167,3 @@ max-statements = 80
 
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"
-
