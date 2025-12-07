@@ -192,6 +192,7 @@ class TestTimedeltaToAlias(XarrayUtilsBase):
         with self.assertRaises(ValueError):
             timedelta_to_alias(da)
 
+
 class TestGetOverlappingTimeSlice(XarrayUtilsBase):
     def test_normal_overlap(self):
         t1 = np.array(np.arange("2021-01-01", "2021-01-07", dtype="datetime64[D]"))

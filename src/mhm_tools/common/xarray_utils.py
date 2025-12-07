@@ -109,7 +109,9 @@ def get_single_data_var(ds):
     data_vars = list(ds.data_vars)  # shallow copy is enough; entries are strings
     if len(data_vars) > 1:
         # remove coords without mutating while iterating
-        coords = [coord for coord in LAT_KEYS + LON_KEYS + TIME_KEYS if coord in data_vars]
+        coords = [
+            coord for coord in LAT_KEYS + LON_KEYS + TIME_KEYS if coord in data_vars
+        ]
         for coord in coords:
             logger.debug(f"Removing coordinate data_var {coord} from consideration.")
         data_vars = [dv for dv in data_vars if dv not in coords]

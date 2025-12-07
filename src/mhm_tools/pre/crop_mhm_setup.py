@@ -150,7 +150,9 @@ def regrid_mask(
             )
             return reindexed
         except Exception:
-            logger.debug("Mask reindex to target grid failed; using original mask", exc_info=True)
+            logger.debug(
+                "Mask reindex to target grid failed; using original mask", exc_info=True
+            )
             return mask_ds
     else:
         msg = "mask coarser than file not yet implemented"
@@ -445,7 +447,8 @@ def crop_file(  # noqa: PLR0912
             lon_key_mask = get_coord_key(mask_da, lon=True)
             lat_key_mask = get_coord_key(mask_da, lat=True)
             latlon_files.set_dem_output_file(output_file)
-            logger.info("Masking file")
+            logger.info("Masking dem file")
+            logger.debug(f"dem ds before masking: {ds_cropped}")
             mask_regridded = regrid_mask(
                 mask_ds=mask_da,
                 lon_key_mask=lon_key_mask,
@@ -454,12 +457,16 @@ def crop_file(  # noqa: PLR0912
                 target_lat=ds_cropped[lat_key].data,
             )
             ds_cropped = ds_cropped.where(mask_regridded == 1, np.nan)
+            logger.debug(f"dem ds after masking: {ds_cropped}")
         else:
             logger.info("Can't mask dem file because no mask was provided.")
     if output_var is not None:
         try:
             data_var = get_single_data_var(ds_cropped)
             ds_cropped = ds_cropped.rename({data_var: output_var})
+            logger.info(
+                f"Renamed data_var from {data_var} to specified output variable name {output_var}"
+            )
         except ValueError:
             logger.warning(
                 f"Could not rename data_var to specified output variable name {output_var}"

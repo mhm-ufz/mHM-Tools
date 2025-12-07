@@ -171,7 +171,7 @@ def resample_to_daily_or_hourly_adaptive(
     in_obj = in_obj.copy()
     logger.info(f"Starting adaptive resampling to {target}")
     logger.info(f"Input object: {in_obj}")
-    
+
     # If Dataset, keep only data_vars that have a time dimension/coord
     if isinstance(in_obj, xr.Dataset):
         if var:
@@ -185,7 +185,7 @@ def resample_to_daily_or_hourly_adaptive(
             for name, da in in_obj.data_vars.items():
                 try:
                     _ensure_time(da)
-                    if da.sizes.get("time", 0)  >= 2:
+                    if da.sizes.get("time", 0) >= 2:
                         vars_with_time.append(name)
                     else:
                         logger.info(
