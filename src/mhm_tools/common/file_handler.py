@@ -3,7 +3,7 @@
 import logging
 from enum import Enum
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional, Set, Union
 
 import numpy as np
 import xarray as xr
@@ -609,10 +609,10 @@ RESERVED_FOR_ENCODING = {
 
 
 def move_reserved_attrs_to_encoding(
-    obj: xr.Dataset | xr.DataArray,
+    obj: Union[xr.Dataset, xr.DataArray],
     include_coords: bool = True,
-    extra_reserved: set[str] | None = None,
-    encoding_in: dict | None = None,
+    extra_reserved: Optional[Set[str]] = None,
+    encoding_in: Optional[dict] = None,
 ):
     """
     Move reserved serialization keys from .attrs to .encoding and return.
@@ -623,13 +623,13 @@ def move_reserved_attrs_to_encoding(
 
     Parameters
     ----------
-    obj : xr.Dataset | xr.DataArray
+    obj : xr.Dataset or xr.DataArray
         The object to clean.
     include_coords : bool, default True
         If True, also process coordinate variables.
-    extra_reserved : set[str] | None
+    extra_reserved : set[str] or None
         Additional keys to treat as reserved (moved to encoding).
-    encoding_in : dict | None
+    encoding_in : dict or None
         Initial encoding dict to update. If None, starts empty.
 
     Returns

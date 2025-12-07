@@ -209,6 +209,9 @@ def _ensure_bounds_exist(ds: xr.Dataset, bounds_dim: str = "bnds") -> None:
 
         # Bounds missing: try to generate and attach
         try:
+            if da.ndim != 1 or da.sizes[da.dims[0]] < 2:
+                logger.debug(f"da: {da}")
+                raise ValueError("Cannot generate bounds for non-1D or too short data.")
             ds.coords[bounds_name] = generate_bounds(da, bounds_dim=bounds_dim)
             ds[coord].attrs["bounds"] = bounds_name
             created.append(bounds_name)
@@ -224,6 +227,7 @@ def _ensure_bounds_exist(ds: xr.Dataset, bounds_dim: str = "bnds") -> None:
         logger.debug(
             f"Skipped bounds generation for coordinates (non-1D or too short): {sorted(skipped)}"
         )
+
 
 def sanitize_nc_encoding(ds: "xr.Dataset", encoding: dict) -> dict:
     """Return a safe encoding dict and clean ds attrs so netCDF4 won't error."""
