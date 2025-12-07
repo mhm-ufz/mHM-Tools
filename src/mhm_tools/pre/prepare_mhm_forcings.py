@@ -72,33 +72,33 @@ def convert_units(ds: Union[xr.Dataset, xr.DataArray], var: str) -> xr.DataArray
         da.attrs["units"] = "degC"
     # Total precipitation
     elif units in PRECIPITATION_UNITS:
-        new_var = "pre"
         if units in ["m", "kg m-2"]:
             da = da * 1000
         da.attrs["units"] = "mm"
 
     # Precipitation rate
     elif units in PRECIPITATION_RATE_UNITS:
-        new_var = "pre"
         freq = pd.infer_freq(da.indexes["time"])
+        if not freq or not freq.startswith(("H", "D")):
+            msg = (
+                f"Cannot infer frequency from time coordinate with freq={freq!r}. "
+                f"Expected hourly or daily frequency."
+            )
+            with ErrorLogger(logger):
+                raise ValueError(msg)
+        factor = 1.0
         if "kg" in units and "s-1" in units:
-            if freq and freq.startswith("D"):
-                factor = 86400
-            elif freq and freq.startswith("H"):
-                factor = 3600
-            else:
-                factor = 1
-        elif units == "mm d-1":
-            if freq and freq.startswith("D"):
-                factor = 1
-            elif freq and freq.startswith("H"):
-                factor = 1 / 24
+            factor = (
+                86400 if freq.startswith("D") else 3600 if freq.startswith("H") else 1
+            )
+        elif units == "mm d-1" and freq:
+            factor = (
+                1 if freq.startswith("D") else 1 / 24 if freq.startswith("H") else 1
+            )
         elif units == "mm s-1":
-            if freq and freq.startswith("D"):
-                factor = 90000
-            elif freq and freq.startswith("H"):
-                factor = 3600
-
+            factor = (
+                90000 if freq.startswith("D") else 3600 if freq.startswith("H") else 1
+            )
         da = da * factor
         da.attrs["units"] = "mm"
     else:

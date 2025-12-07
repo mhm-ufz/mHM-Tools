@@ -91,22 +91,31 @@ class LatlonFiles:
 
 
 def regrid_mask(
-    mask_ds, lon_key_mask, lat_key_mask, target_lon, target_lat, mask_key=None, lon_key_target=None, lat_key_target=None
+    mask_ds,
+    lon_key_mask,
+    lat_key_mask,
+    target_lon,
+    target_lat,
+    mask_key=None,
+    lon_key_target=None,
+    lat_key_target=None,
 ):
     """Regrid a xarray mask dataset mask_ds to the resolution of a second dataset ds2."""
+
     def _select_mask_var(mask_obj):
         if isinstance(mask_obj, xr.DataArray):
             return mask_obj
         if isinstance(mask_obj, xr.Dataset):
             key = mask_key or get_single_data_var(mask_obj)
             if key is None:
+                no_key_msg = "Mask dataset has multiple data_vars; provide mask_key."
                 with ErrorLogger(logger):
-                    raise ValueError(
-                        "Mask dataset has multiple data_vars; provide mask_key."
-                    )
+                    raise ValueError(no_key_msg)
             return mask_obj[key]
+        wrong_type_msg = f"Unsupported mask type: {type(mask_obj)}"
         with ErrorLogger(logger):
-            raise ValueError(f"Unsupported mask type: {type(mask_obj)}")
+            raise ValueError(wrong_type_msg)
+
     if lon_key_target is None:
         lon_key_target = lon_key_mask
     if lat_key_target is None:
@@ -135,12 +144,14 @@ def regrid_mask(
                             results[i][j] += mask_ds.data[n, m]
         results /= np.nanmax(results)
         mask = results > 1e-3
-        da_mask = xr.DataArray(
+        results[mask] = 1
+        results[~mask] = 0
+        return xr.DataArray(
             results,
             dims=[lat_key_target, lon_key_target],
             coords={lat_key_target: target_lat, lon_key_target: target_lon},
         )
-    elif abs(target_res - mask_res) <= 1e-5:
+    if abs(target_res - mask_res) <= 1e-5:
         logger.debug("Target resolution equals mask resolution (within tolerance).")
         # If coords differ only by floating error, snap mask grid to target grid
         # so alignment in subsequent operations does not fail.
@@ -170,21 +181,16 @@ def regrid_mask(
                 f"delta lon={float(np.nanmax(np.abs(mask_lon[:min_lon] - target_lon[:min_lon]))):.3g}, "
                 f"delta lat={float(np.nanmax(np.abs(mask_lat[:min_lat] - target_lat[:min_lat]))):.3g}"
             )
-            da_mask = _select_mask_var(reindexed)
-            return da_mask
+            return _select_mask_var(reindexed)
         except Exception:
             logger.debug(
                 "Mask reindex to target grid failed; using original mask", exc_info=True
             )
-            da_mask = _select_mask_var(mask_ds)
-            return da_mask
+            return _select_mask_var(mask_ds)
     else:
         msg = "mask coarser than file not yet implemented"
         with ErrorLogger(logger):
             raise Exception(msg)
-    results[mask] = 1
-    results[~mask] = 0
-    return da_mask
 
 
 def crop_file_with_header(ds_in, file_path, output_path, lonslice, latslice):
@@ -485,9 +491,7 @@ def crop_file(  # noqa: PLR0912
             # apply mask only to data variables that share both spatial dims
             for var in ds_cropped.data_vars:
                 if {lat_key, lon_key}.issubset(ds_cropped[var].dims):
-                    ds_cropped[var] = ds_cropped[var].where(
-                        mask_regridded == 1, np.nan
-                    )
+                    ds_cropped[var] = ds_cropped[var].where(mask_regridded == 1, np.nan)
             logger.debug(f"dem ds after masking: {ds_cropped}")
         else:
             logger.info("Can't mask dem file because no mask was provided.")

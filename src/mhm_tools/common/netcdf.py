@@ -7,6 +7,7 @@ from typing import Any, List, Optional, Union
 import numpy as np
 import xarray as xr
 
+from mhm_tools.common.logger import ErrorLogger
 from mhm_tools.common.xarray_utils import get_dtype
 
 from .constants import NC_ENCODE_DEFAULTS, WILDCARDS
@@ -211,7 +212,9 @@ def _ensure_bounds_exist(ds: xr.Dataset, bounds_dim: str = "bnds") -> None:
         try:
             if da.ndim != 1 or da.sizes[da.dims[0]] < 2:
                 logger.debug(f"da: {da}")
-                raise ValueError("Cannot generate bounds for non-1D or too short data.")
+                msg = "Cannot generate bounds for non-1D or too short data."
+                with ErrorLogger(logger):
+                    raise ValueError(msg)
             ds.coords[bounds_name] = generate_bounds(da, bounds_dim=bounds_dim)
             ds[coord].attrs["bounds"] = bounds_name
             created.append(bounds_name)

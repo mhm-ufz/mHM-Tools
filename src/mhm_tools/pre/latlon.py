@@ -18,7 +18,7 @@ from mhm_tools.common.file_handler import (
     get_xarray_ds_from_file,
     write_xarray_to_file,
 )
-from mhm_tools.common.logger import log_arguments
+from mhm_tools.common.logger import ErrorLogger, log_arguments
 
 from ..common import (
     NC_ENCODE_DEFAULTS,
@@ -60,7 +60,7 @@ def xy_to_latlon(x, y, crs=None):
 
 
 def _create_grid(header, crs=None, dtype="f4"):
-    # create x and y grid
+    """Create grid from ascii header."""
     c_size = header["cellsize"]
     x = header["xllcorner"] + c_size / 2 + np.arange(header["ncols"]) * c_size
     y = header["yllcorner"] + c_size / 2 + np.arange(header["nrows"]) * c_size
@@ -71,7 +71,18 @@ def _create_grid(header, crs=None, dtype="f4"):
     return x.astype(dtype), y.astype(dtype), lons.astype(dtype), lats.astype(dtype)
 
 
-#     """This function writes the latlon.nc file from given ASCII headers."""
+def get_l0_from_file(file):
+    """Get level-0 header from file."""
+    file = Path(file)
+    if file.suffix.lower() == ".nc":
+        with get_xarray_ds_from_file(file) as ds:
+            return create_header(ds, write=False)
+    elif file.suffix.lower() in [".asc", ".hdr", ".txt"]:
+        return read_header(file)
+    else:
+        msg = f"Cannot read level-0 header from file {file!r}."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
 
 
 @log_arguments()
@@ -134,12 +145,7 @@ def create_latlon(
 
     # read header information
     if not isinstance(level0, dict):
-        level0 = Path(level0)
-        if level0.suffix.lower() == ".nc":
-            with get_xarray_ds_from_file(level0) as ds:
-                level0 = create_header(ds, write=False)
-        elif level0.suffix.lower() in [".asc", ".hdr", ".txt"]:
-            level0 = read_header(level0)
+        level0 = read_header(level0)
     level0 = standardize_header(level0)
     if isinstance(level1, (int, float)):
         level1 = rescale_grid(level0, level1, in_name="L0", out_name="L1")
