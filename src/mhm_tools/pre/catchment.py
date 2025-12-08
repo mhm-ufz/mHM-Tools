@@ -1374,43 +1374,21 @@ def create_catchment(  # noqa: PLR0913
             # remove the temporary files
             temp_file1.unlink()
             temp_file2.unlink()
-        elif coordinate_slices is not None:
-            logger.info(f"Creating basin id file for {coordinate_slices}")
-            input_ds_sliced = input_ds.sel(
-                lat=coordinate_slices["lat"], lon=coordinate_slices["lon"]
-            )
-            logger.info(
-                f"lat {input_ds_sliced.lat.data[0]}, {input_ds_sliced.lat.data[-1]}"
-            )
-            logger.info(
-                f"lon {input_ds_sliced.lon.data[0]}, {input_ds_sliced.lon.data[-1]}"
-            )
-            c = Catchment(
-                ds=input_ds_sliced,
-                var_name=var_name,
-                var=var,
-                ftype=ftype,
-                transform=transform,
-                latlon=latlon,
-                out_var_name="basin_ids.nc",
-                do_shift=False,
-                l1_resolution=l1_resolution,
-                l11_resolution=l11_resolution,
-                l2_resolution=l2_resolution,
-                upscale=upscale,
-            )
-            if l1_resolution is not None and upscale:
-                c.upscale(var)
-            else:
-                c.get_facc()
-            c.get_basins()
-            c.get_grid_area()
-            c.get_upstream_area()
-            c.write(output_path, single_file=True, mask_file=mask_file, frame=frame)
-        else:
+            return
+        input_ds_sliced = input_ds.sel(
+            lat=coordinate_slices["lat"], lon=coordinate_slices["lon"]
+        )
+        logger.info(f"Cropped input dataset:")
+        logger.info(
+            f"        lat {input_ds_sliced.lat.data[0]}, {input_ds_sliced.lat.data[-1]}"
+        )
+        logger.info(
+            f"        lon {input_ds_sliced.lon.data[0]}, {input_ds_sliced.lon.data[-1]}"
+        )
+        if gauge_coords is not None:
             logger.info(f"Creating catchment for gauge coordinates {gauge_coords}")
             c = Catchment(
-                ds=input_ds,
+                ds=input_ds_sliced,
                 var_name=var_name,
                 var=var,
                 ftype=ftype,
@@ -1444,3 +1422,28 @@ def create_catchment(  # noqa: PLR0913
                 buffer=frame,
                 gauge_id=gauge_id,
             )
+            return
+        logger.info(f"Creating basin id file for region.")
+        
+        c = Catchment(
+            ds=input_ds_sliced,
+            var_name=var_name,
+            var=var,
+            ftype=ftype,
+            transform=transform,
+            latlon=latlon,
+            out_var_name="basin_ids.nc",
+            do_shift=False,
+            l1_resolution=l1_resolution,
+            l11_resolution=l11_resolution,
+            l2_resolution=l2_resolution,
+            upscale=upscale,
+        )
+        if l1_resolution is not None and upscale:
+            c.upscale(var)
+        else:
+            c.get_facc()
+        c.get_basins()
+        c.get_grid_area()
+        c.get_upstream_area()
+        c.write(output_path, single_file=True, mask_file=mask_file, frame=frame)

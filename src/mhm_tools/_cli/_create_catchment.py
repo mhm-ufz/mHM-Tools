@@ -195,13 +195,13 @@ def run(args):
 
     if args.gauge_coords is not None:
         if args.lonlatbox is not None:
-            with ErrorLogger(logger):
-                msg = "You can't use --gauge_coords and --lonlatbox at the same time."
-                raise ValueError(msg)
+            logger.warning(
+                "You are using --gauge_coords and --lonlatbox at the same time. Make sure this is intendet and the lonlatbox contains the whole catchment area."
+            )
         lat, lon = map(float, args.gauge_coords.split(","))
         gauge_coords = (np.array([lat]), np.array([lon]))
         logger.info(f"using gauge coordinates {gauge_coords}")
-    elif args.lonlatbox is not None:
+    if args.lonlatbox is not None:
         lonmin, lonmax, latmin, latmax, resl0 = map(float, args.lonlatbox.split(","))
         coordinate_slices = {"lat": slice(latmax, latmin), "lon": slice(lonmin, lonmax)}
         logger.info(
