@@ -71,7 +71,7 @@ def _create_grid(header, crs=None, dtype="f4"):
     return x.astype(dtype), y.astype(dtype), lons.astype(dtype), lats.astype(dtype)
 
 
-def get_l0_from_file(file):
+def get_header_from_file(file):
     """Get level-0 header from file."""
     file = Path(file)
     if file.suffix.lower() == ".nc":
@@ -145,12 +145,12 @@ def create_latlon(
 
     # read header information
     if not isinstance(level0, dict):
-        level0 = read_header(level0)
+        level0 = get_header_from_file(level0)
     level0 = standardize_header(level0)
     if isinstance(level1, (int, float)):
         level1 = rescale_grid(level0, level1, in_name="L0", out_name="L1")
     elif not isinstance(level1, dict):
-        level1 = read_header(level1)
+        level1 = get_header_from_file(level1)
     level1 = standardize_header(level1)
     # check L0/L1 compatibility
     check_grid_compatibility(level0, level1, "L0", "L1")
