@@ -407,7 +407,7 @@ def crop_file(  # noqa: PLR0912
                 chunking=chunking,
                 available_mem_gib=available_mem_gib // 3,
                 normalize_latlon_coords=True,
-                force_decending_y=(lat_order == 'decreasing')
+                force_decending_y=(lat_order == 'decreasing'),
                 force_ascending_y=(lat_order == 'increasing'),
                 chunk_type=ChunkType.TIME,
             )
