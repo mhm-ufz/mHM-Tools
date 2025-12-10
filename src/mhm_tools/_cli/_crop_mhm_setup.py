@@ -154,6 +154,9 @@ def add_args(parser):
     parser.add_argument(
         "--mask_var", required=False, default="mask", help=("""Mask variable name.""")
     )
+    parser.add_argument(
+        "--lat_order", required=False, default="decreasing", help=("""Direction of the latitude coordinate. Will be forced if input has coordinates.""")
+    )
 
 
 def run(args):
@@ -179,7 +182,8 @@ def run(args):
         args.lat_max,
         mask_var=args.mask_var,
     )
-    latslice = slice(lat_max_target_grid, lat_min_target_grid)
+    if args.lat_order == 'decreasing':
+        latslice = slice(lat_max_target_grid, lat_min_target_grid)
     lonslice = slice(lon_min_target_grid, lon_max_target_grid)
     # l0_resolution = float(args.lonlatbox.split(",")[4])
     available_mem = get_available_mem_in_unit(args.available_mem)
@@ -199,4 +203,5 @@ def run(args):
         chunking=args.chunking,
         output_var=args.output_var,
         no_cropping=args.no_cropping,
+        lat_order=args.lat_order,
     )
