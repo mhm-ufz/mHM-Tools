@@ -203,6 +203,12 @@ def create_latlon(
         check_grid_compatibility(level0, level2, "L0", "L2")
         # check L1/L2 compatibility
         check_grid_compatibility(level1, level2, "L1", "L2")
+        # create grids
+        x_l2, y_l2, lons_l2, lats_l2 = _create_grid(level2, crs, dtype)
+        coords["yc_l2"] = y_l2
+        coords["xc_l2"] = x_l2
+        coords["lat_l2"] = (["yc_l2", "xc_l2"], lats_l2)
+        coords["lon_l2"] = (["yc_l2", "xc_l2"], lons_l2)
         if write_header_l2:
             write_header(write_header_l2, level2)
 
