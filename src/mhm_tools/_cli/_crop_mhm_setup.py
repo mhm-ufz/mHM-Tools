@@ -184,6 +184,10 @@ def run(args):
     )
     if args.lat_order == 'decreasing':
         latslice = slice(lat_max_target_grid, lat_min_target_grid)
+    elif args.lat_order == 'increasing':
+        latslice = slice(lat_min_target_grid, lat_max_target_grid)
+    else:
+        raise ValueError("lat_order must be either 'decreasing' or 'increasing'")
     lonslice = slice(lon_min_target_grid, lon_max_target_grid)
     # l0_resolution = float(args.lonlatbox.split(",")[4])
     available_mem = get_available_mem_in_unit(args.available_mem)
