@@ -391,7 +391,7 @@ class Catchment:
         raise_on_sanity_check=True,
     ):
         """Delineate the basin for a given lat and lon."""
-        logger.info(f"Deliniating basin for gauge coordinates {gauge_coords}")
+        logger.info(f"Delineating basin for gauge coordinates {gauge_coords} and reference catchment area {ref_catchment_area} km2.")
         gauge_coords = (gauge_coords[0], gauge_coords[1])
         # Target area in km2 we want to match (can be adjusted/replaced by caller later)
 
