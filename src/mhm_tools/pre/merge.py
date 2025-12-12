@@ -85,6 +85,7 @@ def merge_files_from_folder(
             max_files=max_files,
             recursive_depth=recursive_depth + 1,
         )
+
         part_parts_merged = [
             p for p in out_files if p is not None and p != "" and Path(p).is_file()
         ]
@@ -111,7 +112,7 @@ def merge_files_from_folder(
             env={"SKIP_SAME_TIME": "1"},
             options="-O",
         )
-    return list(str(out_file))
+    return [str(out_file)]
 
 
 def merge_files(input_path, input_file_part, output, n_cpus):
@@ -165,7 +166,7 @@ def merge_files(input_path, input_file_part, output, n_cpus):
             out_files.append(out_file)
         elif len(file_list) > 1:
             with tempfile.TemporaryDirectory(dir=out_file.parent) as tmpdir:
-                out_files.append(
+                out_files.extend(
                     merge_files_from_folder(tmpdir, file_list, out_file, n_cpus)
                 )
         sum_files += len(file_list)
