@@ -22,8 +22,9 @@ def add_args(parser):
     )
     parser.add_argument(
         "--input_name",
-        required=True,
-        help="The path to input files.",
+        required=False,
+        default="*.*",
+        help="Input file name. E.g. '*.nc' to merge only nc files or 'pre*' to merge only precipitation files.",
     )
     parser.add_argument(
         "-o", "--output_file", required=True, help="The name of the output file."
@@ -34,4 +35,9 @@ def add_args(parser):
 def run(args):
     input = Path(args.input_path)
     output = Path(args.output_file)
-    merge_files(input, args.input_name, output, args.n_cpus)
+    merge_files(
+        input_path=input,
+        input_file_part=args.input_name,
+        output=output,
+        n_cpus=int(args.n_cpus),
+    )
