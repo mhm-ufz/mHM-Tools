@@ -78,7 +78,7 @@ def calculate_pet(
     data_var = get_single_data_var(ds)
     tavg = ds.tavg if "tavg" in ds else ds[data_var]  # (time, lat, lon)
     lat = ds.lat if "lat" in ds.coords else ds[get_coord_key(ds, lat=True)]
-    lon = ds.lon if "lon" in ds.coords else ds[get_coord_key(ds, lat=True)]
+    lon = ds.lon if "lon" in ds.coords else ds[get_coord_key(ds, lon=True)]
 
     times = ds.time.data
     logger.info(f"Creating pet from tavg ds with shape {tavg.shape}")
@@ -122,7 +122,7 @@ def calculate_pet(
     # Wrap into DataArray
     pet_da = xr.DataArray(
         pet_data,
-        coords=[ds.time, ds.lat, ds.lon],
+        coords=[ds.time, lat, lon],
         dims=["time", "lat", "lon"],
         attrs={"units": "mm", "missing_value": -9999.0, "_FillValue": -9999.0},
     )
