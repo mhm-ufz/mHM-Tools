@@ -1,7 +1,12 @@
 """Cut domains out of an existing mHM setup."""
 
+import logging
+
 from mhm_tools.common.cli_utils import get_available_mem_in_unit, get_coords
+from mhm_tools.common.logger import ErrorLogger
 from mhm_tools.pre.crop_mhm_setup import crop_mhm_setup
+
+logger = logging.getLogger(__name__)
 
 
 def add_args(parser):
@@ -155,7 +160,12 @@ def add_args(parser):
         "--mask_var", required=False, default="mask", help=("""Mask variable name.""")
     )
     parser.add_argument(
-        "--lat_order", required=False, default="decreasing", help=("""Direction of the latitude coordinate. Will be forced if input has coordinates.""")
+        "--lat_order",
+        required=False,
+        default="decreasing",
+        help=(
+            """Direction of the latitude coordinate. Will be forced if input has coordinates."""
+        ),
     )
 
 
@@ -182,12 +192,14 @@ def run(args):
         args.lat_max,
         mask_var=args.mask_var,
     )
-    if args.lat_order == 'decreasing':
+    if args.lat_order == "decreasing":
         latslice = slice(lat_max_target_grid, lat_min_target_grid)
-    elif args.lat_order == 'increasing':
+    elif args.lat_order == "increasing":
         latslice = slice(lat_min_target_grid, lat_max_target_grid)
     else:
-        raise ValueError("lat_order must be either 'decreasing' or 'increasing'")
+        msg = f"Unknown lat_order {args.lat_order!r}. Use 'increasing' or 'decreasing'."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
     lonslice = slice(lon_min_target_grid, lon_max_target_grid)
     # l0_resolution = float(args.lonlatbox.split(",")[4])
     available_mem = get_available_mem_in_unit(args.available_mem)

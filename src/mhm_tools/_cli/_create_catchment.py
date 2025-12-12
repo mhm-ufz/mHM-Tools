@@ -6,7 +6,6 @@ from pathlib import Path
 import numpy as np
 
 from mhm_tools.common.cli_utils import get_available_mem_in_unit
-from mhm_tools.common.logger import ErrorLogger
 
 from ..pre import create_catchment
 

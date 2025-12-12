@@ -85,6 +85,38 @@ def get_header_from_file(file):
             raise ValueError(msg)
 
 
+def add_optional_level(
+    coords,
+    level,
+    level_name,
+    level0_header,
+    level1_header,
+    crs,
+    dtype,
+    write_header_path=None,
+):
+    """Add optional level to the latlon dataset."""
+    if isinstance(level, (int, float)):
+        level_header = rescale_grid(
+            level0_header, level, in_name="L0", out_name=level_name
+        )
+    elif not isinstance(level, dict):
+        level_header = get_header_from_file(level)
+    level_header = standardize_header(level_header)
+    # check L0/level compatibility
+    check_grid_compatibility(level_header, level0_header, "L0", level_name)
+    # check L1/level compatibility
+    check_grid_compatibility(level_header, level1_header, "L1", level_name)
+    # create grids
+    x_level, y_level, lons_level, lats_level = _create_grid(level_header, crs, dtype)
+    coords[f"yc_{level_name}"] = y_level
+    coords[f"xc_{level_name}"] = x_level
+    coords[f"lat_{level_name}"] = (f"yc_{level_name}", f"xc_{level_name}"), lats_level
+    coords[f"lon_{level_name}"] = (f"yc_{level_name}", f"xc_{level_name}"), lons_level
+    if write_header_path:
+        write_header(write_header_path, level_header)
+
+
 @log_arguments()
 def create_latlon(
     out_file,
@@ -174,44 +206,29 @@ def create_latlon(
 
     # level11 is optional
     if level11:
-        if isinstance(level11, (int, float)):
-            level11 = rescale_grid(level0, level11, in_name="L0", out_name="L11")
-        elif not isinstance(level11, dict):
-            level11 = read_header(level11)
-        level11 = standardize_header(level11)
-        # check L0/L11 compatibility
-        check_grid_compatibility(level0, level11, "L0", "L11")
-        # check L1/L11 compatibility
-        check_grid_compatibility(level1, level11, "L1", "L11")
-        # create grids
-        x_l11, y_l11, lons_l11, lats_l11 = _create_grid(level11, crs, dtype)
-        coords["yc_l11"] = y_l11
-        coords["xc_l11"] = x_l11
-        coords["lat_l11"] = (["yc_l11", "xc_l11"], lats_l11)
-        coords["lon_l11"] = (["yc_l11", "xc_l11"], lons_l11)
-        if write_header_l11:
-            write_header(write_header_l11, level11)
+        add_optional_level(
+            coords,
+            level11,
+            level_name="l11",
+            level0_header=level0,
+            level1_header=level1,
+            crs=crs,
+            dtype=dtype,
+            write_header_path=write_header_l11,
+        )
 
     # level2 is optional
     if level2:
-        if isinstance(level2, (int, float)):
-            level2 = rescale_grid(level0, level2, in_name="L0", out_name="L2")
-        elif not isinstance(level2, dict):
-            level2 = read_header(level2)
-        level2 = standardize_header(level2)
-        # check L0/L2 compatibility
-        check_grid_compatibility(level0, level2, "L0", "L2")
-        # check L1/L2 compatibility
-        check_grid_compatibility(level1, level2, "L1", "L2")
-        # create grids
-        x_l2, y_l2, lons_l2, lats_l2 = _create_grid(level2, crs, dtype)
-        coords["yc_l2"] = y_l2
-        coords["xc_l2"] = x_l2
-        coords["lat_l2"] = (["yc_l2", "xc_l2"], lats_l2)
-        coords["lon_l2"] = (["yc_l2", "xc_l2"], lons_l2)
-        if write_header_l2:
-            write_header(write_header_l2, level2)
-
+        add_optional_level(
+            coords,
+            level2,
+            level_name="l2",
+            level0_header=level0,
+            level1_header=level1,
+            crs=crs,
+            dtype=dtype,
+            write_header_path=write_header_l2,
+        )
     latlon = xr.Dataset(
         coords=coords,
         attrs={

@@ -231,12 +231,14 @@ def crop_file_with_header(ds_in, file_path, output_path, lonslice, latslice):
         index_y_min = int(
             (ymax - latslice.start - pres) / header_information["cellsize"] + 0.5
         )
-        index_y_max = int((ymax - latslice.stop + pres) / header_information["cellsize"])
-    else: 
+        index_y_max = int(
+            (ymax - latslice.stop + pres) / header_information["cellsize"]
+        )
+    else:
         index_y_min = int(
-        (latslice.start - pres - header_information["yllcorner"])
-        / header_information["cellsize"]
-        + 0.5
+            (latslice.start - pres - header_information["yllcorner"])
+            / header_information["cellsize"]
+            + 0.5
         )
         index_y_max = int(
             (latslice.stop + pres - header_information["yllcorner"])
@@ -322,7 +324,7 @@ def call_create_latlon(
     meteo_header_path,
     crs,
     chunking=True,
-    lat_order='decreasing',
+    lat_order="decreasing",
 ):
     """Create lat/lon headers for multiple resolutions and write the latlon file.
 
@@ -335,8 +337,8 @@ def call_create_latlon(
         dem_output_file,
         chunking=chunking,
         normalize_latlon_coords=True,
-        force_decending_y=(lat_order == 'decreasing'),
-        force_ascending_y=(lat_order == 'increasing'),
+        force_decending_y=(lat_order == "decreasing"),
+        force_ascending_y=(lat_order == "increasing"),
     ) as ds_dem:
         l0 = create_header(ds_dem, None, write=False)
     logger.debug(f"L0: {l0}")
@@ -387,7 +389,7 @@ def crop_file(  # noqa: PLR0912
     chunking=False,
     output_var=None,
     no_cropping=False,
-    lat_order='decreasing',
+    lat_order="decreasing",
 ):
     """Crops one file by lat and lon slice and may mask it with the mask dataarray."""
     logger.info(f"Cropping the file {input_file}")
@@ -417,8 +419,8 @@ def crop_file(  # noqa: PLR0912
                 chunking=chunking,
                 available_mem_gib=available_mem_gib // 3,
                 normalize_latlon_coords=True,
-                force_decending_y=(lat_order == 'decreasing'),
-                force_ascending_y=(lat_order == 'increasing'),
+                force_decending_y=(lat_order == "decreasing"),
+                force_ascending_y=(lat_order == "increasing"),
                 chunk_type=ChunkType.TIME,
             )
         except ValueError as ve:
@@ -558,7 +560,7 @@ def crop_mhm_setup(  # noqa: PLR0913
     chunking=False,
     output_var=None,
     no_cropping=False,
-    lat_order='decreasing',
+    lat_order="decreasing",
 ):
     """Cut out an existing mhm domain setup using a mask file."""
     # check if the input is correct

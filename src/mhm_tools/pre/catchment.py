@@ -1378,7 +1378,7 @@ def create_catchment(  # noqa: PLR0913
         input_ds_sliced = input_ds.sel(
             lat=coordinate_slices["lat"], lon=coordinate_slices["lon"]
         )
-        logger.info(f"Cropped input dataset:")
+        logger.info("Cropped input dataset:")
         logger.info(
             f"        lat {input_ds_sliced.lat.data[0]}, {input_ds_sliced.lat.data[-1]}"
         )
@@ -1423,8 +1423,8 @@ def create_catchment(  # noqa: PLR0913
                 gauge_id=gauge_id,
             )
             return
-        logger.info(f"Creating basin id file for region.")
-        
+        logger.info("Creating basin id file for region.")
+
         c = Catchment(
             ds=input_ds_sliced,
             var_name=var_name,
