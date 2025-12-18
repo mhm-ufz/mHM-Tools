@@ -176,7 +176,7 @@ class Catchment:
             self.input_da.attrs["_FillValue"] = FDIR_FILLVALUE[ftype]
             self.input_da.attrs["nodata_value"] = FDIR_FILLVALUE[ftype]
             self.input_da = self.input_da.where(
-                (ds[var_name] != old_no_data_val) & ~np.isnan(ds[var_name]),
+                (data != old_no_data_val) & ~np.isnan(data),
                 FDIR_FILLVALUE[ftype],
             )
             logger.debug(self.input_da)
