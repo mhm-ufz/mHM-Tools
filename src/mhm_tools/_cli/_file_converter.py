@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_to_file
+from mhm_tools.common.file_handler import create_header, get_xarray_ds_from_file, write_xarray_to_file
 
 
 def add_args(parser):
@@ -50,6 +50,12 @@ def add_args(parser):
         required=False,
         help=("use latlon variables"),
     )
+    parser.add_argument(
+        "--only_header",
+        action="store_true",
+        required=False,
+        help=("Only write header output."),
+    )
 
 
 def run(args):
@@ -63,4 +69,7 @@ def run(args):
     ds = get_xarray_ds_from_file(
         input, var_name=var_name, normalize_latlon_coords=args.latlon
     )
-    write_xarray_to_file(ds, output, var_name=var_name)
+    if args.only_header:
+        create_header(ds, output_path=output, no_data_value=None)
+    else:
+        write_xarray_to_file(ds, output, var_name=var_name)
