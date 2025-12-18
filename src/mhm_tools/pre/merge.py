@@ -115,7 +115,7 @@ def merge_files_from_folder(
     return [str(out_file)]
 
 
-def merge_files(input_path, input_file_part, output, n_cpus):
+def merge_files(input_path, input_file_part, output, n_cpus, preserve_folders=False):
     """
     Merge NetCDF files along time using CDO via its Python API.
 
@@ -128,6 +128,7 @@ def merge_files(input_path, input_file_part, output, n_cpus):
         output_path (str): directory to write output
         output_file_name (str): name of output NetCDF (e.g., "merged.nc")
         n_cpus (int): number of parallel workers
+        preserve_folders (bool): Decides if the top level folder structure should be preserved. 
     Returns:
         str: path to the merged file
     """
@@ -174,6 +175,13 @@ def merge_files(input_path, input_file_part, output, n_cpus):
         msg = f"No files match {in_dir}/{input_file_part}"
         with ErrorLogger(logger):
             raise FileNotFoundError(msg)
-    logger.info(
-        f"Merged a total of {sum_files} into these {len(out_files)} files: {out_files}"
-    )
+    if not preserve_folders:
+        with tempfile.TemporaryDirectory(dir=out_file.parent) as tmpdir:
+            final_merge = merge_files_from_folder(tmpdir, out_files, output, n_cpus)
+        logger.info(
+            f"Merged a total of {sum_files} to: {final_merge}"
+        )
+    else:
+        logger.info(
+            f"Merged a total of {sum_files} into these {len(out_files)} files: {out_files}"
+        )
