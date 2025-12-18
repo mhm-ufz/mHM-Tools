@@ -76,7 +76,7 @@ def get_header_from_file(file):
     file = Path(file)
     if file.suffix.lower() == ".nc":
         with get_xarray_ds_from_file(file) as ds:
-            return create_header(ds, write=False)
+            return create_header(ds)
     elif file.suffix.lower() in [".asc", ".hdr", ".txt"]:
         return read_header(file)
     else:

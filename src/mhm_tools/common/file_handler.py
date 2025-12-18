@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 ######
 
 
-def create_header(ds, output_path=None, no_data_value=None, write=True) -> dict:
+def create_header(ds, output_path=None, no_data_value=None) -> dict:
     """Write a header file from a dataset.
 
     Takes an xarray Dataset and writes the ASCII header needed for GIS tools.
@@ -59,13 +59,13 @@ def create_header(ds, output_path=None, no_data_value=None, write=True) -> dict:
     }
     header_dict = standardize_header(header_dict)
 
-    if write:
+    if output_path is not None:
         if output_path.is_dir():
             header_out_path = output_path / "header.txt"
         elif output_path.is_file():
             header_out_path = output_path
         else:
-            msg = "Header output path is neither file nor directory."
+            msg = f"Header output path {output_path} is neither file nor directory."
             with ErrorLogger(logger):
                 raise ValueError(msg)
         header_str = write_header(header_out_path, header_dict, dtype)
@@ -494,7 +494,7 @@ def write_xarray_to_ascii(dataset, filepath, data_var=None, nodata_value=None):
         typ = int if is_int else float
         nodata_value = typ(NO_DATA)
 
-    header = create_header(dataset, write=False, no_data_value=nodata_value)
+    header = create_header(dataset, no_data_value=nodata_value)
 
     data_to_write = data
     if isinstance(data_to_write, xr.DataArray):

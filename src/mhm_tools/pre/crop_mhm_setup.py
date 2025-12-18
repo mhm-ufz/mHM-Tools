@@ -340,7 +340,7 @@ def call_create_latlon(
         force_decending_y=(lat_order == "decreasing"),
         force_ascending_y=(lat_order == "increasing"),
     ) as ds_dem:
-        l0 = create_header(ds_dem, None, write=False)
+        l0 = create_header(ds_dem)
     logger.debug(f"L0: {l0}")
     l1 = l0.copy()
     l1["cellsize"] = l1_resolution
@@ -538,7 +538,7 @@ def crop_file(  # noqa: PLR0912
 
     logger.info(f"Written to {output_file}")
     if force_header_creation and not (output_file.parent / "header.txt").is_file():
-        create_header(ds_cropped, output_path=output_file.parent, write=True)
+        create_header(ds_cropped, output_path=output_file.parent)
     return latlon_files
 
 

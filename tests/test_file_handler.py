@@ -35,7 +35,7 @@ class TestCreateHeader(unittest.TestCase, BaseDatasetMixin):
         for dtype in [np.float32, np.int32, np.uint16]:
             with self.subTest(dtype=dtype):
                 ds = self.make_simple_ds(dtype=dtype)
-                header_dict = fh.create_header(ds, write=False, no_data_value="-9999")
+                header_dict = fh.create_header(ds, no_data_value="-9999")
                 self.assertEqual(header_dict["ncols"], ds.sizes["lon"])
                 self.assertEqual(header_dict["nrows"], ds.sizes["lat"])
                 self.assertAlmostEqual(float(header_dict["cellsize"]), 1.0)
@@ -56,7 +56,7 @@ class TestCreateHeader(unittest.TestCase, BaseDatasetMixin):
             expected_path = Path(td) / "header.txt"
             self.assertFalse(expected_path.is_file())
             header_dict = fh.create_header(
-                ds, output_path=Path(td), write=True, no_data_value=2245
+                ds, output_path=Path(td), no_data_value=2245
             )
             self.assertTrue(expected_path.is_file())
             self.assertEqual(header_dict["ncols"], ds.sizes["lon"])
