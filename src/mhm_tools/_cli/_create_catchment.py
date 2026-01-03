@@ -3,6 +3,7 @@
 import logging
 from pathlib import Path
 
+from mhm_tools.pre.catchment import Resolution
 import numpy as np
 
 from mhm_tools.common.cli_utils import get_available_mem_in_unit
@@ -119,6 +120,15 @@ def add_args(parser):
         ),
     )
     optional_args.add_argument(
+        "--meteo_file",
+        required=False,
+        type=str,
+        default=None,
+        help=(
+            """Path to a meteo file to extract the l2 resolution from. Overwrites the l2_resolution argument."""
+        ),
+    )
+    optional_args.add_argument(
         "--upscale",
         action="store_true",
         default=False,
@@ -214,6 +224,10 @@ def run(args):
         mask_file = str(Path(args.output_path) / Path(args.mask_file))
     else:
         mask_file = args.mask_file
+    coarse_resolutions = Resolution(l1_resolution=args.l1_resolution,
+        l11_resolution=args.l11_resolution,
+        l2_resolution=args.l2_resolution,
+        l2_file=args.meteo_file)
     create_catchment(
         input_file=args.input_file,
         output_path=args.output_path,
@@ -223,9 +237,7 @@ def run(args):
         gauge_coords=gauge_coords,
         coordinate_slices=coordinate_slices,
         mask_file=mask_file,
-        l1_resolution=args.l1_resolution,
-        l11_resolution=args.l11_resolution,
-        l2_resolution=args.l2_resolution,
+        resolutions=coarse_resolutions,
         frame=args.frame,
         upscale=args.upscale,
         latlon=args.coords_are_not_latlon,
