@@ -19,6 +19,7 @@ from scipy.ndimage import binary_dilation
 
 from mhm_tools.common.constants import NC_ENCODE_MASK
 from mhm_tools.common.file_handler import (
+    get_coord_values,
     get_xarray_ds_from_file,
     write_xarray_to_file,
 )
@@ -87,7 +88,7 @@ class Resolution:
             self.l2_file = Path(self.l2_file)
             if self.l2_file.is_dir():
                 # get the first netcdf file in the directory
-                nc_files = list(self.l2_file.glob("*.nc"))
+                nc_files = list(self.l2_file.rglob("*.nc"))
                 if len(nc_files) == 0:
                     with ErrorLogger(logger):
                         msg = f"No netcdf files found in {self.l2_file}."
@@ -832,6 +833,83 @@ class Catchment:
                 msg = f'Format "{format}" unknown, use one of ["nc", "asc"]'
                 raise Exception(msg)
 
+    def align_bounds_to_l2(self, min_row, max_row, min_col, max_col):
+        """Align the given bounds to the L2 grid."""
+        if self.resolutions.l2_file is None:
+            return min_row, max_row, min_col, max_col
+
+        with get_xarray_ds_from_file(
+            self.resolutions.l2_file,
+            force_decending_y=True,
+            normalize_latlon_coords=True,
+        ) as ds:
+            l2_lon = get_coord_values(ds, lon=True)
+            l2_lat = get_coord_values(ds, lat=True)
+            if l2_lon is None or l2_lat is None:
+                logger.warning(
+                    f"Could not get lon/lat from L2 file {self.resolutions.l2_file}, using raw values."
+                )
+
+        lon = self.ds.lon.values
+        lat = self.ds.lat.values
+        input_res = round(abs(lon[1] - lon[0]), 9)
+        tol = input_res / 2 + 1e-9
+
+        lon_bounds = generate_bounds(
+            xr.DataArray(lon, dims=["lon"], coords={"lon": lon})
+        ).values
+        lat_bounds = generate_bounds(
+            xr.DataArray(lat, dims=["lat"], coords={"lat": lat})
+        ).values
+        lon_lower_edges = np.minimum(lon_bounds[:, 0], lon_bounds[:, 1])
+        lon_upper_edges = np.maximum(lon_bounds[:, 0], lon_bounds[:, 1])
+        lat_lower_edges = np.minimum(lat_bounds[:, 0], lat_bounds[:, 1])
+        lat_upper_edges = np.maximum(lat_bounds[:, 0], lat_bounds[:, 1])
+
+        cur_lon_min = min(lon_lower_edges[min_col], lon_lower_edges[max_col])
+        cur_lon_max = max(lon_upper_edges[min_col], lon_upper_edges[max_col])
+        cur_lat_min = min(lat_lower_edges[min_row], lat_lower_edges[max_row])
+        cur_lat_max = max(lat_upper_edges[min_row], lat_upper_edges[max_row])
+
+        def _bound_to_grid(values, lower, upper):
+            bounds = generate_bounds(
+                xr.DataArray(values, dims=["coord"], coords={"coord": values})
+            ).values
+            lower_edges = np.minimum(bounds[:, 0], bounds[:, 1])
+            upper_edges = np.maximum(bounds[:, 0], bounds[:, 1])
+            lower_vals = lower_edges[lower_edges <= lower]
+            upper_vals = upper_edges[upper_edges >= upper]
+            lower_target = lower_vals.max() if lower_vals.size else lower_edges.min()
+            upper_target = upper_vals.min() if upper_vals.size else upper_edges.max()
+            return lower_target, upper_target
+
+        l2_lon_min, l2_lon_max = _bound_to_grid(l2_lon, cur_lon_min, cur_lon_max)
+        l2_lat_min, l2_lat_max = _bound_to_grid(l2_lat, cur_lat_min, cur_lat_max)
+
+        def _idx_for(edges, target_values, name):
+            target = (
+                target_values - self.resolutions.l2_resolution / 2
+                if "min" in name
+                else target_values + self.resolutions.l2_resolution / 2
+            )
+            idx = int(np.argmin(np.abs(edges - target)))
+            if not np.isclose(edges[idx], target, atol=tol):
+                logger.warning(
+                    f"L2 {name} bound {target} not aligned with L0 grid; using {edges[idx]}"
+                )
+            return idx
+
+        lon_min_idx = _idx_for(lon_lower_edges, l2_lon_min, "lon-min")
+        lon_max_idx = _idx_for(lon_upper_edges, l2_lon_max, "lon-max")
+        lat_min_idx = _idx_for(lat_lower_edges, l2_lat_min, "lat-min")
+        lat_max_idx = _idx_for(lat_upper_edges, l2_lat_max, "lat-max")
+
+        min_col = min(lon_min_idx, lon_max_idx)
+        max_col = max(lon_min_idx, lon_max_idx)
+        min_row = min(lat_min_idx, lat_max_idx)
+        max_row = max(lat_min_idx, lat_max_idx)
+        return min_row, max_row, min_col, max_col
+
     def processing_data_variable(
         self,
         var_name,
@@ -997,6 +1075,7 @@ class Catchment:
         # 2) compute correct coarse coordinates from fine edges
         lon_f = da[lon_name].values
         lat_f = da[lat_name].values
+
         lon_edges = self._cell_edges(lon_f)
         lat_edges = self._cell_edges(lat_f)
 
@@ -1030,16 +1109,21 @@ class Catchment:
         out.name = "mask_L2"
 
         # 3) (optional) log edges for verification
-        lon_edges_coarse = self._cell_edges(out[lon_name].values)
-        lat_edges_coarse = self._cell_edges(out[lat_name].values)
-        logger.info(
-            f"Coarse lon edges: {lon_edges_coarse[0]:.6f} .. {lon_edges_coarse[-1]:.6f} "
-            f"(should equal fine window edges: {lon_edges_win[0]:.6f} .. {lon_edges_win[-1]:.6f})"
-        )
-        logger.info(
-            f"Coarse lat edges: {lat_edges_coarse[0]:.6f} .. {lat_edges_coarse[-1]:.6f} "
-            f"(should equal fine window edges: {lat_edges_win[0]:.6f} .. {lat_edges_win[-1]:.6f})"
-        )
+        try:
+            lon_edges_coarse = self._cell_edges(out[lon_name].values)
+            lat_edges_coarse = self._cell_edges(out[lat_name].values)
+            logger.info(
+                f"Coarse lon edges: {lon_edges_coarse[0]:.6f} .. {lon_edges_coarse[-1]:.6f} "
+                f"(should equal fine window edges: {lon_edges_win[0]:.6f} .. {lon_edges_win[-1]:.6f})"
+            )
+            logger.info(
+                f"Coarse lat edges: {lat_edges_coarse[0]:.6f} .. {lat_edges_coarse[-1]:.6f} "
+                f"(should equal fine window edges: {lat_edges_win[0]:.6f} .. {lat_edges_win[-1]:.6f})"
+            )
+        except IndexError:
+            logger.debug("Could not log coarse edges for verification.")
+            logger.debug(f"lon_coarse: {out[lon_name].values}")
+            logger.debug(f"lat_coarse: {out[lat_name].values}")
         return out
 
     def upscale_mask(
@@ -1147,8 +1231,11 @@ class Catchment:
             dim_coords = all_coords & dims  # intersection
             for var in dim_coords:
                 bounds_name = f"{var}_bnds"
-                mask_ds.coords[bounds_name] = generate_bounds(mask_ds[var])
-                mask_ds[var].attrs["bounds"] = bounds_name
+                try:
+                    mask_ds.coords[bounds_name] = generate_bounds(mask_ds[var])
+                    mask_ds[var].attrs["bounds"] = bounds_name
+                except IndexError:
+                    logger.info(f"Could not generate bounds for coord {var}")
             encoding = {
                 v: {"zlib": True, "complevel": 4, "shuffle": True, **NC_ENCODE_MASK}
                 for v in mask_ds.data_vars
@@ -1201,15 +1288,13 @@ class Catchment:
             #  +1 to include the whole last coarse grid cell -1 to not get one cell from the next block
             max_row = (max_row // factor + 1) * factor - 1
             max_col = (max_col // factor + 1) * factor - 1
+            if self.resolutions.l2_file is not None:
+                min_row, max_row, min_col, max_col = self.align_bounds_to_l2(
+                    min_row, max_row, min_col, max_col
+                )
             # clamp
             max_row = min(max_row, self.catchment_mask.shape[0] - 1)
             max_col = min(max_col, self.catchment_mask.shape[1] - 1)
-            # if max_col >= len(cols):
-            #     logger.warning("While regridding max_cols was larger than col-size")
-            #     max_col = len(cols) - 1
-            # if max_row >= len(rows):
-            #     logger.warning("While regridding max_rows was larger than row-size")
-            #     max_row = len(rows) - 1
         logger.info(
             f"min row: {min_row} max row: {max_row} min_col: {min_col}, max_col: {max_col}"
         )
@@ -1334,6 +1419,8 @@ def create_catchment(  # noqa: PLR0913
     logger.info(
         f"Creating catchment file for {var_name} using {var} and {ftype} from {input_file}"
     )
+    if coordinate_slices is None:
+        coordinate_slices = {"lat": slice(None, None), "lon": slice(None, None)}
     if resolutions is None:
         resolutions = Resolution()
     if var not in {"fdir", "dem"}:
