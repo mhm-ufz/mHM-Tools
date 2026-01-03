@@ -9,7 +9,7 @@ Authors
 """
 
 import logging
-from pathlib import Path 
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
@@ -20,7 +20,6 @@ from scipy.ndimage import binary_dilation
 from mhm_tools.common.constants import NC_ENCODE_MASK
 from mhm_tools.common.file_handler import (
     get_xarray_ds_from_file,
-    write_xarray_to_ascii,
     write_xarray_to_file,
 )
 from mhm_tools.common.logger import ErrorLogger, log_arguments
@@ -76,7 +75,9 @@ def create_cell_area(ds, lat_name="lat", lon_name="lon"):
 class Resolution:
     """Class to hold resolution information."""
 
-    def __init__(self, l1_resolution=None, l11_resolution=None, l2_resolution=None, l2_file=None):
+    def __init__(
+        self, l1_resolution=None, l11_resolution=None, l2_resolution=None, l2_file=None
+    ):
         """Initialize the Resolution class."""
         self.l1_resolution = l1_resolution
         self.l11_resolution = l11_resolution
@@ -89,23 +90,29 @@ class Resolution:
                 nc_files = list(self.l2_file.glob("*.nc"))
                 if len(nc_files) == 0:
                     with ErrorLogger(logger):
-                        raise FileNotFoundError(f"No netcdf files found in {self.l2_file}.")
+                        msg = f"No netcdf files found in {self.l2_file}."
+                        raise FileNotFoundError(msg)
                 self.l2_file = nc_files[0]
             elif not self.l2_file.is_file():
                 with ErrorLogger(logger):
-                    raise FileNotFoundError(f"L2 file {self.l2_file} not found.")
+                    msg = f"L2 file {self.l2_file} not found."
+                    raise FileNotFoundError(msg)
         if self.l2_file is not None and self.l2_resolution is None:
             with get_xarray_ds_from_file(self.l2_file) as ds:
                 lon = ds.lon.values
                 self.l2_resolution = round(abs(lon[1] - lon[0]), 9)
-                logger.info(f"Derived l2_resolution {self.l2_resolution} from {self.l2_file}")
+                logger.info(
+                    f"Derived l2_resolution {self.l2_resolution} from {self.l2_file}"
+                )
         self.l11_resolution = (
-            self.l11_resolution if self.l11_resolution is not None else self.l1_resolution
+            self.l11_resolution
+            if self.l11_resolution is not None
+            else self.l1_resolution
         )
         self.l2_resolution = (
             self.l2_resolution if self.l2_resolution is not None else self.l1_resolution
         )
-    
+
     def get_max_resolution(self):
         """Get the maximum resolution."""
         return max(
@@ -117,7 +124,6 @@ class Resolution:
             ]
             if r is not None
         )
-
 
 
 class Catchment:
@@ -132,7 +138,7 @@ class Catchment:
         transform=None,
         out_var_name=None,
         do_shift=False,
-        resolutions: Resolution = Resolution(),
+        resolutions: Resolution = None,
         upscale=False,
         latlon=True,
     ):
@@ -148,7 +154,7 @@ class Catchment:
         self.gauge_lon = None
         self.ftype = ftype
         self.catchment_mask = None
-        self.resolutions = resolutions
+        self.resolutions = resolutions if resolutions is not None else Resolution()
         self.do_upscale = upscale
         self.out_var_name = (
             out_var_name if out_var_name is not None else f"{var_name}.nc"
@@ -430,7 +436,9 @@ class Catchment:
         raise_on_sanity_check=True,
     ):
         """Delineate the basin for a given lat and lon."""
-        logger.info(f"Delineating basin for gauge coordinates {gauge_coords} and reference catchment area {ref_catchment_area} km2.")
+        logger.info(
+            f"Delineating basin for gauge coordinates {gauge_coords} and reference catchment area {ref_catchment_area} km2."
+        )
         gauge_coords = (gauge_coords[0], gauge_coords[1])
         # Target area in km2 we want to match (can be adjusted/replaced by caller later)
 
@@ -846,8 +854,12 @@ class Catchment:
             return None
         lon = self.ds.lon.data
         lat = self.ds.lat.data
-        if self.resolutions.l1_resolution is not None and input_res != self.resolutions.l1_resolution and self.do_upscale:
-            input_res = round(abs(lon[1] - lon[0]), 9)
+        input_res = round(abs(lon[1] - lon[0]), 9)
+        if (
+            self.resolutions.l1_resolution is not None
+            and input_res != self.resolutions.l1_resolution
+            and self.do_upscale
+        ):
             logger.info(
                 f"Creating lon and lat arrays from l1_resolution {self.resolutions.l1_resolution}"
             )
@@ -1230,6 +1242,7 @@ class Catchment:
         logger.info(f"lat_slice: {lat_slice_idx}, lon_slice: {lon_slice_idx}")
         return lat_slice_idx, lon_slice_idx
 
+
 def merge_catchment(path1, path2, out_path):
     """Merge the rolled and non-rolled file."""
     # read the rolled and non-rolled files
@@ -1307,7 +1320,7 @@ def create_catchment(  # noqa: PLR0913
     gauge_coords=None,
     coordinate_slices=None,
     mask_file=None,
-    resolutions: Resolution = Resolution(),
+    resolutions: Resolution = None,
     frame=1,
     upscale=False,
     latlon=True,
@@ -1321,7 +1334,8 @@ def create_catchment(  # noqa: PLR0913
     logger.info(
         f"Creating catchment file for {var_name} using {var} and {ftype} from {input_file}"
     )
-
+    if resolutions is None:
+        resolutions = Resolution()
     if var not in {"fdir", "dem"}:
         with ErrorLogger(logger):
             msg = f"Unexpected value for var={var}, must be 'fdir' or 'dem'"

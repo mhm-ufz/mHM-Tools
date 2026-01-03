@@ -3,10 +3,10 @@
 import logging
 from pathlib import Path
 
-from mhm_tools.pre.catchment import Resolution
 import numpy as np
 
 from mhm_tools.common.cli_utils import get_available_mem_in_unit
+from mhm_tools.pre.catchment import Resolution
 
 from ..pre import create_catchment
 
@@ -224,10 +224,12 @@ def run(args):
         mask_file = str(Path(args.output_path) / Path(args.mask_file))
     else:
         mask_file = args.mask_file
-    coarse_resolutions = Resolution(l1_resolution=args.l1_resolution,
+    coarse_resolutions = Resolution(
+        l1_resolution=args.l1_resolution,
         l11_resolution=args.l11_resolution,
         l2_resolution=args.l2_resolution,
-        l2_file=args.meteo_file)
+        l2_file=args.meteo_file,
+    )
     create_catchment(
         input_file=args.input_file,
         output_path=args.output_path,

@@ -30,7 +30,11 @@ def add_args(parser):
         "-o", "--output_file", required=True, help="The name of the output file."
     )
     parser.add_argument(
-        "-p", "--preserve_folders", required=False,  action="store_true" , help="Preserve the top level folder structure. Recusive merge inside."
+        "-p",
+        "--preserve_folders",
+        required=False,
+        action="store_true",
+        help="Preserve the top level folder structure. Recusive merge inside.",
     )
     parser.add_argument("--n_cpus", required=False, default=1, help="Number of CPUs.")
 
@@ -43,5 +47,5 @@ def run(args):
         input_file_part=args.input_name,
         output=output,
         n_cpus=int(args.n_cpus),
-        preserve_folders=args.preserve_folders
+        preserve_folders=args.preserve_folders,
     )

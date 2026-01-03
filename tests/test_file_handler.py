@@ -55,9 +55,7 @@ class TestCreateHeader(unittest.TestCase, BaseDatasetMixin):
         with tempfile.TemporaryDirectory() as td:
             expected_path = Path(td) / "header.txt"
             self.assertFalse(expected_path.is_file())
-            header_dict = fh.create_header(
-                ds, output_path=Path(td), no_data_value=2245
-            )
+            header_dict = fh.create_header(ds, output_path=Path(td), no_data_value=2245)
             self.assertTrue(expected_path.is_file())
             self.assertEqual(header_dict["ncols"], ds.sizes["lon"])
             self.assertEqual(header_dict["nrows"], ds.sizes["lat"])
