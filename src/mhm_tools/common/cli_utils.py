@@ -79,8 +79,8 @@ def get_coords_from_mask(mask, mask_key=None):
         lat_min_target_grid = lat.min()
         lat_max_target_grid = lat.max()
 
-        # if bounds are avaiable use them: 
-        # try to get it from coordinate bounds 
+        # if bounds are avaiable use them:
+        # try to get it from coordinate bounds
         if "bounds" in lon.attrs and "bounds" in lat.attrs:
             lon_bounds_key = lon.attrs["bounds"]
             lon_bounds = mask_ds[lon_bounds_key]

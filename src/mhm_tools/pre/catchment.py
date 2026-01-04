@@ -77,7 +77,12 @@ class Resolution:
     """Class to hold resolution information."""
 
     def __init__(
-        self, l1_resolution=None, l11_resolution=None, l2_resolution=None, l2_file=None, l0_resolution=None
+        self,
+        l1_resolution=None,
+        l11_resolution=None,
+        l2_resolution=None,
+        l2_file=None,
+        l0_resolution=None,
     ):
         """Initialize the Resolution class."""
         self.l0_resolution = l0_resolution
@@ -112,7 +117,6 @@ class Resolution:
                         msg = f"Unsupported file format for l2_file: {self.l2_file.suffix}"
                         raise ValueError(msg)
 
-                    
         self.l11_resolution = (
             self.l11_resolution
             if self.l11_resolution is not None
@@ -150,7 +154,7 @@ class Catchment:
         resolutions: Resolution = None,
         upscale=False,
         latlon=True,
-        l0_presision: Optional[int] = None,
+        l0_presision: int = 9,
     ):
         self.flwdir = None
         self.basin = None
@@ -165,7 +169,9 @@ class Catchment:
         self.ftype = ftype
         self.catchment_mask = None
         self.resolutions = resolutions if resolutions is not None else Resolution()
-        self.resolutions.l0_resolution = round(abs(ds.lon.data[1] - ds.lon.data[0]), l0_presision:=9)
+        self.resolutions.l0_resolution = round(
+            abs(ds.lon.data[1] - ds.lon.data[0]), l0_presision
+        )
         self.do_upscale = upscale
         self.out_var_name = (
             out_var_name if out_var_name is not None else f"{var_name}.nc"
@@ -863,7 +869,7 @@ class Catchment:
         lon = self.ds.lon.values
         lat = self.ds.lat.values
         tol = self.resolutions.l0_resolution / 2 + 1e-9
-        
+
         # get lower and upper edges of mask lon/lat
         lon_bounds = generate_bounds(
             xr.DataArray(lon, dims=["lon"], coords={"lon": lon})
@@ -891,7 +897,11 @@ class Catchment:
             upper_vals = upper_edges[upper_edges >= upper]
             lower_target = lower_vals.max() if lower_vals.size else lower_edges.min()
             upper_target = upper_vals.min() if upper_vals.size else upper_edges.max()
-            logger.debug('_bound_to_grid: "values" min: %.6f, max: %.6f', lower_target, upper_target)
+            logger.debug(
+                '_bound_to_grid: "values" min: %.6f, max: %.6f',
+                lower_target,
+                upper_target,
+            )
             return lower_target, upper_target
 
         l2_lon_min, l2_lon_max = _bound_to_grid(l2_lon, cur_lon_min, cur_lon_max)
@@ -899,13 +909,11 @@ class Catchment:
 
         def _idx_for(coordinate_values, target_values, name):
             asc_factor = 1 if coordinate_values[1] > coordinate_values[0] else -1
-            target = (
-                target_values + self.resolutions.l0_resolution / 2 * asc_factor
-                if "min" in name
-                else target_values + self.resolutions.l0_resolution / 2 * asc_factor
-            )
+            target = target_values + self.resolutions.l0_resolution / 2 * asc_factor
             idx = int(np.argmin(np.abs(coordinate_values - target)))
-            logger.debug(f"_idx_for: {name} target: {target}, L0 coord: {coordinate_values[idx]}, idx: {idx}")
+            logger.debug(
+                f"_idx_for: {name} target: {target}, L0 coord: {coordinate_values[idx]}, idx: {idx}"
+            )
             if not np.isclose(coordinate_values[idx], target, atol=tol):
                 logger.warning(
                     f"L2 {name} bound {target} not aligned with L0 grid; using {coordinate_values[idx]}"
@@ -916,7 +924,6 @@ class Catchment:
         lon_max_idx = _idx_for(lon, l2_lon_max, "lon-max")
         lat_min_idx = _idx_for(lat, l2_lat_min, "lat-min")
         lat_max_idx = _idx_for(lat, l2_lat_max, "lat-max")
-
 
         min_col = min(lon_min_idx, lon_max_idx)
         max_col = max(lon_min_idx, lon_max_idx)
@@ -1296,15 +1303,16 @@ class Catchment:
             f"L0 initial window (rows, cols): [{min_row}:{max_row}], [{min_col}:{max_col}]"
         )
 
-
         factor = self.get_upscaling_factor(max_resolution=True)
         if factor > 1:
             logger.info(
                 f"Regridding to fit coarse grid with res {max([r for r in [self.resolutions.l1_resolution, self.resolutions.l11_resolution, self.resolutions.l2_resolution] if r is not None ])} (factor {factor})"
             )
-            
+
             if self.resolutions.l2_file is not None:
-                logger.debug(f"Aligning to L2 grid from file {self.resolutions.l2_file}")
+                logger.debug(
+                    f"Aligning to L2 grid from file {self.resolutions.l2_file}"
+                )
                 min_row, max_row, min_col, max_col = self.align_bounds_to_l2(
                     min_row, max_row, min_col, max_col
                 )
