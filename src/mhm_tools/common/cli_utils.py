@@ -79,12 +79,40 @@ def get_coords_from_mask(mask, mask_key=None):
         lat_min_target_grid = lat.min()
         lat_max_target_grid = lat.max()
 
-        # change values from center cell to corner values
-        resolution = lon.values[1] - lon.values[0]
-        lon_min_target_grid -= resolution / 2
-        lon_max_target_grid += resolution / 2
-        lat_min_target_grid -= resolution / 2
-        lat_max_target_grid += resolution / 2
+        # if bounds are avaiable use them: 
+        # try to get it from coordinate bounds 
+        if "bounds" in lon.attrs and "bounds" in lat.attrs:
+            lon_bounds_key = lon.attrs["bounds"]
+            lon_bounds = mask_ds[lon_bounds_key]
+            lat_bounds_key = lat.attrs["bounds"]
+            lat_bounds = mask_ds[lat_bounds_key]
+            resolution = float(lon_bounds.values[0][1] - lon_bounds.values[0][0]) / 2
+            lon_min_target_grid = lon_bounds.values[0][0]
+            lon_max_target_grid = lon_bounds.values[-1][1]
+            lat_min_target_grid = lat_bounds.values[0][0]
+            lat_max_target_grid = lat_bounds.values[-1][1]
+        else:
+            # change values from center cell to corner values
+            try:
+                resolution = float(lon.values[1] - lon.values[0])
+                lon_min_target_grid -= resolution / 2
+                lon_max_target_grid += resolution / 2
+                lat_min_target_grid -= resolution / 2
+                lat_max_target_grid += resolution / 2
+            except Exception as e:
+                if mask_key == "mask_l2":
+                    # switch to different mask key for min max calculation
+                    mask_key = "mask"
+                    mask_da_fine = mask_ds[mask_key]
+                    lon_fine = mask_da_fine[lon_key]
+                    lat_fine = mask_da_fine[lat_key]
+                    resolution = float(lon_fine.values[1] - lon_fine.values[0])
+                    lon_min_target_grid = lon_fine.min() - resolution / 2
+                    lon_max_target_grid = lon_fine.max() + resolution / 2
+                    lat_min_target_grid = lat_fine.min() - resolution / 2
+                    lat_max_target_grid = lat_fine.max() + resolution / 2
+                else:
+                    raise e
 
         logger.debug(
             f"Read coord from mask file: lat ({lat_min_target_grid} to {lat_max_target_grid}) {(lon_max_target_grid-lat_min_target_grid)/resolution} cells and lon ({lon_min_target_grid} to {lon_max_target_grid}) {(lon_max_target_grid-lat_min_target_grid)/resolution} cells"
