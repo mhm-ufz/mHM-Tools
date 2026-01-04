@@ -104,8 +104,10 @@ def get_coords_from_mask(mask, mask_key=None):
                     # switch to different mask key for min max calculation
                     mask_key = "mask"
                     mask_da_fine = mask_ds[mask_key]
-                    lon_fine = mask_da_fine[lon_key]
-                    lat_fine = mask_da_fine[lat_key]
+                    lon_key_fine = get_coord_key(mask_da_fine, lon=True)
+                    lat_key_fine = get_coord_key(mask_da_fine, lat=True)
+                    lon_fine = mask_da_fine[lon_key_fine]
+                    lat_fine = mask_da_fine[lat_key_fine]
                     resolution = float(lon_fine.values[1] - lon_fine.values[0])
                     lon_min_target_grid = lon_fine.min() - resolution / 2
                     lon_max_target_grid = lon_fine.max() + resolution / 2
