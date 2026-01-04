@@ -99,13 +99,20 @@ class Resolution:
                 with ErrorLogger(logger):
                     msg = f"L2 file {self.l2_file} not found."
                     raise FileNotFoundError(msg)
-        if self.l2_file is not None and self.l2_resolution is None:
-            with get_xarray_ds_from_file(self.l2_file) as ds:
-                lon = ds.lon.values
-                self.l2_resolution = round(abs(lon[1] - lon[0]), 9)
-                logger.info(
-                    f"Derived l2_resolution {self.l2_resolution} from {self.l2_file}"
-                )
+            if self.l2_resolution is None:
+                if self.l2_file.suffix == ".nc":
+                    with get_xarray_ds_from_file(self.l2_file) as ds:
+                        lon = ds.lon.values
+                        self.l2_resolution = round(abs(lon[1] - lon[0]), 9)
+                        logger.info(
+                            f"Derived l2_resolution {self.l2_resolution} from {self.l2_file}"
+                        )
+                else:
+                    with ErrorLogger(logger):
+                        msg = f"Unsupported file format for l2_file: {self.l2_file.suffix}"
+                        raise ValueError(msg)
+
+                    
         self.l11_resolution = (
             self.l11_resolution
             if self.l11_resolution is not None
