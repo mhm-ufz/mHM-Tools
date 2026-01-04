@@ -1038,7 +1038,7 @@ class Catchment:
         # centers are midpoints of each coarse cell
         n = np.arange(n_blocks)
         centers = left_edge + (n + 0.5) * dx_coarse
-        if not ascending:
+        if not ascending and centers[0] < centers[-1]:
             centers = centers[::-1]
         return centers
 
@@ -1081,6 +1081,7 @@ class Catchment:
 
         asc_lon = lon_f[0] < lon_f[-1]
         asc_lat = lat_f[0] < lat_f[-1]
+        logger.debug(f"asc_lon: {asc_lon}, asc_lat: {asc_lat}")
 
         n_lon_blocks = out.sizes.get(lon_name, 1)
         n_lat_blocks = out.sizes.get(lat_name, 1)
@@ -1104,6 +1105,11 @@ class Catchment:
         lat_coarse = self._coarse_centers_from_edges(
             lat_edges_win, ky, n_lat_blocks, asc_lat
         )
+        asc_lat_coarse = lat_coarse[0] < lat_coarse[-1]
+        if asc_lat != asc_lat_coarse:
+            logger.warning(
+                "Coarse lat coordinate ascending order does not match fine grid; check calculations."
+            )
 
         out = out.assign_coords({lon_name: lon_coarse, lat_name: lat_coarse})
         out.name = "mask_L2"
