@@ -390,11 +390,14 @@ def crop_file(  # noqa: PLR0912
     output_var=None,
     no_cropping=False,
     lat_order="decreasing",
+    output_suffix=None,
 ):
     """Crops one file by lat and lon slice and may mask it with the mask dataarray."""
     logger.info(f"Cropping the file {input_file}")
     output_file = output_path / input_file.relative_to(input_path)
     output_file.parent.mkdir(parents=True, exist_ok=True)
+    if output_suffix is not None:
+        output_file = output_file.with_suffix(output_suffix)
     latlon_files = LatlonFiles()
     if output_file.is_file() and not overwrite:
         logger.info("Target file already exists. Cropping is skipped.")

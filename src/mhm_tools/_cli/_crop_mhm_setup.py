@@ -167,7 +167,12 @@ def add_args(parser):
             """Direction of the latitude coordinate. Will be forced if input has coordinates."""
         ),
     )
-
+    parser.add_argument(
+        "--output_suffix",
+        required=False,
+        default=None,
+        help=("""Suffix added to output file names leading to file type conversion."""),
+    )
 
 def run(args):
     """Cut out a domain setup out of an existing mHM setup..
@@ -220,4 +225,5 @@ def run(args):
         output_var=args.output_var,
         no_cropping=args.no_cropping,
         lat_order=args.lat_order,
+        output_suffix=args.output_suffix,
     )
