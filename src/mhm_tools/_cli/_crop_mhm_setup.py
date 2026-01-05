@@ -174,6 +174,7 @@ def add_args(parser):
         help=("""Suffix added to output file names leading to file type conversion."""),
     )
 
+
 def run(args):
     """Cut out a domain setup out of an existing mHM setup..
 

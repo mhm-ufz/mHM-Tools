@@ -522,7 +522,9 @@ class Catchment:
                 return
 
         self.catchment_mask = self.basin > 0
-        logger.debug(f"mask statistics: min={self.basin.min()}, max={self.basin.max()}, all true? {np.all(self.catchment_mask)}")
+        logger.debug(
+            f"mask statistics: min={self.basin.min()}, max={self.basin.max()}, all true? {np.all(self.catchment_mask)}"
+        )
         # logging and sanity checks
         mean_cell_area = (
             float(np.mean(self.cell_area)) if self.cell_area is not None else np.nan
@@ -1162,13 +1164,14 @@ class Catchment:
             logger.debug(f"lat_coarse: {out[lat_name].values}")
         return out
 
-
     def write_mask_file(self, ds, mask_file):
         """Write basin mask to specified path."""
         if mask_file is not None:
             logger.info("Writing mask file")
             # name the variable mask
-            mask = np.where(ds.basin > 0, 1, 0) # if self.catchment_mask is None else self.catchment_mask
+            mask = np.where(
+                ds.basin > 0, 1, 0
+            )  # if self.catchment_mask is None else self.catchment_mask
             mask_file = Path(mask_file)
             mask_da = xr.DataArray(
                 mask, coords={"lat": ds.lat, "lon": ds.lon}, dims=["lat", "lon"]
@@ -1189,7 +1192,9 @@ class Catchment:
                     "axis": "X",
                 }
             )
-            logger.debug(f'Created mask dataarray with shape {mask_da.shape} and stats min {mask_da.min().item()}, max {mask_da.max().item()}')
+            logger.debug(
+                f"Created mask dataarray with shape {mask_da.shape} and stats min {mask_da.min().item()}, max {mask_da.max().item()}"
+            )
             mask_ds = xr.Dataset({"land_mask": mask_da, "mask": mask_da})
             mask_upscaled = None
             if self.do_upscale:
