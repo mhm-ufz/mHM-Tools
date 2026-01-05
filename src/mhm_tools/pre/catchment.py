@@ -522,6 +522,7 @@ class Catchment:
                 return
 
         self.catchment_mask = self.basin > 0
+        logger.debug(f"mask statistics: min={self.basin.min()}, max={self.basin.max()}, all true? {np.all(self.catchment_mask)}")
         # logging and sanity checks
         mean_cell_area = (
             float(np.mean(self.cell_area)) if self.cell_area is not None else np.nan
@@ -1090,7 +1091,15 @@ class Catchment:
         if lat_name in da.dims:
             coarsen_map[lat_name] = ky
 
-        cond = (~xr.apply_ufunc(np.isnan, da)) | (da == 0)
+        # Treat only explicit mask=1 (or True) as land; ignore fill values and NaNs.
+        if da.dtype == bool:
+            cond = da
+        else:
+            fillv = da.attrs.get("_FillValue", da.encoding.get("_FillValue"))
+            da_clean = da
+            if fillv is not None:
+                da_clean = da.where(da != fillv)
+            cond = da_clean == 1
         out = cond.coarsen(coarsen_map, boundary="trim").any().astype("int8")
 
         # 2) compute correct coarse coordinates from fine edges
@@ -1153,76 +1162,13 @@ class Catchment:
             logger.debug(f"lat_coarse: {out[lat_name].values}")
         return out
 
-    def upscale_mask(
-        self, da: xr.DataArray, factor=None, lon_name="lon", lat_name="lat"
-    ) -> xr.DataArray:
-        """
-        Upscale a 2D/3D mask-like field on a regular lon/lat grid by an integer factor.
-
-        L2 cell = 1  if any underlying L0 cell is (not NaN) OR (== 0)
-                = 0  otherwise
-
-        Parameters
-        ----------
-        da : xr.DataArray
-            Input with dims including lon_name and lat_name (time/other dims allowed).
-        factor : int | tuple[int,int]
-            Integer multiple(s): k or (kx, ky). E.g. 5 or (5, 3).
-        lon_name, lat_name : str
-            Coordinate names.
-
-        Returns
-        -------
-        xr.DataArray
-            Coarsened mask (0/1), aligned to the top-left of each kx x ky block.
-        """
-        logger.info("Create upscaled mask")
-        if factor is None:
-            factor = self.get_upscaling_factor(max_resolution=True)
-        if isinstance(factor, int):
-            kx = ky = int(factor)
-        else:
-            kx, ky = map(int, factor)
-
-        if kx < 1 or ky < 1:
-            msg = "factor must be >= 1"
-            with ErrorLogger(logger):
-                raise ValueError(msg)
-
-        # Condition: non-masked (not NaN) OR equals 0
-        cond = (~xr.apply_ufunc(np.isnan, da)) | (da == 0)
-
-        # Coarsen over lat/lon windows and take logical OR (any)
-        coarsen_map = {
-            dim: size
-            for dim, size in ((lon_name, kx), (lat_name, ky))
-            if dim in cond.dims
-        }
-        out = cond.coarsen(coarsen_map, boundary="trim").any().astype("int8")
-
-        # Make coordinates every k-th point so grid aligns with the upscaled blocks
-        if lon_name in out.dims:
-            out = out.assign_coords(
-                {lon_name: da[lon_name].isel({lon_name: slice(0, None, kx)})}
-            )
-        if lat_name in out.dims:
-            out = out.assign_coords(
-                {lat_name: da[lat_name].isel({lat_name: slice(0, None, ky)})}
-            )
-
-        out.name = da.name or "mask_L2"
-        out.attrs.update(da.attrs)
-        logger.info(
-            f"Resolution of upscaled mask: {round(abs(out.lon.data[1] - out.lon.data[0]), 6)}"
-        )
-        return out
 
     def write_mask_file(self, ds, mask_file):
         """Write basin mask to specified path."""
         if mask_file is not None:
             logger.info("Writing mask file")
             # name the variable mask
-            mask = ds.basin > 0
+            mask = np.where(ds.basin > 0, 1, 0) # if self.catchment_mask is None else self.catchment_mask
             mask_file = Path(mask_file)
             mask_da = xr.DataArray(
                 mask, coords={"lat": ds.lat, "lon": ds.lon}, dims=["lat", "lon"]
@@ -1243,6 +1189,7 @@ class Catchment:
                     "axis": "X",
                 }
             )
+            logger.debug(f'Created mask dataarray with shape {mask_da.shape} and stats min {mask_da.min().item()}, max {mask_da.max().item()}')
             mask_ds = xr.Dataset({"land_mask": mask_da, "mask": mask_da})
             mask_upscaled = None
             if self.do_upscale:
