@@ -785,16 +785,16 @@ class Catchment:
                     coords={"lat": ds.lat, "lon": ds.lon},
                     dims=["lat", "lon"],
                 )
-                id_ds = id_da.to_dataset(name="data")
+                id_ds = id_da.to_dataset(name="idgauges")
                 id_ds = write_gauge_id(
                     ds=id_ds,
                     id=gauge_id,
                     lat=self.gauge_lat,
                     lon=self.gauge_lon,
-                    data_var="data",
+                    data_var="idgauges",
                 )
                 write_xarray_to_file(id_ds, out_path / "idgauges.nc", "idgauges")
-                write_xarray_to_file(id_ds, out_path / "idgauges.asc", "data")
+                write_xarray_to_file(id_ds, out_path / "idgauges.asc", "idgauges")
 
     def write_single_variable_file(
         self, data_var, var_name, out_path, cellsize, format
