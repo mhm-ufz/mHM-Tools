@@ -564,6 +564,7 @@ def crop_mhm_setup(  # noqa: PLR0913
     output_var=None,
     no_cropping=False,
     lat_order="decreasing",
+    output_suffix=None,
 ):
     """Cut out an existing mhm domain setup using a mask file."""
     # check if the input is correct
@@ -595,6 +596,7 @@ def crop_mhm_setup(  # noqa: PLR0913
             output_var=output_var,
             no_cropping=no_cropping,
             lat_order=lat_order,
+            output_suffix=output_suffix,
         )
         for f in files
     )
