@@ -535,6 +535,10 @@ def crop_file(  # noqa: PLR0912
         logger.info("Changing datatype to float")
         for var_name in ds_cropped.data_vars:
             ds_cropped[var_name] = ds_cropped[var_name].astype(float)
+        # if ds_cropped is three dimensional convert output file to netcdf (if it was asci) and write warning
+        if "time" in ds_cropped.dims and ds_cropped.sizes["time"] > 1 and output_file.suffix == ".asc":
+            output_file = output_file.with_suffix(".nc")
+            logger.warning("Converting output file to netcdf because it is three dimensional.")
         write_xarray_to_file(
             ds_cropped, output_file  # , available_mem_gib=available_mem_gib
         )
