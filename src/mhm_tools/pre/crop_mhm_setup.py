@@ -527,7 +527,8 @@ def crop_file(  # noqa: PLR0912
                 f"Could not rename data_var to specified output variable name {output_var}"
             )
     # if ds_cropped is three dimensional convert output file to netcdf (if it was asci) and write warning
-    if "time" in ds_cropped.dims and ds_cropped.sizes["time"] > 1 and output_file.suffix == ".asc":
+    logger.debug(f'Writing cropped file with dims {ds_cropped.dims} to {output_file}')
+    if (("time" in ds_cropped.dims and ds_cropped.sizes["time"] > 1) or ("month_of_year" in ds_cropped.dims and ds_cropped.sizes["month_of_year"] > 1)) and output_file.suffix == ".asc":
         output_file = output_file.with_suffix(".nc")
         logger.warning("Converting output file to netcdf because it is three dimensional.")
     try:
