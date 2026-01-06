@@ -793,7 +793,7 @@ class Catchment:
                     lon=self.gauge_lon,
                     data_var="data",
                 )
-                write_xarray_to_file(id_ds, out_path / "idgauges.nc", "data")
+                write_xarray_to_file(id_ds, out_path / "idgauges.nc", "idgauges")
                 write_xarray_to_file(id_ds, out_path / "idgauges.asc", "data")
 
     def write_single_variable_file(
