@@ -546,9 +546,9 @@ def crop_file(  # noqa: PLR0912
 
     logger.info(f"Written to {output_file}")
     if force_header_creation and not (output_file.parent / "header.txt").is_file():
-        if ds[lon_key].sizes[0] > 1:
+        if len(ds[lon_key]) > 1:
             file_res = abs(ds[lon_key].data[1] - ds[lon_key].data[0])
-        elif ds[lat_key].sizes[0] > 1:
+        elif len(ds[lat_key]) > 1:
             file_res = abs(ds[lat_key].data[1] - ds[lat_key].data[0])
         create_header(ds_cropped, output_path=output_file.parent, cellsize=file_res)
     return latlon_files
