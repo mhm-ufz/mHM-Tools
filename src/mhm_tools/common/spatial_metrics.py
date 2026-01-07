@@ -2,11 +2,12 @@
 
 import logging
 
-# import required modules
-from mhm_tools.common.utils import pretty_print_df
 import numpy as np
 import pandas as pd
 from scipy.stats import spearmanr
+
+# import required modules
+from mhm_tools.common.utils import pretty_print_df
 
 logger = logging.getLogger(__name__)
 
@@ -130,4 +131,3 @@ def create_results_csv(map1, map2, ds1_name, ds2_name, out_path):
     create_csv_from_dict(results_dict=results_dict, out_path=out_path)
     df = pd.DataFrame(results_dict, index=[0])
     pretty_print_df(df)
-    

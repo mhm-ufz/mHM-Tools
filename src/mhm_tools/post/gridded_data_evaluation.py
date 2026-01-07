@@ -640,7 +640,13 @@ def plot_map(
 
 @log_errors(raise_exceptions=True)
 def plot_map_bias_only(
-    rel_mean, ref_clim, input_clim, input_name, ref_name, output_path, overlapping_years=None
+    rel_mean,
+    ref_clim,
+    input_clim,
+    input_name,
+    ref_name,
+    output_path,
+    overlapping_years=None,
 ):
     """Create a plot with four subplots showing relative mean, standard deviation, the spearman correlation of the climatologies and the seasonal mean of both datasets."""
     rel_mean = np.where(rel_mean == np.inf, np.nan, rel_mean)
@@ -923,19 +929,18 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913
             logger.info(input_ts.time)
             logger.info(ref_ts.time)
             raise ve
-    else:
-        if not bias_only:
-            logger.info("Calculating spearman correlation from seasonalities.")
-            spearman, spearman_pval = spearman_spatial_joblib(
-                input["clim"], ref["clim"], spearman_correlation, ncpus
-            )
-            create_results_csv(
-                input["clim"].data,
-                ref["clim"].data,
-                input_name,
-                ref_name,
-                output_path / output_name,
-            )
+    elif not bias_only:
+        logger.info("Calculating spearman correlation from seasonalities.")
+        spearman, spearman_pval = spearman_spatial_joblib(
+            input["clim"], ref["clim"], spearman_correlation, ncpus
+        )
+        create_results_csv(
+            input["clim"].data,
+            ref["clim"].data,
+            input_name,
+            ref_name,
+            output_path / output_name,
+        )
 
     rel_mean = input["mean"].values / ref["mean"].values
     rel_mean = xr.DataArray(
@@ -1037,7 +1042,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913
                 input_name=input_name,
                 ref_name=ref_name,
                 output_path=output_path,
-                overlapping_years=[time_slice.start.year, time_slice.stop.year]
+                overlapping_years=[time_slice.start.year, time_slice.stop.year],
             )
         else:
             plot_map_bias_only(
@@ -1047,7 +1052,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913
                 input_name=input_name,
                 ref_name=ref_name,
                 output_path=output_path,
-                overlapping_years=[time_slice.start.year, time_slice.stop.year]
+                overlapping_years=[time_slice.start.year, time_slice.stop.year],
             )
     return file_name
 

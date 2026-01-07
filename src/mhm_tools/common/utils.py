@@ -1,5 +1,14 @@
 """Utility helpers."""
+
+import logging
+
 import pandas as pd
+
+logger = logging.getLogger(__name__)
+
+
+
+
 
 def dict_to_multiline_string(d: dict, spacing: int = 12) -> str:
     r"""
@@ -14,6 +23,7 @@ def dict_to_multiline_string(d: dict, spacing: int = 12) -> str:
         lines.append(f"{k!s:<{spacing}}{v}")
     return "\n".join(lines)
 
+
 def pretty_print_df(df: pd.DataFrame, max_col_width: int = 30) -> None:
     """Pretty-print a DataFrame as an ASCII table with simple truncation.
 
@@ -21,7 +31,7 @@ def pretty_print_df(df: pd.DataFrame, max_col_width: int = 30) -> None:
     max_col_width are truncated with an ellipsis.
     """
     if df.empty:
-        print("(empty)")
+        logger.info("There are no results to display.")
         return
 
     def is_numeric(col: pd.Series) -> bool:
@@ -64,15 +74,18 @@ def pretty_print_df(df: pd.DataFrame, max_col_width: int = 30) -> None:
         return "+" + "+".join("-" * (w + 2) for w in widths) + "+"
 
     # Header
-    print(sep())
+    out_string = "\n"
+    out_string += sep() + "\n"
     header_cells = [" " + fmt_cell(h, w, False) + " " for h, w in zip(headers, widths)]
-    print("|" + "|".join(header_cells) + "|")
-    print(sep())
+    out_string += "|" + "|".join(header_cells) + "|\n"
+    out_string += sep() + "\n"
 
     # Rows
     for _, row in df.iterrows():
         cells = []
         for h, w, right in zip(headers, widths, aligns_right):
             cells.append(" " + fmt_cell(row[h], w, right) + " ")
-        print("|" + "|".join(cells) + "|")
-    print(sep())
+        out_string += "|" + "|".join(cells) + "|\n"
+    out_string += sep() + "\n"
+
+    logger.info(out_string)
