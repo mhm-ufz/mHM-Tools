@@ -902,7 +902,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913
         else:
             input_ts, ref_ts = resample_to_coarser_calendar(input_ts, ref_ts)
 
-        input_ts, ref_ts = crop_data_to_overlapping_time(input_ts, ref_ts)
+        input_ts, ref_ts, time_slice = crop_data_to_overlapping_time(input_ts, ref_ts)
         logger.info(
             f"Creating data from timeseries with shape {input_ts.shape} and {ref_ts.shape}"
         )
@@ -911,31 +911,31 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913
                 spearman, spearman_pval = spearman_spatial_joblib(
                     input_ts, ref_ts, spearman_correlation, ncpus
                 )
-            create_results_csv(
-                input_ts.data,
-                ref_ts.data,
-                input_name,
-                ref_name,
-                output_path / output_name,
-            )
+                create_results_csv(
+                    input_ts.data,
+                    ref_ts.data,
+                    input_name,
+                    ref_name,
+                    output_path / output_name,
+                )
         except ValueError as ve:
             logger.error("Input and ref do not have the same temporal extent.")
             logger.info(input_ts.time)
             logger.info(ref_ts.time)
             raise ve
     else:
-        logger.info("Calculating spearman correlation from seasonalities.")
         if not bias_only:
+            logger.info("Calculating spearman correlation from seasonalities.")
             spearman, spearman_pval = spearman_spatial_joblib(
                 input["clim"], ref["clim"], spearman_correlation, ncpus
             )
-        create_results_csv(
-            input["clim"].data,
-            ref["clim"].data,
-            input_name,
-            ref_name,
-            output_path / output_name,
-        )
+            create_results_csv(
+                input["clim"].data,
+                ref["clim"].data,
+                input_name,
+                ref_name,
+                output_path / output_name,
+            )
 
     rel_mean = input["mean"].values / ref["mean"].values
     rel_mean = xr.DataArray(
