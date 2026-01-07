@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 ######
 
 
-def create_header(ds, output_path=None, no_data_value=None) -> dict:
+def create_header(ds, output_path=None, no_data_value=None, cellsize=None) -> dict:
     """Write a header file from a dataset.
 
     Takes an xarray Dataset and writes the ASCII header needed for GIS tools.
@@ -41,7 +41,15 @@ def create_header(ds, output_path=None, no_data_value=None) -> dict:
     lon_key = get_coord_key(ds, lon=True)
     x = ds[lon_key].data
     y = ds[lat_key].data
-    cellsize = abs(x[1] - x[0])
+    if cellsize is None:
+        if len(x) > 1:
+            cellsize = abs(x[1] - x[0])
+        elif len(y) > 1:
+            cellsize = abs(y[1] - y[0])
+        else:
+            msg = "Cannot determine cellsize from dataset with only one x and one y value. Please provide cellsize as an argument."
+            with ErrorLogger(logger):
+                raise ValueError(msg)
     xllcorner = np.nanmin(x) - 0.5 * cellsize
     yllcorner = np.nanmin(y) - 0.5 * cellsize
 
