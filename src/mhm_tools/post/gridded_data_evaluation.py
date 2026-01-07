@@ -629,8 +629,8 @@ def plot_map(
         for spine in ax.spines.values():
             spine.set_linewidth(0.25)
     plt.tight_layout()
-
-    plt.savefig(output_path / f"et_map_{input_name}_{ref_name}.png", dpi=800)
+    file_name = f"et_map_{input_name}_{ref_name}.png".replace(" ", "_")
+    plt.savefig(output_path / file_name, dpi=800)
     logger.info("created et_map")
 
 
@@ -884,7 +884,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913
     if len(ref["lat"].data) < 1 or len(ref["lon"].data) < 1:
         logger.error("Ref dataset has empty coordinate.")
     input, ref = regridd_to_higher_spatial_resolution(input, ref)
-
+    output_name = f"{input_name}-{ref_name}.csv".replace(" ", "_")
     # compare and save statistics
     if direct_comp:
         input_ts, ref_ts = input["time_series"], ref["time_series"]
@@ -910,7 +910,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913
                 ref_ts.data,
                 input_name,
                 ref_name,
-                output_path / f"{input_name}-{ref_name}.csv",
+                output_path / output_name,
             )
         except ValueError as ve:
             logger.error("Input and ref do not have the same temporal extent.")
@@ -928,7 +928,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913
             ref["clim"].data,
             input_name,
             ref_name,
-            output_path / f"{input_name}-{ref_name}.csv",
+            output_path / output_name,
         )
 
     rel_mean = input["mean"].values / ref["mean"].values
@@ -1012,7 +1012,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913
         output[f"{ref_name}_clim"] = ref_clim
     else:
         output["ref_clim"] = ref_clim
-
+    file_name = file_name.replace(" ", "_")
     if bootstrap_index is not None:
         file_name = output_path / f"{file_name}_{bootstrap_index}.nc"
     else:
@@ -1052,6 +1052,7 @@ def get_rel_stat_file(output_path, input_name, ref_name):
         file_name += f"_{input_name}"
     if ref_name is not None:
         file_name += f"_{ref_name}"
+    file_name = file_name.replace(" ", "_")
     return output_path / f"{file_name}.nc"
 
 
@@ -1366,7 +1367,7 @@ def gridded_data_evaluation(
             f"No ref file provided. Only creating a stat file for {input.name}."
         )
         output_name = f"{input.name}_stats.nc" if input.name is not None else "stats.nc"
-
+        output_name = output_name.replace(" ", "_")
         if input_path.is_file():
             # Write file stats to file
             with get_xarray_ds_from_file(
