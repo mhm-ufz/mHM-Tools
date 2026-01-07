@@ -4,6 +4,7 @@ import logging
 from typing import Optional
 
 import numpy as np
+import pandas as pd
 import xarray as xr
 from scipy.stats import spearmanr
 
@@ -216,6 +217,8 @@ def get_overlapping_time_slice(input_ds, ref_ds):
     else:
         with ErrorLogger:
             raise ValueError(only_nan_msg)
+    start = pd.to_datetime(start)
+    end = pd.to_datetime(end)
     return slice(start, end)
 
 

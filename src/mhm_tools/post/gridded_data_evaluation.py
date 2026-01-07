@@ -502,7 +502,7 @@ def crop_data_to_overlapping_time(input_ds, ref_ds):
     # Slice both datasets to that time range
     input_ds = input_ds.sel(time=time_slice)
     ref_ds = ref_ds.sel(time=time_slice)
-    return input_ds, ref_ds
+    return input_ds, ref_ds, time_slice
 
 
 @log_errors(raise_exceptions=True)
@@ -515,6 +515,7 @@ def plot_map(
     input_name,
     ref_name,
     output_path,
+    overlapping_years=None,
 ):
     """Create a 2x2 figure of relative mean, relative std, Spearman correlation, and seasonal means.
 
@@ -526,7 +527,10 @@ def plot_map(
     rel_std = np.where(rel_std == np.inf, np.nan, rel_std)
     fig, axes = plt.subplots(2, 2, figsize=(10.5, 4.68))
     if input_name is not None and ref_name is not None:
-        fig.suptitle(f"Comparision {input_name} with {ref_name}")
+        title = f"Comparision {input_name} with {ref_name}"
+    if overlapping_years is not None and len(overlapping_years) > 1:
+        title += f" for years {overlapping_years[0]}-{overlapping_years[-1]}"
+    fig.suptitle(title, fontweight="normal", fontsize="x-large")
 
     # Set common colormap and normalization limits for mean_et and mean_aet
     mean_diff_1 = max(np.abs(1 - np.nanmin(rel_mean)), np.abs(1 - np.nanmax(rel_mean)))
@@ -636,14 +640,16 @@ def plot_map(
 
 @log_errors(raise_exceptions=True)
 def plot_map_bias_only(
-    rel_mean, ref_clim, input_clim, input_name, ref_name, output_path
+    rel_mean, ref_clim, input_clim, input_name, ref_name, output_path, overlapping_years=None
 ):
     """Create a plot with four subplots showing relative mean, standard deviation, the spearman correlation of the climatologies and the seasonal mean of both datasets."""
     rel_mean = np.where(rel_mean == np.inf, np.nan, rel_mean)
     fig, axes = plt.subplots(2, 1, figsize=(10.5, 4.68))
     if input_name is not None and ref_name is not None:
-        fig.suptitle(f"Comparision {input_name} with {ref_name}")
-
+        title = f"Comparision {input_name} with {ref_name}"
+    if overlapping_years is not None and len(overlapping_years) > 1:
+        title += f" for years {overlapping_years[0]}-{overlapping_years[-1]}"
+    fig.suptitle(title, fontweight="normal", fontsize="x-large")
     # Set common colormap and normalization limits for mean_et and mean_aet
     mean_diff_1 = max(np.abs(1 - np.nanmin(rel_mean)), np.abs(1 - np.nanmax(rel_mean)))
     im0, bounds0, extend0 = plot_single_map(
@@ -1031,6 +1037,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913
                 input_name=input_name,
                 ref_name=ref_name,
                 output_path=output_path,
+                overlapping_years=[time_slice.start.year, time_slice.stop.year]
             )
         else:
             plot_map_bias_only(
@@ -1040,8 +1047,8 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913
                 input_name=input_name,
                 ref_name=ref_name,
                 output_path=output_path,
+                overlapping_years=[time_slice.start.year, time_slice.stop.year]
             )
-
     return file_name
 
 
