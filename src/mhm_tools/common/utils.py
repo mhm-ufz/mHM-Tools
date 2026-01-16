@@ -7,9 +7,6 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 
-
-
-
 def dict_to_multiline_string(d: dict, spacing: int = 12) -> str:
     r"""
     Convert a dictionary into a formatted multiline string.

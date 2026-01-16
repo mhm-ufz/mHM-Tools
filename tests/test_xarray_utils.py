@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import xarray as xr
 
 import mhm_tools.common.xarray_utils as utils
@@ -206,8 +207,8 @@ class TestGetOverlappingTimeSlice(XarrayUtilsBase):
         sl = get_overlapping_time_slice(ds1, ds2)
         print(sl)
         self.assertIsInstance(sl, slice)
-        self.assertEqual(sl.start, "2021-01-03")
-        self.assertEqual(sl.stop, "2021-01-06")
+        self.assertEqual(sl.start, pd.to_datetime("2021-01-03"))
+        self.assertEqual(sl.stop, pd.to_datetime("2021-01-06"))
 
     def test_no_overlap_logs_warning(self):
         t1 = np.array(np.arange("2021-01-01", "2021-01-03", dtype="datetime64[D]"))
