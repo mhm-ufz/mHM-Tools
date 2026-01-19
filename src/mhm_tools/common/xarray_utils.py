@@ -1,18 +1,53 @@
 """Provides basic xarray utils."""
 
 import logging
+from typing import Optional
 
 import numpy as np
+import pandas as pd
 import xarray as xr
+from scipy.stats import spearmanr
 
+from mhm_tools.common.constants import LAT_KEYS, LON_KEYS, TIME_KEYS
 from mhm_tools.common.logger import ErrorLogger
 
 logger = logging.getLogger(__name__)
 
 
-def normalize_lat_lon(ds: xr.Dataset, lat: str, lon: float) -> xr.Dataset:
-    """Normalize names for latitude/longitude."""
-    return ds.rename({lat: "lat", lon: "lon"})
+def normalize_lat_lon(
+    ds: xr.Dataset,
+    lat: Optional[str] = None,
+    lon: Optional[str] = None,
+    raise_exceptions: bool = False,
+) -> xr.Dataset:
+    """
+    Normalize latitude and longitude dimension and coordinate names to 'lat' and 'lon'.
+
+    Handles both dimensions and coordinate variables.
+    """
+    try:
+        rename_dict = {}
+        if lat is None:
+            lat = get_coord_key(ds, lon=True)
+        if lon is None:
+            lon = get_coord_key(ds, lon=True)
+
+        coords_and_dims = list(ds.coords) + list(ds.dims)
+
+        # Rename coordinate variables if needed
+        if lat is not None and "lat" not in coords_and_dims and lat in coords_and_dims:
+            rename_dict[lat] = "lat"
+        if lon is not None and "lon" not in coords_and_dims and lon in coords_and_dims:
+            rename_dict[lon] = "lon"
+
+        return ds.rename(rename_dict)
+    except Exception as e:
+        if raise_exceptions:
+            with ErrorLogger(logger):
+                raise (e)
+        else:
+            logger.warning(f"Exception in normalize lat lon: {e}")
+            return ds
 
 
 def get_coord_key(
@@ -35,13 +70,13 @@ def get_coord_key(
                 return dim
     except AttributeError:
         pass
-    # then select possible keys from the following lists and try them untill a fitting one is found.
+    # then select possible keys from the following lists and try them until a fitting one is found.
     if lat:
-        keys = ["lat", "latitude", "northing", "y", "new_y", "Y", "geo_y"]
+        keys = LAT_KEYS
     elif lon:
-        keys = ["lon", "longitude", "easting", "x", "new_x", "X", "geo_x"]
+        keys = LON_KEYS
     else:
-        keys = ["time", "month_of_year"]
+        keys = TIME_KEYS
     for key in keys:
         if key in ds_dims and len(ds[key].shape) == 1:
             return key
@@ -71,26 +106,46 @@ def get_coord_key(
 
 
 def get_single_data_var(ds):
-    """Get the data var name from da dataset that only contains one data variable."""
-    data_vars = list(ds.data_vars)
-    len_data_vars = len(data_vars)
-    if len_data_vars > 1:
-        for coord in [get_coord_key(ds, lon=True), get_coord_key(ds, lat=True)]:
-            if coord in data_vars: 
-                len_data_vars -= 1
-                data_vars.remove(coord)
-        if len_data_vars > 1:
+    """Get the data var name from a dataset that only contains one data variable."""
+    data_vars = list(ds.data_vars)  # shallow copy is enough; entries are strings
+    if len(data_vars) > 1:
+        # remove coords without mutating while iterating
+        coords = [
+            coord for coord in LAT_KEYS + LON_KEYS + TIME_KEYS if coord in data_vars
+        ]
+        for coord in coords:
+            logger.debug(f"Removing coordinate data_var {coord} from consideration.")
+        data_vars = [dv for dv in data_vars if dv not in coords]
+        logger.debug(f"data_vars after removing coords: {data_vars}")
+
+        # remove bounds variables; iterate over snapshot to avoid skipping
+        bounds_removed = []
+        filtered = []
+        for data_var in data_vars.copy():
+            if "bounds" in ds[data_var].attrs or data_var.endswith("_bnds"):
+                bounds_removed.append(data_var)
+            else:
+                filtered.append(data_var)
+                logger.debug(f"Keeping data_var {data_var}.")
+        for bnd in bounds_removed:
+            logger.debug(f"Removing bounds data_var {bnd} from consideration.")
+        data_vars = filtered
+        logger.debug(f"data_vars after removing bounds: {data_vars}")
+
+        if len(data_vars) > 1:
             logger.error(f"Only single data_var allowed but has {data_vars}")
             return None
-        if len_data_vars == 0:
+        if len(data_vars) == 0:
             logger.error("No datavar that is not coordinate.")
             return None
     logger.debug(f"data_vars: {data_vars}")
-    return data_vars[0]
+    if isinstance(data_vars, list) and len(data_vars) == 1:
+        return data_vars[0]
+    return None
 
 
 def induce_data_var_from_file_name(ds, file_path):
-    """Check if one of the data_vars is part of the file name and select it as most probable data_var."""
+    """Check if one of the data_vars is part of the file name and select it as the most probable data_var."""
     logger.info("Searching for more than one datavar by comparing with file name.")
     name = file_path.stem
     data_vars = list(ds.data_vars)
@@ -104,15 +159,31 @@ def induce_data_var_from_file_name(ds, file_path):
 
 
 def timedelta_to_alias(ds: xr.DataArray) -> str:
-    """
-    Map a median timedelta to a pandas frequency alias.
+    """Map a median timedelta to a pandas frequency alias.
 
-    - ~1 day  → 'D'
-    - ~7 days → 'W'
-    - ~28–31 days → 'M'
+    - ~1 day -> 'D'
+    - ~7 days -> 'W'
+    - ~28-31 days -> 'M'
     - otherwise: fall back to '<N>H'
+
     """
-    median_delta = ds.time.diff("time").median()
+    time = getattr(ds, "time", None)
+    if time is None:
+        msg = "Object has no 'time' coordinate."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    if time.size < 2:
+        msg = (
+            "Cannot infer time frequency because only "
+            f"{time.size} timestamp{'s' if time.size != 1 else ''} are present."
+        )
+        raise ValueError(msg)
+    try:
+        median_delta = ds.time.diff("time").median()
+    except Exception as e:
+        logger.error(ds)
+        with ErrorLogger(logger):
+            raise e
     days = median_delta / np.timedelta64(1, "D")
     hours = int(median_delta / np.timedelta64(1, "h"))
     if abs(days - 1) < 0.5:
@@ -146,6 +217,8 @@ def get_overlapping_time_slice(input_ds, ref_ds):
     else:
         with ErrorLogger:
             raise ValueError(only_nan_msg)
+    start = pd.to_datetime(start)
+    end = pd.to_datetime(end)
     return slice(start, end)
 
 
@@ -164,10 +237,10 @@ def crop_ds(
     lat_low, lat_high = sorted([lat_min, lat_max])
 
     # grab the coordinate arrays by name
-    lon_vals = ds[lon_name].values
-    lat_vals = ds[lat_name].values
+    lon_vals = ds[lon_name].data
+    lat_vals = ds[lat_name].data
 
-    # if the coordinate axis is ascending, slice low→high; else high→low
+    # if the coordinate axis is ascending, slice low->high; else high->low
     if lon_vals[0] <= lon_vals[-1]:
         lon_slice = slice(lon_low, lon_high)
     else:
@@ -180,3 +253,76 @@ def crop_ds(
 
     # select using a dict so named dims are respected
     return ds.sel({lon_name: lon_slice, lat_name: lat_slice})
+
+
+def climatology(data):
+    """Calculate the climatology from an xarray DataArray."""
+    if "time" not in data.dims or data.sizes["time"] == 0:
+        msg = "Input data for climatology calculation has no valid time dimension."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    # group into monthly mean data
+    data_clim = data.groupby("time.month").mean(dim="time", skipna=True)
+    # Ensure the climatology has all 12 months, filling missing months with NaNs
+    return data_clim.reindex(month=np.arange(1, 13), fill_value=np.nan)
+
+
+def get_clim_from_ds(ds, input_var=None, factor=1):
+    """Calculate climatology from a Dataset or DataArray.
+
+    Multiplies the selected data by `factor` before computing the monthly
+    climatology.
+    """
+    data = ds * factor if input_var is None else ds[input_var] * factor
+    return climatology(data)
+
+
+def spearman_correlation(data1, data2):
+    """Calculate Spearman rank correlation between two xarray DataArrays."""
+    # Check that both arrays are of the same size and flatten them
+    if data1.shape != data2.shape:
+        with ErrorLogger(logger):
+            msg = "Both DataArrays must have the same shape"
+            raise ValueError(msg)
+    data1 = data1.values.flatten()
+    data2 = data2.values.flatten()
+    # Calculate Spearman rank correlation using scipy
+    corr, p_value = spearmanr(data1, data2)
+    return corr, p_value
+
+
+def get_dtype(ds):
+    """Return a simple dtype string without forcing data into memory."""
+    try:
+        if isinstance(ds, xr.Dataset):
+            v = get_single_data_var(ds)
+            if v is None:
+                try:
+                    dt = ds.dtype  # check if dataset has single dtype
+                    da = ds  # use dataset directly
+                except AttributeError as e:
+                    msg = "Dataset has no single data variable to inspect."
+                    raise ValueError(msg) from e
+            else:
+                da = ds[v]
+        elif isinstance(ds, xr.DataArray):
+            da = ds
+        else:
+            msg = f"Unsupported type {type(ds)}"
+            raise ValueError(msg)
+
+        dt = da.dtype  # cheap: does not load data
+        if dt is None:
+            return "f4"
+
+        if np.issubdtype(dt, np.floating):
+            return "f4" if dt.itemsize <= 4 else "f8"
+        if np.issubdtype(dt, np.integer) or np.issubdtype(dt, np.unsignedinteger):
+            # prefer signed integers for ASCII grid
+            return "i4" if dt.itemsize <= 4 else "i8"
+
+        msg = f"write_grid: cannot infer dtype from data with numpy dtype {dt}"
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    except Exception:
+        return "f4"

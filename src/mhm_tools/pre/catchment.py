@@ -1,5 +1,4 @@
-r"""
-Create the catchment file for mRM.
+"""Create the catchment file for mRM.
 
 Authors
 -------
@@ -10,15 +9,24 @@ Authors
 """
 
 import logging
-import pathlib as pl
+from pathlib import Path
+from typing import Optional
 
 import numpy as np
 import pyflwdir
 import xarray as xr
 from scipy.ndimage import binary_dilation
 
-from mhm_tools.common.file_handler import get_xarray_ds_from_file
+from mhm_tools.common.constants import NC_ENCODE_MASK
+from mhm_tools.common.file_handler import (
+    get_coord_values,
+    get_xarray_ds_from_file,
+    write_xarray_to_file,
+)
 from mhm_tools.common.logger import ErrorLogger, log_arguments
+from mhm_tools.common.netcdf import generate_bounds
+from mhm_tools.common.xarray_utils import get_dtype
+from mhm_tools.pre.create_id_gauges import write_gauge_id
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +42,103 @@ CUTOFF_THRESHOLD = 175
 # FUNCTIONS
 
 
+def create_cell_area(ds, lat_name="lat", lon_name="lon"):
+    """Create a cell area data array in km2."""
+    logger.info("Create cell area data array.")
+    lat = ds[lat_name].data
+    lon = ds[lon_name].data
+    # calculate cellsize in kilometers
+    R = 6371  # radius of the earth in kilometers
+    lat_rad = np.deg2rad(lat)
+    lon_rad = np.deg2rad(lon)
+    dlat = np.abs(np.gradient(lat_rad))
+    dlon = np.abs(np.gradient(lon_rad))
+    # create 2D arrays for lat and lon
+    dlat_2d, dlon_2d = np.meshgrid(dlat, dlon, indexing="ij")
+    lat_2d = np.tile(lat_rad[:, np.newaxis], (1, len(lon)))
+    # calculate area
+    cell_areas = R**2 * dlat_2d * dlon_2d * np.cos(lat_2d)
+    return xr.DataArray(
+        cell_areas,
+        coords={lat_name: lat, lon_name: lon},
+        dims=[lat_name, lon_name],
+        name="cell_area",
+        attrs={
+            "title": "cell area",
+            "units": "km2",
+            "creator": "Department of Computational Hydrosystems",
+            "institution": "Helmholtz Centre for Environmental Research - UFZ",
+        },
+    )
+
+
 # CLASSES
+class Resolution:
+    """Class to hold resolution information."""
+
+    def __init__(
+        self,
+        l1_resolution=None,
+        l11_resolution=None,
+        l2_resolution=None,
+        l2_file=None,
+        l0_resolution=None,
+    ):
+        """Initialize the Resolution class."""
+        self.l0_resolution = l0_resolution
+        self.l1_resolution = l1_resolution
+        self.l11_resolution = l11_resolution
+        self.l2_resolution = l2_resolution
+        self.l2_file = l2_file
+        if self.l2_file is not None:
+            self.l2_file = Path(self.l2_file)
+            if self.l2_file.is_dir():
+                # get the first netcdf file in the directory
+                nc_files = list(self.l2_file.rglob("*.nc"))
+                if len(nc_files) == 0:
+                    with ErrorLogger(logger):
+                        msg = f"No netcdf files found in {self.l2_file}."
+                        raise FileNotFoundError(msg)
+                self.l2_file = nc_files[0]
+            elif not self.l2_file.is_file():
+                with ErrorLogger(logger):
+                    msg = f"L2 file {self.l2_file} not found."
+                    raise FileNotFoundError(msg)
+            if self.l2_resolution is None:
+                if self.l2_file.suffix == ".nc":
+                    with get_xarray_ds_from_file(self.l2_file) as ds:
+                        lon = ds.lon.values
+                        self.l2_resolution = round(abs(lon[1] - lon[0]), 9)
+                        logger.info(
+                            f"Derived l2_resolution {self.l2_resolution} from {self.l2_file}"
+                        )
+                else:
+                    with ErrorLogger(logger):
+                        msg = f"Unsupported file format for l2_file: {self.l2_file.suffix}"
+                        raise ValueError(msg)
+
+        self.l11_resolution = (
+            self.l11_resolution
+            if self.l11_resolution is not None
+            else self.l1_resolution
+        )
+        self.l2_resolution = (
+            self.l2_resolution if self.l2_resolution is not None else self.l1_resolution
+        )
+
+    def get_max_resolution(self):
+        """Get the maximum resolution."""
+        return max(
+            r
+            for r in [
+                self.l1_resolution,
+                self.l11_resolution,
+                self.l2_resolution,
+            ]
+            if r is not None
+        )
+
+
 class Catchment:
     """Catchment class deliniating catchmetns with pyflowdir."""
 
@@ -47,11 +151,10 @@ class Catchment:
         transform=None,
         out_var_name=None,
         do_shift=False,
-        l1_resolution=None,
-        l11_resolution=None,
-        l2_resolution=None,
+        resolutions: Resolution = None,
         upscale=False,
         latlon=True,
+        l0_presision: int = 9,
     ):
         self.flwdir = None
         self.basin = None
@@ -59,12 +162,16 @@ class Catchment:
         self.uparea_grid = None
         self.grdare = None
         self.elevtn = None
+        self.cell_area = None
         self._fdir = None
+        self.gauge_lat = None
+        self.gauge_lon = None
         self.ftype = ftype
         self.catchment_mask = None
-        self.l1_resolution = l1_resolution
-        self.l11_resolution = l11_resolution if l11_resolution is not None else l1_resolution
-        self.l2_resolution = l2_resolution if l2_resolution is not None else l1_resolution
+        self.resolutions = resolutions if resolutions is not None else Resolution()
+        self.resolutions.l0_resolution = round(
+            abs(ds.lon.data[1] - ds.lon.data[0]), l0_presision
+        )
         self.do_upscale = upscale
         self.out_var_name = (
             out_var_name if out_var_name is not None else f"{var_name}.nc"
@@ -83,7 +190,12 @@ class Catchment:
             "uparea_grid": {
                 "title": "accumulated data values along the flow directions",
                 "_FillValue": FACC_FILLVALUE,
-                "units": "m2",
+                "units": "-",
+            },
+            "upgrid": {
+                "title": "upstream area",
+                "_FillValue": FACC_FILLVALUE,
+                "units": "km2",
             },
             "grdare": {
                 "title": "rectangular grid area",
@@ -126,7 +238,7 @@ class Catchment:
             self.input_da.attrs["_FillValue"] = FDIR_FILLVALUE[ftype]
             self.input_da.attrs["nodata_value"] = FDIR_FILLVALUE[ftype]
             self.input_da = self.input_da.where(
-                (ds[var_name] != old_no_data_val) & ~np.isnan(ds[var_name]),
+                (data != old_no_data_val) & ~np.isnan(data),
                 FDIR_FILLVALUE[ftype],
             )
             logger.debug(self.input_da)
@@ -176,37 +288,338 @@ class Catchment:
             )
         self.get_fdir()
 
-    def delineate_basin(self, gauge_coords, stream_order=4):
-        """Deliniate the basin for a given lat and lon."""
-        logger.info(f"Deliniating basin for gauge coordinates {gauge_coords}")
-        gauge_coords = (gauge_coords[0], gauge_coords[1])
-        self.basin = self._fdir.basins(
-            xy=gauge_coords, streams=self._fdir.stream_order() >= stream_order
+    def calc_upstream_area(self):
+        """Use pyflwdir to calculate the upstream area from flow direction by providing cell areas."""
+        if self._fdir is None:
+            logger.error("Flow direction is not initialized.")
+            return None
+        if self.cell_area is None:
+            self.cell_area = create_cell_area(self.ds).data
+        return self._fdir.accuflux(self.cell_area, nodata=-9999)
+
+    def _coord_to_index(self, lat, lon):
+        """Map latitude/longitude or indices to integer grid indices."""
+        if "lat" not in self.ds.coords or "lon" not in self.ds.coords:
+            msg = "Dataset is missing latitude/longitude coordinates."
+            with ErrorLogger(logger):
+                raise ValueError(msg)
+        lat_vals = self.ds.lat.data
+        lon_vals = self.ds.lon.data
+
+        if isinstance(lat, (int, np.integer)):
+            i = int(lat)
+            logger.debug(
+                f"Was given latitude index {i} directly. Corresponding lat_value {lat_vals[i]}"
+            )
+        elif lat < min(lat_vals) or lat > max(lat_vals):
+            logger.error(
+                f"Given latitude {lat} is outside dataset bounds ({min(lat_vals)}, {max(lat_vals)}). Clipping to bounds."
+            )
+            i = None
+        else:
+            i = int(np.abs(lat_vals - float(lat)).argmin())
+            logger.debug(
+                f"Mapped latitude {float(lat)} to index {i} with lat_value {lat_vals[i]}"
+            )
+
+        if isinstance(lon, (int, np.integer)):
+            j = int(lon)
+            logger.debug(
+                f"Was given longitude index {j} directly. Corresponding lon_value {lon_vals[j]}"
+            )
+        elif lon < min(lon_vals) or lon > max(lon_vals):
+            logger.error(
+                f"Given longitude {lon} is outside dataset bounds ({min(lon_vals)}, {max(lon_vals)}). Clipping to bounds."
+            )
+            j = None
+        else:
+            j = int(np.abs(lon_vals - float(lon)).argmin())
+            logger.debug(
+                f"Mapped longitude {float(lon)} to index {j} with lon_value {lon_vals[j]}"
+            )
+        if i is None or j is None:
+            msg = (
+                "Could not map given coordinates to valid indices within "
+                "dataset bounds."
+            )
+            with ErrorLogger(logger):
+                raise ValueError(msg)
+        i = int(np.clip(i, 0, len(lat_vals) - 1))
+        j = int(np.clip(j, 0, len(lon_vals) - 1))
+
+        return i, j
+
+    def get_best_coordinate(
+        self,
+        upstream_area,
+        gauge_coords,
+        ref_catchment_area,
+        max_distance_cells=5,
+        max_error=0.25,
+        recursion=False,
+    ):
+        """Find best coordinate given gauge location and target area."""
+        if not recursion:
+            max_distance_cells = max_distance_cells // 2
+
+        # Determine whether gauge_coords are lat/lon floats or array indices
+        lat_vals = self.ds.lat.data
+        lon_vals = self.ds.lon.data
+        gi, gj = self._coord_to_index(gauge_coords[0], gauge_coords[1])
+
+        logger.debug(f"Gauge index (row, col): {(gi, gj)}")
+
+        # We will search for candidate outlet cells within a bbox around the gauge
+        # (in degrees). These parameters are conservative defaults and can be
+        # tuned later or exposed as args.
+        max_cells = int(max(0, round(max_distance_cells)))
+
+        # find index window (clamp to domain)
+        i_min = max(0, gi - max_cells)
+        i_max = min(len(lat_vals) - 1, gi + max_cells)
+        j_min = max(0, gj - max_cells)
+        j_max = min(len(lon_vals) - 1, gj + max_cells)
+
+        # Ensure min <= max
+        if i_min > i_max:
+            i_min, i_max = i_max, i_min
+        if j_min > j_max:
+            j_min, j_max = j_max, j_min
+
+        # Extract subgrid of upstream_area
+        sub = upstream_area[i_min : i_max + 1, j_min : j_max + 1]
+
+        # If subgrid is empty fallback to whole domain
+        if sub.size == 0:
+            logger.warning("Search bbox empty, falling back to full-domain search")
+            sub = upstream_area
+            i_min, j_min = 0, 0
+
+        # Search for candidate cells whose upstream area matches ref_catchment_area
+        size = float(ref_catchment_area)
+        error = 0.0
+        step = 0.01
+        candidates = None
+        while error <= max_error and (candidates is None or len(candidates[0]) == 0):
+            low = size * (1.0 - error)
+            high = size * (1.0 + error)
+            candidates = np.where((sub >= low) & (sub <= high))
+            if len(candidates[0]) == 0:
+                error += step
+
+        best_coord = None
+        if len(candidates[0]) > 0:
+            # convert sub indices to global indices
+            cand_i = candidates[0] + i_min
+            cand_j = candidates[1] + j_min
+            # choose the candidate nearest to the gauge index
+            d2 = (cand_i - gi) ** 2 + (cand_j - gj) ** 2
+            k = int(np.argmin(d2))
+            best_coord = (int(cand_i[k]), int(cand_j[k]))
+            logger.info(
+                f"Selected outlet candidate {best_coord} with upstream area {upstream_area[best_coord]} km2 (tolerance {error:.3f})"
+            )
+        else:
+            logger.warning(
+                "No candidate found within tolerance; falling back to nearest stream cell by upstream area magnitude."
+            )
+            if not recursion:
+                return self.get_best_coordinate(
+                    upstream_area,
+                    gauge_coords,
+                    ref_catchment_area,
+                    max_distance_cells,
+                    max_error,
+                    recursion=True,
+                )
+            # fallback: pick the cell in bbox with upstream area closest to target
+            flat = np.abs(sub - size)
+            idx = int(np.argmin(flat))
+            ri, rj = np.unravel_index(idx, sub.shape)
+            best_coord = (ri + i_min, rj + j_min)
+            logger.info(
+                f"The selected outlet candidate is {best_coord} with upstream area {upstream_area[best_coord]} km2 resulting in error {(ref_catchment_area - upstream_area[best_coord]) / ref_catchment_area:.3f}."
+            )
+
+        return best_coord, error
+
+    def delineate_basin(
+        self,
+        gauge_coords,
+        stream_order=4,
+        ref_catchment_area=None,
+        max_distance_cells=5,
+        max_error=0.25,
+        raise_on_sanity_check=True,
+    ):
+        """Delineate the basin for a given lat and lon."""
+        logger.info(
+            f"Delineating basin for gauge coordinates {gauge_coords} and reference catchment area {ref_catchment_area} km2."
         )
+        gauge_coords = (gauge_coords[0], gauge_coords[1])
+        # Target area in km2 we want to match (can be adjusted/replaced by caller later)
+
+        # Compute upstream area (in km2) using accuflux and cell areas
+        upstream_area = None
+        if ref_catchment_area is not None:
+            if self.cell_area is None:
+                self.cell_area = create_cell_area(self.ds).data
+            try:
+                upstream_area = self.calc_upstream_area()
+            except Exception:
+                logger.exception("Failed to compute upstream area (accuflux).")
+
+            if upstream_area is None:
+                logger.error(
+                    "Could not calculate upstream area. Flow direction may be uninitialized."
+                )
+
+            outlet_idx, error = self.get_best_coordinate(
+                upstream_area,
+                gauge_coords,
+                ref_catchment_area,
+                max_distance_cells,
+                max_error,
+            )
+            new_lat = float(self.ds.lat.data[outlet_idx[0]])
+            new_lon = float(self.ds.lon.data[outlet_idx[1]])
+            self.gauge_lat = new_lat
+            self.gauge_lon = new_lon
+            logger.info(
+                f"Moved outlet latitude {float(gauge_coords[0])} to {new_lat} and longitude {float(gauge_coords[1])} to {new_lon}."
+            )
+
+            river_mask = (upstream_area > ref_catchment_area * (1 - error - 1e-6)) & (
+                upstream_area < ref_catchment_area * (1 + error + 1e-6)
+            )
+        else:
+            logger.warning(
+                "No catchment area provided; falling back to original gauge coordinates."
+            )
+            outlet_idx = self._coord_to_index(gauge_coords[0], gauge_coords[1])
+            river_mask = None
+
+        outlet_linear_idx = np.ravel_multi_index(outlet_idx, self._fdir.shape)
+
+        # Now delineate basin using pyflwdir basins()
+        streams_mask = self._fdir.stream_order() >= stream_order
+        if river_mask is not None:
+            streams_mask = np.logical_and(streams_mask, river_mask.astype(bool))
+        try:
+            self.basin = self._fdir.basins(
+                idxs=np.array([outlet_linear_idx], dtype=np.int64),
+                streams=streams_mask,
+            )
+        except Exception as e:
+            logger.exception(f"pyflwdir.basins(idxs=...) failed for {outlet_idx}: {e}")
+            # try computing all basins and pick id at outlet
+            try:
+                all_basins = self._fdir.basins()
+                basin_id = int(all_basins[outlet_idx])
+                self.basin = np.where(all_basins == basin_id, basin_id, 0)
+            except Exception as e2:
+                logger.exception(f"Fallback basins() also failed: {e2}")
+                return
+
         self.catchment_mask = self.basin > 0
+        logger.debug(
+            f"mask statistics: min={self.basin.min()}, max={self.basin.max()}, all true? {np.all(self.catchment_mask)}"
+        )
+        # logging and sanity checks
+        mean_cell_area = (
+            float(np.mean(self.cell_area)) if self.cell_area is not None else np.nan
+        )
+        unique_vals = np.unique(self.basin[self.catchment_mask])
+        cell_count = int(np.sum(self.catchment_mask))
+        delineated_area = (
+            float(np.sum(self.cell_area[self.catchment_mask]))
+            if self.cell_area is not None
+            else np.nan
+        )
+
+        logger.info(
+            "Basin unique values: %s | cells in basin: %d | mean cell area: %.6f km2",
+            unique_vals,
+            cell_count,
+            mean_cell_area,
+        )
+        uparea_at_outlet = (
+            upstream_area[outlet_idx] if upstream_area is not None else np.nan
+        )
+        logger.info(
+            "Upstream area reported at selected outlet cell = %.2f km2. "
+            "Difference (sum_cells - upstream_at_outlet) = %.2f km2 (%.2f%%).",
+            uparea_at_outlet,
+            delineated_area - uparea_at_outlet,
+            (
+                (delineated_area - uparea_at_outlet) / uparea_at_outlet * 100.0
+                if uparea_at_outlet != 0
+                else np.nan
+            ),
+        )
+        if ref_catchment_area is not None:
+            area_error = (delineated_area - ref_catchment_area) / ref_catchment_area
+            logger.info(
+                "Delineated basin area (sum of cell_area[basin>0]) = %.2f km2; "
+                "reference area = %.2f km2; error = %.2f%%",
+                delineated_area,
+                ref_catchment_area,
+                area_error * 100.0,
+            )
+            if abs(area_error) > max_error * 2:
+                with ErrorLogger(logger):
+                    msg = f"Delineated basin area ({delineated_area:2f} km2) differs from reference area ({ref_catchment_area:2f} km2) by more than twice the max error {max_error*100:.2f}%. Adjust max_error or max_distance_cells."
+                    if raise_on_sanity_check:
+                        raise ValueError(msg)
+                    logger.warning(msg)
+                # warn if the two area measures disagree substantially
+        else:
+            logger.warning(
+                "No reference catchment area provided; skipping area consistency check."
+            )
+        if not np.isclose(delineated_area, uparea_at_outlet, rtol=0.02, atol=1e-6):
+            with ErrorLogger(logger):
+                msg = f"Sum of cell areas inside the basin ({delineated_area:2f} km2) differs from "
+                msg += f"upstream area at outlet ({uparea_at_outlet:2f} km2). Investigate flow-direction "
+                msg += "masking, nodata handling or area units."
+                if raise_on_sanity_check:
+                    raise ValueError(msg)
+                logger.warning(msg)
+        # finalize mask and basin fill values
+
         if np.all(~self.catchment_mask):
             if stream_order > 1:
+                # try again with a lower stream_order (legacy behavior)
                 self.delineate_basin(
-                    (gauge_coords[0], gauge_coords[1]), stream_order=stream_order - 1
+                    gauge_coords,
+                    stream_order=stream_order - 1,
+                    ref_catchment_area=ref_catchment_area,
+                    max_distance_cells=max_distance_cells,
+                    max_error=max_error,
                 )
+                return
             logger.error("No catchment found for the given coordinates")
-        if not np.any(np.isnan(self.basin)):
-            self.basin[np.where(~self.catchment_mask)] = self.VARIABLES["basin"][
-                "_FillValue"
-            ]
+            return
 
-    def get_upscaling_factor(self, max_resolution=False):
+        # set fillvalue for non-basin cells
+        try:
+            fillv = self.VARIABLES["basin"]["_FillValue"]
+            self.basin = np.where(self.catchment_mask, self.basin, fillv)
+        except Exception:
+            # best-effort: leave basin as-is
+            logger.debug("Could not set basin fill values")
+
+    def get_upscaling_factor(self, max_resolution=True):
         """Create upscaling factor."""
-        input_res = round(abs(self.ds.lon.data[1] - self.ds.lon.data[0]), 6)
-        upscale_res = self.l1_resolution
+        input_res = self.resolutions.l0_resolution
+        upscale_res = self.resolutions.l1_resolution
         if max_resolution:
-            upscale_res = max([res for res in [self.l1_resolution, self.l11_resolution, self.l2_resolution] if res is not None ])
-        if (
-            int(upscale_res / input_res + 0.5) - (upscale_res / input_res)
-            < 1e6
-        ):
+            upscale_res = self.resolutions.get_max_resolution()
+        if upscale_res is None:
+            return 1
+        if int(upscale_res / input_res + 0.5) - (upscale_res / input_res) < 1e6:
             return int(upscale_res / input_res + 0.5)
-        not_int_multiple_msg = f"Upscaling only works if L1 resolution is integer muplipe of L0 resolution but L1 = {self.l1_resolution / input_res:.4f} * L0"
+        not_int_multiple_msg = f"Upscaling only works if L1 resolution is integer muplipe of L0 resolution but L1 = {self.resolutions.l1_resolution / input_res:.4f} * L0"
         raise ValueError(not_int_multiple_msg)
 
     def upscale(self, var):
@@ -219,7 +632,7 @@ class Catchment:
         # if we upscale the do_upscale flag should be true
         self.do_upscale = True
         logger.info(
-            f"Upscaling flow direction to {self.l1_resolution} with the fator {factor}."
+            f"Upscaling flow direction to {self.resolutions.l1_resolution} with the fator {factor}."
         )
         fdir_upscaled, upscaling_indices = self._fdir.upscale(factor, method="ihu")
 
@@ -238,7 +651,7 @@ class Catchment:
             lat_size, lon_size = self.input_da.shape
             # Ensure the dimensions are evenly divisible by the factor
             if lat_size % factor != 0 or lon_size % factor != 0:
-                msg = f"Data dimensions must be divisible by the upscaling factor of {factor}. Lat ({lat_size}/{factor})={lat_size/factor:.2f}; Lon ({lon_size}/{factor})={lon_size/factor:.2f}"
+                msg = f"Data dimensions must be divisible by the upscaling factor of {factor}. Lat ({lat_size}/{factor})={lat_size / factor:.2f}; Lon ({lon_size}/{factor})={lon_size / factor:.2f}"
                 with ErrorLogger(logger):
                     raise ValueError(msg)
 
@@ -261,10 +674,12 @@ class Catchment:
 
     def get_upstream_area(self):
         """Perform the calculation of the upstream catchment area."""
-        self.upgrid = self._fdir.upstream_area(unit="km2").astype(int)
+        # upgrid = self._fdir.upstream_area(unit="km2").astype(int)
+        self.upgrid = self.calc_upstream_area().astype(int)
 
     def get_grid_area(self):
         """Perform the calculation of the catchment area."""
+        self.get_upstream_area()
         self.grdare = self._fdir.area.astype(int)
 
     def get_facc(self):
@@ -290,8 +705,7 @@ class Catchment:
         return ds
 
     def fill_adjacent_missing_with_sink(self, da, fill_value, sink_value):
-        """
-        Replace all missing values adjacent to non-missing values with 0 in an xarray Dataset.
+        """Replace all missing values adjacent to non-missing values with 0 in an xarray Dataset.
 
         Parameters
         ----------
@@ -329,20 +743,28 @@ class Catchment:
         mask_file=None,
         frame=1,
         buffer=0,
+        gauge_id=None,
     ):
         """Write the produced data to one or multiple files."""
         data_vars = {}
-        out_path = pl.Path(out_path)
+        out_path = Path(out_path)
         if not out_path.is_dir():
             out_path.mkdir(parents=True, exist_ok=True)
+        lat_slice_idx, lon_slice_idx = None, None
+        lat_slice, lon_slice = None, None
         if cut_by_basin:
-            lat_slice, lon_slice = self.cut_to_filled_area(buffer)
+            lat_slice_idx, lon_slice_idx = self.cut_to_filled_area(buffer)
         else:
             lat_slice, lon_slice = slice(84, -56), slice(None)
 
         for var_name in self.VARIABLES:
             data_var = self.processing_data_variable(
-                var_name, cut_by_basin, lat_slice, lon_slice
+                var_name,
+                cut_by_basin,
+                lat_slice,
+                lon_slice,
+                lat_slice_idx,
+                lon_slice_idx,
             )
             if data_var is None:
                 continue
@@ -356,6 +778,23 @@ class Catchment:
             ds = self.write_basin_id_file(data_vars, frame, out_path)
             # use basin_id to create a mask file
             self.write_mask_file(ds, mask_file)
+            if gauge_id is not None:
+                # create empty ds with mask l0 extend and fill the data_var called data with -9999 values
+                id_da = xr.DataArray(
+                    np.full(ds.basin.shape, -9999, dtype=int),
+                    coords={"lat": ds.lat, "lon": ds.lon},
+                    dims=["lat", "lon"],
+                )
+                id_ds = id_da.to_dataset(name="idgauges")
+                id_ds = write_gauge_id(
+                    ds=id_ds,
+                    id=gauge_id,
+                    lat=self.gauge_lat,
+                    lon=self.gauge_lon,
+                    data_var="idgauges",
+                )
+                write_xarray_to_file(id_ds, out_path / "idgauges.nc", "idgauges")
+                write_xarray_to_file(id_ds, out_path / "idgauges.asc", "idgauges")
 
     def write_single_variable_file(
         self, data_var, var_name, out_path, cellsize, format
@@ -372,11 +811,12 @@ class Catchment:
         }
         fname = out_path / f"{var_name}.{format}"
         if format == "nc":
-            data_var.to_netcdf(
+            write_xarray_to_file(
+                data_var,
                 fname,
                 encoding={
                     var_name: {
-                        "dtype": data_var[var_name].dtype,
+                        "dtype": get_dtype(data_var[var_name]),
                         "_FillValue": self.VARIABLES[var_name]["_FillValue"],
                     }
                 },
@@ -400,7 +840,7 @@ class Catchment:
                     )
                 file_object.write(f"cellsize {cellsize}\n")
                 file_object.write(
-                    f"NODATA_value {self.VARIABLES[var_name]['_FillValue']}\n"
+                    f"nodata_value {self.VARIABLES[var_name]['_FillValue']}\n"
                 )
                 if is_ascending:
                     vals = data_var[var_name].values[::-1, :]
@@ -412,7 +852,97 @@ class Catchment:
                 msg = f'Format "{format}" unknown, use one of ["nc", "asc"]'
                 raise Exception(msg)
 
-    def processing_data_variable(self, var_name, cut_by_basin, lat_slice, lon_slice):
+    def align_bounds_to_l2(self, min_row, max_row, min_col, max_col):
+        """Align the given bounds to the L2 grid."""
+        if self.resolutions.l2_file is None:
+            return min_row, max_row, min_col, max_col
+
+        with get_xarray_ds_from_file(
+            self.resolutions.l2_file,
+            force_decending_y=True,
+            normalize_latlon_coords=True,
+        ) as ds:
+            l2_lon = get_coord_values(ds, lon=True)
+            l2_lat = get_coord_values(ds, lat=True)
+            if l2_lon is None or l2_lat is None:
+                logger.warning(
+                    f"Could not get lon/lat from L2 file {self.resolutions.l2_file}, using raw values."
+                )
+
+        lon = self.ds.lon.values
+        lat = self.ds.lat.values
+        tol = self.resolutions.l0_resolution / 2 + 1e-9
+
+        # get lower and upper edges of mask lon/lat
+        lon_bounds = generate_bounds(
+            xr.DataArray(lon, dims=["lon"], coords={"lon": lon})
+        ).values
+        lat_bounds = generate_bounds(
+            xr.DataArray(lat, dims=["lat"], coords={"lat": lat})
+        ).values
+        lon_lower_edges = np.minimum(lon_bounds[:, 0], lon_bounds[:, 1])
+        lon_upper_edges = np.maximum(lon_bounds[:, 0], lon_bounds[:, 1])
+        lat_lower_edges = np.minimum(lat_bounds[:, 0], lat_bounds[:, 1])
+        lat_upper_edges = np.maximum(lat_bounds[:, 0], lat_bounds[:, 1])
+
+        cur_lon_min = min(lon_lower_edges[min_col], lon_lower_edges[max_col])
+        cur_lon_max = max(lon_upper_edges[min_col], lon_upper_edges[max_col])
+        cur_lat_min = min(lat_lower_edges[min_row], lat_lower_edges[max_row])
+        cur_lat_max = max(lat_upper_edges[min_row], lat_upper_edges[max_row])
+
+        def _bound_to_grid(values, lower, upper):
+            bounds = generate_bounds(
+                xr.DataArray(values, dims=["coord"], coords={"coord": values})
+            ).values
+            lower_edges = np.minimum(bounds[:, 0], bounds[:, 1])
+            upper_edges = np.maximum(bounds[:, 0], bounds[:, 1])
+            lower_vals = lower_edges[lower_edges <= lower]
+            upper_vals = upper_edges[upper_edges >= upper]
+            lower_target = lower_vals.max() if lower_vals.size else lower_edges.min()
+            upper_target = upper_vals.min() if upper_vals.size else upper_edges.max()
+            logger.debug(
+                '_bound_to_grid: "values" min: %.6f, max: %.6f',
+                lower_target,
+                upper_target,
+            )
+            return lower_target, upper_target
+
+        l2_lon_min, l2_lon_max = _bound_to_grid(l2_lon, cur_lon_min, cur_lon_max)
+        l2_lat_min, l2_lat_max = _bound_to_grid(l2_lat, cur_lat_min, cur_lat_max)
+
+        def _idx_for(coordinate_values, target_values, name):
+            asc_factor = 1 if coordinate_values[1] > coordinate_values[0] else -1
+            target = target_values + self.resolutions.l0_resolution / 2 * asc_factor
+            idx = int(np.argmin(np.abs(coordinate_values - target)))
+            logger.debug(
+                f"_idx_for: {name} target: {target}, L0 coord: {coordinate_values[idx]}, idx: {idx}"
+            )
+            if not np.isclose(coordinate_values[idx], target, atol=tol):
+                logger.warning(
+                    f"L2 {name} bound {target} not aligned with L0 grid; using {coordinate_values[idx]}"
+                )
+            return idx
+
+        lon_min_idx = _idx_for(lon, l2_lon_min, "lon-min")
+        lon_max_idx = _idx_for(lon, l2_lon_max, "lon-max")
+        lat_min_idx = _idx_for(lat, l2_lat_min, "lat-min")
+        lat_max_idx = _idx_for(lat, l2_lat_max, "lat-max")
+
+        min_col = min(lon_min_idx, lon_max_idx)
+        max_col = max(lon_min_idx, lon_max_idx)
+        min_row = min(lat_min_idx, lat_max_idx)
+        max_row = max(lat_min_idx, lat_max_idx)
+        return min_row, max_row, min_col, max_col
+
+    def processing_data_variable(
+        self,
+        var_name,
+        cut_by_basin,
+        lat_slice=None,
+        lon_slice=None,
+        lat_slice_idx=None,
+        lon_slice_idx=None,
+    ):
         """Process data variable, masking it and croping it spatial dimensions."""
         logger.info(f"Processing {var_name}")
         data = getattr(self, var_name)
@@ -426,24 +956,27 @@ class Catchment:
             return None
         lon = self.ds.lon.data
         lat = self.ds.lat.data
-        if self.l1_resolution is not None:
-            input_res = round(abs(lon[1] - lon[0]), 9)
-            if input_res != self.l1_resolution and self.do_upscale:
-                logger.debug(
-                    f"Creating lon and lat arrays from l1_resolution {self.l1_resolution}"
-                )
-                lon = np.arange(
-                    lon.min() - input_res / 2 + self.l1_resolution / 2,
-                    lon.max() + self.l1_resolution / 2,
-                    self.l1_resolution,
-                )
-                lat = np.arange(
-                    lat.max() + input_res / 2 - self.l1_resolution / 2,
-                    lat.min() - self.l1_resolution / 2,
-                    -self.l1_resolution,
-                )
+        input_res = self.resolutions.l0_resolution
+        if (
+            self.resolutions.l1_resolution is not None
+            and input_res != self.resolutions.l1_resolution
+            and self.do_upscale
+        ):
+            logger.info(
+                f"Creating lon and lat arrays from l1_resolution {self.resolutions.l1_resolution}"
+            )
+            lon = np.arange(
+                lon.min() - input_res / 2 + self.resolutions.l1_resolution / 2,
+                lon.max() + self.resolutions.l1_resolution / 2,
+                self.resolutions.l1_resolution,
+            )
+            lat = np.arange(
+                lat.max() + input_res / 2 - self.resolutions.l1_resolution / 2,
+                lat.min() - self.resolutions.l1_resolution / 2,
+                -self.resolutions.l1_resolution,
+            )
         logger.debug(
-            f"lon_min {np.min(lon):.3f}, lon_max {np.max(lon):.3f}, resulution: {self.l1_resolution}"
+            f"lon_min {np.min(lon):.3f}, lon_max {np.max(lon):.3f}, resulution: {self.resolutions.l1_resolution}"
         )
         logger.debug(f"{var_name} - mean {np.nanmean(data)}, max {np.nanmax(data)}")
         logger.debug(f"Shape {data.shape},  lon {len(lon)}, lat {len(lat)}")
@@ -454,14 +987,19 @@ class Catchment:
                 "lat": lat,  # [slice(860, 870)],
             },
         )
-        logger.info(f"Cutting {var_name} data to correct spatial dimensions")
-        data_var = data_var.sel(lat=lat_slice, lon=lon_slice)
+        if lat_slice is not None and lon_slice is not None:
+            logger.info(f"Cutting {var_name} data to correct spatial dimensions")
+            data_var = data_var.sel(lat=lat_slice, lon=lon_slice)
+        elif lat_slice_idx is not None and lon_slice_idx is not None:
+            logger.info(f"Cutting {var_name} data to correct spatial dimensions")
+            data_var = data_var.isel(lat=lat_slice_idx, lon=lon_slice_idx)
         logger.debug(data_var)
         return data_var
 
     def write_basin_id_file(self, data_vars, frame, out_path):
         """Write the basin_id file to specified path and set a sink value frame if specified."""
         logger.info("Write to single file.")
+        logger.debug(f"data_vars: {data_vars}")
         ds = xr.merge(data_vars.values())
         # set some attributes
         for coord in ds.coords:
@@ -486,11 +1024,12 @@ class Catchment:
         #     ds["flwdir"], FDIR_FILLVALUE[self.ftype], FDIR_SINKVALUE[self.ftype]
         # )
         # ds["flwdir"].data[:] = fdir_filled.data[:]
-        ds.to_netcdf(
+        write_xarray_to_file(
+            ds,
             out_path / self.out_var_name,
             encoding={
                 var_name: {
-                    "dtype": ds[var_name].dtype,
+                    "dtype": get_dtype(ds[var_name]),
                     "_FillValue": self.VARIABLES[var_name]["_FillValue"],
                 }
                 for var_name in ds.data_vars
@@ -499,20 +1038,188 @@ class Catchment:
         logger.info(f"Basin Id has been written to {out_path / self.out_var_name}")
         return ds
 
+    def _cell_edges(self, centers: np.ndarray) -> np.ndarray:
+        """Compute edges (len=N+1) from center coords (len=N) on a regular grid."""
+        c = np.asarray(centers)
+        d = np.diff(c)
+        left = c[0] - 0.5 * d[0]
+        right = c[-1] + 0.5 * d[-1]
+        mids = (c[:-1] + c[1:]) / 2.0
+        return np.concatenate(([left], mids, [right]))
+
+    def _coarse_centers_from_edges(
+        self, edges: np.ndarray, k: int, n_blocks: int, ascending: bool
+    ) -> np.ndarray:
+        """
+        Given fine-grid edges, build coarse-grid centers for block size k.
+
+        Ensures coarse edges == fine edges over the cropped window.
+        """
+        # we assume you've cropped L0 so len(fine_centers) is divisible by k
+        # The window's left edge and right edge are edges[0] and edges[k*n_blocks]
+        left_edge = edges[0]
+        dx_coarse = edges[k] - edges[0]  # = k * dx_fine (works for asc/desc)
+        # centers are midpoints of each coarse cell
+        n = np.arange(n_blocks)
+        centers = left_edge + (n + 0.5) * dx_coarse
+        if not ascending and centers[0] < centers[-1]:
+            centers = centers[::-1]
+        return centers
+
+    def upscale_mask_with_correct_coords(
+        self,
+        da: xr.DataArray,
+        factor: Optional[int] = None,
+        lon_name: str = "lon",
+        lat_name: str = "lat",
+    ) -> xr.DataArray:
+        """
+        Coarsen a 2D mask-like field by integer factor and assign correct coarse coords.
+
+        so that coarse *edges* equal fine *edges* of the cropped window.
+        """
+        if factor is None:
+            factor = self.get_upscaling_factor(max_resolution=True)
+        if factor < 1:
+            msg = "factor must be >= 1"
+            with ErrorLogger(logger):
+                raise ValueError(msg)
+
+        # 1) coarsen over lon/lat windows
+        kx = ky = int(factor)
+        coarsen_map = {}
+        if lon_name in da.dims:
+            coarsen_map[lon_name] = kx
+        if lat_name in da.dims:
+            coarsen_map[lat_name] = ky
+
+        # Treat only explicit mask=1 (or True) as land; ignore fill values and NaNs.
+        if da.dtype == bool:
+            cond = da
+        else:
+            fillv = da.attrs.get("_FillValue", da.encoding.get("_FillValue"))
+            da_clean = da
+            if fillv is not None:
+                da_clean = da.where(da != fillv)
+            cond = da_clean == 1
+        out = cond.coarsen(coarsen_map, boundary="trim").any().astype("int8")
+
+        # 2) compute correct coarse coordinates from fine edges
+        lon_f = da[lon_name].values
+        lat_f = da[lat_name].values
+
+        lon_edges = self._cell_edges(lon_f)
+        lat_edges = self._cell_edges(lat_f)
+
+        asc_lon = lon_f[0] < lon_f[-1]
+        asc_lat = lat_f[0] < lat_f[-1]
+        logger.debug(f"asc_lon: {asc_lon}, asc_lat: {asc_lat}")
+
+        n_lon_blocks = out.sizes.get(lon_name, 1)
+        n_lat_blocks = out.sizes.get(lat_name, 1)
+
+        # figure out which portion of edges we used after boundary="trim":
+        # Since you cropped L0 to a multiple of factor, the coarsen starts at index 0
+        # and uses exactly n_blocks*k cells. So we can take edges[0 : n_blocks*k + 1].
+        lon_edges_win = (
+            lon_edges[: n_lon_blocks * kx + 1]
+            if asc_lon
+            else lon_edges[-(n_lon_blocks * kx + 1) :]
+        )
+        lat_edges_win = (
+            lat_edges[: n_lat_blocks * ky + 1]
+            if asc_lat
+            else lat_edges[-(n_lat_blocks * ky + 1) :]
+        )
+        lon_coarse = self._coarse_centers_from_edges(
+            lon_edges_win, kx, n_lon_blocks, asc_lon
+        )
+        lat_coarse = self._coarse_centers_from_edges(
+            lat_edges_win, ky, n_lat_blocks, asc_lat
+        )
+        asc_lat_coarse = lat_coarse[0] < lat_coarse[-1]
+        if asc_lat != asc_lat_coarse:
+            logger.warning(
+                "Coarse lat coordinate ascending order does not match fine grid; check calculations."
+            )
+
+        out = out.assign_coords({lon_name: lon_coarse, lat_name: lat_coarse})
+        out.name = "mask_L2"
+
+        # 3) (optional) log edges for verification
+        try:
+            lon_edges_coarse = self._cell_edges(out[lon_name].values)
+            lat_edges_coarse = self._cell_edges(out[lat_name].values)
+            logger.info(
+                f"Coarse lon edges: {lon_edges_coarse[0]:.6f} .. {lon_edges_coarse[-1]:.6f} "
+                f"(should equal fine window edges: {lon_edges_win[0]:.6f} .. {lon_edges_win[-1]:.6f})"
+            )
+            logger.info(
+                f"Coarse lat edges: {lat_edges_coarse[0]:.6f} .. {lat_edges_coarse[-1]:.6f} "
+                f"(should equal fine window edges: {lat_edges_win[0]:.6f} .. {lat_edges_win[-1]:.6f})"
+            )
+        except IndexError:
+            logger.debug("Could not log coarse edges for verification.")
+            logger.debug(f"lon_coarse: {out[lon_name].values}")
+            logger.debug(f"lat_coarse: {out[lat_name].values}")
+        return out
+
     def write_mask_file(self, ds, mask_file):
         """Write basin mask to specified path."""
         if mask_file is not None:
+            logger.info("Writing mask file")
             # name the variable mask
-            mask = ds.basin > 0
-            mask_file = pl.Path(mask_file)
+            mask = np.where(
+                ds.basin > 0, 1, 0
+            )  # if self.catchment_mask is None else self.catchment_mask
+            mask_file = Path(mask_file)
             mask_da = xr.DataArray(
                 mask, coords={"lat": ds.lat, "lon": ds.lon}, dims=["lat", "lon"]
             )
-            mask_ds = xr.Dataset(
-                {"land_mask": mask_da, "mask": mask_da},
-                coords={"lon": ds.lon, "lat": ds.lat},
+            mask_da["lat"].attrs.update(
+                {
+                    "units": "degrees_north",
+                    "long_name": "latitude",
+                    "standard_name": "latitude",
+                    "axis": "Y",
+                }
             )
-            mask_ds.to_netcdf(mask_file)
+            mask_da["lon"].attrs.update(
+                {
+                    "units": "degrees_east",
+                    "long_name": "longitude",
+                    "standard_name": "longitude",
+                    "axis": "X",
+                }
+            )
+            logger.debug(
+                f"Created mask dataarray with shape {mask_da.shape} and stats min {mask_da.min().item()}, max {mask_da.max().item()}"
+            )
+            mask_ds = xr.Dataset({"land_mask": mask_da, "mask": mask_da})
+            mask_upscaled = None
+            if self.do_upscale:
+                mask_upscaled = mask_da
+            elif self.resolutions.l2_resolution is not None:
+                mask_upscaled = self.upscale_mask_with_correct_coords(mask_da)
+
+            if mask_upscaled is not None:
+                mask_upscaled = mask_upscaled.rename({"lat": "lat_l2", "lon": "lon_l2"})
+                mask_ds["mask_l2"] = mask_upscaled
+            dims = set(mask_ds.dims)
+            all_coords = set(mask_ds.coords)
+            dim_coords = all_coords & dims  # intersection
+            for var in dim_coords:
+                bounds_name = f"{var}_bnds"
+                try:
+                    mask_ds.coords[bounds_name] = generate_bounds(mask_ds[var])
+                    mask_ds[var].attrs["bounds"] = bounds_name
+                except IndexError:
+                    logger.info(f"Could not generate bounds for coord {var}")
+            encoding = {
+                v: {"zlib": True, "complevel": 4, "shuffle": True, **NC_ENCODE_MASK}
+                for v in mask_ds.data_vars
+            }
+            write_xarray_to_file(mask_ds, mask_file, encoding=encoding)
             logger.info(f"Mask file has been written to {mask_file}")
         else:
             logger.info("No mask file path specified.")
@@ -538,54 +1245,75 @@ class Catchment:
         min_col, max_col = np.where(cols)[0][[0, -1]]
 
         if buffer > 0:
-            # Add a buffer of one cell
+            # Add a buffer of buffer cells
             logger.info(f"Using a min buffer of {buffer}")
-            min_row = min_row - buffer if min_row > 0 else min_row
-            min_col = min_col - buffer if min_col > 0 else min_col
-            max_row = (
-                max_row + buffer if max_row < self.catchment_mask.shape[0] else max_row
-            )
-            max_col = (
-                max_col + buffer if max_col < self.catchment_mask.shape[1] else max_col
-            )
+            min_row = max(0, min_row - buffer)
+            min_col = max(0, min_col - buffer)
+            max_row = min(self.catchment_mask.shape[0] - 1, max_row + buffer)
+            max_col = min(self.catchment_mask.shape[1] - 1, max_col + buffer)
         logger.info(
-            f"min row: {min_row} max row: {max_row} min_col: {min_col}, max_col: {max_col}"
-        )
-        if self.l1_resolution is not None:
-            factor = self.get_upscaling_factor(max_resolution=True)
-            if factor != 1:
-                logger.info(
-                    f"Regridding to fit coarse grid with res {self.l1_resolution} (factor {factor})"
-                )
-                min_row = min_row // factor * factor
-                min_col = min_col // factor * factor
-                # Calculating max_row/col it needs:
-                #  +1 to include the whole last coarse grid cell -1 to not get one cell from the next block
-                max_row = (max_row // factor + 1) * factor - 1
-                max_col = (max_col // factor + 1) * factor - 1
-                if max_col >= len(cols):
-                    logger.warning("While regridding max_cols was larger than col-size")
-                    max_col = len(cols) - 1
-                if max_row >= len(rows):
-                    logger.warning("While regridding max_rows was larger than row-size")
-                    max_row = len(rows) - 1
-        logger.info(
-            f"min row: {min_row} max row: {max_row} min_col: {min_col}, max_col: {max_col}"
+            f"L0 initial window (rows, cols): [{min_row}:{max_row}], [{min_col}:{max_col}]"
         )
 
-        # Slice the array to extract the filled part
-        lon_min, lon_max = (
-            np.round(self.ds.lon.values[min_col], 8),
-            np.round(self.ds.lon.values[max_col], 8),
-        )
-        lat_min, lat_max = (
-            np.round(self.ds.lat.values[max_row], 8),
-            np.round(self.ds.lat.values[min_row], 8),
-        )
-        lat_slice = slice(lat_max, lat_min)
-        lon_slice = slice(lon_min, lon_max)
-        logger.info(f"lat_slice: {lat_slice}, lon_slice: {lon_slice}")
-        return lat_slice, lon_slice
+        factor = self.get_upscaling_factor(max_resolution=True)
+        if factor > 1:
+            logger.info(
+                f"Regridding to fit coarse grid with res {max([r for r in [self.resolutions.l1_resolution, self.resolutions.l11_resolution, self.resolutions.l2_resolution] if r is not None ])} (factor {factor})"
+            )
+
+            if self.resolutions.l2_file is not None:
+                logger.debug(
+                    f"Aligning to L2 grid from file {self.resolutions.l2_file}"
+                )
+                min_row, max_row, min_col, max_col = self.align_bounds_to_l2(
+                    min_row, max_row, min_col, max_col
+                )
+            else:
+                # Calculating min_row/col it needs:
+                #  integer division to get the coarse grid cell containing the min_row/col
+                #  multiply back to get the min_row/col of that coarse grid cell
+                min_row = min_row // factor * factor
+                min_col = min_col // factor * factor
+                #  Calculating max_row/col it needs:
+                #  +1 to include the whole last coarse grid cell
+                max_row = (max_row // factor + 1) * factor
+                max_col = (max_col // factor + 1) * factor
+            # clamp
+            min_row = max(min_row, 0)
+            min_col = max(min_col, 0)
+            max_row = min(max_row, self.catchment_mask.shape[0] - 1)
+            max_col = min(max_col, self.catchment_mask.shape[1] - 1)
+            logger.info(
+                f"After shifting to L2 grid (rows, cols): [{min_row}:{max_row}], [{min_col}:{max_col}]"
+            )
+        # build index slice
+        lat_slice_idx = slice(min_row, max_row)
+        lon_slice_idx = slice(min_col, max_col)
+
+        # Sanity: cropped shape divisible by factor ---
+        n_lat = lat_slice_idx.stop - lat_slice_idx.start
+        n_lon = lon_slice_idx.stop - lon_slice_idx.start
+        if factor > 1 and ((n_lat % factor) != 0 or (n_lon % factor) != 0):
+            msg = (
+                "Cropped L0 shape "
+                f"({n_lat}, {n_lon}) not divisible by factor={factor}"
+            )
+            with ErrorLogger(logger):
+                raise AssertionError(msg)
+
+        # # Slice the array to extract the filled part
+        # lon_min, lon_max = (
+        #     np.round(self.ds.lon.values[min_col], 8),
+        #     np.round(self.ds.lon.values[max_col], 8),
+        # )
+        # lat_min, lat_max = (
+        #     np.round(self.ds.lat.values[max_row], 8),
+        #     np.round(self.ds.lat.values[min_row], 8),
+        # )
+        # lat_slice = slice(lat_max, lat_min)
+        # lon_slice = slice(lon_min, lon_max)
+        logger.info(f"lat_slice: {lat_slice_idx}, lon_slice: {lon_slice_idx}")
+        return lat_slice_idx, lon_slice_idx
 
 
 def merge_catchment(path1, path2, out_path):
@@ -608,7 +1336,7 @@ def merge_catchment(path1, path2, out_path):
 
     # in the border area, use the rolled data, else the original
     merged = xr.where(mask, ds2.reindex_like(ds1, method="nearest"), ds1)
-    merged.to_netcdf(out_path)
+    write_xarray_to_file(merged, out_path)
 
 
 def get_transformation_matrix_nc(ds, var_name):
@@ -656,7 +1384,7 @@ def is_data_global(ds, coordinate_slice):
 
 
 @log_arguments()
-def create_catchment(
+def create_catchment(  # noqa: PLR0913
     input_file,
     output_path,
     var_name,
@@ -665,26 +1393,37 @@ def create_catchment(
     gauge_coords=None,
     coordinate_slices=None,
     mask_file=None,
-    l1_resolution=None,
-    l11_resolution=None,
-    l2_resolution=None,
+    resolutions: Resolution = None,
     frame=1,
     upscale=False,
     latlon=True,
-    available_mem=None
+    available_mem=None,
+    ref_catchment_area=None,
+    max_distance_cells=5,
+    max_error=0.1,
+    gauge_id=None,
 ):
     """Create file containing catchment ids, flowdirection and upstream area from dem or flow direction."""
     logger.info(
         f"Creating catchment file for {var_name} using {var} and {ftype} from {input_file}"
     )
-
+    if coordinate_slices is None:
+        coordinate_slices = {"lat": slice(None, None), "lon": slice(None, None)}
+    if resolutions is None:
+        resolutions = Resolution()
     if var not in {"fdir", "dem"}:
         with ErrorLogger(logger):
             msg = f"Unexpected value for var={var}, must be 'fdir' or 'dem'"
             raise ValueError(msg)
 
+    chunking = available_mem is not None
     with get_xarray_ds_from_file(
-        input_file, var_name, normalize_latlon_coords=True, force_decending_y=True, available_mem_gib=available_mem
+        input_file,
+        var_name,
+        normalize_latlon_coords=True,
+        force_decending_y=True,
+        available_mem_gib=available_mem,
+        chunking=chunking,
     ) as input_ds:
         # transform
         transform = get_transformation_matrix_nc(input_ds, var_name)
@@ -703,9 +1442,7 @@ def create_catchment(
                 latlon=latlon,
                 out_var_name=temp_file1,
                 do_shift=False,
-                l1_resolution=l1_resolution,
-                l11_resolution=l11_resolution,
-                l2_resolution=l2_resolution,
+                resolutions=resolutions,
                 upscale=upscale,
             )
             # create a shifted version of the catchment to avoid border effects
@@ -719,41 +1456,45 @@ def create_catchment(
                 latlon=latlon,
                 out_var_name=temp_file2,
                 do_shift=True,
-                l1_resolution=l1_resolution,
-                l11_resolution=l11_resolution,
-                l2_resolution=l2_resolution,
+                resolutions=resolutions,
                 upscale=upscale,
             )
             catchments = [global_catchments, global_catchments_shifted]
 
             for c in catchments:
-                if l1_resolution is not None and upscale:
+                if resolutions.l1_resolution is not None and upscale:
                     c.upscale(var)
                 else:
                     c.get_facc()
                 c.get_basins()
                 c.get_grid_area()
-                # c.get_upstream_area()
+                c.get_upstream_area()
                 c.write(output_path, single_file=True, frame=frame, mask_file=mask_file)
             # add paths to the temp files
-            temp_file1 = pl.Path(output_path, "hydro1.nc")
-            temp_file2 = pl.Path(output_path, "hydro2.nc")
+            temp_file1 = Path(output_path, "hydro1.nc")
+            temp_file2 = Path(output_path, "hydro2.nc")
             logger.info("Merging catchment files")
             merge_catchment(
                 temp_file1,
                 temp_file2,
-                pl.Path(output_path, "basin_ids.nc"),
+                Path(output_path, "basin_ids.nc"),
             )
             # remove the temporary files
             temp_file1.unlink()
             temp_file2.unlink()
-        elif coordinate_slices is not None:
-            logger.info(f"Creating basin id file for {coordinate_slices}")
-            input_ds_sliced = input_ds.sel(
-                lat=coordinate_slices["lat"], lon=coordinate_slices["lon"]
-            )
-            logger.info(f"lat {input_ds_sliced.lat.data[0]}, {input_ds_sliced.lat.data[-1]}")
-            logger.info(f"lon {input_ds_sliced.lon.data[0]}, {input_ds_sliced.lon.data[-1]}")
+            return
+        input_ds_sliced = input_ds.sel(
+            lat=coordinate_slices["lat"], lon=coordinate_slices["lon"]
+        )
+        logger.info("Cropped input dataset:")
+        logger.info(
+            f"        lat {input_ds_sliced.lat.data[0]}, {input_ds_sliced.lat.data[-1]}"
+        )
+        logger.info(
+            f"        lon {input_ds_sliced.lon.data[0]}, {input_ds_sliced.lon.data[-1]}"
+        )
+        if gauge_coords is not None:
+            logger.info(f"Creating catchment for gauge coordinates {gauge_coords}")
             c = Catchment(
                 ds=input_ds_sliced,
                 var_name=var_name,
@@ -763,40 +1504,21 @@ def create_catchment(
                 latlon=latlon,
                 out_var_name="basin_ids.nc",
                 do_shift=False,
-                l1_resolution=l1_resolution,
-                l11_resolution=l11_resolution,
-                l2_resolution=l2_resolution,
+                resolutions=resolutions,
                 upscale=upscale,
             )
-            if l1_resolution is not None and upscale:
-                c.upscale(var)
-            else:
-                c.get_facc()
-            c.get_basins()
-            c.get_grid_area()
-            c.write(output_path, single_file=True, mask_file=mask_file, frame=frame)
-        else:
-            logger.info(f"Creating catchment for gauge coordinates {gauge_coords}")
-            c = Catchment(
-                ds=input_ds,
-                var_name=var_name,
-                var=var,
-                ftype=ftype,
-                transform=transform,
-                latlon=latlon,
-                out_var_name="basin_ids.nc",
-                do_shift=False,
-                l1_resolution=l1_resolution,
-                l11_resolution=l11_resolution,
-                l2_resolution=l2_resolution,
-                upscale=upscale,
+            c.delineate_basin(
+                gauge_coords,
+                ref_catchment_area=ref_catchment_area,
+                max_distance_cells=max_distance_cells,
+                max_error=max_error,
             )
-            c.delineate_basin(gauge_coords)
-            if l1_resolution is not None and upscale:
+            if resolutions.l1_resolution is not None and upscale:
                 c.upscale(var)
             else:
                 c.get_facc()
             c.get_grid_area()
+            c.get_upstream_area()
             c.write(
                 output_path,
                 single_file=True,
@@ -804,4 +1526,28 @@ def create_catchment(
                 mask_file=mask_file,
                 frame=frame,
                 buffer=frame,
+                gauge_id=gauge_id,
             )
+            return
+        logger.info("Creating basin id file for region.")
+
+        c = Catchment(
+            ds=input_ds_sliced,
+            var_name=var_name,
+            var=var,
+            ftype=ftype,
+            transform=transform,
+            latlon=latlon,
+            out_var_name="basin_ids.nc",
+            do_shift=False,
+            resolutions=resolutions,
+            upscale=upscale,
+        )
+        if resolutions.l1_resolution is not None and upscale:
+            c.upscale(var)
+        else:
+            c.get_facc()
+        c.get_basins()
+        c.get_grid_area()
+        c.get_upstream_area()
+        c.write(output_path, single_file=True, mask_file=mask_file, frame=frame)

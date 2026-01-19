@@ -1,12 +1,14 @@
-#!/usr/bin/env python3
 """Common NetCDF/xarray routines and utilities for reading, encoding, and bounds generation."""
 
-import glob
 import logging
 from pathlib import Path
 from typing import Any, List, Optional, Union
 
+import numpy as np
 import xarray as xr
+
+from mhm_tools.common.logger import ErrorLogger
+from mhm_tools.common.xarray_utils import get_dtype
 
 from .constants import NC_ENCODE_DEFAULTS, WILDCARDS
 
@@ -22,9 +24,9 @@ def _has_wildcards(path: Union[str, Path]) -> bool:
 
 
 def _fallback_open(open_func: Any, *args: Any, **kwargs: Any) -> xr.Dataset:
-    """
-    Open a dataset with the provided xarray function,
-    falling back from h5netcdf to netcdf4 engine if necessary.
+    """Open a dataset with the provided xarray function.
+
+    Falls back from the h5netcdf to the netcdf4 engine if necessary.
     """
     try:
         return open_func(*args, **kwargs)
@@ -47,16 +49,16 @@ def read_dataset(
     This function accepts either a single path (possibly containing
     shell-style wildcards), or a list of paths, and handles both:
 
-      - Single-file case: opens it directly.
-      - Multi-file case:
-        * If `use_mfdataset=True`, uses xarray.open_mfdataset for
+    - Single-file case: opens it directly.
+    - Multi-file case:
+        * If `use_mfdataset=True`, uses `xarray.open_mfdataset` for
           contiguous datasets.
-        * Otherwise, opens each file individually and then combines
-          them via coords (attributes overridden).
+        * Otherwise, opens each file individually and combines them
+          via coordinates (attributes overridden).
 
     Parameters
     ----------
-    file_path : str or Path or list thereof
+    file_path : Union[str, Path, List[Union[str, Path]]]
         A file path (can include wildcards), or a list of explicit
         file paths.
     use_mfdataset : bool, default False
@@ -93,6 +95,7 @@ def read_dataset(
 
     >>> paths = ["data/part1.nc", "data/part2.nc"]
     >>> ds = read_dataset(paths)
+
     """
     # Normalize to list of string paths
     if isinstance(file_path, (list, tuple)):
@@ -101,10 +104,9 @@ def read_dataset(
     else:
         pattern = str(file_path)
         if _has_wildcards(pattern):
-            logger.debug(f"Globbing for pattern: {pattern} (recursive=True)")
-            # recursive=True will match any number of subdir levels
-            matches = glob.glob(pattern, recursive=True)
-            paths = sorted(matches)
+            logger.debug(f"Globbing for pattern: {pattern}")
+            matches = sorted(Path().glob(pattern))
+            paths = [str(p) for p in matches]
             if not paths:
                 msg = f"No files match pattern: {pattern}"
                 logger.error(msg)
@@ -153,17 +155,164 @@ def set_netcdf_encoding(
     var_encoding: Optional[dict] = None,
 ) -> None:
     """Set default NetCDF encoding settings on an xarray Dataset."""
+    # Ensure missing bounds variables are generated before encoding.
+    _ensure_bounds_exist(ds)
     encoding = var_encoding or NC_ENCODE_DEFAULTS
     dims = set(ds.dims)
     coords = set(ds.coords)
     dim_coords = coords & dims
     aux_coords = coords - dims
-    bnds = {ds[c].attrs.get("bounds") for c in coords if "bounds" in ds[c].attrs}
+    # collect bounds variables referenced by coords, but only keep ones actually present
+    bnds_all = {ds[c].attrs.get("bounds") for c in coords if "bounds" in ds[c].attrs}
+    bnds = {b for b in bnds_all if b in ds}
+    missing_bnds = bnds_all - bnds
+    if missing_bnds:
+        logger.debug(
+            f"Ignoring missing bounds variables referenced in attrs: {sorted(missing_bnds)}"
+        )
     data_vars = set(ds.data_vars) - bnds
     for name in aux_coords | data_vars:
         ds[name].encoding = encoding
     for name in dim_coords | bnds:
         ds[name].encoding = {"_FillValue": None}
+
+
+def _ensure_bounds_exist(ds: xr.Dataset, bounds_dim: str = "bnds") -> None:
+    """
+    Create bounds variables for 1D coordinates if missing.
+
+    - If a coordinate already declares a 'bounds' attribute but the
+      referenced variable is absent, the bounds variable is created.
+    - If a coordinate lacks 'bounds', a new bounds variable named
+      '{coord}_bnds' is generated (unless it already exists).
+
+    Bounds generation uses `generate_bounds` and is skipped for
+    coordinates with fewer than two points or with more than one
+    dimension.
+    """
+    created: List[str] = []
+    skipped: List[str] = []
+    for coord in ds.coords:
+        da = ds[coord]
+        # only handle 1D coordinates with at least two points
+        if da.ndim != 1 or da.sizes[da.dims[0]] < 2:
+            skipped.append(coord)
+            continue
+
+        bounds_name = da.attrs.get("bounds", f"{coord}_bnds")
+        has_bounds_var = bounds_name in ds
+
+        # If bounds already exist, just ensure attr is set
+        if has_bounds_var:
+            if "bounds" not in da.attrs:
+                da.attrs["bounds"] = bounds_name
+            continue
+
+        # Bounds missing: try to generate and attach
+        try:
+            if da.ndim != 1 or da.sizes[da.dims[0]] < 2:
+                logger.debug(f"da: {da}")
+                msg = "Cannot generate bounds for non-1D or too short data."
+                with ErrorLogger(logger):
+                    raise ValueError(msg)
+            ds.coords[bounds_name] = generate_bounds(da, bounds_dim=bounds_dim)
+            ds[coord].attrs["bounds"] = bounds_name
+            created.append(bounds_name)
+        except Exception:
+            logger.debug(
+                f"Could not generate bounds for coordinate '{coord}'", exc_info=True
+            )
+            skipped.append(coord)
+
+    if created:
+        logger.debug(f"Generated bounds for coordinates: {sorted(created)}")
+    if skipped:
+        logger.debug(
+            f"Skipped bounds generation for coordinates (non-1D or too short): {sorted(skipped)}"
+        )
+
+
+def sanitize_nc_encoding(ds: "xr.Dataset", encoding: dict) -> dict:
+    """Return a safe encoding dict and clean ds attrs so netCDF4 won't error."""
+    enc_out = {}
+    for name in ds.data_vars:
+        if name not in encoding:
+            continue
+        da = ds[name]
+        e = dict(encoding[name])  # shallow copy
+
+        # Always keep compression settings
+        for k in list(e.keys()):
+            if k not in {"zlib", "complevel", "shuffle", "_FillValue"}:
+                # 'missing_value' and any other stray keys should not live in 'encoding'
+                e.pop(k, None)
+
+        # Clean any leftover attrs that might have been set earlier
+        # (especially important for boolean vars) and avoid conflicts
+        # between variable attributes and encoding entries (xarray will
+        # raise if both provide _FillValue). If a fill/missing value is
+        # present in attrs, prefer moving it into encoding (if not already
+        # present) and then remove from attrs to avoid clashes.
+        mv = da.attrs.pop("missing_value", None)
+        fv = da.attrs.pop("_FillValue", None)
+        # If encoding does not already specify _FillValue, prefer the
+        # attribute value (if available) and cast it to the variable dtype.
+        if fv is not None and "_FillValue" not in e and get_dtype(da) != np.bool_:
+            try:
+                e["_FillValue"] = np.array(fv).astype(get_dtype(da)).item()
+            except Exception:
+                # if casting fails, drop the fill value
+                e.pop("_FillValue", None)
+        # If mv (missing_value) exists and encoding doesn't include it,
+        # move it to attrs (ensuring dtype match) — this keeps netCDF CF legacy
+        # but avoids placing it into encoding where it can conflict.
+        if mv is not None and "missing_value" not in e:
+            try:
+                da.attrs["missing_value"] = np.array(mv).astype(get_dtype(da)).item()
+            except Exception:
+                # drop if cannot cast
+                da.attrs.pop("missing_value", None)
+
+        if get_dtype(da) == np.bool_:
+            # Booleans: do NOT set fill attributes at all
+            e.pop("_FillValue", None)
+        # Cast _FillValue to the variable dtype if present
+        elif "_FillValue" in e:
+            try:
+                e["_FillValue"] = np.array(e["_FillValue"]).astype(get_dtype(da)).item()
+            except Exception:
+                # If casting fails, drop it rather than erroring out
+                e.pop("_FillValue", None)
+
+            # If you *must* also expose 'missing_value' (CF legacy), put it in attrs
+            # with matching dtype (commented out by default):
+            # mv = da.attrs.get("missing_value", None)
+            # if mv is not None:
+            #     da.attrs["missing_value"] = np.array(mv).astype(da.dtype).item()
+
+        enc_out[name] = e
+
+    return enc_out
+
+
+# def generate_safe_nc_encoding(da, target_mb=320, fill=NO_DATA):
+#     item = np.dtype(da.dtype).itemsize
+#     ny = da.sizes.get("lat", 1)
+#     nx = da.sizes.get("lon", 1)
+#     per_t_bytes = ny * nx * item
+#     t = max(1, int((target_mb * 1024**2) // per_t_bytes))
+#     return {
+#         da.name
+#         or "var": {
+#             "chunksizes": (min(t, da.sizes.get("time", t)), ny, nx),
+#             "zlib": True,
+#             "complevel": 4,
+#             "dtype": "f4",
+#             "_FillValue": fill,
+#             "missing_value": fill,
+#             "contiguous": False,
+#         }
+#     }
 
 
 def generate_bounds(

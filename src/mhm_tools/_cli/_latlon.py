@@ -1,5 +1,4 @@
-"""
-Create the latlon.nc file required for mHM.
+"""Create the latlon.nc file required for mHM.
 
 The latlon file contains the lat-lon information for 3 levels in mHM:
 Level-0 (DEM), Level-1 (hydrology) and Level-11 (routing).

@@ -48,7 +48,9 @@ dependencies = [
   "crick",
   "distributed",
   "seaborn",
-  "netCDF4"
+  "netCDF4",
+  "easy_mpl",
+  "cdo"
 ]
 
 [project.urls]
@@ -73,6 +75,9 @@ check = [
   "black>=24,<25",
   "isort[colors]",
   "ruff>=0.4,<0.5",
+]
+plot = [
+  "cartopy",
 ]
 
 [project.scripts]
@@ -162,4 +167,3 @@ max-statements = 80
 
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"
-

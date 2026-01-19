@@ -1,15 +1,16 @@
 """
 Create files containing subsets of the river network based on the provided input files.
 
-The river network, provied as nc file containing basin ids, is split into subdomains based on the provided basin clusters.
-These subdomains of the global network are independent and can be run in parallel.
+The river network, provied as nc file containing basin ids, is split
+into subdomains based on the provided basin clusters. These subdomains
+of the global network are independent and can be run in parallel.
 """
 
 from ..pre import create_subdomain_masks
 
 
 def add_args(parser):
-    """Add cli arguments for the create_catchment subcommand.
+    """Add CLI arguments for the create_subdomain_masks subcommand.
 
     Parameters
     ----------
@@ -33,8 +34,8 @@ def add_args(parser):
         "-b",
         "--basin_ids",
         help=(
-            "file containing unique basins ids for all river basins"
-            "they need to be in variable 'basin'"
+            "file containing unique basin ids for all river basins; "
+            "variable 'basin' must exist in file"
         ),
     )
     required_args.add_argument(
@@ -42,22 +43,22 @@ def add_args(parser):
         "--basin_clusters",
         default=None,
         help=(
-            "file containing clustered basins ids e.g. of the 53 subbasins from PGB reference"
-            "they need to be in variable 'mask' but can have any resolution"
+            "file containing clustered basin ids (e.g., PGB reference); "
+            "variable 'mask' must exist"
         ),
     )
     required_args.add_argument(
         "-l",
         "--land_mask",
         help=(
-            "File containing a mask of all land surfaces"
-            "grid of target resolution, need to be in integer variable 'land_mask'"
+            "file containing land surface mask at target resolution; "
+            "variable 'land_mask' must exist"
         ),
     )
 
 
 def run(args):
-    """Create the catchment file.
+    """Create the subdomain mask files.
 
     Parameters
     ----------

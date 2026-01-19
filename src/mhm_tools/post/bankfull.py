@@ -1,5 +1,4 @@
-"""
-Calculate the river discharge at bankfull conditions and the bankfull width.
+"""Calculate the river discharge at bankfull conditions and the bankfull width.
 
 Authors
 -------
@@ -11,8 +10,9 @@ import logging
 
 import numpy as np
 
-from mhm_tools.common.file_handler import get_xarray_ds_from_file
+from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_to_file
 from mhm_tools.common.logger import log_arguments
+from mhm_tools.common.xarray_utils import get_dtype
 
 from ..common import NC_ENCODE_DEFAULTS, set_netcdf_encoding
 
@@ -51,7 +51,7 @@ def calc_q_bkfl(q_yearly_peak, return_period):
     -------
     numpy.ma.MaskedArray
     """
-    q_bkfl = np.ma.empty(q_yearly_peak.shape[1:], q_yearly_peak.dtype)
+    q_bkfl = np.ma.empty(q_yearly_peak.shape[1:], get_dtype(q_yearly_peak))
     q_bkfl[...] = np.nan
     # all finite values mask
     q_mask = np.all(np.isfinite(q_yearly_peak), axis=0)
@@ -136,4 +136,4 @@ def bankfull_discharge(
     set_netcdf_encoding(ds=ds, var_encoding=var_encode)
 
     # save
-    ds.to_netcdf(out_file)
+    write_xarray_to_file(ds=ds, file_path=out_file)

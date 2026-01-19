@@ -1,5 +1,4 @@
-"""
-Create the catchment file for mRM.
+"""Create the catchment file for mRM.
 
 Authors
 -------
@@ -18,7 +17,7 @@ import numpy as np
 import xarray as xr
 from scipy.interpolate import NearestNDInterpolator
 
-from mhm_tools.common.file_handler import get_xarray_ds_from_file
+from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_to_file
 from mhm_tools.common.logger import ErrorLogger, log_arguments
 
 logger = logging.getLogger(__name__)
@@ -52,8 +51,7 @@ FILL_VALUE = -9999
 
 
 class CreateSubdomainMasks:
-    """
-    A class for creating subdomain masks based on input data.
+    """A class for creating subdomain masks based on input data.
 
     Parameters
     ----------
@@ -72,7 +70,6 @@ class CreateSubdomainMasks:
     ------
     ValueError
         If the input path is not a directory.
-
     """
 
     def __init__(
@@ -108,7 +105,24 @@ class CreateSubdomainMasks:
 
     @staticmethod
     def get_mask_from_polygon(arr, vertices):
-        """Create a mask on an array with lon and lat attributes for given list of vertices."""
+        """Create a boolean mask for points inside a polygon.
+
+        The input `arr` is a 2D array with `lat` and `lon` coordinates; the mask is
+        True for cells whose (lon, lat) fall inside the polygon defined by
+        `vertices`.
+
+        Parameters
+        ----------
+        arr : xarray.DataArray
+            2D data array with coordinates `lat` and `lon`.
+        vertices : sequence[tuple[float, float]]
+            Polygon vertices as (lon, lat) pairs.
+
+        Returns
+        -------
+        numpy.ndarray
+            Boolean mask with the same shape as `arr`, True inside the polygon.
+        """
         polygon = mpl.path.Path(vertices)
         # mask out only the values in arr that fall within bbox of polygon, convert them to points
         bbox = polygon.get_extents()
@@ -128,13 +142,11 @@ class CreateSubdomainMasks:
         return mask
 
     def create_subdomains(self):
-        """
-        Create subdomain masks based on the input data.
+        """Create subdomain masks based on the input data.
 
         Returns
         -------
         None
-
         """
         logger.info("Global domain selected. Creating subdomains...")
         if self.pgb_file is None:
@@ -204,8 +216,9 @@ class CreateSubdomainMasks:
 
             # 3rd step --- write masks
             # read land_mask to intersect with subdomain_mask
-            new_ids_remapped.to_netcdf(
-                file_basins_remapped,
+            write_xarray_to_file(
+                ds=new_ids_remapped,
+                file_path=file_basins_remapped,
                 encoding={
                     new_ids_remapped.name: {"_FillValue": FILL_VALUE, "dtype": "int16"}
                 },
@@ -227,8 +240,9 @@ class CreateSubdomainMasks:
             ds_sub_ref_file = ds_ref_file.copy()
             for data_var in ds_sub_ref_file.data_vars:
                 ds_sub_ref_file[data_var].values[~sub_mask] = np.nan
-
-            ds_sub_ref_file.to_netcdf(fname, encoding=REF_FILE_ENCODING)
+            write_xarray_to_file(
+                ds=ds_sub_ref_file, file_path=fname, encoding=REF_FILE_ENCODING
+            )
             logger.info(f"Wrote to {fname}")
 
     def use_land_mask(self, lat, lon):
@@ -313,15 +327,16 @@ class CreateSubdomainMasks:
         # Write the output to a netCDF file
         fname = self.out_file_name + ".nc"
         logger.info(f"Writing to {fname}")
-        ds_sub_ref_file.to_netcdf(fname, encoding=REF_FILE_ENCODING)
+        write_xarray_to_file(
+            ds=ds_sub_ref_file, file_path=fname, encoding=REF_FILE_ENCODING
+        )
 
 
 @log_arguments()
 def create_subdomain_masks(
     output_dir, output_file_name, basin_id_file, basin_clusters, land_mask
 ):
-    """
-    Create subdomain masks based on the provided input parameters.
+    """Create subdomain masks based on the provided input parameters.
 
     Args:
         output_dir (str): The directory where the output files will be saved.
