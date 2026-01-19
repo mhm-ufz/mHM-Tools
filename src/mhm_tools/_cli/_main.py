@@ -21,6 +21,7 @@ from . import (
     _hydrograph,
     _landcover_ascii_to_nc,
     _latlon,
+    _link_folder_tree,
     _long_term_mean,
     _merge,
     _prepare_mhm_forcings,
@@ -28,7 +29,6 @@ from . import (
     _regrid,
     _relative_difference,
     _taylor_diagram,
-    _link_folder_tree
 )
 
 
