@@ -1,9 +1,14 @@
-from pathlib import Path
+"""Functions to link folder trees with symlinks."""
+
 import logging
+from pathlib import Path
+
 logger = logging.getLogger(__name__)
 
 
-def link_folder_tree(input_dir: Path, output_dir: Path, overwrite: bool = False, file_name: str = "*.*"):
+def link_folder_tree(
+    input_dir: Path, output_dir: Path, overwrite: bool = False, file_name: str = "*.*"
+):
     """Link all files in a folder tree to another folder tree creating symlinks for each file.
 
     Parameters

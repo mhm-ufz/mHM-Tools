@@ -44,4 +44,9 @@ def add_args(parser):
 def run(args):
     input_dir = Path(args.input_dir)
     output_dir = Path(args.output_dir)
-    link_folder_tree(input_dir=input_dir, output_dir=output_dir, overwrite=args.overwrite, file_name=args.file_name)
+    link_folder_tree(
+        input_dir=input_dir,
+        output_dir=output_dir,
+        overwrite=args.overwrite,
+        file_name=args.file_name,
+    )
