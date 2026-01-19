@@ -28,6 +28,7 @@ from . import (
     _regrid,
     _relative_difference,
     _taylor_diagram,
+    _link_folder_tree
 )
 
 
@@ -114,6 +115,7 @@ def _get_parser():
     add_command_from_module(subparsers, "ratio", _ratio)
     add_command_from_module(subparsers, "taylor_diagram", _taylor_diagram)
     add_command_from_module(subparsers, "2d_map", _2d_map)
+    add_command_from_module(subparsers, "link_folder_tree", _link_folder_tree)
 
     # add logging
     # option 1 explicit log levels by name

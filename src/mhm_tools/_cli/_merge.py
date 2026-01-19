@@ -6,7 +6,7 @@ from mhm_tools.pre.merge import merge_files
 
 
 def add_args(parser):
-    """Add cli arguments for the hydrograph subcommand.
+    """Add cli arguments for the merge subcommand.
 
     Parameters
     ----------
