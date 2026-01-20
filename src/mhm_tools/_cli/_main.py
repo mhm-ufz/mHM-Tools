@@ -2,8 +2,34 @@
 
 import argparse
 
+from mhm_tools._cli import _calculate_pet
+from mhm_tools.common.logger import configure_mhm_tools_logger
+
 from .. import __version__
-from . import _bankfull, _latlon
+from . import (
+    _2d_map,
+    _bankfull,
+    _create_catchment,
+    _create_idgauges,
+    _create_mhm_restart_file,
+    _create_subdomain_masks,
+    _crop_mhm_setup,
+    _difference,
+    _file_converter,
+    _grdc_validation,
+    _gridded_data_evaluation,
+    _hydrograph,
+    _landcover_ascii_to_nc,
+    _latlon,
+    _link_folder_tree,
+    _long_term_mean,
+    _merge,
+    _prepare_mhm_forcings,
+    _ratio,
+    _regrid,
+    _relative_difference,
+    _taylor_diagram,
+)
 
 
 class Formatter(
@@ -13,8 +39,7 @@ class Formatter(
 
 
 def add_command_from_module(subparsers, name, module):
-    """
-    Add a subcommand from a given module.
+    """Add a subcommand from a given module.
 
     Parameters
     ----------
@@ -62,15 +87,77 @@ def _get_parser():
     # module needs two functions: add_args and run
 
     add_command_from_module(subparsers, "bankfull", _bankfull)
+
+    add_command_from_module(subparsers, "hydrograph", _hydrograph)
+    add_command_from_module(
+        subparsers, "gridded_data_evaluation", _gridded_data_evaluation
+    )
+    add_command_from_module(subparsers, "grdc_validation", _grdc_validation)
     add_command_from_module(subparsers, "latlon", _latlon)
+    add_command_from_module(subparsers, "converter_nc_ascii", _file_converter)
+    add_command_from_module(subparsers, "landcover_ascii_to_nc", _landcover_ascii_to_nc)
+    add_command_from_module(subparsers, "merge_files", _merge)
+    add_command_from_module(subparsers, "regrid_file", _regrid)
+    add_command_from_module(subparsers, "create_catchment", _create_catchment)
+    add_command_from_module(subparsers, "crop_mhm_setup", _crop_mhm_setup)
+    add_command_from_module(subparsers, "prepare_mhm_forcings", _prepare_mhm_forcings)
+    add_command_from_module(subparsers, "calculate_pet", _calculate_pet)
+    add_command_from_module(subparsers, "create_id_gauges", _create_idgauges)
+    add_command_from_module(
+        subparsers, "create_subdomain_masks", _create_subdomain_masks
+    )
+    add_command_from_module(
+        subparsers, "create_mhm_restart_file", _create_mhm_restart_file
+    )
+    add_command_from_module(subparsers, "long_term_mean", _long_term_mean)
+    add_command_from_module(subparsers, "difference", _difference)
+    add_command_from_module(subparsers, "relative_difference", _relative_difference)
+    add_command_from_module(subparsers, "ratio", _ratio)
+    add_command_from_module(subparsers, "taylor_diagram", _taylor_diagram)
+    add_command_from_module(subparsers, "2d_map", _2d_map)
+    add_command_from_module(subparsers, "link_folder_tree", _link_folder_tree)
+
+    # add logging
+    # option 1 explicit log levels by name
+    parent_parser.add_argument(
+        "--log_level",
+        type=str,
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        default=None,
+        help="Set the log level explicitly.",
+    )
+    # option 2 regulation verbosity by -v and -q flags default is INFO
+    parent_parser.add_argument(
+        "--verbose", "-v", action="count", default=0, help="Increase verbosity"
+    )
+    parent_parser.add_argument(
+        "--quiet",
+        "-q",
+        action="count",
+        default=0,
+        help="Reduce verbosity can be repeted e.g. -qq",
+    )
+    # handle file and terminal output
+    parent_parser.add_argument(
+        "--log_file", type=str, default=None, help="Generate a log file."
+    )
+    parent_parser.add_argument(
+        "--log_file_level",
+        type=str,
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        default=None,
+        help="Set log level for the log file. Defaults to console log level.",
+    )
+    parent_parser.add_argument(
+        "--no_console_output", action="store_true", help="Prohibit console output."
+    )
 
     # return the parser
     return parent_parser
 
 
 def main(argv=None):
-    """
-    Execute main CLI routine.
+    """Execute main CLI routine.
 
     Parameters
     ----------
@@ -82,4 +169,12 @@ def main(argv=None):
         result of the called sub-argument routine
     """
     args = _get_parser().parse_args(argv)
+    configure_mhm_tools_logger(
+        log_level=args.log_level,
+        count_verbose=args.verbose,
+        count_quiet=args.quiet,
+        log_file=args.log_file,
+        log_file_level=args.log_file_level,
+        no_colsole_logging=args.no_console_output,
+    )
     return args.func(args)

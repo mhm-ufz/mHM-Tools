@@ -5,6 +5,7 @@ The mHM-Tools project was created by the following people.
 ## Core developers
 
 - Sebastian Müller (E-mail: <sebastian.mueller@ufz.de>)
+- Simon Lüdke (E-mail: <simon.luedke@ufz.de>)
 
 ## Working Group members
 

@@ -1,11 +1,17 @@
 """Common ESRI ASCII grid routines."""
 
+import logging
 import warnings
 from pathlib import Path
+from textwrap import dedent
 
 import numpy as np
 
+from mhm_tools.common.logger import ErrorLogger
+
 from .constants import ESRI_REQ, ESRI_TYPES, NO_DATA
+
+logger = logging.getLogger(__name__)
 
 
 def _is_number(string):
@@ -25,8 +31,7 @@ def _extract_header(file):
 
 
 def standardize_header(header):
-    """
-    Standardize an ASCII grid header dictionary.
+    """Standardize an ASCII grid header dictionary.
 
     Parameters
     ----------
@@ -46,6 +51,7 @@ def standardize_header(header):
     """
     header = {n: ESRI_TYPES[n](v) for (n, v) in header.items() if n in ESRI_TYPES}
     # convert cell center to corner information
+    # TODO: CHECK IF THIS IS ALREADY DONE IN CROP MHM SETUP
     if "xllcenter" in header:
         header["xllcorner"] = header["xllcenter"] - 0.5 * header.get("cellsize", 1)
         del header["xllcenter"]
@@ -61,13 +67,13 @@ def standardize_header(header):
     missing = ESRI_REQ - (set(header) & ESRI_REQ)
     if missing:
         msg = f"standardize_header: missing header information {missing}"
-        raise ValueError(msg)
+        with ErrorLogger(logger):
+            raise ValueError(msg)
     return header
 
 
 def read_header(file):
-    """
-    Read an ASCII grid header from file.
+    """Read an ASCII grid header from file.
 
     Parameters
     ----------
@@ -89,8 +95,7 @@ def read_header(file):
 
 
 def read_grid(file, dtype=None):
-    """
-    Read an ASCII grid from file.
+    """Read an ASCII grid from file.
 
     Parameters
     ----------
@@ -125,13 +130,13 @@ def read_grid(file, dtype=None):
             f"read_grid: data shape {data.shape} "
             f"not matching given header ({nrows=}, {ncols=})."
         )
-        raise ValueError(msg)
+        with ErrorLogger(logger):
+            raise ValueError(msg)
     return header, data
 
 
 def write_header(file, header, dtype="f4"):
-    """
-    Write an ascii header to file.
+    """Write an ascii header to file.
 
     Parameters
     ----------
@@ -144,12 +149,11 @@ def write_header(file, header, dtype="f4"):
         Needs to be integer or float and compatible with np.dtype
         (i.e. "i4", "f4", "f8"), by default "f4"
     """
-    write_grid(file, header, dtype=dtype)
+    return write_grid(file, header, dtype=dtype)
 
 
 def write_grid(file, header, data=None, dtype="f4"):
-    """
-    Write an ascii grid to file.
+    """Write an ascii grid to file.
 
     Parameters
     ----------
@@ -175,39 +179,52 @@ def write_grid(file, header, data=None, dtype="f4"):
         If data shape is not matching the given header.
     """
     header = standardize_header(header)
-    if not issubclass(np.dtype(dtype).type, (np.integer, np.floating)):
+    if not issubclass(
+        np.dtype(dtype).type, (np.unsignedinteger, np.integer, np.floating)
+    ):
         msg = f"write_grid: data type needs to be integer or float. Got: {dtype}"
-        raise ValueError(msg)
-    is_int = issubclass(np.dtype(dtype).type, np.integer)
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    is_int = issubclass(np.dtype(dtype).type, (np.integer, np.unsignedinteger))
     if data is not None:
         data = np.array(data, dtype=dtype, copy=False, ndmin=2)
         if data.ndim != 2:
             msg = f"write_grid: data needs to be 2D. Got: {data.ndim}D"
-            raise ValueError(msg)
+            with ErrorLogger(logger):
+                raise ValueError(msg)
         nrows, ncols = header["nrows"], header["ncols"]
         if data.shape[0] != nrows or data.shape[1] != ncols:
             msg = (
                 f"write_grid: data shape {data.shape} "
                 f"not matching given header ({nrows=}, {ncols=})."
             )
-            raise ValueError(msg)
+            with ErrorLogger(logger):
+                raise ValueError(msg)
     # write header and data
     header_path = Path(file)
     header_path.parent.mkdir(parents=True, exist_ok=True)
+    typ = int if is_int else float
+    header_str = dedent(
+        f"""
+        ncols                {header["ncols"]}
+        nrows                {header["nrows"]}
+        xllcorner            {header["xllcorner"]}
+        yllcorner            {header["yllcorner"]}
+        cellsize             {header["cellsize"]}
+        nodata_value         {typ(header["nodata_value"])}
+        """
+    ).lstrip()
     with header_path.open("w") as f:
-        for key in ["nrows", "ncols", "xllcorner", "yllcorner", "cellsize"]:
-            print(key, header[key], file=f)
-        typ = int if is_int else float
-        print("nodata_value", typ(header["nodata_value"]), file=f)
+        f.write(header_str)
         if data is not None:
             np.savetxt(f, data, fmt="%i" if is_int else "%f")
+    return header_str
 
 
 def check_resolutions(
     cellsize_1, cellsize_2, first_finer=False, name_1="LA", name_2="LB"
 ):
-    """
-    Check two resolutions for compatibility.
+    """Check two resolutions for compatibility.
 
     Parameters
     ----------
@@ -240,7 +257,8 @@ def check_resolutions(
             f"{name_1} ({cellsize_1}) should be finer than "
             f"{name_2} ({cellsize_2})"
         )
-        raise ValueError(msg)
+        with ErrorLogger(logger):
+            raise ValueError(msg)
     f_ratio = (
         cellsize_1 / cellsize_2 if cellsize_1 > cellsize_2 else cellsize_2 / cellsize_1
     )
@@ -253,7 +271,8 @@ def check_resolutions(
             f"{name_2} ({cellsize_2}) are not compatible. "
             f"Ratio: {f_ratio}"
         )
-        raise ValueError(msg)
+        with ErrorLogger(logger):
+            raise ValueError(msg)
     return ratio
 
 
@@ -273,8 +292,7 @@ def _get_extends(in_size, out_size, nrows, ncols, in_name, out_name):
 
 
 def rescale_grid(header, cellsize, in_name="LA", out_name="LB"):
-    """
-    Rescale grid from given header to a coarser cell-size with matching extend.
+    """Rescale grid from given header to a coarser cell-size with matching extend.
 
     Parameters
     ----------
@@ -313,8 +331,7 @@ def rescale_grid(header, cellsize, in_name="LA", out_name="LB"):
 
 
 def check_grid_compatibility(header_1, header_2, name_1="LA", name_2="LB"):
-    """
-    Check grids for compatibility.
+    """Check grids for compatibility.
 
     Parameters
     ----------
@@ -346,7 +363,8 @@ def check_grid_compatibility(header_1, header_2, name_1="LA", name_2="LB"):
             f"{name_2} ({header_2['xllcorner']}, {header_2['yllcorner']})  and "
             "don't share the same lower-left corner."
         )
-        raise ValueError(msg)
+        with ErrorLogger(logger):
+            raise ValueError(msg)
     # find the finer grid
     if header_1["cellsize"] > header_2["cellsize"]:
         header_1, header_2, name_1, name_2 = header_2, header_1, name_2, name_1
@@ -366,4 +384,5 @@ def check_grid_compatibility(header_1, header_2, name_1="LA", name_2="LB"):
             f"would need an extend of ({ncols=}, {nrows=}) "
             f"to be compatible with {name_1}."
         )
-        raise ValueError(msg)
+        with ErrorLogger(logger):
+            raise ValueError(msg)

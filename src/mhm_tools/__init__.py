@@ -1,5 +1,4 @@
-"""
-Tools to pre- and post-process data for and from mHM.
+"""Tools to pre- and post-process data for and from mHM.
 
 .. toctree::
    :hidden:

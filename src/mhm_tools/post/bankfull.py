@@ -1,5 +1,4 @@
-"""
-Calculate the river discharge at bankfull conditions and the bankfull width.
+"""Calculate the river discharge at bankfull conditions and the bankfull width.
 
 Authors
 -------
@@ -7,10 +6,17 @@ Authors
 - Sebastian Müller
 """
 
+import logging
+
 import numpy as np
-import xarray as xr
+
+from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_to_file
+from mhm_tools.common.logger import log_arguments
+from mhm_tools.common.xarray_utils import get_dtype
 
 from ..common import NC_ENCODE_DEFAULTS, set_netcdf_encoding
+
+logger = logging.getLogger(__name__)
 
 
 def find_nearest_idx(array, value):
@@ -45,7 +51,7 @@ def calc_q_bkfl(q_yearly_peak, return_period):
     -------
     numpy.ma.MaskedArray
     """
-    q_bkfl = np.ma.empty(q_yearly_peak.shape[1:], q_yearly_peak.dtype)
+    q_bkfl = np.ma.empty(q_yearly_peak.shape[1:], get_dtype(q_yearly_peak))
     q_bkfl[...] = np.nan
     # all finite values mask
     q_mask = np.all(np.isfinite(q_yearly_peak), axis=0)
@@ -60,6 +66,7 @@ def calc_q_bkfl(q_yearly_peak, return_period):
     return q_bkfl
 
 
+@log_arguments()
 def bankfull_discharge(
     in_file, out_file, return_period=1.5, wetted_perimeter=False, var="Qrouted"
 ):
@@ -100,7 +107,7 @@ def bankfull_discharge(
        Toward a Better Understanding of Recurrence Intervals, Bankfull, and Their Importance.
        J. Contemp. Water Res. Educ., 166, 35-45, https://doi.org/10.1111/j.1936-704X.2019.03300.x, 2019.
     """
-    ds = xr.open_dataset(in_file)
+    ds = get_xarray_ds_from_file(in_file)
     var_encode = {
         key: ds[var].encoding.get(key, val) for key, val in NC_ENCODE_DEFAULTS.items()
     }
@@ -129,4 +136,4 @@ def bankfull_discharge(
     set_netcdf_encoding(ds=ds, var_encoding=var_encode)
 
     # save
-    ds.to_netcdf(out_file)
+    write_xarray_to_file(ds=ds, file_path=out_file)

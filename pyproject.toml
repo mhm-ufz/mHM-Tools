@@ -36,10 +36,21 @@ classifiers = [
 ]
 dependencies = [
   "numpy>=1.17.3",
-  "netCDF4",
   "xarray",
+  "rioxarray",
+  "matplotlib>=3.6.1",
   "pandas<2; python_version=='3.8'",
   "pyproj",
+  "pyflwdir",
+  "matplotlib",
+  "scipy",
+  "joblib",
+  "crick",
+  "distributed",
+  "seaborn",
+  "netCDF4",
+  "easy_mpl",
+  "cdo"
 ]
 
 [project.urls]
@@ -64,6 +75,9 @@ check = [
   "black>=24,<25",
   "isort[colors]",
   "ruff>=0.4,<0.5",
+]
+plot = [
+  "cartopy",
 ]
 
 [project.scripts]

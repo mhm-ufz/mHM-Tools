@@ -1,16 +1,24 @@
-"""
-Create the latlon file for mHM.
+"""Create the latlon file for mHM.
 
 Authors
 -------
 - Sebastian Müller
 """
 
+import logging
 import time
+from pathlib import Path
 
 import numpy as np
 import xarray as xr
 from pyproj import Proj
+
+from mhm_tools.common.file_handler import (
+    create_header,
+    get_xarray_ds_from_file,
+    write_xarray_to_file,
+)
+from mhm_tools.common.logger import ErrorLogger, log_arguments
 
 from ..common import (
     NC_ENCODE_DEFAULTS,
@@ -23,10 +31,11 @@ from ..common import (
     write_header,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def xy_to_latlon(x, y, crs=None):
-    """
-    Convert cartesian coordinates to lat-lon.
+    """Convert cartesian coordinates to lat-lon.
 
     Parameters
     ----------
@@ -51,19 +60,64 @@ def xy_to_latlon(x, y, crs=None):
 
 
 def _create_grid(header, crs=None, dtype="f4"):
-    # create x and y grid
+    """Create grid from ascii header."""
     c_size = header["cellsize"]
     x = header["xllcorner"] + c_size / 2 + np.arange(header["ncols"]) * c_size
     y = header["yllcorner"] + c_size / 2 + np.arange(header["nrows"]) * c_size
+    y = np.flip(y)
     x_grid, y_grid = np.meshgrid(x, y)
     # determine latitude and longitude of the target grid
     lons, lats = xy_to_latlon(x_grid, y_grid, crs)
     return x.astype(dtype), y.astype(dtype), lons.astype(dtype), lats.astype(dtype)
 
 
-#     """This function writes the latlon.nc file from given ASCII headers."""
+def get_header_from_file(file):
+    """Get level-0 header from file."""
+    file = Path(file)
+    if file.suffix.lower() == ".nc":
+        with get_xarray_ds_from_file(file) as ds:
+            return create_header(ds)
+    elif file.suffix.lower() in [".asc", ".hdr", ".txt"]:
+        return read_header(file)
+    else:
+        msg = f"Cannot read level-0 header from file {file!r}."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
 
 
+def add_optional_level(
+    coords,
+    level,
+    level_name,
+    level0_header,
+    level1_header,
+    crs,
+    dtype,
+    write_header_path=None,
+):
+    """Add optional level to the latlon dataset."""
+    if isinstance(level, (int, float)):
+        level_header = rescale_grid(
+            level0_header, level, in_name="L0", out_name=level_name
+        )
+    elif not isinstance(level, dict):
+        level_header = get_header_from_file(level)
+    level_header = standardize_header(level_header)
+    # check L0/level compatibility
+    check_grid_compatibility(level_header, level0_header, "L0", level_name)
+    # check L1/level compatibility
+    check_grid_compatibility(level_header, level1_header, "L1", level_name)
+    # create grids
+    x_level, y_level, lons_level, lats_level = _create_grid(level_header, crs, dtype)
+    coords[f"yc_{level_name}"] = y_level
+    coords[f"xc_{level_name}"] = x_level
+    coords[f"lat_{level_name}"] = (f"yc_{level_name}", f"xc_{level_name}"), lats_level
+    coords[f"lon_{level_name}"] = (f"yc_{level_name}", f"xc_{level_name}"), lons_level
+    if write_header_path:
+        write_header(write_header_path, level_header)
+
+
+@log_arguments()
 def create_latlon(
     out_file,
     level0,
@@ -79,8 +133,7 @@ def create_latlon(
     compression=9,
     add_bounds=False,
 ):
-    """
-    Create the latlon.nc file from given ASCII headers.
+    """Create the latlon.nc file from given ASCII headers.
 
     Parameters
     ----------
@@ -124,12 +177,12 @@ def create_latlon(
 
     # read header information
     if not isinstance(level0, dict):
-        level0 = read_header(level0)
+        level0 = get_header_from_file(level0)
     level0 = standardize_header(level0)
     if isinstance(level1, (int, float)):
         level1 = rescale_grid(level0, level1, in_name="L0", out_name="L1")
     elif not isinstance(level1, dict):
-        level1 = read_header(level1)
+        level1 = get_header_from_file(level1)
     level1 = standardize_header(level1)
     # check L0/L1 compatibility
     check_grid_compatibility(level0, level1, "L0", "L1")
@@ -153,38 +206,29 @@ def create_latlon(
 
     # level11 is optional
     if level11:
-        if isinstance(level11, (int, float)):
-            level11 = rescale_grid(level0, level11, in_name="L0", out_name="L11")
-        elif not isinstance(level11, dict):
-            level11 = read_header(level11)
-        level11 = standardize_header(level11)
-        # check L0/L11 compatibility
-        check_grid_compatibility(level0, level11, "L0", "L11")
-        # check L1/L11 compatibility
-        check_grid_compatibility(level1, level11, "L1", "L11")
-        # create grids
-        x_l11, y_l11, lons_l11, lats_l11 = _create_grid(level11, crs, dtype)
-        coords["yc_l11"] = y_l11
-        coords["xc_l11"] = x_l11
-        coords["lat_l11"] = (["yc_l11", "xc_l11"], lats_l11)
-        coords["lon_l11"] = (["yc_l11", "xc_l11"], lons_l11)
-        if write_header_l11:
-            write_header(write_header_l11, level11)
+        add_optional_level(
+            coords,
+            level11,
+            level_name="l11",
+            level0_header=level0,
+            level1_header=level1,
+            crs=crs,
+            dtype=dtype,
+            write_header_path=write_header_l11,
+        )
 
     # level2 is optional
     if level2:
-        if isinstance(level2, (int, float)):
-            level2 = rescale_grid(level0, level2, in_name="L0", out_name="L2")
-        elif not isinstance(level2, dict):
-            level2 = read_header(level2)
-        level2 = standardize_header(level2)
-        # check L0/L2 compatibility
-        check_grid_compatibility(level0, level2, "L0", "L2")
-        # check L1/L2 compatibility
-        check_grid_compatibility(level1, level2, "L1", "L2")
-        if write_header_l2:
-            write_header(write_header_l2, level2)
-
+        add_optional_level(
+            coords,
+            level2,
+            level_name="l2",
+            level0_header=level0,
+            level1_header=level1,
+            crs=crs,
+            dtype=dtype,
+            write_header_path=write_header_l2,
+        )
     latlon = xr.Dataset(
         coords=coords,
         attrs={
@@ -224,4 +268,4 @@ def create_latlon(
         encoding.update({"zlib": True, "complevel": compression})
     set_netcdf_encoding(latlon, encoding)
     # save netcdf file
-    latlon.to_netcdf(out_file)
+    write_xarray_to_file(ds=latlon, file_path=out_file)  # , encoding=encoding)

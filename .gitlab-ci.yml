@@ -1,19 +1,28 @@
-image: python
+image: python:3.11
 
 stages:
+  - check
   - test
   - build
   - deploy
 
-check:
-  stage: test
+black:
+  stage: check
   script:
     - pip3 install --editable .[check]
     - black --check --diff --color .
+isort:
+  stage: check
+  script:
+    - pip3 install --editable .[check]
     - isort --check --diff --color .
+ruff:
+  stage: check
+  script:
+    - pip3 install --editable .[check]
     - ruff check src/mhm_tools
-
 test:
+  when: always
   stage: test
   script:
     - pip3 install --editable .[test]
@@ -28,6 +37,7 @@ test:
       - cov
 
 documentation:
+  when: always
   stage: build
   script:
     - pip3 install --editable .[doc]
@@ -38,6 +48,7 @@ documentation:
       - public
 
 build:
+  when: always
   stage: build
   variables:
     GIT_STRATEGY: clone
