@@ -461,19 +461,17 @@ class Catchment:
 
         # Compute upstream area (in km2) using accuflux and cell areas
         upstream_area = None
+        if self.cell_area is None:
+            self.cell_area = create_cell_area(self.ds).data
+        try:
+            upstream_area = self.calc_upstream_area()
+        except Exception:
+            logger.exception("Failed to compute upstream area (accuflux).")
+        if upstream_area is None:
+            msg ="Could not calculate upstream area. Flow direction may be uninitialized."
+            with ErrorLogger(logger):
+                raise ValueError(msg)
         if ref_catchment_area is not None:
-            if self.cell_area is None:
-                self.cell_area = create_cell_area(self.ds).data
-            try:
-                upstream_area = self.calc_upstream_area()
-            except Exception:
-                logger.exception("Failed to compute upstream area (accuflux).")
-
-            if upstream_area is None:
-                logger.error(
-                    "Could not calculate upstream area. Flow direction may be uninitialized."
-                )
-
             outlet_idx, error = self.get_best_coordinate(
                 upstream_area,
                 gauge_coords,
