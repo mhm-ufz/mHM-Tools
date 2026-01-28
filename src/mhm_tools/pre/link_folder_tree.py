@@ -3,6 +3,8 @@
 import logging
 from pathlib import Path
 
+from mhm_tools.common.logger import ErrorLogger
+
 logger = logging.getLogger(__name__)
 
 
@@ -21,6 +23,10 @@ def link_folder_tree(
         Overwrite existing symlinks, by default False
 
     """
+    if not input_dir.exists():
+        msg = f"Input directory does not exist: {input_dir}"
+        with ErrorLogger(logger):
+            raise FileNotFoundError(msg)
     logger.info(f"Linking files from {input_dir} to {output_dir}")
     for file in input_dir.rglob(file_name):
         relative_path = file.relative_to(input_dir)
