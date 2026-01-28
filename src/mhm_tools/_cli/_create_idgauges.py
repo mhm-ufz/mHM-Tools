@@ -2,9 +2,6 @@
 
 import logging
 
-from mhm_tools.common.logger import ErrorLogger
-from mhm_tools.pre import create_id_gauges
-
 logger = logging.getLogger(__name__)
 
 
@@ -84,6 +81,9 @@ def run(args):
     args : argparse.Namespace
         parsed command line arguments
     """
+    from mhm_tools.common.logger import ErrorLogger
+    from mhm_tools.pre import create_id_gauges
+
     if args.lat and args.lon:
         lat = args.lat
         lon = args.lon

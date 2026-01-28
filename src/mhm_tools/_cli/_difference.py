@@ -13,8 +13,6 @@ Authors
 
 import argparse
 
-from ..post.difference import OutputOptions, PlotOptions, calc_diff
-
 
 def str2float(value):
     """Convert a string to float, but let None remain None."""
@@ -132,6 +130,8 @@ def add_args(parser):
 
 def run(args):
     """Run script to plot long term means of a variable given (model - reference)."""
+    from ..post.difference import OutputOptions, PlotOptions, calc_diff
+
     plot_opts = PlotOptions(
         colorbar_label=args.colorbar_label,
         title=args.title,

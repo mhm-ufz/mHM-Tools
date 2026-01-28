@@ -2,13 +2,13 @@
 
 import argparse
 
-from mhm_tools._cli import _calculate_pet
 from mhm_tools.common.logger import configure_mhm_tools_logger
 
 from .. import __version__
 from . import (
     _2d_map,
     _bankfull,
+    _calculate_pet,
     _create_catchment,
     _create_idgauges,
     _create_mhm_restart_file,

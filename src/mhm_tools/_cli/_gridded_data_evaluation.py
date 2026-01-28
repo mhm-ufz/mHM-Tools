@@ -1,8 +1,5 @@
 """Evaluation of spatially distributed data based on their climatology or timeseries."""
 
-from mhm_tools.common.cli_utils import get_available_mem_in_unit, get_coords
-from mhm_tools.post.gridded_data_evaluation import EvalDataset, gridded_data_evaluation
-
 
 def add_args(parser):
     """Add cli arguments for the gridded evaluation.
@@ -193,6 +190,12 @@ def run(args):
     args : argparse.Namespace
         parsed command line arguments
     """
+    from mhm_tools.common.cli_utils import get_available_mem_in_unit, get_coords
+    from mhm_tools.post.gridded_data_evaluation import (
+        EvalDataset,
+        gridded_data_evaluation,
+    )
+
     (
         lon_min,
         lon_max,

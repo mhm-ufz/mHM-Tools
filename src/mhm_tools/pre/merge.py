@@ -5,10 +5,9 @@ import math
 import tempfile
 from pathlib import Path
 
-
 try:
-    from cdo import CDOException
-    from cdo import Cdo
+    from cdo import Cdo, CDOException
+
     cdo = Cdo(returnNoneOnError=False)
 except Exception:
     cdo = None
@@ -17,8 +16,6 @@ from joblib import Parallel, delayed
 from mhm_tools.common.logger import ErrorLogger
 
 logger = logging.getLogger(__name__)
-
-
 
 
 def _merge_chunk(files, out_path, options):

@@ -2,10 +2,6 @@
 
 import logging
 
-from mhm_tools.common.cli_utils import get_available_mem_in_unit, get_coords
-from mhm_tools.common.logger import ErrorLogger
-from mhm_tools.pre.crop_mhm_setup import crop_mhm_setup
-
 logger = logging.getLogger(__name__)
 
 
@@ -183,6 +179,10 @@ def run(args):
     args : argparse.Namespace
         parsed command line arguments
     """
+    from mhm_tools.common.cli_utils import get_available_mem_in_unit, get_coords
+    from mhm_tools.common.logger import ErrorLogger
+    from mhm_tools.pre.crop_mhm_setup import crop_mhm_setup
+
     (
         lon_min_target_grid,
         lon_max_target_grid,

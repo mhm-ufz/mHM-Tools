@@ -3,8 +3,6 @@
 import logging
 from pathlib import Path
 
-from mhm_tools.pre.link_folder_tree import link_folder_tree
-
 logger = logging.getLogger("mhm_tools.link_folder_tree")
 
 
@@ -42,6 +40,8 @@ def add_args(parser):
 
 
 def run(args):
+    from mhm_tools.pre.link_folder_tree import link_folder_tree
+
     input_dir = Path(args.input_dir)
     output_dir = Path(args.output_dir)
     link_folder_tree(

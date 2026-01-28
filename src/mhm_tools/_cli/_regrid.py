@@ -2,8 +2,6 @@
 
 from pathlib import Path
 
-from mhm_tools.pre.regrid import regrid
-
 
 def add_args(parser):
     """Add cli arguments.
@@ -31,8 +29,9 @@ def add_args(parser):
 
 
 def run(args):
-    input = Path(args.input)
+    from mhm_tools.pre.regrid import regrid
 
+    input = Path(args.input)
     output = Path(args.output)
     mask = Path(args.mask)
     msg = ""

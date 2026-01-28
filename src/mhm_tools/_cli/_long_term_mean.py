@@ -2,8 +2,6 @@
 
 import argparse
 
-from mhm_tools.post.long_term_mean import cal_long_term_mean
-
 
 def add_args(parser):
     """Add CLI arguments for cal_long_term_mean subcommand."""
@@ -110,6 +108,8 @@ def run(args: argparse.Namespace):
     args : argparse.Namespace
         Parsed command line arguments.
     """
+    from mhm_tools.post.long_term_mean import cal_long_term_mean
+
     if not args.aggregate:
         args.aggregation_type = None
         args.long_term_mean_type = None

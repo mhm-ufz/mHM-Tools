@@ -5,13 +5,6 @@ specific grid.
 """
 
 import logging
-from pathlib import Path
-
-from mhm_tools.common.cli_utils import get_coords
-from mhm_tools.common.logger import ErrorLogger
-from mhm_tools.pre.create_mhm_restart_file import Grid, LatLon, MPRRunner
-
-from ..pre import MHMRestartFile
 
 logger = logging.getLogger(__name__)
 
@@ -214,6 +207,14 @@ def run(args):
     args : argparse.Namespace
         parsed command line arguments
     """
+    from pathlib import Path
+
+    from mhm_tools.common.cli_utils import get_coords
+    from mhm_tools.common.logger import ErrorLogger
+    from mhm_tools.pre.create_mhm_restart_file import Grid, LatLon, MPRRunner
+
+    from ..pre import MHMRestartFile
+
     l1_resolution = float(args.l1_resolution)
 
     if args.lonlatbox is not None:

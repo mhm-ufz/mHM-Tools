@@ -468,7 +468,7 @@ class Catchment:
         except Exception:
             logger.exception("Failed to compute upstream area (accuflux).")
         if upstream_area is None:
-            msg ="Could not calculate upstream area. Flow direction may be uninitialized."
+            msg = "Could not calculate upstream area. Flow direction may be uninitialized."
             with ErrorLogger(logger):
                 raise ValueError(msg)
         if ref_catchment_area is not None:

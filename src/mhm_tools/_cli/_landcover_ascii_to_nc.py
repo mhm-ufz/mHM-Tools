@@ -5,8 +5,6 @@ from __future__ import annotations
 from argparse import ArgumentParser, Namespace
 from pathlib import Path
 
-from mhm_tools.pre.landcover_ascii_to_nc import convert_lc_ascii_to_nc
-
 
 def add_args(parser: ArgumentParser) -> None:
     """
@@ -101,6 +99,8 @@ def run(args: Namespace) -> None:
     args : argparse.Namespace
         Parsed command line arguments (see add_args()).
     """
+    from mhm_tools.pre.landcover_ascii_to_nc import convert_lc_ascii_to_nc
+
     input_nml = Path(args.input_nml)
     output = Path(args.output)
     var_name = _resolve_var_name(args, input_nml, output)
