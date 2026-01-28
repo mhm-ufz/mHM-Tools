@@ -13,8 +13,6 @@ Authors
 
 import argparse
 
-from ..post.relative_difference import calc_rel_diff
-
 
 def str2float(value):
     """Convert a string to float, but let None remain None."""
@@ -146,6 +144,8 @@ def run(args):
         parsed command line arguments
 
     """
+    from ..post.relative_difference import calc_rel_diff
+
     calc_rel_diff(
         ref_input_dir=args.ref_input_dir,
         mod_input_dir=args.mod_input_dir,

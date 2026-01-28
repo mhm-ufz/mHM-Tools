@@ -2,8 +2,6 @@
 
 from pathlib import Path
 
-from mhm_tools.pre.merge import merge_files
-
 
 def add_args(parser):
     """Add cli arguments for the merge subcommand.
@@ -40,6 +38,8 @@ def add_args(parser):
 
 
 def run(args):
+    from mhm_tools.pre.merge import merge_files
+
     input = Path(args.input_path)
     output = Path(args.output_file)
     merge_files(

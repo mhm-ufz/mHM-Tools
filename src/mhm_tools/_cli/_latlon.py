@@ -12,9 +12,7 @@ import ast
 import logging
 from pathlib import Path
 
-from mhm_tools.common.logger import ErrorLogger, log_arguments
-
-from ..pre import create_latlon
+from mhm_tools.common.logger import ErrorLogger
 
 logger = logging.getLogger(__name__)
 
@@ -131,7 +129,6 @@ def add_args(parser):
     )
 
 
-@log_arguments()
 def run(args):
     """Create the latlon file.
 
@@ -140,6 +137,8 @@ def run(args):
     args : argparse.Namespace
         parsed command line arguments
     """
+    from ..pre import create_latlon
+
     create_latlon(
         out_file=args.out_file,
         level0=_eval(args.level0, "level0"),

@@ -6,8 +6,6 @@ into subdomains based on the provided basin clusters. These subdomains
 of the global network are independent and can be run in parallel.
 """
 
-from ..pre import create_subdomain_masks
-
 
 def add_args(parser):
     """Add CLI arguments for the create_subdomain_masks subcommand.
@@ -65,6 +63,8 @@ def run(args):
     args : argparse.Namespace
         parsed command line arguments
     """
+    from ..pre import create_subdomain_masks
+
     create_subdomain_masks(
         output_dir=args.output_dir,
         output_file_name=args.output_file_name,

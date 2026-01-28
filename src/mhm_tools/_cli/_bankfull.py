@@ -11,8 +11,6 @@ or sub-daily data is preferred. Ouput variables in the created NetCDF
 file are called "Q_bkfl" and "P_bkfl".
 """
 
-from ..post.bankfull import bankfull_discharge
-
 
 def add_args(parser):
     """Add cli arguments for the bankfull subcommand.
@@ -67,6 +65,8 @@ def run(args):
     args : argparse.Namespace
         parsed command line arguments
     """
+    from ..post.bankfull import bankfull_discharge
+
     bankfull_discharge(
         in_file=args.in_file,
         out_file=args.out_file,

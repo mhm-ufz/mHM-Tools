@@ -2,8 +2,6 @@
 
 import logging
 
-from mhm_tools.pre.pet_calc import calculate_pet
-
 logger = logging.getLogger(__name__)
 
 
@@ -54,6 +52,8 @@ def run(args):
     args : argparse.Namespace
         parsed command line arguments
     """
+    from mhm_tools.pre.pet_calc import calculate_pet
+
     calculate_pet(
         tavg_file=args.tavg,
         stat_freq=args.freq,

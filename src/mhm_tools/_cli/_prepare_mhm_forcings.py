@@ -1,7 +1,5 @@
 """mHM processing netCDF precipitation and temperature forcings."""
 
-from mhm_tools.pre.prepare_mhm_forcings import prepare_forcings
-
 
 def add_args(parser):
     """Add CLI arguments for prepare_mhm_forcings subcommand.
@@ -109,6 +107,8 @@ def run(args):
     args : argparse.Namespace
         parsed command line arguments
     """
+    from mhm_tools.pre.prepare_mhm_forcings import prepare_forcings
+
     prepare_forcings(
         in_dir=args.in_dir,
         in_file=args.in_file,

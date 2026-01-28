@@ -2,12 +2,6 @@
 
 from pathlib import Path
 
-from mhm_tools.common.file_handler import (
-    create_header,
-    get_xarray_ds_from_file,
-    write_xarray_to_file,
-)
-
 
 def add_args(parser):
     """Add cli arguments for the file_converter subcommand.
@@ -63,6 +57,12 @@ def add_args(parser):
 
 
 def run(args):
+    from mhm_tools.common.file_handler import (
+        create_header,
+        get_xarray_ds_from_file,
+        write_xarray_to_file,
+    )
+
     input = Path(args.input)
     output = Path(args.output)
     var_name = args.varname

@@ -1,8 +1,5 @@
 """Discharge Validation."""
 
-from mhm_tools.common.cli_utils import get_coords
-from mhm_tools.post.GRDC_validation import evaludate_grdc_data
-
 
 def add_args(parser):
     required_args = parser.add_argument_group("required arguments")
@@ -101,6 +98,9 @@ def add_args(parser):
 
 
 def run(args):
+    from mhm_tools.common.cli_utils import get_coords
+    from mhm_tools.post.GRDC_validation import evaludate_grdc_data
+
     lon_min, lon_max, lat_min, lat_max, mask = get_coords(
         args.lonlatbox, args.mask_file, raise_exception=False
     )

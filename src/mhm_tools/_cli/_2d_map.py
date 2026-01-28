@@ -12,8 +12,6 @@ from pathlib import Path
 
 import xarray as xr
 
-from mhm_tools.common.plotter import plot_map
-
 
 def str2float(value):
     """Convert a string to float, but let None remain None."""
@@ -99,6 +97,8 @@ def run(args: argparse.Namespace):
     out_path = output_dir / args.output_file_png
 
     # Call the plotting utility
+    from mhm_tools.common.plotter import plot_map
+
     plot_map(
         data=data,
         cb_label=args.colorbar_label,

@@ -1,14 +1,6 @@
 """Create basin id file and deliniate catchments."""
 
 import logging
-from pathlib import Path
-
-import numpy as np
-
-from mhm_tools.common.cli_utils import get_available_mem_in_unit
-from mhm_tools.pre.catchment import Resolution
-
-from ..pre import create_catchment
 
 logger = logging.getLogger(__name__)
 
@@ -199,6 +191,15 @@ def run(args):
     args : argparse.Namespace
         parsed command line arguments
     """
+    from pathlib import Path
+
+    import numpy as np
+
+    from mhm_tools.common.cli_utils import get_available_mem_in_unit
+    from mhm_tools.pre.catchment import Resolution
+
+    from ..pre import create_catchment
+
     gauge_coords = None
     coordinate_slices = None
 
