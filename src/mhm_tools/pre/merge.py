@@ -5,12 +5,11 @@ import math
 import tempfile
 from pathlib import Path
 
-from cdo import CDOException
 
 try:
+    from cdo import CDOException
     from cdo import Cdo
-
-    cdo = Cdo()
+    cdo = Cdo(returnNoneOnError=False)
 except Exception:
     cdo = None
 from joblib import Parallel, delayed
@@ -19,13 +18,12 @@ from mhm_tools.common.logger import ErrorLogger
 
 logger = logging.getLogger(__name__)
 
-# _cdo = Cdo()  # requires the `cdo` binary installed
-_cdo = Cdo(returnNoneOnError=False)
+
 
 
 def _merge_chunk(files, out_path, options):
     try:
-        res = _cdo.mergetime(
+        res = cdo.mergetime(
             input=" ".join(map(str, files)), output=str(out_path), options=options
         )
     except CDOException as e:
@@ -106,7 +104,7 @@ def merge_files_from_folder(
         logger.info(f"Merging {len(part_parts_merged)} files")
         logger.info(" ".join(map(str, part_parts_merged)))
         logger.info(str(out_file))
-        _cdo.mergetime(
+        cdo.mergetime(
             input=" ".join(map(str, part_parts_merged)),
             output=str(out_file),
             env={"SKIP_SAME_TIME": "1"},
@@ -162,7 +160,7 @@ def merge_files(input_path, input_file_part, output, n_cpus, preserve_folders=Fa
         out_file = out_dir / output.name
         logger.info(f"Found {len(file_list)} files in {in_dir / folder}")
         if len(file_list) == 1:
-            # _cdo.copy(input=str(files[0]), output=str(out_file), options="-O")
+            # cdo.copy(input=str(files[0]), output=str(out_file), options="-O")
             if out_file.exists():
                 out_file.unlink()
             out_file.symlink_to(file_list[0])
