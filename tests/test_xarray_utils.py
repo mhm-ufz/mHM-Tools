@@ -186,7 +186,7 @@ class TestTimedeltaToAlias(XarrayUtilsBase):
         da = self.make_time_da("2021-01-01T00", periods=4, step="6h")
         hours, alias = timedelta_to_alias(da)
         self.assertEqual(hours, 6)
-        self.assertEqual(alias, "6H")
+        self.assertEqual(alias, "6h")
 
     def test_raises_with_single_timestamp(self):
         da = self.make_time_da("2021-01-01", periods=1, step="D")
@@ -240,16 +240,16 @@ class TestCropDs(XarrayUtilsBase):
     def test_basic(self):
         ds = self.make_sample_ds()
         out = crop_ds(ds, lon_min=101, lon_max=103, lat_min=10.5, lat_max=12.0)
-        self.assertEqual(out.dims["lon"], 3)  # 101, 102, 103
-        self.assertEqual(out.dims["lat"], 2)  # 11, 12
+        self.assertEqual(out.sizes["lon"], 3)  # 101, 102, 103
+        self.assertEqual(out.sizes["lat"], 2)  # 11, 12
         self.assertTrue(set(out.lon.values).issubset({101.0, 102.0, 103.0}))
         self.assertTrue(set(out.lat.values).issubset({11.0, 12.0}))
 
     def test_reversed_inputs(self):
         ds = self.make_sample_ds()
         out = crop_ds(ds, lon_min=103, lon_max=101, lat_min=12.0, lat_max=10.5)
-        self.assertEqual(out.dims["lon"], 3)  # 101, 102, 103
-        self.assertEqual(out.dims["lat"], 2)  # 11, 12
+        self.assertEqual(out.sizes["lon"], 3)  # 101, 102, 103
+        self.assertEqual(out.sizes["lat"], 2)  # 11, 12
         self.assertTrue(set(out.lon.values).issubset({101.0, 102.0, 103.0}))
         self.assertTrue(set(out.lat.values).issubset({11.0, 12.0}))
 
