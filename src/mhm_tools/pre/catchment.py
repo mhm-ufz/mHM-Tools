@@ -15,6 +15,7 @@ from typing import Optional
 import numpy as np
 import pyflwdir
 import xarray as xr
+from joblib import Parallel, delayed
 from scipy.ndimage import binary_dilation
 
 from mhm_tools.common.constants import NC_ENCODE_MASK
@@ -164,8 +165,9 @@ class Catchment:
         self.elevtn = None
         self.cell_area = None
         self._fdir = None
-        self.gauge_lat = None
-        self.gauge_lon = None
+        self.gauge_ids = []
+        self.gauge_lats = []
+        self.gauge_lons = []
         self.ftype = ftype
         self.catchment_mask = None
         self.resolutions = resolutions if resolutions is not None else Resolution()
@@ -349,7 +351,7 @@ class Catchment:
 
         return i, j
 
-    def get_best_coordinate(
+    def find_best_gauge_location(
         self,
         upstream_area,
         gauge_coords,
@@ -358,7 +360,7 @@ class Catchment:
         max_error=0.25,
         recursion=False,
     ):
-        """Find best coordinate given gauge location and target area."""
+        """Find best gauge location given reference gauge location, refernce cathcment area and allowed area and value deviation."""
         if not recursion:
             max_distance_cells = max_distance_cells // 2
 
@@ -424,7 +426,7 @@ class Catchment:
                 "No candidate found within tolerance; falling back to nearest stream cell by upstream area magnitude."
             )
             if not recursion:
-                return self.get_best_coordinate(
+                return self.find_best_gauge_location(
                     upstream_area,
                     gauge_coords,
                     ref_catchment_area,
@@ -443,36 +445,17 @@ class Catchment:
 
         return best_coord, error
 
-    def delineate_basin(
+    def get_best_gauge_coordinate(
         self,
+        upstream_area,
         gauge_coords,
-        stream_order=4,
-        ref_catchment_area=None,
-        max_distance_cells=5,
-        max_error=0.25,
-        raise_on_sanity_check=True,
+        ref_catchment_area,
+        max_distance_cells,
+        max_error,
     ):
-        """Delineate the basin for a given lat and lon."""
-        logger.info(
-            f"Delineating basin for gauge coordinates {gauge_coords} and reference catchment area {ref_catchment_area} km2."
-        )
-        gauge_coords = (gauge_coords[0], gauge_coords[1])
-        # Target area in km2 we want to match (can be adjusted/replaced by caller later)
-
-        # Compute upstream area (in km2) using accuflux and cell areas
-        upstream_area = None
-        if self.cell_area is None:
-            self.cell_area = create_cell_area(self.ds).data
-        try:
-            upstream_area = self.calc_upstream_area()
-        except Exception:
-            logger.exception("Failed to compute upstream area (accuflux).")
-        if upstream_area is None:
-            msg = "Could not calculate upstream area. Flow direction may be uninitialized."
-            with ErrorLogger(logger):
-                raise ValueError(msg)
+        """Get best gauge coordinates given target catchment area."""
         if ref_catchment_area is not None:
-            outlet_idx, error = self.get_best_coordinate(
+            outlet_idx, error = self.find_best_gauge_location(
                 upstream_area,
                 gauge_coords,
                 ref_catchment_area,
@@ -481,30 +464,157 @@ class Catchment:
             )
             new_lat = float(self.ds.lat.data[outlet_idx[0]])
             new_lon = float(self.ds.lon.data[outlet_idx[1]])
-            self.gauge_lat = new_lat
-            self.gauge_lon = new_lon
+            gauge_lat = new_lat
+            gauge_lon = new_lon
             logger.info(
                 f"Moved outlet latitude {float(gauge_coords[0])} to {new_lat} and longitude {float(gauge_coords[1])} to {new_lon}."
             )
 
-            river_mask = (upstream_area > ref_catchment_area * (1 - error - 1e-6)) & (
-                upstream_area < ref_catchment_area * (1 + error + 1e-6)
-            )
         else:
             logger.warning(
                 "No catchment area provided; falling back to original gauge coordinates."
             )
             outlet_idx = self._coord_to_index(gauge_coords[0], gauge_coords[1])
-            river_mask = None
+            gauge_lat = float(gauge_coords[0])
+            gauge_lon = float(gauge_coords[1])
+            error = None
+        return outlet_idx, error, gauge_lat, gauge_lon
 
+    def delineation_sanity_check(
+        self,
+        catchment_mask,
+        basin,
+        upstream_area,
+        outlet_idx,
+        ref_catchment_area,
+        max_error,
+        raise_on_sanity_check,
+        gauge_id,
+    ):
+        """Perform sanity checks on the delineated basin."""
+        try:
+            mean_cell_area = (
+                float(np.mean(self.cell_area[catchment_mask]))
+                if self.cell_area is not None
+                else np.nan
+            )
+            unique_vals = np.unique(basin[catchment_mask])
+            cell_count = int(np.sum(catchment_mask))
+            delineated_area = (
+                float(np.sum(self.cell_area[catchment_mask]))
+                if self.cell_area is not None
+                else np.nan
+            )
+
+            logger.info(
+                "Basin unique values: %s | cells in basin: %d | mean cell area: %.6f km2",
+                unique_vals,
+                cell_count,
+                mean_cell_area,
+            )
+            uparea_at_outlet = (
+                upstream_area[outlet_idx] if upstream_area is not None else np.nan
+            )
+            logger.info(
+                "Upstream area reported at selected outlet cell = %.2f km2. "
+                "Difference (sum_cells - upstream_at_outlet) = %.2f km2 (%.2f%%).",
+                uparea_at_outlet,
+                delineated_area - uparea_at_outlet,
+                (
+                    (delineated_area - uparea_at_outlet) / uparea_at_outlet * 100.0
+                    if uparea_at_outlet != 0
+                    else np.nan
+                ),
+            )
+            if ref_catchment_area is not None:
+                area_error = (delineated_area - ref_catchment_area) / ref_catchment_area
+                logger.info(
+                    "Delineated basin area (sum of cell_area[basin>0]) = %.2f km2; "
+                    "reference area = %.2f km2; error = %.2f%%",
+                    delineated_area,
+                    ref_catchment_area,
+                    area_error * 100.0,
+                )
+                if abs(area_error) > max_error * 2:
+                    with ErrorLogger(logger):
+                        msg = f"Delineated basin area ({delineated_area:2f} km2) differs from reference area ({ref_catchment_area:2f} km2) by more than twice the max error {max_error*100:.2f}%. Adjust max_error or max_distance_cells."
+                        if raise_on_sanity_check:
+                            raise ValueError(msg)
+                        logger.warning(msg)
+                        return True
+                    # warn if the two area measures disagree substantially
+            else:
+                logger.warning(
+                    "No reference catchment area provided; skipping area consistency check."
+                )
+            if not np.isclose(delineated_area, uparea_at_outlet, rtol=0.02, atol=1e-6):
+                with ErrorLogger(logger):
+                    msg = f"Gauge ID {gauge_id}: " if gauge_id is not None else ""
+                    msg += f"Sum of cell areas inside the basin ({delineated_area:2f} km2) differs from "
+                    msg += f"upstream area at outlet ({uparea_at_outlet:2f} km2). Investigate flow-direction "
+                    msg += "masking, nodata handling or area units."
+                    if raise_on_sanity_check:
+                        raise ValueError(msg)
+                    logger.warning(msg)
+                    return True
+            return False
+        except Exception as e:
+            logger.exception(f"Sanity check failed: {e}")
+            if raise_on_sanity_check:
+                raise e
+            return True
+
+    def delineate_basin(
+        self,
+        gauge_coords,
+        stream_order=4,
+        ref_catchment_area=None,
+        max_distance_cells=5,
+        max_error=0.25,
+        raise_on_sanity_check=True,
+        upstream_area=None,
+        gauge_id: Optional[int] = None,
+        mask_catchment: Optional[bool] = True,
+        save_coords: Optional[bool] = True,
+    ):
+        """Delineate the basin for a given lat and lon."""
+        # Target area in km2 we want to match (can be adjusted/replaced by caller later)
+
+        # Compute upstream area (in km2) using accuflux and cell areas
+        upstream_area = None
+        if self.cell_area is None:
+            self.cell_area = create_cell_area(self.ds).data
+        if upstream_area is None:
+            try:
+                upstream_area = self.calc_upstream_area()
+            except Exception:
+                logger.exception("Failed to compute upstream area (accuflux).")
+            if upstream_area is None:
+                msg = "Could not calculate upstream area. Flow direction may be uninitialized."
+                with ErrorLogger(logger):
+                    raise ValueError(msg)
+        gauge_str = f" (ID: {gauge_id})" if gauge_id is not None else ""
+        logger.info(
+            f"Delineating basin {gauge_str} for gauge coordinates {gauge_coords} and reference catchment area {ref_catchment_area} km2."
+        )
+        outlet_idx, error, gauge_lat, gauge_lon = self.get_best_gauge_coordinate(
+            upstream_area,
+            gauge_coords,
+            ref_catchment_area,
+            max_distance_cells,
+            max_error,
+        )
         outlet_linear_idx = np.ravel_multi_index(outlet_idx, self._fdir.shape)
 
         # Now delineate basin using pyflwdir basins()
-        streams_mask = self._fdir.stream_order() >= stream_order
-        if river_mask is not None:
-            streams_mask = np.logical_and(streams_mask, river_mask.astype(bool))
+        if ref_catchment_area is not None:
+            streams_mask = (upstream_area > ref_catchment_area * (1 - error - 1e-6)) & (
+                upstream_area < ref_catchment_area * (1 + error + 1e-6)
+            ).astype(bool)
+        else:
+            streams_mask = self._fdir.stream_order() >= stream_order
         try:
-            self.basin = self._fdir.basins(
+            basin = self._fdir.basins(
                 idxs=np.array([outlet_linear_idx], dtype=np.int64),
                 streams=streams_mask,
             )
@@ -514,98 +624,69 @@ class Catchment:
             try:
                 all_basins = self._fdir.basins()
                 basin_id = int(all_basins[outlet_idx])
-                self.basin = np.where(all_basins == basin_id, basin_id, 0)
+                basin = np.where(all_basins == basin_id, basin_id, 0)
             except Exception as e2:
                 logger.exception(f"Fallback basins() also failed: {e2}")
-                return
+                return None
 
-        self.catchment_mask = self.basin > 0
+        catchment_mask = basin > 0
         logger.debug(
-            f"mask statistics: min={self.basin.min()}, max={self.basin.max()}, all true? {np.all(self.catchment_mask)}"
+            f"mask statistics: min={basin.min()}, max={basin.max()}, all true? {np.all(catchment_mask)}"
         )
         # logging and sanity checks
-        mean_cell_area = (
-            float(np.mean(self.cell_area)) if self.cell_area is not None else np.nan
-        )
-        unique_vals = np.unique(self.basin[self.catchment_mask])
-        cell_count = int(np.sum(self.catchment_mask))
-        delineated_area = (
-            float(np.sum(self.cell_area[self.catchment_mask]))
-            if self.cell_area is not None
-            else np.nan
+        failed_sanity_check = self.delineation_sanity_check(
+            catchment_mask,
+            basin,
+            upstream_area,
+            outlet_idx,
+            ref_catchment_area,
+            max_error,
+            raise_on_sanity_check,
+            gauge_id,
         )
 
-        logger.info(
-            "Basin unique values: %s | cells in basin: %d | mean cell area: %.6f km2",
-            unique_vals,
-            cell_count,
-            mean_cell_area,
-        )
-        uparea_at_outlet = (
-            upstream_area[outlet_idx] if upstream_area is not None else np.nan
-        )
-        logger.info(
-            "Upstream area reported at selected outlet cell = %.2f km2. "
-            "Difference (sum_cells - upstream_at_outlet) = %.2f km2 (%.2f%%).",
-            uparea_at_outlet,
-            delineated_area - uparea_at_outlet,
-            (
-                (delineated_area - uparea_at_outlet) / uparea_at_outlet * 100.0
-                if uparea_at_outlet != 0
-                else np.nan
-            ),
-        )
-        if ref_catchment_area is not None:
-            area_error = (delineated_area - ref_catchment_area) / ref_catchment_area
-            logger.info(
-                "Delineated basin area (sum of cell_area[basin>0]) = %.2f km2; "
-                "reference area = %.2f km2; error = %.2f%%",
-                delineated_area,
-                ref_catchment_area,
-                area_error * 100.0,
-            )
-            if abs(area_error) > max_error * 2:
-                with ErrorLogger(logger):
-                    msg = f"Delineated basin area ({delineated_area:2f} km2) differs from reference area ({ref_catchment_area:2f} km2) by more than twice the max error {max_error*100:.2f}%. Adjust max_error or max_distance_cells."
-                    if raise_on_sanity_check:
-                        raise ValueError(msg)
-                    logger.warning(msg)
-                # warn if the two area measures disagree substantially
-        else:
-            logger.warning(
-                "No reference catchment area provided; skipping area consistency check."
-            )
-        if not np.isclose(delineated_area, uparea_at_outlet, rtol=0.02, atol=1e-6):
-            with ErrorLogger(logger):
-                msg = f"Sum of cell areas inside the basin ({delineated_area:2f} km2) differs from "
-                msg += f"upstream area at outlet ({uparea_at_outlet:2f} km2). Investigate flow-direction "
-                msg += "masking, nodata handling or area units."
-                if raise_on_sanity_check:
-                    raise ValueError(msg)
-                logger.warning(msg)
         # finalize mask and basin fill values
 
-        if np.all(~self.catchment_mask):
+        if np.all(catchment_mask):
             if stream_order > 1:
                 # try again with a lower stream_order (legacy behavior)
-                self.delineate_basin(
+                logger.info("Trying again with stream_order %d", stream_order - 1)
+                return self.delineate_basin(
                     gauge_coords,
                     stream_order=stream_order - 1,
                     ref_catchment_area=ref_catchment_area,
                     max_distance_cells=max_distance_cells,
                     max_error=max_error,
+                    raise_on_sanity_check=raise_on_sanity_check,
+                    upstream_area=upstream_area,
+                    gauge_id=gauge_id,
+                    mask_catchment=mask_catchment,
                 )
-                return
             logger.error("No catchment found for the given coordinates")
-            return
+            return None
 
-        # set fillvalue for non-basin cells
-        try:
-            fillv = self.VARIABLES["basin"]["_FillValue"]
-            self.basin = np.where(self.catchment_mask, self.basin, fillv)
-        except Exception:
-            # best-effort: leave basin as-is
-            logger.debug("Could not set basin fill values")
+        if mask_catchment:
+            self.catchment_mask = catchment_mask
+            self.basin = basin
+            # set fillvalue for non-basin cells
+            try:
+                fillv = self.VARIABLES["basin"]["_FillValue"]
+                self.basin = np.where(self.catchment_mask, self.basin, fillv)
+            except Exception:
+                # best-effort: leave basin as-is
+                logger.debug("Could not set basin fill values")
+        if not failed_sanity_check:
+            if save_coords:
+                self.save_coords(gauge_id, gauge_lat, gauge_lon)
+            return gauge_lat, gauge_lon
+        return None
+
+    def save_coords(self, gauge_id, gauge_lat, gauge_lon):
+        """Save gauge coordinates."""
+        if gauge_id is not None:
+            self.gauge_ids.append(gauge_id)
+        self.gauge_lats.append(gauge_lat)
+        self.gauge_lons.append(gauge_lon)
 
     def get_upscaling_factor(self, max_resolution=True):
         """Create upscaling factor."""
@@ -741,7 +822,6 @@ class Catchment:
         mask_file=None,
         frame=1,
         buffer=0,
-        gauge_id=None,
     ):
         """Write the produced data to one or multiple files."""
         data_vars = {}
@@ -776,7 +856,8 @@ class Catchment:
             ds = self.write_basin_id_file(data_vars, frame, out_path)
             # use basin_id to create a mask file
             self.write_mask_file(ds, mask_file)
-            if gauge_id is not None:
+            if self.gauge_ids:
+                logger.info("Writing gauges file.")
                 # create empty ds with mask l0 extend and fill the data_var called data with -9999 values
                 id_da = xr.DataArray(
                     np.full(ds.basin.shape, -9999, dtype=int),
@@ -786,13 +867,15 @@ class Catchment:
                 id_ds = id_da.to_dataset(name="idgauges")
                 id_ds = write_gauge_id(
                     ds=id_ds,
-                    id=gauge_id,
-                    lat=self.gauge_lat,
-                    lon=self.gauge_lon,
+                    id=self.gauge_ids,
+                    lat=self.gauge_lats,
+                    lon=self.gauge_lons,
                     data_var="idgauges",
                 )
                 write_xarray_to_file(id_ds, out_path / "idgauges.nc", "idgauges")
                 write_xarray_to_file(id_ds, out_path / "idgauges.asc", "idgauges")
+            else:
+                logger.info("No gauges to write, skipping gauges file.")
 
     def write_single_variable_file(
         self, data_var, var_name, out_path, cellsize, format
@@ -1381,8 +1464,15 @@ def is_data_global(ds, coordinate_slice):
         return False
 
 
+def _is_list_of_float_tuples(a):
+    return isinstance(a, list) and all(
+        isinstance(x, tuple) and len(x) == 2 and all(isinstance(v, float) for v in x)
+        for x in a
+    )
+
+
 @log_arguments()
-def create_catchment(  # noqa: PLR0913
+def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
     input_file,
     output_path,
     var_name,
@@ -1399,7 +1489,8 @@ def create_catchment(  # noqa: PLR0913
     ref_catchment_area=None,
     max_distance_cells=5,
     max_error=0.1,
-    gauge_id=None,
+    gauge_ids=None,
+    ncpus=1,
 ):
     """Create file containing catchment ids, flowdirection and upstream area from dem or flow direction."""
     logger.info(
@@ -1407,13 +1498,21 @@ def create_catchment(  # noqa: PLR0913
     )
     if coordinate_slices is None:
         coordinate_slices = {"lat": slice(None, None), "lon": slice(None, None)}
+    if _is_list_of_float_tuples(gauge_coords) and len(gauge_coords) == 1:
+        gauge_coords = gauge_coords[0]
+    if isinstance(ref_catchment_area, list) and len(ref_catchment_area) == 1:
+        ref_catchment_area = ref_catchment_area[0]
+        if isinstance(ref_catchment_area, list):
+            if len(ref_catchment_area) != 1:
+                msg = "If gauge_coords is a list of one tuple, ref_catchment_area (if provided) must be a single value or a list of one value."
+                raise ValueError(msg)
+            ref_catchment_area = ref_catchment_area[0]
     if resolutions is None:
         resolutions = Resolution()
     if var not in {"fdir", "dem"}:
         with ErrorLogger(logger):
             msg = f"Unexpected value for var={var}, must be 'fdir' or 'dem'"
             raise ValueError(msg)
-
     chunking = available_mem is not None
     with get_xarray_ds_from_file(
         input_file,
@@ -1491,7 +1590,7 @@ def create_catchment(  # noqa: PLR0913
         logger.info(
             f"        lon {input_ds_sliced.lon.data[0]}, {input_ds_sliced.lon.data[-1]}"
         )
-        if gauge_coords is not None:
+        if gauge_coords is not None and isinstance(gauge_coords, tuple):
             logger.info(f"Creating catchment for gauge coordinates {gauge_coords}")
             c = Catchment(
                 ds=input_ds_sliced,
@@ -1510,6 +1609,7 @@ def create_catchment(  # noqa: PLR0913
                 ref_catchment_area=ref_catchment_area,
                 max_distance_cells=max_distance_cells,
                 max_error=max_error,
+                gauge_id=gauge_ids if not isinstance(gauge_ids, list) else gauge_ids[0],
             )
             if resolutions.l1_resolution is not None and upscale:
                 c.upscale(var)
@@ -1524,7 +1624,6 @@ def create_catchment(  # noqa: PLR0913
                 mask_file=mask_file,
                 frame=frame,
                 buffer=frame,
-                gauge_id=gauge_id,
             )
             return
         logger.info("Creating basin id file for region.")
@@ -1541,6 +1640,124 @@ def create_catchment(  # noqa: PLR0913
             resolutions=resolutions,
             upscale=upscale,
         )
+        if (
+            _is_list_of_float_tuples(gauge_coords)
+            and isinstance(gauge_ids, list)
+            and len(gauge_coords) == len(gauge_ids)
+        ):
+            logger.info(f"Creating catchments for gauge coordinates {gauge_coords}")
+            upstream_area = c.calc_upstream_area()
+            if c.cell_area is None:
+                c.cell_area = create_cell_area(c.ds).data
+
+            lon = get_coord_values(input_ds_sliced, lon=True)
+            lat = get_coord_values(input_ds_sliced, lat=True)
+
+            def _process_gauge(i, gc, lon, lat):
+                ref_area = (
+                    ref_catchment_area[i]
+                    if isinstance(ref_catchment_area, list)
+                    else ref_catchment_area
+                )
+                if not (
+                    lon.min() <= gc[1] <= lon.max() and lat.min() <= gc[0] <= lat.max()
+                ):
+                    logger.warning(
+                        f"Gauge coordinate {gc} is outside the domain lon: [{lon.min()}, {lon.max()}], lat: [{lat.min()}, {lat.max()}]"
+                    )
+                    return None
+
+                outlet_idx, error, gauge_lat, gauge_lon = c.get_best_gauge_coordinate(
+                    upstream_area,
+                    gc,
+                    ref_area,
+                    max_distance_cells,
+                    max_error,
+                )
+                return {
+                    "gauge_id": gauge_ids[i],
+                    "gauge_lat": gauge_lat,
+                    "gauge_lon": gauge_lon,
+                    "outlet_idx": outlet_idx,
+                    "error": error,
+                    "ref_area": ref_area,
+                }
+
+            gauge_infos = Parallel(n_jobs=ncpus, prefer="threads")(
+                delayed(_process_gauge)(i, gc, lon, lat)
+                for i, gc in enumerate(gauge_coords)
+            )
+
+            gauge_infos = [gi for gi in gauge_infos if gi is not None]
+            if not gauge_infos:
+                logger.warning("No valid gauge coordinates found inside domain.")
+            else:
+                logger.info(
+                    f"Found {len(gauge_infos)} valid gauge coordinates inside domain."
+                )
+                outlet_idxs = [gi["outlet_idx"] for gi in gauge_infos]
+                outlet_linear = np.array(
+                    [np.ravel_multi_index(idx, c._fdir.shape) for idx in outlet_idxs],
+                    dtype=np.int64,
+                )
+                # combine all river masks
+                streams_mask = None
+                logger.info("Creating stream masks for all gauges.")
+                for gi in gauge_infos:
+                    if gi["ref_area"] is None or gi["error"] is None:
+                        continue
+                    if streams_mask is None:
+                        streams_mask = (
+                            upstream_area > gi["ref_area"] * (1 - gi["error"] - 1e-6)
+                        ) & (
+                            upstream_area < gi["ref_area"] * (1 + gi["error"] + 1e-6)
+                        ).astype(
+                            bool
+                        )
+                    else:
+                        streams_mask |= (
+                            upstream_area > gi["ref_area"] * (1 - gi["error"] - 1e-6)
+                        ) & (
+                            upstream_area < gi["ref_area"] * (1 + gi["error"] + 1e-6)
+                        ).astype(
+                            bool
+                        )
+                logger.info("Delineating basins for all gauges.")
+                if streams_mask is None or not np.any(streams_mask):
+                    logger.warning("No river mask found for any gauge.")
+                    streams_mask = c._fdir.stream_order() >= 4
+                try:
+                    basins = c._fdir.basins(idxs=outlet_linear, streams=streams_mask)
+                except Exception as exc:
+                    logger.exception("pyflwdir.basins(idxs=...) failed: %s", exc)
+                    with ErrorLogger(logger):
+                        raise exc
+                logger.info("Performing sanity checks for all delineated basins.")
+                for gi in gauge_infos:
+                    outlet_idx = gi["outlet_idx"]
+                    basin_id = int(basins[outlet_idx])
+                    if basin_id == 0:
+                        logger.warning(
+                            "No basin id found for gauge_id %s at outlet %s",
+                            gi["gauge_id"],
+                            outlet_idx,
+                        )
+                        continue
+                    catchment_mask = basins == basin_id
+                    failed = c.delineation_sanity_check(
+                        catchment_mask,
+                        basins,
+                        upstream_area,
+                        outlet_idx,
+                        gi["ref_area"],
+                        max_error,
+                        False,
+                        gi["gauge_id"],
+                    )
+                    if failed:
+                        continue
+                    c.save_coords(gi["gauge_id"], gi["gauge_lat"], gi["gauge_lon"])
+
         if resolutions.l1_resolution is not None and upscale:
             c.upscale(var)
         else:

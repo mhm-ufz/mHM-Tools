@@ -79,7 +79,7 @@ def _is_intensive(var: xr.DataArray) -> bool:  # noqa: PLR0911
 
 
 def _target_alias(which: Literal["daily", "hourly"]) -> str:
-    return "D" if which == "daily" else "1H"
+    return "D" if which == "daily" else "1h"
 
 
 def _alias_and_hours(obj: Union[xr.DataArray, xr.Dataset]) -> tuple[int, str]:
@@ -89,14 +89,17 @@ def _alias_and_hours(obj: Union[xr.DataArray, xr.Dataset]) -> tuple[int, str]:
 
 def _offset_for_alias(alias: str) -> pd.DateOffset:
     # Map our aliases to pandas offsets
+    alias = alias.upper()
     if alias in ("D",):
         return pd.offsets.Day(1)
     if alias in ("W",):
         return pd.offsets.Week(1)
     if alias in ("ME", "M"):
         return pd.offsets.MonthEnd(1)
-    # e.g., "3H", "1H"
-    if alias.endswith("H"):
+    # e.g., "3H", "1H" (case-insensitive)
+    if alias.endswith(
+        "H",
+    ):
         return pd.offsets.Hour(int(alias[:-1]))
     msg = f"Unsupported alias '{alias}'"
     with ErrorLogger(logger):
@@ -166,7 +169,7 @@ def resample_to_daily_or_hourly_adaptive(
 
     Returns
     -------
-    Same type as input, resampled to calendar-aware 'D' or '1H'.
+    Same type as input, resampled to calendar-aware 'D' or '1h'.
     """
     in_obj = in_obj.copy()
     logger.info(f"Starting adaptive resampling to {target}")
@@ -208,7 +211,7 @@ def resample_to_daily_or_hourly_adaptive(
     tgt_hours = 24 if target == "daily" else 1
     in_hours, alias_in = _alias_and_hours(in_obj)
 
-    # If already at target cadence (1H or D), return
+    # If already at target cadence (1h or D), return
     if (target == "hourly" and in_hours == 1) or (
         target == "daily" and alias_in == "D"
     ):
@@ -244,7 +247,7 @@ def resample_to_daily_or_hourly_adaptive(
                 da, alias_in=alias_in, alias_out=alias_tgt
             )
 
-        # Same nominal hours but different calendars (e.g., 24H -> D or D -> 1H)
+        # Same nominal hours but different calendars (e.g., 24H -> D or D -> 1h)
         if target == "daily":
             return (
                 da.resample(time="D").mean()
@@ -253,15 +256,15 @@ def resample_to_daily_or_hourly_adaptive(
             )
         if intensive:
             if upsample_for_intensive == "linear":
-                return da.resample(time="1H").interpolate("linear")
+                return da.resample(time="1h").interpolate("linear")
             if upsample_for_intensive == "ffill":
-                return da.resample(time="1H").ffill()
+                return da.resample(time="1h").ffill()
             if upsample_for_intensive == "nearest":
-                return da.resample(time="1H").nearest()
+                return da.resample(time="1h").nearest()
             msg = f"Unknown upsample_for_intensive='{upsample_for_intensive}'"
             with ErrorLogger(logger):
                 raise ValueError(msg)
-        return _distribute_extensive_to_finer(da, alias_in=alias_in, alias_out="1H")
+        return _distribute_extensive_to_finer(da, alias_in=alias_in, alias_out="1h")
 
     if isinstance(in_obj, xr.DataArray):
         out = _resample_da(in_obj)

@@ -35,7 +35,7 @@ classifiers = [
   "Topic :: Utilities",
 ]
 dependencies = [
-  "numpy>=1.17.3",
+  "numpy>=1.17.3,<2.4",
   "xarray",
   "rioxarray",
   "matplotlib>=3.6.1",
@@ -50,7 +50,9 @@ dependencies = [
   "seaborn",
   "netCDF4",
   "easy_mpl",
-  "cdo"
+  "cdo",
+  "h5netcdf",
+  "h5py",
 ]
 
 [project.urls]

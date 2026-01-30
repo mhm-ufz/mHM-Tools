@@ -1,3 +1,4 @@
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -291,6 +292,167 @@ class TestCatchment(unittest.TestCase):
             print(
                 f"With ref Delineated area: {area_km2} km², Reference area: {ref_area} km², Relative difference: {rel_diff*100:.2f}%"
             )
+
+    def test_multiple_gauges_idgauges_consistency(self):
+        """Compare idgauges from individual gauges vs. combined multi-gauge output."""
+        if (
+            not self.FDIR_PATH.exists()
+            or self.GAUGE_LAT is None
+            or self.GAUGE_LON is None
+        ):
+            self.skipTest(
+                "Set FDIR_PATH, GAUGE_LAT and GAUGE_LON in this test file to run this integration test."
+            )
+
+        gauge_ids = [101, 202]
+        gauge_coords = [
+            (float(self.GAUGE_LAT[0]), float(self.GAUGE_LON[0])),
+            (float(self.GAUGE_LAT[1]), float(self.GAUGE_LON[1])),
+        ]
+
+        with get_xarray_ds_from_file(str(self.FDIR_PATH)) as ds:
+            var_name = (
+                self.FDIR_VAR
+                if self.FDIR_VAR in ds.data_vars
+                else list(ds.data_vars)[0]
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            snapped = []
+            resolutions = catchment.Resolution(
+                l0_resolution=0.001953125, l1_resolution=1 / 32
+            )
+            for idx, (lat, lon) in enumerate(gauge_coords):
+                out_dir = tmp_path / f"single_{idx}"
+                out_dir.mkdir(parents=True, exist_ok=True)
+                with get_xarray_ds_from_file(
+                    str(self.FDIR_PATH),
+                    var_name=var_name,
+                    normalize_latlon_coords=True,
+                    force_decending_y=True,
+                ) as ds:
+                    transform = catchment.get_transformation_matrix_nc(ds, var_name)
+                    catchment.create_catchment(
+                        input_file=str(self.FDIR_PATH),
+                        output_path=str(out_dir),
+                        var_name=var_name,
+                        var="fdir",
+                        ftype="d8",
+                        gauge_coords=(lat, lon),
+                        gauge_ids=[gauge_ids[idx]],
+                        latlon=True,
+                        frame=1,
+                        resolutions=resolutions,
+                    )
+                id_path = out_dir / "idgauges.nc"
+                self.assertTrue(id_path.is_file())
+                with xr.open_dataset(id_path) as id_ds:
+                    id_da = id_ds["idgauges"]
+                    matches = np.argwhere(id_da.values == gauge_ids[idx])
+                    self.assertEqual(matches.shape[0], 1)
+                    row, col = matches[0]
+                    lat_val = float(id_da["lat"].values[row])
+                    lon_val = float(id_da["lon"].values[col])
+                snapped.append((lat_val, lon_val, gauge_ids[idx]))
+
+            combined_dir = tmp_path / "combined"
+            combined_dir.mkdir(parents=True, exist_ok=True)
+            catchment.create_catchment(
+                input_file=str(self.FDIR_PATH),
+                output_path=str(combined_dir),
+                var_name=var_name,
+                var="fdir",
+                ftype="d8",
+                gauge_coords=gauge_coords,
+                gauge_ids=gauge_ids,
+                latlon=True,
+                frame=1,
+                resolutions=resolutions,
+            )
+            combined_path = combined_dir / "idgauges.nc"
+            self.assertTrue(combined_path.is_file())
+            with xr.open_dataset(combined_path) as combined_ds:
+                combined_da = combined_ds["idgauges"]
+                for lat_val, lon_val, gid in snapped:
+                    combined_val = combined_da.sel(
+                        lat=lat_val, lon=lon_val, method="nearest"
+                    ).item()
+                    self.assertEqual(int(combined_val), gid)
+
+    def test_parallel_matches_sequential_multi_gauge(self):
+        """Parallel output should match sequential output for multiple gauges."""
+        if (
+            not self.FDIR_PATH.exists()
+            or self.GAUGE_LAT is None
+            or self.GAUGE_LON is None
+        ):
+            self.skipTest(
+                "Set FDIR_PATH, GAUGE_LAT and GAUGE_LON in this test file to run this integration test."
+            )
+
+        gauge_ids = [101, 202]
+        gauge_coords = [
+            (float(self.GAUGE_LAT[0]), float(self.GAUGE_LON[0])),
+            (float(self.GAUGE_LAT[1]), float(self.GAUGE_LON[1])),
+        ]
+
+        with get_xarray_ds_from_file(str(self.FDIR_PATH)) as ds:
+            var_name = (
+                self.FDIR_VAR
+                if self.FDIR_VAR in ds.data_vars
+                else list(ds.data_vars)[0]
+            )
+
+        resolutions = catchment.Resolution(
+            l0_resolution=0.001953125, l1_resolution=1 / 32
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            seq_dir = tmp_path / "seq"
+            par_dir = tmp_path / "par"
+            seq_dir.mkdir(parents=True, exist_ok=True)
+            par_dir.mkdir(parents=True, exist_ok=True)
+
+            catchment.create_catchment(
+                input_file=str(self.FDIR_PATH),
+                output_path=str(seq_dir),
+                var_name=var_name,
+                var="fdir",
+                ftype="d8",
+                gauge_coords=gauge_coords,
+                gauge_ids=gauge_ids,
+                latlon=True,
+                frame=1,
+                resolutions=resolutions,
+                ncpus=1,
+            )
+            catchment.create_catchment(
+                input_file=str(self.FDIR_PATH),
+                output_path=str(par_dir),
+                var_name=var_name,
+                var="fdir",
+                ftype="d8",
+                gauge_coords=gauge_coords,
+                gauge_ids=gauge_ids,
+                latlon=True,
+                frame=1,
+                resolutions=resolutions,
+                ncpus=2,
+            )
+
+            seq_path = seq_dir / "idgauges.nc"
+            par_path = par_dir / "idgauges.nc"
+            self.assertTrue(seq_path.is_file())
+            self.assertTrue(par_path.is_file())
+
+            with xr.open_dataset(seq_path) as seq_ds, xr.open_dataset(
+                par_path
+            ) as par_ds:
+                np.testing.assert_array_equal(
+                    seq_ds["idgauges"].values, par_ds["idgauges"].values
+                )
 
 
 if __name__ == "__main__":

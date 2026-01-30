@@ -473,7 +473,7 @@ def resample_to_coarser_calendar(
 
     Compare the two datasets' median time steps, convert them to pandas/xarray
     frequency aliases, and resample the finer one up to the coarser one using
-    calendar-aware frequencies (e.g., 'M' not '720H').
+    calendar-aware frequencies (e.g., 'ME' not '720H').
     """
     hours_in, alias_in = timedelta_to_alias(ds_input)
     hours_ref, alias_ref = timedelta_to_alias(ds_ref)

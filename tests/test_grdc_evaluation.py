@@ -80,7 +80,7 @@ class TestLowLevelHelpers(unittest.TestCase):
         )
 
     def test_gen_list_of_result_dicts_all_nan(self):
-        times = pd.date_range("2000-01-01", periods=3, freq="H")
+        times = pd.date_range("2000-01-01", periods=3, freq="h")
         da = xr.DataArray(
             [np.nan, np.nan, np.nan], dims=("time",), coords={"time": times}
         )
@@ -88,7 +88,7 @@ class TestLowLevelHelpers(unittest.TestCase):
         self.assertIsNone(res)
 
     def test_gen_list_of_result_dicts_ok(self):
-        times = pd.date_range("2000-01-01", periods=2, freq="H")
+        times = pd.date_range("2000-01-01", periods=2, freq="h")
         da = xr.DataArray([1.0, 2.0], dims=("time",), coords={"time": times})
         res = gv.gen_list_of_result_dicts(da, id=7, facc=11.0)
         self.assertEqual(len(res), 2)
@@ -120,8 +120,8 @@ class TestQDataToXarray(unittest.TestCase):
         self.facc = [1000.0, 1500.0]
 
         # observed hourly, sim 3-hourly (mismatched temporal resolution)
-        self.obs_times = pd.date_range("2001-01-01", periods=6, freq="H")
-        self.sim_times = pd.date_range("2001-01-01", periods=4, freq="3H")
+        self.obs_times = pd.date_range("2001-01-01", periods=6, freq="h")
+        self.sim_times = pd.date_range("2001-01-01", periods=4, freq="3h")
 
         # datasets for mocked file reads
         self.obs_ds = make_observed_data(

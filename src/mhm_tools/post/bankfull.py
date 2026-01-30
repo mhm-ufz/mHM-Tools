@@ -112,7 +112,7 @@ def bankfull_discharge(
         key: ds[var].encoding.get(key, val) for key, val in NC_ENCODE_DEFAULTS.items()
     }
     # bankfull discharge from yearly peak flow
-    q_yearly_peak = ds[var].resample(time="AS").max()
+    q_yearly_peak = ds[var].resample(time="YS").max()
     q_bkfl_data = calc_q_bkfl(q_yearly_peak.data, return_period=return_period)
     q_bkfl = q_yearly_peak.isel(time=0, drop=True).copy(data=q_bkfl_data)
     q_bkfl.attrs["long_name"] = "Discharge at bankfull conditions"

@@ -163,8 +163,8 @@ def timedelta_to_alias(ds: xr.DataArray) -> str:
 
     - ~1 day -> 'D'
     - ~7 days -> 'W'
-    - ~28-31 days -> 'M'
-    - otherwise: fall back to '<N>H'
+    - ~28-31 days -> 'ME'
+    - otherwise: fall back to '<N>h'
 
     """
     time = getattr(ds, "time", None)
@@ -192,8 +192,8 @@ def timedelta_to_alias(ds: xr.DataArray) -> str:
         return hours, "W"
     if 27 < days < 32:
         return hours, "ME"
-    # fallback: integer hours
-    return hours, f"{hours}H"
+    # fallback: integer hours (lowercase for pandas >= 3.0)
+    return hours, f"{hours}h"
 
 
 def get_overlapping_time_slice(input_ds, ref_ds):
