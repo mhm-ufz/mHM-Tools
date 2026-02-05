@@ -1,6 +1,6 @@
-import shutil
-import unittest
 from pathlib import Path
+
+import pytest
 
 import mhm_tools as mt
 from mhm_tools.common.file_handler import get_xarray_ds_from_file
@@ -8,18 +8,18 @@ from mhm_tools.common.logger import configure_mhm_tools_logger
 from mhm_tools.pre.create_mhm_restart_file import Grid, LatLon, MPRRunner
 
 HERE = Path(__file__).parent
-TMP = HERE / "tmp"
-TMP_WORK = TMP / "work"
-TMP_OUT = TMP / "out"
-TMP_WORK.mkdir(parents=True, exist_ok=True)
-TMP_OUT.mkdir(parents=True, exist_ok=True)
 
 
-class TestCreateRestart(unittest.TestCase):
-    def setUp(self):
+class TestCreateRestart:
+    @pytest.fixture(autouse=True)
+    def _tmp_dirs(self, tmp_path):
         # setup read_morph_files test
         configure_mhm_tools_logger("ERROR")
-        self.morph_dir = TMP / "morph"
+        self.tmp_work = tmp_path / "work"
+        self.tmp_out = tmp_path / "out"
+        self.tmp_work.mkdir(parents=True, exist_ok=True)
+        self.tmp_out.mkdir(parents=True, exist_ok=True)
+        self.morph_dir = tmp_path / "morph"
         self.morph_dir.mkdir(parents=True, exist_ok=True)
         # create empty files in morph directory
         self.file_names = [
@@ -36,11 +36,7 @@ class TestCreateRestart(unittest.TestCase):
         ]
         for n in self.file_names:
             (self.morph_dir / f"{n}.nc").touch()
-
-    def tearDown(self) -> None:
-        # self.morph_dir.rmdir()
-        shutil.rmtree(TMP)
-        return super().tearDown()
+        yield
 
     def test_read_morph_files(self):
         mf = mt.pre.MorphFiles(self.morph_dir)
@@ -107,7 +103,7 @@ class TestCreateRestart(unittest.TestCase):
         )
         m = mt.pre.MHMRestartFile(
             grid=grid,
-            output_path=TMP_OUT,
+            output_path=self.tmp_out,
             nml_template=morph / "mpr_mhm_template.nml",
             increment_l1=increment_l1,
             mpr=mpr_runner,
@@ -198,8 +194,8 @@ class TestCreateRestart(unittest.TestCase):
         )
         m = mt.pre.MHMRestartFile(
             grid=grid,
-            output_path=TMP_OUT,
-            work_path=TMP_WORK,
+            output_path=self.tmp_out,
+            work_path=self.tmp_work,
             nml_template=morph / "mpr_mhm_template.nml",
             increment_l1=increment_l1,
             mpr=mpr_runner,
@@ -257,7 +253,3 @@ class TestCreateRestart(unittest.TestCase):
 
     def test_write_namelists(self):
         pass
-
-
-if __name__ == "__main__":
-    unittest.main()

@@ -79,7 +79,7 @@ def convert_units(ds: Union[xr.Dataset, xr.DataArray], var: str) -> xr.DataArray
     # Precipitation rate
     elif units in PRECIPITATION_RATE_UNITS:
         freq = pd.infer_freq(da.indexes["time"])
-        if not freq or not freq.startswith(("H", "D")):
+        if not freq or not freq.startswith(("h", "D")):
             msg = (
                 f"Cannot infer frequency from time coordinate with freq={freq!r}. "
                 f"Expected hourly or daily frequency."
@@ -89,15 +89,15 @@ def convert_units(ds: Union[xr.Dataset, xr.DataArray], var: str) -> xr.DataArray
         factor = 1.0
         if "kg" in units and "s-1" in units:
             factor = (
-                86400 if freq.startswith("D") else 3600 if freq.startswith("H") else 1
+                86400 if freq.startswith("D") else 3600 if freq.startswith("h") else 1
             )
         elif units == "mm d-1" and freq:
             factor = (
-                1 if freq.startswith("D") else 1 / 24 if freq.startswith("H") else 1
+                1 if freq.startswith("D") else 1 / 24 if freq.startswith("h") else 1
             )
         elif units == "mm s-1":
             factor = (
-                90000 if freq.startswith("D") else 3600 if freq.startswith("H") else 1
+                90000 if freq.startswith("D") else 3600 if freq.startswith("h") else 1
             )
         da = da * factor
         da.attrs["units"] = "mm"

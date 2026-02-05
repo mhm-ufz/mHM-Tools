@@ -9,6 +9,20 @@ import xarray as xr
 import mhm_tools.common.file_handler as fh
 
 
+def _engine_available(engine: str) -> bool:
+    if engine != "h5netcdf":
+        return True
+    try:
+        ds = xr.Dataset({"var": (("y", "x"), np.zeros((1, 1), dtype=np.float32))})
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "probe.nc"
+            ds.to_netcdf(path, engine=engine)
+            xr.open_dataset(path, engine=engine).close()
+        return True
+    except Exception:
+        return False
+
+
 class BaseDatasetMixin:
     def make_simple_ds(self, dtype=np.float32):
         # 3 x 4 grid, lat descending
@@ -181,12 +195,16 @@ class TestAsciiReadWrite(unittest.TestCase, BaseDatasetMixin):
 class TestWriteXarrayToFile(unittest.TestCase, BaseDatasetMixin):
     def test_write_xarray_to_file_nc(self):
         ds = self.make_simple_ds()
-        with tempfile.TemporaryDirectory() as td:
-            nc_path = Path(td) / "ds.nc"
-            fh.write_xarray_to_file(ds, nc_path)
-            self.assertTrue(nc_path.is_file())
-            back = xr.open_dataset(nc_path)
-            self.assertIn("var", back)
+        engines = [e for e in ["netcdf4", "h5netcdf"] if _engine_available(e)]
+        if not engines:
+            self.skipTest("No NetCDF engine available for writing.")
+        for engine in engines:
+            with tempfile.TemporaryDirectory() as td:
+                nc_path = Path(td) / "ds.nc"
+                fh.write_xarray_to_file(ds, nc_path, engine=engine)
+                self.assertTrue(nc_path.is_file())
+                back = xr.open_dataset(nc_path, engine=engine)
+                self.assertIn("var", back)
 
     def test_write_xarray_to_file_asc(self):
         ds = self.make_simple_ds()
@@ -206,35 +224,75 @@ class TestWriteXarrayToFile(unittest.TestCase, BaseDatasetMixin):
 class TestGetXarrayDsFromFile(unittest.TestCase, BaseDatasetMixin):
     def test_get_xarray_ds_from_file_nc_flow(self):
         ds_with_time = self.make_ds_with_time(lon_coord="x", lat_coord="y")
-        with tempfile.TemporaryDirectory() as td:
-            nc_path = Path(td) / "stub.nc"
-            ds_with_time.to_netcdf(nc_path)
+        engines = [e for e in ["netcdf4", "h5netcdf"] if _engine_available(e)]
+        if not engines:
+            self.skipTest("No NetCDF engine available for writing.")
+        for engine in engines:
+            with tempfile.TemporaryDirectory() as td:
+                nc_path = Path(td) / "stub.nc"
+                ds_with_time.to_netcdf(nc_path, engine=engine)
 
-            with patch.object(
-                fh, "read_dataset", return_value=ds_with_time
-            ), patch.object(
-                fh,
-                "chunk_dataset",
-                side_effect=lambda ds, ctype, mem: ds.chunk(
-                    {"time": -1, "lat": 2, "lon": 2}
-                ),
-            ):
+                with patch.object(
+                    fh, "read_dataset", return_value=ds_with_time
+                ), patch.object(
+                    fh,
+                    "chunk_dataset",
+                    side_effect=lambda ds, ctype, mem: ds.chunk(
+                        {"time": -1, "lat": 2, "lon": 2}
+                    ),
+                ):
 
-                out = fh.get_xarray_ds_from_file(
-                    nc_path,
-                    var_name=None,
-                    chunking=True,
-                    available_mem_gib=1.0,
-                    chunk_type=fh.ChunkType.SPACE,
-                    use_mfdataset=False,
-                    engine="h5netcdf",
-                    normalize_latlon_coords=True,
-                    force_decending_y=True,
-                )
-                self.assertIn("lat", out.coords)
-                self.assertIn("lon", out.coords)
-                self.assertIn("time", out.sizes)
-                self.assertIsNotNone(out.chunks)
+                    out = fh.get_xarray_ds_from_file(
+                        nc_path,
+                        var_name=None,
+                        chunking=True,
+                        available_mem_gib=1.0,
+                        chunk_type=fh.ChunkType.SPACE,
+                        use_mfdataset=False,
+                        engine=engine,
+                        normalize_latlon_coords=True,
+                        force_decending_y=True,
+                    )
+                    self.assertIn("lat", out.coords)
+                    self.assertIn("lon", out.coords)
+                    self.assertIn("time", out.sizes)
+                    self.assertIsNotNone(out.chunks)
+
+    def test_get_xarray_ds_from_file_nc_flow_cross_engine(self):
+        ds_with_time = self.make_ds_with_time(lon_coord="x", lat_coord="y")
+        engines = [e for e in ["netcdf4", "h5netcdf"] if _engine_available(e)]
+        if len(engines) < 2:
+            self.skipTest("Cross-engine test requires both netcdf4 and h5netcdf.")
+        for i, j in [(0, 1), (1, 0)]:
+            with tempfile.TemporaryDirectory() as td:
+                nc_path = Path(td) / "stub.nc"
+                ds_with_time.to_netcdf(nc_path, engine=engines[i])
+
+                with patch.object(
+                    fh, "read_dataset", return_value=ds_with_time
+                ), patch.object(
+                    fh,
+                    "chunk_dataset",
+                    side_effect=lambda ds, ctype, mem: ds.chunk(
+                        {"time": -1, "lat": 2, "lon": 2}
+                    ),
+                ):
+
+                    out = fh.get_xarray_ds_from_file(
+                        nc_path,
+                        var_name=None,
+                        chunking=True,
+                        available_mem_gib=1.0,
+                        chunk_type=fh.ChunkType.SPACE,
+                        use_mfdataset=False,
+                        engine=engines[j],
+                        normalize_latlon_coords=True,
+                        force_decending_y=True,
+                    )
+                    self.assertIn("lat", out.coords)
+                    self.assertIn("lon", out.coords)
+                    self.assertIn("time", out.sizes)
+                    self.assertIsNotNone(out.chunks)
 
     def test_get_xarray_ds_from_file_asc_flow(self):
         ds = self.make_simple_ds()

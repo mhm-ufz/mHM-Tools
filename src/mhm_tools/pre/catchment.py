@@ -1413,7 +1413,7 @@ def merge_catchment(path1, path2, out_path):
     # get a mask of all the border area basins
     mask = ds1["basin"].isin(mask_ids)
     # modify the ids to avoid overlaps
-    ds2["basin"] = ds2["basin"] + 200000
+    ds2["basin"] = ds2["basin"] + ds1["basin"].max().item() + 1
 
     # in the border area, use the rolled data, else the original
     merged = xr.where(mask, ds2.reindex_like(ds1, method="nearest"), ds1)

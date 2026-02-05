@@ -89,17 +89,15 @@ def _alias_and_hours(obj: Union[xr.DataArray, xr.Dataset]) -> tuple[int, str]:
 
 def _offset_for_alias(alias: str) -> pd.DateOffset:
     # Map our aliases to pandas offsets
-    alias = alias.upper()
-    if alias in ("D",):
+    alias_upper = alias.upper()
+    if alias_upper in ("D",):
         return pd.offsets.Day(1)
     if alias in ("W",):
         return pd.offsets.Week(1)
-    if alias in ("ME", "M"):
+    if alias_upper in ("ME", "M"):
         return pd.offsets.MonthEnd(1)
-    # e.g., "3H", "1H" (case-insensitive)
-    if alias.endswith(
-        "H",
-    ):
+    # e.g., "3H", "1H"
+    if alias_upper.endswith("H"):
         return pd.offsets.Hour(int(alias[:-1]))
     msg = f"Unsupported alias '{alias}'"
     with ErrorLogger(logger):
