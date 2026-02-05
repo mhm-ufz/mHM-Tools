@@ -1,20 +1,19 @@
-import unittest
 from pathlib import Path
 
 import numpy as np
+import pytest
 import xarray as xr
 
 import mhm_tools as mt
 
 HERE = Path(__file__).parent
-TMP = HERE / "tmp"
-TMP.mkdir(parents=True, exist_ok=True)
 
 
-class TestBankfull(unittest.TestCase):
-    def setUp(self):
+class TestBankfull:
+    @pytest.fixture(autouse=True)
+    def _setup(self, tmp_path):
         self.in_file = HERE / "files" / "mRM_Fluxes_States.nc"
-        self.out_file = TMP / "Q-bkfl.nc"
+        self.out_file = tmp_path / "Q-bkfl.nc"
         self.out_file.unlink(missing_ok=True)
         self.q_ref = np.array(
             [
@@ -44,22 +43,19 @@ class TestBankfull(unittest.TestCase):
             ],
             dtype=np.float32,
         )
+        yield
 
     def test_bankfull(self):
         mt.post.bankfull_discharge(self.in_file, self.out_file, wetted_perimeter=True)
-        self.assertTrue(self.out_file.is_file())
+        assert self.out_file.is_file()
         ds = xr.load_dataset(self.out_file)
-        self.assertIn("Q_bkfl", ds.variables)
-        self.assertIn("P_bkfl", ds.variables)
-        self.assertSequenceEqual(ds["Q_bkfl"].dims, ("northing", "easting"))
-        self.assertSequenceEqual(ds["P_bkfl"].dims, ("northing", "easting"))
-        self.assertTrue(
-            np.all(np.isclose(ds["Q_bkfl"].data, self.q_ref, atol=1e-4, equal_nan=True))
+        assert "Q_bkfl" in ds.variables
+        assert "P_bkfl" in ds.variables
+        assert ds["Q_bkfl"].dims == ("northing", "easting")
+        assert ds["P_bkfl"].dims == ("northing", "easting")
+        assert np.all(
+            np.isclose(ds["Q_bkfl"].data, self.q_ref, atol=1e-4, equal_nan=True)
         )
-        self.assertTrue(
-            np.all(np.isclose(ds["P_bkfl"].data, self.p_ref, atol=1e-4, equal_nan=True))
+        assert np.all(
+            np.isclose(ds["P_bkfl"].data, self.p_ref, atol=1e-4, equal_nan=True)
         )
-
-
-if __name__ == "__main__":
-    unittest.main()

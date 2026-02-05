@@ -32,6 +32,12 @@ class TestCatchment(unittest.TestCase):
         self.transform = (0.05, 0.0, -180, 0, 0.05, -90)
         self.out_var_name = None
         self.latlon = True
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmpdir.cleanup)
+        self.tmp_path = Path(self._tmpdir.name)
+        self.output_path = self.tmp_path / "files"
+        self.output_path.mkdir(parents=True, exist_ok=True)
+        super().setUp()
 
     def test_initialization(self):
         c = catchment.Catchment(
@@ -44,7 +50,7 @@ class TestCatchment(unittest.TestCase):
             latlon=self.latlon,
         )
         self.assertIsNotNone(c)
-        self.assertEqual(c.ds, self.ds)
+        self.assertIs(c.ds, self.ds)
 
     def test_modify_data(self):
         c = catchment.Catchment(
@@ -123,24 +129,21 @@ class TestCatchment(unittest.TestCase):
             ),
         ]
 
-        output_path = Path(HERE, "files")
-        output_path.mkdir(parents=True, exist_ok=True)
-
         for c, out_var_name in zip(catchments, output_var_names):
             c.get_basins()
             c.get_facc()
             c.get_grid_area()
             c.get_upstream_area()
-            c.write(output_path, single_file=True)
-            output_file = output_path / out_var_name
+            c.write(self.output_path, single_file=True)
+            output_file = self.output_path / out_var_name
             self.assertTrue(output_file.exists(), f"Failed to create {out_var_name}")
 
     def test_merge_catchment(self):
         self.test_write()  # Ensure files are written first
 
-        path1 = Path(HERE, "files/hydro1.nc")
-        path2 = Path(HERE, "files/hydro2.nc")
-        out_path = Path(HERE, "files/hydro_merged_03min.nc")
+        path1 = self.output_path / "hydro1.nc"
+        path2 = self.output_path / "hydro2.nc"
+        out_path = self.output_path / "hydro_merged_03min.nc"
 
         self.assertTrue(path1.is_file(), "hydro1.nc does not exist.")
         with xr.open_dataset(path2, engine="netcdf4") as ds1:
@@ -152,16 +155,6 @@ class TestCatchment(unittest.TestCase):
 
         catchment.merge_catchment(path1, path2, out_path)
         self.assertTrue(out_path.is_file())
-
-    def tearDown(self):
-        files_to_remove = ["hydro1.nc", "hydro2.nc", "hydro_merged_03min.nc"]
-        for filename in files_to_remove:
-            file_path = Path(HERE, "files", filename)
-            try:
-                if file_path.exists():
-                    file_path.unlink()
-            except Exception as e:
-                print(f"Error removing file {file_path}: {e}")
 
     # ------------------------------------------------------------------
     # Optional integration tests for delineation using a real flow-direction
@@ -317,68 +310,66 @@ class TestCatchment(unittest.TestCase):
                 else list(ds.data_vars)[0]
             )
 
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
-            snapped = []
-            resolutions = catchment.Resolution(
-                l0_resolution=0.001953125, l1_resolution=1 / 32
-            )
-            for idx, (lat, lon) in enumerate(gauge_coords):
-                out_dir = tmp_path / f"single_{idx}"
-                out_dir.mkdir(parents=True, exist_ok=True)
-                with get_xarray_ds_from_file(
-                    str(self.FDIR_PATH),
-                    var_name=var_name,
-                    normalize_latlon_coords=True,
-                    force_decending_y=True,
-                ) as ds:
-                    transform = catchment.get_transformation_matrix_nc(ds, var_name)
-                    catchment.create_catchment(
-                        input_file=str(self.FDIR_PATH),
-                        output_path=str(out_dir),
-                        var_name=var_name,
-                        var="fdir",
-                        ftype="d8",
-                        gauge_coords=(lat, lon),
-                        gauge_ids=[gauge_ids[idx]],
-                        latlon=True,
-                        frame=1,
-                        resolutions=resolutions,
-                    )
-                id_path = out_dir / "idgauges.nc"
-                self.assertTrue(id_path.is_file())
-                with xr.open_dataset(id_path) as id_ds:
-                    id_da = id_ds["idgauges"]
-                    matches = np.argwhere(id_da.values == gauge_ids[idx])
-                    self.assertEqual(matches.shape[0], 1)
-                    row, col = matches[0]
-                    lat_val = float(id_da["lat"].values[row])
-                    lon_val = float(id_da["lon"].values[col])
-                snapped.append((lat_val, lon_val, gauge_ids[idx]))
-
-            combined_dir = tmp_path / "combined"
-            combined_dir.mkdir(parents=True, exist_ok=True)
-            catchment.create_catchment(
-                input_file=str(self.FDIR_PATH),
-                output_path=str(combined_dir),
+        snapped = []
+        resolutions = catchment.Resolution(
+            l0_resolution=0.001953125, l1_resolution=1 / 32
+        )
+        for idx, (lat, lon) in enumerate(gauge_coords):
+            out_dir = self.tmp_path / f"single_{idx}"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            with get_xarray_ds_from_file(
+                str(self.FDIR_PATH),
                 var_name=var_name,
-                var="fdir",
-                ftype="d8",
-                gauge_coords=gauge_coords,
-                gauge_ids=gauge_ids,
-                latlon=True,
-                frame=1,
-                resolutions=resolutions,
-            )
-            combined_path = combined_dir / "idgauges.nc"
-            self.assertTrue(combined_path.is_file())
-            with xr.open_dataset(combined_path) as combined_ds:
-                combined_da = combined_ds["idgauges"]
-                for lat_val, lon_val, gid in snapped:
-                    combined_val = combined_da.sel(
-                        lat=lat_val, lon=lon_val, method="nearest"
-                    ).item()
-                    self.assertEqual(int(combined_val), gid)
+                normalize_latlon_coords=True,
+                force_decending_y=True,
+            ) as ds:
+                transform = catchment.get_transformation_matrix_nc(ds, var_name)
+                catchment.create_catchment(
+                    input_file=str(self.FDIR_PATH),
+                    output_path=str(out_dir),
+                    var_name=var_name,
+                    var="fdir",
+                    ftype="d8",
+                    gauge_coords=(lat, lon),
+                    gauge_ids=[gauge_ids[idx]],
+                    latlon=True,
+                    frame=1,
+                    resolutions=resolutions,
+                )
+            id_path = out_dir / "idgauges.nc"
+            self.assertTrue(id_path.is_file())
+            with xr.open_dataset(id_path) as id_ds:
+                id_da = id_ds["idgauges"]
+                matches = np.argwhere(id_da.values == gauge_ids[idx])
+                self.assertEqual(matches.shape[0], 1)
+                row, col = matches[0]
+                lat_val = float(id_da["lat"].values[row])
+                lon_val = float(id_da["lon"].values[col])
+            snapped.append((lat_val, lon_val, gauge_ids[idx]))
+
+        combined_dir = self.tmp_path / "combined"
+        combined_dir.mkdir(parents=True, exist_ok=True)
+        catchment.create_catchment(
+            input_file=str(self.FDIR_PATH),
+            output_path=str(combined_dir),
+            var_name=var_name,
+            var="fdir",
+            ftype="d8",
+            gauge_coords=gauge_coords,
+            gauge_ids=gauge_ids,
+            latlon=True,
+            frame=1,
+            resolutions=resolutions,
+        )
+        combined_path = combined_dir / "idgauges.nc"
+        self.assertTrue(combined_path.is_file())
+        with xr.open_dataset(combined_path) as combined_ds:
+            combined_da = combined_ds["idgauges"]
+            for lat_val, lon_val, gid in snapped:
+                combined_val = combined_da.sel(
+                    lat=lat_val, lon=lon_val, method="nearest"
+                ).item()
+                self.assertEqual(int(combined_val), gid)
 
     def test_parallel_matches_sequential_multi_gauge(self):
         """Parallel output should match sequential output for multiple gauges."""
@@ -408,52 +399,44 @@ class TestCatchment(unittest.TestCase):
             l0_resolution=0.001953125, l1_resolution=1 / 32
         )
 
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
-            seq_dir = tmp_path / "seq"
-            par_dir = tmp_path / "par"
-            seq_dir.mkdir(parents=True, exist_ok=True)
-            par_dir.mkdir(parents=True, exist_ok=True)
+        seq_dir = self.tmp_path / "seq"
+        par_dir = self.tmp_path / "par"
+        seq_dir.mkdir(parents=True, exist_ok=True)
+        par_dir.mkdir(parents=True, exist_ok=True)
 
-            catchment.create_catchment(
-                input_file=str(self.FDIR_PATH),
-                output_path=str(seq_dir),
-                var_name=var_name,
-                var="fdir",
-                ftype="d8",
-                gauge_coords=gauge_coords,
-                gauge_ids=gauge_ids,
-                latlon=True,
-                frame=1,
-                resolutions=resolutions,
-                ncpus=1,
+        catchment.create_catchment(
+            input_file=str(self.FDIR_PATH),
+            output_path=str(seq_dir),
+            var_name=var_name,
+            var="fdir",
+            ftype="d8",
+            gauge_coords=gauge_coords,
+            gauge_ids=gauge_ids,
+            latlon=True,
+            frame=1,
+            resolutions=resolutions,
+            ncpus=1,
+        )
+        catchment.create_catchment(
+            input_file=str(self.FDIR_PATH),
+            output_path=str(par_dir),
+            var_name=var_name,
+            var="fdir",
+            ftype="d8",
+            gauge_coords=gauge_coords,
+            gauge_ids=gauge_ids,
+            latlon=True,
+            frame=1,
+            resolutions=resolutions,
+            ncpus=2,
+        )
+
+        seq_path = seq_dir / "idgauges.nc"
+        par_path = par_dir / "idgauges.nc"
+        self.assertTrue(seq_path.is_file())
+        self.assertTrue(par_path.is_file())
+
+        with xr.open_dataset(seq_path) as seq_ds, xr.open_dataset(par_path) as par_ds:
+            np.testing.assert_array_equal(
+                seq_ds["idgauges"].values, par_ds["idgauges"].values
             )
-            catchment.create_catchment(
-                input_file=str(self.FDIR_PATH),
-                output_path=str(par_dir),
-                var_name=var_name,
-                var="fdir",
-                ftype="d8",
-                gauge_coords=gauge_coords,
-                gauge_ids=gauge_ids,
-                latlon=True,
-                frame=1,
-                resolutions=resolutions,
-                ncpus=2,
-            )
-
-            seq_path = seq_dir / "idgauges.nc"
-            par_path = par_dir / "idgauges.nc"
-            self.assertTrue(seq_path.is_file())
-            self.assertTrue(par_path.is_file())
-
-            with xr.open_dataset(seq_path) as seq_ds, xr.open_dataset(
-                par_path
-            ) as par_ds:
-                np.testing.assert_array_equal(
-                    seq_ds["idgauges"].values, par_ds["idgauges"].values
-                )
-
-
-if __name__ == "__main__":
-    unittest.main()

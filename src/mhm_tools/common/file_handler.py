@@ -238,7 +238,7 @@ def get_xarray_ds_from_file(
     available_mem_gib=None,
     chunk_type=ChunkType.SPACE,
     use_mfdataset=False,
-    engine="h5netcdf",
+    engine="netcdf4",
     normalize_latlon_coords=False,
     force_decending_y=False,
     force_ascending_y=False,
@@ -316,7 +316,7 @@ def get_xarray_ds_from_file(
     return ds_out
 
 
-def write_xarray_to_file(  # noqa: PLR0912
+def write_xarray_to_file(  # noqa: PLR0912, PLR0915
     ds,
     file_path,
     var_name=None,
@@ -357,6 +357,9 @@ def write_xarray_to_file(  # noqa: PLR0912
                 v: {"zlib": True, "complevel": 4, "shuffle": True, **NC_ENCODE_DEFAULTS}
                 for v in data_vars
             }
+        else:
+            # Ensure encoding only targets data variables (avoid coords/bounds)
+            encoding = {k: v for k, v in encoding.items() if k in data_vars}
         # if False and available_mem_gib is not None:
         #     # ds = chunk_dataset(ds, ChunkType.TIME, available_mem_gib//50)
         #     dask.config.set(
@@ -464,6 +467,23 @@ def write_xarray_to_file(  # noqa: PLR0912
                 # then overlay moved encoding (higher precedence)
                 if name in moved_encoding:
                     merged_encoding[name].update(moved_encoding[name])
+
+            # Drop encoding for non-data variables and ensure data variables are safe
+            merged_encoding = {
+                k: v for k, v in merged_encoding.items() if k in data_vars
+            }
+
+            # Fill NaNs for integer data vars and cast bools to uint8
+            for name in data_vars:
+                da = ds_clean[name]
+                dtype = get_dtype(da)
+                if np.issubdtype(dtype, np.bool_):
+                    ds_clean[name] = da.astype("uint8")
+                    merged_encoding.pop(name, None)
+                    continue
+                if np.issubdtype(dtype, np.integer) and np.any(np.isnan(da)):
+                    fillv = da.attrs.get("_FillValue", NO_DATA)
+                    ds_clean[name] = da.fillna(fillv).astype(dtype)
 
             encoding = sanitize_nc_encoding(ds_clean, merged_encoding)
             logger.info(f"Using encoding: {encoding}")

@@ -86,7 +86,7 @@ def calculate_pet(
         hours, time_id = timedelta_to_alias(ds)
         if time_id == "D":
             stat_freq = "daily"
-        elif time_id in {"1H", "1h"}:
+        elif time_id in ["1h", "1H"]:
             stat_freq = "hourly"
         else:
             msg = f"Frequency of input dataset is different from hourly or daily it is {time_id}."

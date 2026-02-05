@@ -10,7 +10,7 @@ import xarray as xr
 from mhm_tools.common.logger import ErrorLogger
 from mhm_tools.common.xarray_utils import get_dtype
 
-from .constants import NC_ENCODE_DEFAULTS, WILDCARDS
+from .constants import NC_ENCODE_DEFAULTS, NO_DATA, WILDCARDS
 
 logger = logging.getLogger(__name__)
 
@@ -30,9 +30,19 @@ def _fallback_open(open_func: Any, *args: Any, **kwargs: Any) -> xr.Dataset:
     """
     try:
         return open_func(*args, **kwargs)
-    except ValueError as exc:
-        if "unrecognized engine 'h5netcdf'" in str(exc):
+    except Exception as exc:
+        if kwargs.get("is_fallback_attempt"):
+            logger.error("Both h5netcdf and netcdf4 engines failed to open dataset.")
+            raise exc
+        kwargs["is_fallback_attempt"] = True
+        if (
+            "unrecognized engine 'h5netcdf'" in str(exc)
+            or kwargs["engine"] == "h5netcdf"
+        ):
             kwargs["engine"] = "netcdf4"
+            return open_func(*args, **kwargs)
+        if "unrecognized engine 'netcdf4'" in str(exc) or kwargs["engine"] == "netcdf4":
+            kwargs["engine"] = "h5netcdf"
             return open_func(*args, **kwargs)
         logger.error("Error opening dataset: %s", exc)
         raise
@@ -41,7 +51,7 @@ def _fallback_open(open_func: Any, *args: Any, **kwargs: Any) -> xr.Dataset:
 def read_dataset(
     file_path: Union[str, Path, List[Union[str, Path]]],
     use_mfdataset: bool = False,
-    engine: str = "h5netcdf",
+    engine: str = "netcdf4",
 ) -> xr.Dataset:
     """
     Load one or more NetCDF files into a single xarray.Dataset.
@@ -65,7 +75,7 @@ def read_dataset(
         If True and multiple files are found, open them with
         `xr.open_mfdataset`. Otherwise, open each with
         `xr.open_dataset` and combine.
-    engine : str, default "h5netcdf"
+    engine : str, default "netcdf4"
         The backend engine to use for opening NetCDF files.
 
     Returns
@@ -283,6 +293,19 @@ def sanitize_nc_encoding(ds: "xr.Dataset", encoding: dict) -> dict:
             except Exception:
                 # If casting fails, drop it rather than erroring out
                 e.pop("_FillValue", None)
+            else:
+                if isinstance(e.get("_FillValue"), float) and np.isnan(
+                    e.get("_FillValue")
+                ):
+                    e.pop("_FillValue", None)
+                if np.issubdtype(get_dtype(da), np.integer):
+                    info = np.iinfo(get_dtype(da))
+                    if e["_FillValue"] < info.min or e["_FillValue"] > info.max:
+                        if info.min < NO_DATA and info.max > NO_DATA:
+                            e["_FillValue"] = (
+                                np.array(NO_DATA).astype(get_dtype(da)).item()
+                            )
+                        e.pop("_FillValue", None)
 
             # If you *must* also expose 'missing_value' (CF legacy), put it in attrs
             # with matching dtype (commented out by default):
