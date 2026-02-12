@@ -105,9 +105,13 @@ def get_coord_key(
     return None
 
 
-def get_single_data_var(ds):
+def get_single_data_var(ds: xr.Dataset, proposed_vars: Optional[list] = None):
     """Get the data var name from a dataset that only contains one data variable."""
     data_vars = list(ds.data_vars)  # shallow copy is enough; entries are strings
+    if isinstance(proposed_vars, list):
+        for var in data_vars:
+            if var in proposed_vars:
+                return var
     if len(data_vars) > 1:
         # remove coords without mutating while iterating
         coords = [

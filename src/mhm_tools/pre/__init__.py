@@ -10,21 +10,64 @@ latlon file creation
     xy_to_latlon
 """
 
-from . import catchment, create_mhm_restart_file, latlon, subdomain_masks
-from .catchment import create_catchment, merge_catchment
-from .create_id_gauges import create_id_gauges
-from .create_mhm_restart_file import Grid, LatLon, MHMRestartFile, MorphFiles
-from .crop_mhm_setup import crop_mhm_setup
-from .latlon import create_latlon, xy_to_latlon
-from .link_folder_tree import link_folder_tree
-from .subdomain_masks import create_subdomain_masks
+import importlib
 
-__all__ = ["latlon"]
-__all__ += ["create_latlon", "xy_to_latlon"]
-__all__ += ["catchment", "create_mhm_restart_file", "subdomain_masks"]
-__all__ += ["create_catchment", "merge_catchment"]
-__all__ += ["Grid", "LatLon", "MHMRestartFile", "MorphFiles"]
-__all__ += ["create_subdomain_masks"]
-__all__ += ["crop_mhm_setup"]
-__all__ += ["create_id_gauges"]
-__all__ += ["link_folder_tree"]
+_MODULE_EXPORTS = {
+    "catchment": "catchment",
+    "create_mhm_restart_file": "create_mhm_restart_file",
+    "latlon": "latlon",
+    "subdomain_masks": "subdomain_masks",
+}
+
+_ATTR_EXPORTS = {
+    "create_catchment": ("catchment", "create_catchment"),
+    "merge_catchment": ("catchment", "merge_catchment"),
+    "create_id_gauges": ("create_id_gauges", "create_id_gauges"),
+    "Grid": ("create_mhm_restart_file", "Grid"),
+    "LatLon": ("create_mhm_restart_file", "LatLon"),
+    "MHMRestartFile": ("create_mhm_restart_file", "MHMRestartFile"),
+    "MorphFiles": ("create_mhm_restart_file", "MorphFiles"),
+    "crop_mhm_setup": ("crop_mhm_setup", "crop_mhm_setup"),
+    "create_latlon": ("latlon", "create_latlon"),
+    "xy_to_latlon": ("latlon", "xy_to_latlon"),
+    "link_folder_tree": ("link_folder_tree", "link_folder_tree"),
+    "create_subdomain_masks": ("subdomain_masks", "create_subdomain_masks"),
+}
+
+__all__ = [
+    "Grid",
+    "LatLon",
+    "MHMRestartFile",
+    "MorphFiles",
+    "catchment",
+    "create_catchment",
+    "create_id_gauges",
+    "create_latlon",
+    "create_mhm_restart_file",
+    "create_subdomain_masks",
+    "crop_mhm_setup",
+    "latlon",
+    "link_folder_tree",
+    "merge_catchment",
+    "subdomain_masks",
+    "xy_to_latlon",
+]
+
+
+def __getattr__(name):
+    if name in _MODULE_EXPORTS:
+        module = importlib.import_module(f".{_MODULE_EXPORTS[name]}", __name__)
+        globals()[name] = module
+        return module
+    if name in _ATTR_EXPORTS:
+        module_name, attr_name = _ATTR_EXPORTS[name]
+        module = importlib.import_module(f".{module_name}", __name__)
+        attr = getattr(module, attr_name)
+        globals()[name] = attr
+        return attr
+    error_msg = f"module '{__name__}' has no attribute '{name}'"
+    raise AttributeError(error_msg)
+
+
+def __dir__():
+    return sorted(set(globals().keys()) | set(__all__))

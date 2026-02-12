@@ -1,9 +1,10 @@
 """File handling utils."""
 
 import logging
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Dict, Optional, Set, Union
+from typing import Dict, Optional, Sequence, Set, Tuple, Union
 
 import numpy as np
 import xarray as xr
@@ -28,6 +29,71 @@ logger = logging.getLogger(__name__)
 ######
 # more on this in the cut_classical_mhm_setups branch There are classes for Morph and meteo data
 ######
+
+
+@dataclass
+class GridDefinition:
+    """Container to preserve a dataset's spatial grid metadata."""
+
+    template: xr.Dataset
+    dims: Tuple[str, ...]
+
+
+def get_grid(
+    ds: xr.Dataset, data_vars: Optional[Union[str, Sequence[str]]] = None
+) -> GridDefinition:
+    """Extract a grid definition from ``ds``.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        Dataset that defines the spatial/temporal grid.
+    data_vars : str | sequence[str], optional
+        Data variables to drop from the returned template. When omitted the
+        first data variable is used.
+    """
+    if data_vars is None:
+        var_name = get_single_data_var(ds)
+        if var_name is None:
+            msg = "Cannot determine data_var to describe grid."
+            with ErrorLogger(logger):
+                raise ValueError(msg)
+        drop_vars = [var_name]
+    elif isinstance(data_vars, str):
+        drop_vars = [data_vars]
+        var_name = data_vars
+    else:
+        drop_vars = list(data_vars)
+        var_name = drop_vars[0]
+
+    if var_name not in ds.data_vars:
+        msg = f"Grid descriptor variable {var_name} not present in dataset."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+
+    template = ds.drop_vars(drop_vars, errors="ignore")
+    dims = tuple(ds[var_name].dims)
+    return GridDefinition(template=template, dims=dims)
+
+
+def set_grid(
+    data: np.ndarray,
+    grid: GridDefinition,
+    var_name: str,
+    data_attrs: Optional[Dict[str, Union[str, float, int]]] = None,
+) -> xr.Dataset:
+    """Attach ``data`` to a preserved grid definition."""
+    coords = dict(grid.template.coords.items())
+    da = xr.DataArray(
+        data,
+        coords=coords,
+        dims=grid.dims,
+        attrs=data_attrs or {},
+        name=var_name,
+    )
+    ds = grid.template.copy(deep=False)
+    ds[var_name] = da
+    return ds
 
 
 def create_header(ds, output_path=None, no_data_value=None, cellsize=None) -> dict:

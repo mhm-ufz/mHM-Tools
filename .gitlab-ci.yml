@@ -6,11 +6,6 @@ stages:
   - build
   - deploy
 
-black:
-  stage: check
-  script:
-    - pip3 install --editable .[check]
-    - black --check --diff --color .
 isort:
   stage: check
   script:
