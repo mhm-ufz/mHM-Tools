@@ -136,10 +136,8 @@ def add_args(parser):
         required=False,
         default=None,
         type=float,
-        help=(
-            """minimum longitude of the target grid
-            required unless --mask_file is provided"""
-        ),
+        help=("""minimum longitude of the target grid
+            required unless --mask_file is provided"""),
     )
 
     parser.add_argument(
@@ -147,10 +145,8 @@ def add_args(parser):
         required=False,
         default=None,
         type=float,
-        help=(
-            """maximum longitude of the target grid
-            required unless --mask_file is provided"""
-        ),
+        help=("""maximum longitude of the target grid
+            required unless --mask_file is provided"""),
     )
 
     parser.add_argument(
@@ -158,10 +154,8 @@ def add_args(parser):
         required=False,
         default=None,
         type=float,
-        help=(
-            """minimum latitude of the target grid
-            required unless --mask_file is provided"""
-        ),
+        help=("""minimum latitude of the target grid
+            required unless --mask_file is provided"""),
     )
 
     parser.add_argument(
@@ -169,10 +163,8 @@ def add_args(parser):
         required=False,
         default=None,
         type=float,
-        help=(
-            """maximum latitude of the target grid
-            required unless --mask_file is provided"""
-        ),
+        help=("""maximum latitude of the target grid
+            required unless --mask_file is provided"""),
     )
     parser.add_argument(
         "--bias_only",

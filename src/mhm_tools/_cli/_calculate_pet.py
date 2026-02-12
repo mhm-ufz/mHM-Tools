@@ -19,8 +19,21 @@ def add_args(parser):
     required = parser.add_argument_group("required arguments")
     required.add_argument(
         "--tavg",
-        required=True,
+        required=False,
+        default=None,
         help="Temperature average file",
+    )
+    required.add_argument(
+        "--tmax",
+        required=False,
+        default=None,
+        help="Temperature maximum file",
+    )
+    required.add_argument(
+        "--tmin",
+        required=False,
+        default=None,
+        help="Temperature minimum file",
     )
     required.add_argument(
         "-o",
@@ -34,6 +47,12 @@ def add_args(parser):
         required=False,
         default=None,
         help="Frequency of pet output, daily or hourly.",
+    )
+    parser.add_argument(
+        "--method",
+        required=False,
+        default="oudin",
+        help="Method of pet calculation. Currently implemented: hargreaves_samani, oudin, jensen_haise, mcguinness_bordne, hamon, blaney_criddle.",
     )
     parser.add_argument(
         "--ncpus",
@@ -56,7 +75,10 @@ def run(args):
 
     calculate_pet(
         tavg_file=args.tavg,
+        tmax_file=args.tmax,
+        tmin_file=args.tmin,
         stat_freq=args.freq,
         out_file=args.output_file,
         max_workers=args.ncpus,
+        method=args.method,
     )
