@@ -39,7 +39,7 @@ def str2float(value):
 
 
 def add_args(parser):
-    """Add CLI arguments for the long_term_mean_diff subcommand."""
+    """Add CLI arguments for the ratio subcommand."""
     parser.description = (
         "Compute and plot the spatial ratio between a model dataset and a reference dataset "
         "for a specified variable: diff = (da_mod / da_ref). "
@@ -138,7 +138,7 @@ def add_args(parser):
 
 def run(args):
     """
-    Run script to plot long term means of a variable given (model - reference).
+    Compute and plot the spatial ratio (model / reference).
 
     Parameters
     ----------

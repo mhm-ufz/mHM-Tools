@@ -2,6 +2,7 @@
 
 
 def add_args(parser):
+    """Add CLI arguments for the grdc_validation subcommand."""
     required_args = parser.add_argument_group("required arguments")
     required_args.add_argument(
         "--mrm_restart",
@@ -98,6 +99,13 @@ def add_args(parser):
 
 
 def run(args):
+    """Evaluate GRDC discharge data against model output.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        parsed command line arguments
+    """
     from mhm_tools.common.cli_utils import get_coords
     from mhm_tools.post.GRDC_validation import evaludate_grdc_data
 

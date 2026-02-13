@@ -4,7 +4,7 @@ import argparse
 
 
 def add_args(parser):
-    """Add CLI arguments for cal_long_term_mean subcommand."""
+    """Add CLI arguments for the long_term_mean subcommand."""
     parser.description = (
         "Compute long-term means (hourly, daily, monthly, yearly) "
         "for precipitation and temperature forcings from NetCDF files."

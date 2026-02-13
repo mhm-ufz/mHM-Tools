@@ -79,6 +79,13 @@ def add_args(parser):
 
 
 def run(args):
+    """Generate a Taylor diagram comparing model datasets to a reference.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        parsed command line arguments
+    """
     from ..post.taylor_diagram import generate_taylor_diagram
 
     # sanity check to ensure matched lists

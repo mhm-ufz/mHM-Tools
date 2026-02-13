@@ -29,6 +29,13 @@ def add_args(parser):
 
 
 def run(args):
+    """Regrid input NetCDF to an L2 grid derived from a mask file.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        parsed command line arguments
+    """
     from mhm_tools.pre.regrid import regrid
 
     input = Path(args.input)

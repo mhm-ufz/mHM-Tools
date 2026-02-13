@@ -38,6 +38,13 @@ def add_args(parser):
 
 
 def run(args):
+    """Merge NetCDF files from a folder into a single output file.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        parsed command line arguments
+    """
     from mhm_tools.pre.merge import merge_files
 
     input = Path(args.input_path)

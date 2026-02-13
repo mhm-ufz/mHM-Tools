@@ -40,6 +40,13 @@ def add_args(parser):
 
 
 def run(args):
+    """Create a symlinked copy of a folder tree.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        parsed command line arguments
+    """
     from mhm_tools.pre.link_folder_tree import link_folder_tree
 
     input_dir = Path(args.input_dir)

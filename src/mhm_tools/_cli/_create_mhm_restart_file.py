@@ -190,7 +190,7 @@ def add_args(parser):
 
 
 def run(args):
-    """Create the catchment file.
+    """Create mHM restart file(s) for the target grid using the mPR stand alone version.
 
     Parameters
     ----------

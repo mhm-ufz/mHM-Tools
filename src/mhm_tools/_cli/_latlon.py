@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 def add_args(parser):
-    """Add cli arguments for the bankfull subcommand.
+    """Add cli arguments for the latlon subcommand.
 
     Parameters
     ----------

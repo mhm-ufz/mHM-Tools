@@ -37,7 +37,7 @@ def str2float(value):
 
 
 def add_args(parser):
-    """Add CLI arguments for the long_term_mean_diff subcommand."""
+    """Add CLI arguments for the relative_difference subcommand."""
     parser.description = (
         "Compute and plot the spatial relative difference between a model dataset and a reference dataset "
         "for a specified variable: diff = (da_ref - da_mod) / da_ref. "
@@ -136,7 +136,7 @@ def add_args(parser):
 
 def run(args):
     """
-    Run script to plot long term means of a variable given (model - reference).
+    Compute and plot the spatial relative difference (ref - model) / ref.
 
     Parameters
     ----------

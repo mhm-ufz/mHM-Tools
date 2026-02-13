@@ -57,6 +57,13 @@ def add_args(parser):
 
 
 def run(args):
+    """Convert between ASCII and NetCDF based on file suffix.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        parsed command line arguments
+    """
     from mhm_tools.common.file_handler import (
         create_header,
         get_xarray_ds_from_file,

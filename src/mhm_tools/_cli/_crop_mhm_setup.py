@@ -6,7 +6,7 @@ logger = logging.getLogger(__name__)
 
 
 def add_args(parser):
-    """Add cli arguments for the cut_mhm_setupt subcommand.
+    """Add cli arguments for the crop_mhm_setup subcommand.
 
     Parameters
     ----------
@@ -164,7 +164,7 @@ def add_args(parser):
 
 
 def run(args):
-    """Cut out a domain setup out of an existing mHM setup..
+    """Cut out a domain setup out of an existing mHM setup.
 
     Parameters
     ----------

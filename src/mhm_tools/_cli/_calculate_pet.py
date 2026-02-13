@@ -64,7 +64,7 @@ def add_args(parser):
 
 
 def run(args):
-    """Run script to convert input forcings into the right mHM format.
+    """Calculate PET from temperature inputs and write output.
 
     Parameters
     ----------
