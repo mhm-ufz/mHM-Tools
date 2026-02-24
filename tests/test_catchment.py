@@ -156,6 +156,145 @@ class TestCatchment(unittest.TestCase):
         catchment.merge_catchment(path1, path2, out_path)
         self.assertTrue(out_path.is_file())
 
+    def test_resolution_l2_file_resolution_matches(self):
+        lon = np.array([0.0, 0.5, 1.0])
+        lat = np.array([1.0, 0.5, 0.0])
+        ds = xr.Dataset(
+            {"dummy": (["lat", "lon"], np.zeros((len(lat), len(lon))))},
+            coords={"lon": lon, "lat": lat},
+        )
+        l2_path = self.tmp_path / "l2_res_match.nc"
+        ds.to_netcdf(l2_path)
+
+        res = catchment.Resolution(l2_resolution=0.5, l2_file=l2_path)
+        self.assertAlmostEqual(res.l2_resolution, 0.5, places=9)
+
+    def test_resolution_l2_file_resolution_within_tolerance(self):
+        lon = np.array([0.0, 0.5, 1.0])
+        lat = np.array([1.0, 0.5, 0.0])
+        ds = xr.Dataset(
+            {"dummy": (["lat", "lon"], np.zeros((len(lat), len(lon))))},
+            coords={"lon": lon, "lat": lat},
+        )
+        l2_path = self.tmp_path / "l2_res_within_tol.nc"
+        ds.to_netcdf(l2_path)
+
+        res = catchment.Resolution(l2_resolution=0.5000005, l2_file=l2_path)
+        self.assertAlmostEqual(res.l2_resolution, 0.5, places=6)
+
+    def test_resolution_l2_file_resolution_mismatch_raises(self):
+        lon = np.array([0.0, 0.5, 1.0])
+        lat = np.array([1.0, 0.5, 0.0])
+        ds = xr.Dataset(
+            {"dummy": (["lat", "lon"], np.zeros((len(lat), len(lon))))},
+            coords={"lon": lon, "lat": lat},
+        )
+        l2_path = self.tmp_path / "l2_res_mismatch.nc"
+        ds.to_netcdf(l2_path)
+
+        with self.assertRaises(ValueError):
+            catchment.Resolution(l2_resolution=0.500002, l2_file=l2_path)
+
+    def test_cut_to_filled_area_l2_alignment_mismatch_raises(self):
+        lon = np.arange(0.5, 64.5, 1.0)
+        lat = np.arange(63.5, -0.5, -1.0)
+        data = np.zeros((len(lat), len(lon)), dtype=float)
+        ds = xr.Dataset(
+            {"dem": (["lat", "lon"], data)},
+            coords={
+                "lon": lon,
+                "lat": lat,
+            },
+        )
+
+        l2_lon = np.arange(2.0, 62.0 + 0.1, 4.0)
+        l2_lat = np.arange(62.0, 2.0 - 0.1, -4.0)
+        l2_ds = xr.Dataset(
+            {"dummy": (["lat", "lon"], np.zeros((len(l2_lat), len(l2_lon))))},
+            coords={
+                "lon": l2_lon,
+                "lat": l2_lat,
+            },
+        )
+        l2_path = self.tmp_path / "l2_alignment.nc"
+        l2_ds.to_netcdf(l2_path)
+
+        resolutions = catchment.Resolution(
+            l1_resolution=32,
+            l11_resolution=32,
+            l2_resolution=32,
+        )
+        transform = catchment.get_transformation_matrix_nc(ds, "dem")
+        c = catchment.Catchment(
+            ds,
+            "dem",
+            var="dem",
+            ftype="ldd",
+            transform=transform,
+            latlon=True,
+            resolutions=resolutions,
+        )
+        c.resolutions.l2_file = (
+            l2_path  # manually set l2_file to not trigger alignment check
+        )
+        mask = np.zeros((len(lat), len(lon)), dtype=bool)
+        mask[10:21, 10:21] = True
+        c.catchment_mask = mask
+
+        with self.assertRaises(AssertionError) as ctx:
+            c.cut_to_filled_area(raise_on_l2_alignment_mismatch=True)
+        self.assertIn("not divisible by factor=32", str(ctx.exception))
+
+    def test_cut_to_filled_area_l2_alignment_matches_factor(self):
+        lon = np.arange(0.5, 64.5, 1.0)
+        lat = np.arange(63.5, -0.5, -1.0)
+        data = np.zeros((len(lat), len(lon)), dtype=float)
+        ds = xr.Dataset(
+            {"dem": (["lat", "lon"], data)},
+            coords={
+                "lon": lon,
+                "lat": lat,
+            },
+        )
+
+        l2_lon = np.array([16.0, 48.0])
+        l2_lat = np.array([48.0, 16.0])
+        l2_ds = xr.Dataset(
+            {"dummy": (["lat", "lon"], np.zeros((len(l2_lat), len(l2_lon))))},
+            coords={
+                "lon": l2_lon,
+                "lat": l2_lat,
+            },
+        )
+        l2_path = self.tmp_path / "l2_alignment_ok.nc"
+        l2_ds.to_netcdf(l2_path)
+
+        resolutions = catchment.Resolution(
+            l1_resolution=32,
+            l11_resolution=32,
+            l2_resolution=32,
+            l2_file=l2_path,
+        )
+        transform = catchment.get_transformation_matrix_nc(ds, "dem")
+        c = catchment.Catchment(
+            ds,
+            "dem",
+            var="dem",
+            ftype="ldd",
+            transform=transform,
+            latlon=True,
+            resolutions=resolutions,
+        )
+        mask = np.zeros((len(lat), len(lon)), dtype=bool)
+        mask[10:21, 10:21] = True
+        c.catchment_mask = mask
+
+        lat_slice_idx, lon_slice_idx = c.cut_to_filled_area()
+        n_lat = lat_slice_idx.stop - lat_slice_idx.start
+        n_lon = lon_slice_idx.stop - lon_slice_idx.start
+        self.assertEqual(n_lat % 32, 0)
+        self.assertEqual(n_lon % 32, 0)
+
     # ------------------------------------------------------------------
     # Optional integration tests for delineation using a real flow-direction
     # file and gauge coordinates. These tests are skipped unless you provide
