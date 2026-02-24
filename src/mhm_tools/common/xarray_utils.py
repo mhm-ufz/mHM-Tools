@@ -288,8 +288,14 @@ def spearman_correlation(data1, data2):
         with ErrorLogger(logger):
             msg = "Both DataArrays must have the same shape"
             raise ValueError(msg)
-    data1 = data1.values.flatten()
-    data2 = data2.values.flatten()
+    # Accept either xarray objects or plain numpy arrays.
+    data1 = np.asarray(getattr(data1, "values", data1)).flatten()
+    data2 = np.asarray(getattr(data2, "values", data2)).flatten()
+    valid = np.isfinite(data1) & np.isfinite(data2)
+    data1 = data1[valid]
+    data2 = data2[valid]
+    if data1.size < 2:
+        return np.nan, np.nan
     # Calculate Spearman rank correlation using scipy
     corr, p_value = spearmanr(data1, data2)
     return corr, p_value

@@ -23,7 +23,9 @@ def _has_wildcards(path: Union[str, Path]) -> bool:
     return any(w in str(path) for w in WILDCARDS)
 
 
-def _fallback_open(open_func: Any, *args: Any, **kwargs: Any) -> xr.Dataset:
+def _fallback_open(
+    open_func: Any, *args: Any, _fallback_attempt: bool = False, **kwargs: Any
+) -> xr.Dataset:
     """Open a dataset with the provided xarray function.
 
     Falls back from the h5netcdf to the netcdf4 engine if necessary.
@@ -31,19 +33,16 @@ def _fallback_open(open_func: Any, *args: Any, **kwargs: Any) -> xr.Dataset:
     try:
         return open_func(*args, **kwargs)
     except Exception as exc:
-        if kwargs.get("is_fallback_attempt"):
+        if _fallback_attempt:
             logger.error("Both h5netcdf and netcdf4 engines failed to open dataset.")
             raise exc
-        kwargs["is_fallback_attempt"] = True
-        if (
-            "unrecognized engine 'h5netcdf'" in str(exc)
-            or kwargs["engine"] == "h5netcdf"
-        ):
+        engine = kwargs.get("engine")
+        if "unrecognized engine 'h5netcdf'" in str(exc) or engine == "h5netcdf":
             kwargs["engine"] = "netcdf4"
-            return open_func(*args, **kwargs)
-        if "unrecognized engine 'netcdf4'" in str(exc) or kwargs["engine"] == "netcdf4":
+            return _fallback_open(open_func, *args, _fallback_attempt=True, **kwargs)
+        if "unrecognized engine 'netcdf4'" in str(exc) or engine == "netcdf4":
             kwargs["engine"] = "h5netcdf"
-            return open_func(*args, **kwargs)
+            return _fallback_open(open_func, *args, _fallback_attempt=True, **kwargs)
         logger.error("Error opening dataset: %s", exc)
         raise
 
