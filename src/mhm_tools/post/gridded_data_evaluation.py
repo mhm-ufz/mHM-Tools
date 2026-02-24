@@ -90,6 +90,10 @@ def spearman_spatial_joblib(
     pval : ndarray, shape (Y, X)
         Two-tailed p-value for each pixel.
     """
+    # materialize once to avoid expensive lazy per-pixel loads
+    data1 = np.asarray(data1)
+    data2 = np.asarray(data2)
+
     # get spatial shape
     _, ny, nx = data1.shape
 
@@ -104,6 +108,13 @@ def spearman_spatial_joblib(
     def _worker(i, j):
         rho, p = spearman_correlation(data1[:, i, j], data2[:, i, j])
         return i, j, rho, p
+
+    if n_jobs == 1:
+        for i, j in indices:
+            rho, p = spearman_correlation(data1[:, i, j], data2[:, i, j])
+            res[i, j] = rho
+            pval[i, j] = p
+        return res, pval
 
     # dispatch in parallel
     results = Parallel(n_jobs=n_jobs)(delayed(_worker)(i, j) for i, j in indices)
@@ -477,21 +488,41 @@ def resample_to_coarser_calendar(
     """
     hours_in, alias_in = timedelta_to_alias(ds_input)
     hours_ref, alias_ref = timedelta_to_alias(ds_ref)
-
     if hours_in > hours_ref:
         # input is coarser (e.g. monthly) → bring ref up to that
-        logger.info(f"Resampling ref from {alias_ref} to {alias_in}")
-        ds_ref = ds_ref.resample(time=alias_in).mean()
+        target_alias = alias_in
     elif hours_ref > hours_in:
         # ref is coarser → bring input up to that
-        logger.info(f"Resampling input from {alias_in} to {alias_ref}")
-        ds_input = ds_input.resample(time=alias_ref).mean()
+        target_alias = alias_ref
     else:
         # same resolution, nothing to do
-        logger.info(f"Both are already {alias_in}")
+        target_alias = alias_in
+        logger.info(f"Both are already {target_alias}")
+    return resample_to_target_freq(ds_input, ds_ref, target_alias)
+
+
+def resample_to_target_freq(
+    ds_input: xr.Dataset, ds_ref: xr.Dataset, target_freq
+) -> Tuple[xr.Dataset, xr.Dataset]:
+    """Resample both datasets to the provided target freq."""
+    hours_in, alias_in = timedelta_to_alias(ds_input)
+    hours_ref, alias_ref = timedelta_to_alias(ds_ref)
+
+    if target_freq != alias_ref:
+        # input is coarser (e.g. monthly) → bring ref up to that
+        logger.info(f"Resampling ref from {alias_ref} to {target_freq}")
+        ds_ref = ds_ref.resample(time=target_freq).mean()
+    if target_freq != alias_in:
+        # ref is coarser → bring input up to that
+        logger.info(f"Resampling input from {alias_in} to {target_freq}")
+        ds_input = ds_input.resample(time=target_freq).mean()
+
+    # Normalize anchors so both datasets share identical timestamps.
+    ds_input = normalize_time_axis(ds_input, target_freq)
+    ds_ref = normalize_time_axis(ds_ref, target_freq)
 
     # finally, force them onto exactly the same time-axis
-    # ds_input, ds_ref = xr.align(ds_input, ds_ref)
+    ds_input, ds_ref = xr.align(ds_input, ds_ref, join="inner")
     # logger.debug(f"Input file after align {ds_input}")
     return ds_input, ds_ref
 
@@ -500,9 +531,62 @@ def crop_data_to_overlapping_time(input_ds, ref_ds):
     """Crop data to overlapping time."""
     time_slice = get_overlapping_time_slice(input_ds, ref_ds)
     # Slice both datasets to that time range
+    logger.debug(f"Input time before crop: {input_ds.time}")
     input_ds = input_ds.sel(time=time_slice)
+    logger.debug(f"Input time after crop: {input_ds.time}")
+    logger.debug(f"Ref time before crop: {ref_ds.time}")
     ref_ds = ref_ds.sel(time=time_slice)
+    logger.debug(f"Ref time after crop: {ref_ds.time}")
+    # Normalize anchors at the current resolution to avoid mismatches.
+    # _, alias = timedelta_to_alias(input_ds)
+    # input_ds = normalize_time_axis(input_ds, alias)
+    # ref_ds = normalize_time_axis(ref_ds, alias)
+    # # Ensure identical time axis after slicing (e.g. monthly midpoints can differ)
+    # input_ds, ref_ds = xr.align(input_ds, ref_ds, join="inner")
     return input_ds, ref_ds, time_slice
+
+
+def normalize_time_axis(ds: xr.Dataset, alias: str) -> xr.Dataset:
+    """Normalize time stamps to a consistent anchor for the given frequency alias."""
+
+    def _period_timestamp_index(period_freq: str, timestamp_freq: str):
+        time_index = ds.indexes.get("time")
+        if time_index is None:
+            return None
+        try:
+            period_index = time_index.to_period(period_freq)
+        except Exception:
+            try:
+                period_index = time_index.to_datetimeindex().to_period(period_freq)
+            except Exception:
+                return None
+        try:
+            return period_index.to_timestamp(timestamp_freq)
+        except Exception:
+            return period_index.to_timestamp(freq=timestamp_freq)
+
+    alias = alias.upper()
+    if "time" not in ds.coords:
+        ds_out = ds
+    elif alias.endswith("H"):
+        try:
+            ds_out = ds.assign_coords(time=ds.time.dt.floor("H"))
+        except ValueError:
+            ds_out = ds.assign_coords(time=ds.time.dt.floor("h"))
+    elif alias == "D":
+        ds_out = ds.assign_coords(time=ds.time.dt.floor("D"))
+    elif alias.startswith("W"):
+        new_time = _period_timestamp_index("W-MON", "W-MON")
+        ds_out = ds.assign_coords(time=new_time) if new_time is not None else ds
+    elif alias == "ME":
+        new_time = _period_timestamp_index("M", "M")
+        ds_out = ds.assign_coords(time=new_time) if new_time is not None else ds
+    elif alias == "MS":
+        new_time = _period_timestamp_index("M", "MS")
+        ds_out = ds.assign_coords(time=new_time) if new_time is not None else ds
+    else:
+        ds_out = ds
+    return ds_out
 
 
 @log_errors(raise_exceptions=True)
@@ -827,14 +911,14 @@ def get_stats(
     return stats_ds
 
 
-def compare_input_with_ref(  # noqa: PLR0912, PLR0913
+def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
     input_path,
     input_var,
     output_path,
     ref_path,
     ref_var,
-    input_name=None,
-    ref_name=None,
+    input_name="input",
+    ref_name="ref",
     input_factor=1,
     ref_factor=1,
     coordinate_slice=None,
@@ -902,24 +986,36 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913
         input_ts, ref_ts = input["time_series"], ref["time_series"]
 
         # If we already know the target frequency, resample to that; otherwise pick the coarser one.
-        if target_freq:
-            input_ts = input_ts.resample(time=target_freq).mean()
-            ref_ts = ref_ts.resample(time=target_freq).mean()
+        if target_freq is not None:
+            input_ts, ref_ts = resample_to_target_freq(input_ts, ref_ts, target_freq)
         else:
             input_ts, ref_ts = resample_to_coarser_calendar(input_ts, ref_ts)
 
         input_ts, ref_ts, time_slice = crop_data_to_overlapping_time(input_ts, ref_ts)
+        if input_ts.shape != ref_ts.shape:
+            msg = f"Input and ref time_series shapes differ after resampling/cropping: {input_ts.shape} vs {ref_ts.shape}"
+            with ErrorLogger(logger):
+                raise ValueError(msg)
+        pairwise_valid = np.isfinite(input_ts.values) & np.isfinite(ref_ts.values)
+        input_ts = input_ts.where(pairwise_valid)
+        ref_ts = ref_ts.where(pairwise_valid)
         logger.info(
             f"Creating data from timeseries with shape {input_ts.shape} and {ref_ts.shape}"
         )
+        if input_ts.sizes.get("time", 0) == 0 or ref_ts.sizes.get("time", 0) == 0:
+            msg = "No overlapping time steps after alignment; cannot compare input and reference."
+            logger.error(msg)
+            raise ValueError(msg)
         try:
             if not bias_only:
+                input_ts_np = np.asarray(input_ts.values)
+                ref_ts_np = np.asarray(ref_ts.values)
                 spearman, spearman_pval = spearman_spatial_joblib(
-                    input_ts, ref_ts, spearman_correlation, ncpus
+                    input_ts_np, ref_ts_np, spearman_correlation, ncpus
                 )
                 create_results_csv(
-                    input_ts.data,
-                    ref_ts.data,
+                    input_ts_np,
+                    ref_ts_np,
                     input_name,
                     ref_name,
                     output_path / output_name,
@@ -931,56 +1027,53 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913
             raise ve
     elif not bias_only:
         logger.info("Calculating spearman correlation from seasonalities.")
+        input_clim_np = np.asarray(input["clim"].values)
+        ref_clim_np = np.asarray(ref["clim"].values)
         spearman, spearman_pval = spearman_spatial_joblib(
-            input["clim"], ref["clim"], spearman_correlation, ncpus
+            input_clim_np, ref_clim_np, spearman_correlation, ncpus
         )
         create_results_csv(
-            input["clim"].data,
-            ref["clim"].data,
+            input_clim_np,
+            ref_clim_np,
             input_name,
             ref_name,
             output_path / output_name,
         )
 
-    rel_mean = input["mean"].values / ref["mean"].values
+    if input["mean"].shape != ref["mean"].shape:
+        msg = f"Input and ref mean shapes differ after regridding: {input['mean'].shape} vs {ref['mean'].shape}"
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    mean_valid = np.isfinite(input["mean"].values) & np.isfinite(ref["mean"].values)
+    rel_mean = np.where(mean_valid, input["mean"].values / ref["mean"].values, np.nan)
     rel_mean = xr.DataArray(
-        rel_mean,
-        coords={
-            "lat": get_coord_values(input, lat=True),
-            "lon": get_coord_values(input, lon=True),
-        },
-        dims=["lat", "lon"],
+        rel_mean, coords=input["mean"].coords, dims=input["mean"].dims
     )
     if not bias_only:
-        rel_std = input["std"].values / ref["std"].values
+        if input["std"].shape != ref["std"].shape:
+            msg = f"Input and ref std shapes differ after regridding: {input['std'].shape} vs {ref['std'].shape}"
+            with ErrorLogger(logger):
+                raise ValueError(msg)
+        std_valid = np.isfinite(input["std"].values) & np.isfinite(ref["std"].values)
+        rel_std = np.where(std_valid, input["std"].values / ref["std"].values, np.nan)
         rel_std = xr.DataArray(
-            rel_std,
-            coords={
-                "lat": get_coord_values(input, lat=True),
-                "lon": get_coord_values(input, lon=True),
-            },
-            dims=["lat", "lon"],
+            rel_std, coords=input["std"].coords, dims=input["std"].dims
         )
         spearman = xr.DataArray(
-            spearman.data,
-            coords={
-                "lat": get_coord_values(input, lat=True),
-                "lon": get_coord_values(input, lon=True),
-            },
-            dims=["lat", "lon"],
+            spearman.data, coords=input["std"].coords, dims=input["std"].dims
         )
         spearman_pval = xr.DataArray(
-            spearman_pval.data,
-            coords={
-                "lat": get_coord_values(input, lat=True),
-                "lon": get_coord_values(input, lon=True),
-            },
-            dims=["lat", "lon"],
+            spearman_pval.data, coords=input["std"].coords, dims=input["std"].dims
         )
     else:
         rel_std, spearman, spearman_pval = None, None, None
+    if input["clim"].shape != ref["clim"].shape:
+        msg = f"Input and ref clim shapes differ after regridding: {input['clim'].shape} vs {ref['clim'].shape}"
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    clim_valid = np.isfinite(input["clim"].values) & np.isfinite(ref["clim"].values)
     input_clim = xr.DataArray(
-        input["clim"].data,
+        np.where(clim_valid, input["clim"].values, np.nan),
         coords={
             "month": np.arange(1, 13, 1),
             "lat": get_coord_values(input, lat=True),
@@ -989,7 +1082,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913
         dims=["month", "lat", "lon"],
     )
     ref_clim = xr.DataArray(
-        ref["clim"].data,
+        np.where(clim_valid, ref["clim"].values, np.nan),
         coords={
             "month": np.arange(1, 13, 1),
             "lat": get_coord_values(input, lat=True),
@@ -1145,6 +1238,7 @@ def get_dataset_from_path(
         return xr.open_mfdataset(
             file_list,
             combine="by_coords",  # Ensures files are combined based on shared coordinates
+            data_vars="all",
         )
     with ErrorLogger(logger):
         msg = f"Path {path} does not exist."
@@ -1168,7 +1262,15 @@ def regridd_to_higher_spatial_resolution(ds1, ds2):
     xarray.Dataset
         The finer dataset (unchanged).
     """
-    # Determine which dataset is coarser
+
+    def _coord_spacing(coord):
+        if coord is None or coord.size < 2:
+            return None
+        diffs = np.diff(np.asarray(coord))
+        diffs = np.abs(diffs[~np.isnan(diffs)])
+        if diffs.size == 0:
+            return None
+        return float(np.nanmedian(diffs))
 
     # lat_res_1 = abs(ds1["lat"][1] - ds1["lat"][0]).item()
     # lon_res_1 = abs(ds1["lon"][1] - ds1["lon"][0]).item()
@@ -1182,20 +1284,11 @@ def regridd_to_higher_spatial_resolution(ds1, ds2):
     lon_shape_2 = ds2["lon"].shape[0]
 
     # Identify the finer and coarser datasets
-    coarse_res = 0
     if (lat_shape_1 * lon_shape_1) == (lat_shape_2 * lon_shape_2):
         return ds1, ds2
     if (lat_shape_1 * lon_shape_1) < (lat_shape_2 * lon_shape_2):
-        if lat_shape_1 > 1:
-            coarse_res = abs(ds1["lat"][1] - ds1["lat"][0]).item()
-        elif lon_shape_1 > 1:
-            coarse_res = abs(ds1["lon"][1] - ds1["lon"][0]).item()
         coarse_ds, fine_ds = ds1, ds2
     else:
-        if lat_shape_1 > 1:
-            coarse_res = abs(ds1["lat"][1] - ds1["lat"][0]).item()
-        elif lon_shape_1 > 1:
-            coarse_res = abs(ds1["lon"][1] - ds1["lon"][0]).item()
         coarse_ds, fine_ds = ds2, ds1
     # if (lat_res_1 * lon_res_1) == (lat_res_2 * lon_res_2):
     #         return ds1, ds2
@@ -1208,9 +1301,20 @@ def regridd_to_higher_spatial_resolution(ds1, ds2):
     # regridded_ds = coarse_ds.interp(
     #     lat=fine_ds["lat"], lon=fine_ds["lon"], method="nearest"
     # )
-    regridded_ds = coarse_ds.reindex(
-        lat=fine_ds["lat"], lon=fine_ds["lon"], method="nearest", tolerance=coarse_res
+    coarse_res = _coord_spacing(coarse_ds.get("lat")) or _coord_spacing(
+        coarse_ds.get("lon")
     )
+    if coarse_res is None:
+        regridded_ds = coarse_ds.reindex(
+            lat=fine_ds["lat"], lon=fine_ds["lon"], method="nearest"
+        )
+    else:
+        regridded_ds = coarse_ds.reindex(
+            lat=fine_ds["lat"],
+            lon=fine_ds["lon"],
+            method="nearest",
+            tolerance=coarse_res,
+        )
 
     # Return regridded dataset and finer dataset
     # logger.info(
@@ -1306,26 +1410,46 @@ def year_structure_paths(path: Path, file_name="*.*") -> bool:
     return year_paths
 
 
-def get_target_time_res_from_files(input_file, ref_file):
-    """Get time resolution for resampling from two files."""
-    with get_xarray_ds_from_file(input_file, force_decending_y=True) as input_in:
-        res_sim = input_in.time.diff("time").median()
-    with get_xarray_ds_from_file(ref_file, force_decending_y=True) as ref_in:
-        res_obs = ref_in.time.diff("time").median()
-    target_res = res_obs if res_obs > res_sim else res_sim
-    return f"{int(target_res / np.timedelta64(1, 'h'))}h"
-
-
-def get_target_time_res(input_path, ref_path):
-    """Get coarser time resolution from two datasets with files in folder structur."""
-    input_files = get_files_from_path(input_path)
-    ref_files = get_files_from_path(ref_path)
-    if not list(input_files) or not list(ref_files):
-        logger.error("One of the datasets has no files.")
+def infer_time_resolution_hours_from_files(files):
+    """Infer dataset time resolution (hours) from one or more files."""
+    file_list = sorted(files)
+    if not file_list:
         return None
-    return get_target_time_res_from_files(
-        next(iter(input_files)), next(iter(ref_files))
-    )
+    max_probe_files = 24
+    if len(file_list) > max_probe_files:
+        # Probe a small consecutive subset to preserve local cadence.
+        file_list = file_list[:max_probe_files]
+
+    intra_file_diffs = []
+    start_times = []
+
+    for file in file_list:
+        with get_xarray_ds_from_file(file, force_decending_y=True) as ds:
+            if "time" not in ds.coords:
+                continue
+            times = np.asarray(ds.time.values)
+            if times.size == 0:
+                continue
+
+            start_times.append(times[0])
+            if times.size > 1:
+                times = times.astype("datetime64[ns]")
+                diffs = np.diff(times) / np.timedelta64(1, "h")
+                diffs = diffs[np.isfinite(diffs) & (diffs > 0)]
+                if diffs.size > 0:
+                    intra_file_diffs.append(float(np.median(diffs)))
+
+    if intra_file_diffs:
+        return float(np.median(np.asarray(intra_file_diffs)))
+
+    if len(start_times) > 1:
+        start_times = np.unique(np.asarray(start_times, dtype="datetime64[ns]"))
+        start_times.sort()
+        diffs = np.diff(start_times) / np.timedelta64(1, "h")
+        diffs = diffs[np.isfinite(diffs) & (diffs > 0)]
+        if diffs.size > 0:
+            return float(np.median(diffs))
+    return None
 
 
 @log_arguments()
@@ -1342,6 +1466,7 @@ def gridded_data_evaluation(
     year_slice=None,
     avaiable_mem=None,
     bias_only=False,
+    target_time_freq=None,
 ):
     """Validate a spatial variable by comparing dataset climatologies."""
     output_path = Path(output_path)
@@ -1366,12 +1491,6 @@ def gridded_data_evaluation(
     if not available_years:
         logger.error("Since no data is available the program is stoped.")
         return
-    target_time_res = None
-    if direct_comp:
-        target_time_res = get_target_time_res(input_path, ref_path)
-        logger.info(
-            f"Years {available_years} are overlapping. Data should be resampled to {target_time_res}"
-        )
 
     if ref_path is None:
         # Only create statistics; do not compare
@@ -1461,7 +1580,7 @@ def gridded_data_evaluation(
                     available_years=available_years,
                     input_file_name=input.file_name,
                     ref_file_name=ref.file_name,
-                    target_freq=target_time_res,
+                    target_freq=target_time_freq,
                     bias_only=bias_only,
                 )
                 for bootstrap_index in range(n_bootstrap_selections)
@@ -1498,6 +1617,6 @@ def gridded_data_evaluation(
             available_mem=avaiable_mem,
             input_file_name=input.file_name,
             ref_file_name=ref.file_name,
-            target_freq=target_time_res,
+            target_freq=target_time_freq,
             bias_only=bias_only,
         )

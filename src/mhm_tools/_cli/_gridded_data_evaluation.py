@@ -1,5 +1,45 @@
 """Evaluation of spatially distributed data based on their climatology or timeseries."""
 
+import logging
+
+from mhm_tools.common.logger import ErrorLogger
+
+logger = logging.getLogger(__name__)
+
+
+def normalize_target_frequency(freq):
+    """Validate and normalize target frequency aliases.
+
+    Accepts aliases (H, D, W, ME) or words (hourly, daily, weekly, monthly),
+    ignoring case. Returns the canonical pandas alias or None.
+    """
+    if freq is None:
+        return None
+    if not isinstance(freq, str):
+        error_msg = "target frequency must be a string or None"
+        with ErrorLogger(logger):
+            raise ValueError(error_msg)
+    normalized = freq.strip().lower()
+    if not normalized:
+        return None
+
+    word_map = {
+        "hourly": "H",
+        "daily": "D",
+        "weekly": "W",
+        "monthly": "ME",
+    }
+    alias_map = {"h": "H", "d": "D", "w": "W", "me": "ME", "M": "ME", "m": "ME"}
+    if normalized in word_map:
+        return word_map[normalized]
+    if normalized in alias_map:
+        return alias_map[normalized]
+
+    valid = ", ".join(["H", "D", "W", "ME", "hourly", "daily", "weekly", "monthly"])
+    error_msg = f"Invalid target frequency '{freq}'. Valid options: {valid}."
+    with ErrorLogger(logger):
+        raise ValueError(error_msg)
+
 
 def add_args(parser):
     """Add cli arguments for the gridded evaluation.
@@ -9,61 +49,70 @@ def add_args(parser):
     parser : argparse.ArgumentParser
         the main argument parser
     """
-    parser.add_argument(
+    required = parser.add_argument_group("required arguments")
+    optional = parser.add_argument_group("optional arguments")
+
+    required.add_argument(
         "--input_path",
         help="Path to the input file. Or the dictionary containing all folders with input files.",
         required=True,
     )
-    parser.add_argument(
+    required.add_argument(
+        "--output_dir", help="Path for the output dir.", required=True
+    )
+
+    optional.add_argument(
         "--input_variable", help="Variable name in the input file.", required=False
     )
-    parser.add_argument(
-        "--input_name", help="Name of the input dataset.", default=None, required=False
+    optional.add_argument(
+        "--input_name",
+        help="Name of the input dataset.",
+        default="input",
+        required=False,
     )
-    parser.add_argument(
+    optional.add_argument(
         "--input_factor",
         help="Unit Conversion factor. e.g. MJ/kg/day:  1 / 2.47 = 0.4",
         default=1,
         required=False,
     )
-    parser.add_argument("--output_dir", help="Path for the output dir.", required=True)
-    parser.add_argument(
+    optional.add_argument(
         "--ref_path",
         help="Path to the first reference file. Or the dictionary containing all folders with ref files.",
         default=None,
         required=False,
     )
-    parser.add_argument(
+    optional.add_argument(
         "--ref_name",
         help="Name of the reference dataset.",
-        default=None,
+        default="ref",
         required=False,
     )
-    parser.add_argument(
+    optional.add_argument(
         "--ref_factor",
         help="Unit Conversion factor. e.g. MJ/kg/day:  1 / 2.47 = 0.4",
         default=1,
         required=False,
     )
-    parser.add_argument(
+    optional.add_argument(
         "--ref_variable",
         help="Variable name in the first reference file.",
         default=None,
         required=False,
     )
-    parser.add_argument(
+    optional.add_argument(
         "--only_plot",
         help="Set Flag if existing output file should be used to create plot",
         action="store_true",
         required=False,
     )
-    parser.add_argument(
+    optional.add_argument(
         "--lonlatbox",
         required=False,
         default=None,
         help=("""coordinates in the form of 'lon_min,lon_max,lat_min,lat_max'"""),
     )
-    parser.add_argument(
+    optional.add_argument(
         "--mask_file",
         required=False,
         default=None,
@@ -72,66 +121,66 @@ def add_args(parser):
             required unless --lonlatbox is provided"""
         ),
     )
-    parser.add_argument(
+    optional.add_argument(
         "--ncpus",
         default=1,
         type=int,
         help=("Number of CPUs to use"),
     )
-    parser.add_argument(
+    optional.add_argument(
         "--n_boostrap_years",
         required=False,
         default=None,
         type=int,
         help=("""Number of years to draw for each boostrap experiment"""),
     )
-    parser.add_argument(
+    optional.add_argument(
         "--n_bootstrap_selections",
         required=False,
         default=None,
         type=int,
         help=("Number of boostrap experiments"),
     )
-    parser.add_argument(
+    optional.add_argument(
         "--direct_comparison",
         action="store_true",
         dest="direct_comparison",
         required=False,
         help=("Use no statistics but compare timeseries directly. Needs ref_path."),
     )
-    parser.add_argument(
+    optional.add_argument(
         "--start_year",
         required=False,
         default=None,
         type=int,
         help=("""First year allowed in the analysis."""),
     )
-    parser.add_argument(
+    optional.add_argument(
         "--end_year",
         required=False,
         default=None,
         type=int,
         help=("Lates year that is allowed in the analysis."),
     )
-    parser.add_argument(
+    optional.add_argument(
         "--available_mem",
         required=False,
         default=None,
         help=("""Available memory per cpu in Gb or Mb (default Gb)"""),
     )
-    parser.add_argument(
+    optional.add_argument(
         "--input_file_name",
         required=False,
         default="*.*",
         help="Input file name. E.g. '*.nc' to copy only nc files or 'pre*' to copy only precipitation files. If the file has a header in it's folder the header is reproduced regardless of wether nor not it fits the filename.",
     )
-    parser.add_argument(
+    optional.add_argument(
         "--ref_file_name",
         required=False,
         default="*.*",
         help="Ref file name. E.g. '*.nc' to copy only nc files or 'pre*' to copy only precipitation files. If the file has a header in it's folder the header is reproduced regardless of wether nor not it fits the filename.",
     )
-    parser.add_argument(
+    optional.add_argument(
         "--lon_min",
         required=False,
         default=None,
@@ -140,7 +189,7 @@ def add_args(parser):
             required unless --mask_file is provided"""),
     )
 
-    parser.add_argument(
+    optional.add_argument(
         "--lon_max",
         required=False,
         default=None,
@@ -149,7 +198,7 @@ def add_args(parser):
             required unless --mask_file is provided"""),
     )
 
-    parser.add_argument(
+    optional.add_argument(
         "--lat_min",
         required=False,
         default=None,
@@ -158,7 +207,7 @@ def add_args(parser):
             required unless --mask_file is provided"""),
     )
 
-    parser.add_argument(
+    optional.add_argument(
         "--lat_max",
         required=False,
         default=None,
@@ -166,11 +215,20 @@ def add_args(parser):
         help=("""maximum latitude of the target grid
             required unless --mask_file is provided"""),
     )
-    parser.add_argument(
+    optional.add_argument(
         "--bias_only",
         action="store_true",
         required=False,
         help=("Only compare bias spatially and for the seasonality."),
+    )
+    optional.add_argument(
+        "--resample_time_to",
+        required=False,
+        default=None,
+        type=normalize_target_frequency,
+        help=(
+            "Frequency to resample input and ref dataset to. Options: (H, D, W, ME) or hourly, daily, weekly, monthly"
+        ),
     )
 
 
@@ -230,6 +288,7 @@ def run(args):
         factor=float(args.ref_factor),
         file_name=args.ref_file_name,
     )
+    target_freq = normalize_target_frequency(args.resample_time_to)
     gridded_data_evaluation(
         input=input,
         ref=ref,
@@ -243,4 +302,5 @@ def run(args):
         year_slice=year_slice,
         avaiable_mem=available_mem,
         bias_only=args.bias_only,
+        target_time_freq=target_freq,
     )
