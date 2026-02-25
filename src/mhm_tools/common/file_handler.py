@@ -634,6 +634,8 @@ def read_ascii_to_xarray(
 
     # Load the data values
     data_values = np.loadtxt(filepath, skiprows=i + 1)
+    if isinstance(nodata_value, int):
+        data_values = data_values.astype(np.int32)
 
     # Calculate latitude and longitude coordinates
     lon = np.arange(
