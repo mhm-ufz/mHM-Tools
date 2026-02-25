@@ -351,6 +351,42 @@ class TestGetXarrayDsFromFile(unittest.TestCase, BaseDatasetMixin):
                 self.assertGreater(out["lat"].values[0], out["lat"].values[-1])
                 out.close()
 
+    def test_get_xarray_ds_from_file_ascii_preserves_dtype_kind(self):
+        lat = np.array([52.0, 51.0, 50.0])
+        lon = np.array([10.0, 11.0, 12.0, 13.0])
+
+        int_data = np.arange(lat.size * lon.size, dtype=np.int32).reshape(
+            lat.size, lon.size
+        )
+        float_data = np.arange(lat.size * lon.size, dtype=np.float64).reshape(
+            lat.size, lon.size
+        )
+
+        int_ds = xr.Dataset(
+            {"var": (("lat", "lon"), int_data)}, coords={"lat": lat, "lon": lon}
+        )
+        float_ds = xr.Dataset(
+            {"var": (("lat", "lon"), float_data)}, coords={"lat": lat, "lon": lon}
+        )
+
+        with tempfile.TemporaryDirectory() as td:
+            int_path = Path(td) / "int.asc"
+            float_path = Path(td) / "float.asc"
+            fh.write_xarray_to_ascii(int_ds, int_path, data_var="var")
+            fh.write_xarray_to_ascii(float_ds, float_path, data_var="var")
+
+            int_out = fh.get_xarray_ds_from_file(int_path, var_name="var")
+            float_out = fh.get_xarray_ds_from_file(float_path, var_name="var")
+
+            self.assertTrue(
+                np.issubdtype(int_out["var"].dtype, np.integer),
+                f"Expected integer dtype, got {int_out['var'].dtype}",
+            )
+            self.assertTrue(
+                np.issubdtype(float_out["var"].dtype, np.floating),
+                f"Expected float dtype, got {float_out['var'].dtype}",
+            )
+
         lat = np.array([50.0, 51.0, 52.0])
         lon = np.array([10.0, 11.0, 12.0, 13.0])
         data = np.arange(lat.size * lon.size, dtype=np.float32).reshape(
