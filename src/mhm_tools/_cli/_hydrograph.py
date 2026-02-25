@@ -14,7 +14,8 @@ def add_args(parser):
         "--input",
         dest="in_dir",
         required=True,
-        help="The path to input (mhm output directory)",
+        nargs="+",
+        help="One or more input paths (mhm output directories)",
     )
     parser.add_argument(
         "-o",
@@ -55,12 +56,12 @@ def add_args(parser):
     parser.add_argument(
         "-p",
         "--plots",
-        default="tysc",
+        default="tyspc",
         required=False,
         dest="plots_to_be_created",
         help="specifies which graphics are generated."
-        "t model timestep, y yearly, s seasonality, c scatter e.g. "
-        "all with out seasonality (advised for performance) = tyc",
+        "t model timestep, y yearly, s seasonality, p flow duration, c scatter e.g. "
+        "all with out seasonality (advised for performance) = typc",
     )
     parser.add_argument(
         "--prec",

@@ -19,7 +19,7 @@ import numpy as np
 import pytest
 
 from mhm_tools.common.logger import configure_mhm_tools_logger
-from mhm_tools.post.hydrograph import Hydrograph
+from mhm_tools.post.hydrograph import Hydrograph, get_hydrograph_from_path
 
 HERE = Path(__file__).parent
 
@@ -152,3 +152,62 @@ class TestHydrograph(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_get_hydrograph_from_path_single_input_creates_csv(tmp_path):
+    input_path = HERE / "files" / "test_hydrograph"
+    output_file = tmp_path / "hydrograph.png"
+
+    get_hydrograph_from_path(
+        input_path=input_path,
+        output_file=output_file,
+        show=False,
+        save=False,
+        title="unit test",
+        plot_code="t",
+        prec_path=input_path,
+    )
+
+    assert (tmp_path / "kge.csv").is_file()
+    assert not output_file.exists()
+
+
+def test_get_hydrograph_from_path_multi_input_creates_csv(tmp_path):
+    input_path = HERE / "files" / "test_hydrograph"
+    output_file = tmp_path / "hydrograph.png"
+
+    get_hydrograph_from_path(
+        input_path=[input_path, input_path],
+        output_file=output_file,
+        show=False,
+        save=False,
+        title="unit test",
+        plot_code="t",
+        prec_path=input_path,
+    )
+
+    assert (tmp_path / "kge.csv").is_file()
+
+
+def test_get_hydrograph_from_path_output_dir_default_png(tmp_path):
+    input_path = HERE / "files" / "test_hydrograph"
+    output_dir = tmp_path / "outdir"
+
+    get_hydrograph_from_path(
+        input_path=input_path,
+        output_file=output_dir,
+        show=False,
+        save=True,
+        title="unit test",
+        plot_code="t",
+        prec_path=input_path,
+    )
+
+    assert (output_dir / "hydrograph.png").is_file()
+    assert (output_dir / "kge.csv").is_file()
+
+
+def test_load_precipitation_data_dir_without_pre_nc(tmp_path):
+    hydro = Hydrograph(calc_stats=False)
+    hydro.load_precipiation_data(tmp_path)
+    assert hydro.pre is None

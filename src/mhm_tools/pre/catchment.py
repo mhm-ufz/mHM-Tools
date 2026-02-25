@@ -84,6 +84,7 @@ class Resolution:
         l2_resolution=None,
         l2_file=None,
         l0_resolution=None,
+        raise_on_missmatch=True,
     ):
         """Initialize the Resolution class."""
         self.l0_resolution = l0_resolution
@@ -105,18 +106,30 @@ class Resolution:
                 with ErrorLogger(logger):
                     msg = f"L2 file {self.l2_file} not found."
                     raise FileNotFoundError(msg)
-            if self.l2_resolution is None:
-                if self.l2_file.suffix == ".nc":
-                    with get_xarray_ds_from_file(self.l2_file) as ds:
-                        lon = ds.lon.values
-                        self.l2_resolution = round(abs(lon[1] - lon[0]), 9)
+            if self.l2_file.suffix == ".nc":
+                with get_xarray_ds_from_file(self.l2_file) as ds:
+                    lon = get_coord_values(ds, lon=True)
+                    file_res = round(abs(lon[1] - lon[0]), 9)
+                    if (
+                        self.l2_resolution is not None
+                        and abs(file_res - self.l2_resolution) > 1e-6
+                    ):
+                        msg = f"Provided l2_resolution {self.l2_resolution} differs from resolution derived from file {file_res}. Either provide the correct l2_resolution or remove it to use the resolution derived from the file."
+                        if raise_on_missmatch:
+                            with ErrorLogger(logger):
+                                raise ValueError(msg)
+                        logger.warning(msg)
+                        self.l2_resolution = file_res
+                    elif self.l2_resolution is None:
                         logger.info(
-                            f"Derived l2_resolution {self.l2_resolution} from {self.l2_file}"
+                            f"Derived l2_resolution {file_res} from {self.l2_file}"
                         )
-                else:
-                    with ErrorLogger(logger):
-                        msg = f"Unsupported file format for l2_file: {self.l2_file.suffix}"
-                        raise ValueError(msg)
+                        self.l2_resolution = file_res
+            else:
+                logger.error(
+                    f"Unsupported file format for l2_file: {self.l2_file.suffix}"
+                )
+                self.l2_file = None
 
         self.l11_resolution = (
             self.l11_resolution
@@ -688,10 +701,18 @@ class Catchment:
         self.gauge_lats.append(gauge_lat)
         self.gauge_lons.append(gauge_lon)
 
-    def get_upscaling_factor(self, max_resolution=True):
+    def get_upscaling_factor(self, max_resolution=False, l1=False, l2=True):
         """Create upscaling factor."""
         input_res = self.resolutions.l0_resolution
-        upscale_res = self.resolutions.l1_resolution
+        if l1:
+            upscale_res = self.resolutions.l1_resolution
+        elif l2:
+            upscale_res = self.resolutions.l2_resolution
+        else:
+            error_msg = "Either l1 or l2 must be True"
+            with ErrorLogger(logger):
+                raise ValueError(error_msg)
+        upscale_res = self.resolutions.l2_resolution
         if max_resolution:
             upscale_res = self.resolutions.get_max_resolution()
         if upscale_res is None:
@@ -703,7 +724,7 @@ class Catchment:
 
     def upscale(self, var):
         """Upscale flow direction to l1_resolution if that is int multipe of data resolution."""
-        factor = self.get_upscaling_factor()
+        factor = self.get_upscaling_factor(l1=True)
 
         if factor == 1:
             self.get_facc()
@@ -1160,7 +1181,7 @@ class Catchment:
         so that coarse *edges* equal fine *edges* of the cropped window.
         """
         if factor is None:
-            factor = self.get_upscaling_factor(max_resolution=True)
+            factor = self.get_upscaling_factor(l2=True)
         if factor < 1:
             msg = "factor must be >= 1"
             with ErrorLogger(logger):
@@ -1305,7 +1326,9 @@ class Catchment:
         else:
             logger.info("No mask file path specified.")
 
-    def cut_to_filled_area(self, buffer=0):
+    def cut_to_filled_area(
+        self, buffer=0, repeat=False, raise_on_l2_alignment_mismatch=False
+    ):
         """Create lat and lon slices to cut the data to the filled area."""
         logger.info("Cutting to filled area.")
         # Find the non-zero elements
@@ -1336,13 +1359,13 @@ class Catchment:
             f"L0 initial window (rows, cols): [{min_row}:{max_row}], [{min_col}:{max_col}]"
         )
 
-        factor = self.get_upscaling_factor(max_resolution=True)
+        factor = self.get_upscaling_factor(l2=True)
         if factor > 1:
             logger.info(
                 f"Regridding to fit coarse grid with res {max([r for r in [self.resolutions.l1_resolution, self.resolutions.l11_resolution, self.resolutions.l2_resolution] if r is not None ])} (factor {factor})"
             )
 
-            if self.resolutions.l2_file is not None:
+            if self.resolutions.l2_file is not None and not repeat:
                 logger.debug(
                     f"Aligning to L2 grid from file {self.resolutions.l2_file}"
                 )
@@ -1379,6 +1402,15 @@ class Catchment:
                 "Cropped L0 shape "
                 f"({n_lat}, {n_lon}) not divisible by factor={factor}"
             )
+            if (
+                not repeat
+                and self.resolutions.l2_file is not None
+                and not raise_on_l2_alignment_mismatch
+            ):
+                logger.warning(
+                    f"{msg} after aligning to L2 grid; check l2 file and alignment calculations."
+                )
+                return self.cut_to_filled_area(buffer=buffer, repeat=True)
             with ErrorLogger(logger):
                 raise AssertionError(msg)
 

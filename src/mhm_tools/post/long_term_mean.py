@@ -21,6 +21,8 @@ Authors
 """
 
 import logging
+import re
+import uuid
 from pathlib import Path
 from typing import Optional
 
@@ -45,9 +47,26 @@ OP_MAP = {
 }
 
 
+def _summarize_inputs_for_log(files: list[Path]) -> str:
+    """Return a compact summary for logging a file collection."""
+    if not files:
+        return "no files"
+    years = []
+    year_re = re.compile(r"^(\d{4})")
+    for file in files:
+        match = year_re.match(file.name)
+        if match:
+            years.append(int(match.group(1)))
+    if years:
+        return (
+            f"{len(files)} files (years {min(years)}-{max(years)}), "
+            f"sample: {files[0].name} ... {files[-1].name}"
+        )
+    return f"{len(files)} files, sample: {files[0].name} ... {files[-1].name}"
+
+
 def aggregate_files(
-    input_path: Path,
-    file_name: str,
+    input_file: Path,
     output_path: Path,
     aggregation_type: str = "intensive",
     long_term_mean_type: str = "monthly",
@@ -70,16 +89,16 @@ def aggregate_files(
     cdo_op = mean_op if aggregation_type == "intensive" else sum_op
     output_path.mkdir(parents=True, exist_ok=True)
 
-    input_file = input_path / file_name
     if not input_file.exists():
         msg = f"Input file not found: {input_file}"
         raise FileNotFoundError(msg)
-    out_filename = f"{cdo_op}_{file_name}"
+    out_filename = f"{cdo_op}_{input_file.name}"
     out_file = output_path / out_filename
 
     cdo = Cdo()
     try:
-        logger.info(f"Running CDO {cdo_op} on {input_file} → {out_file}")
+        # Per-file aggregation can be numerous; keep this at debug level.
+        logger.debug(f"Running CDO {cdo_op} on {input_file} → {out_file}")
         getattr(cdo, cdo_op)(input=str(input_file), output=str(out_file))
     except Exception as e:
         msg = f"CDO operation '{cdo_op}' failed on file '{input_file}': {e}"
@@ -115,6 +134,10 @@ def cal_long_term_mean(  # noqa: PLR0912, PLR0915
         with ErrorLogger(logger):
             raise FileNotFoundError(msg)
 
+    # Track optional temporary directories for safe cleanup.
+    crop_dir = None
+    aggregation_dir = None
+
     # If cropping is requested, verify bounds
     if crop and None in (lon_min, lon_max, lat_min, lat_max):
         msg = "All lon/lat bounds must be provided when --crop is used."
@@ -124,10 +147,12 @@ def cal_long_term_mean(  # noqa: PLR0912, PLR0915
     # Prepare output directory
     p_out_dir = Path(out_dir)
     p_out_dir.mkdir(parents=True, exist_ok=True)
+    logger.info(f"Matched {_summarize_inputs_for_log(files)} using pattern '{in_file}'")
 
     # If cropping, produce cropped files into a subfolder and use that as input
     if crop:
-        crop_dir = p_out_dir / "cropped_files"
+        # Unique temp folder avoids collisions across concurrent/repeated runs.
+        crop_dir = p_out_dir / f"cropped_files_{uuid.uuid4().hex}"
         crop_dir.mkdir(parents=True, exist_ok=True)
         # Note: flipping lat_min/lat_max because slice(lat_max, lat_min) often needed
         lonslice = slice(lon_min, lon_max)
@@ -143,14 +168,13 @@ def cal_long_term_mean(  # noqa: PLR0912, PLR0915
                 latslice=latslice,
                 lonslice=lonslice,
             )
-        p_input_dir = crop_dir
-        # After cropping, redefine `files` to be the cropped set
-        files = sorted(Path(crop_dir).glob(Path(in_file).name))
-    else:
-        p_input_dir = p_in_dir
+        # p_input_dir = crop_dir
+        # After cropping, map to flattened cropped outputs by file name.
+        files = sorted((crop_dir / fpath.name) for fpath in files)
+    # else:
+    # p_input_dir = p_in_dir
 
     cdo = Cdo()
-    pattern_name = Path(in_file).name
 
     # If aggregation is requested, aggregate each file individually first
     if aggregate:
@@ -170,30 +194,32 @@ def cal_long_term_mean(  # noqa: PLR0912, PLR0915
         mean_op, sum_op = OP_MAP[long_term_mean_type]
         cdo_op = mean_op if aggregation_type == "intensive" else sum_op
 
-        files_to_aggregate = sorted(p_input_dir.glob(in_file))
-        aggregation_dir = p_out_dir / "aggregated_files"
+        # Unique temp folder avoids collisions across concurrent/repeated runs.
+        aggregation_dir = p_out_dir / f"aggregated_files_{uuid.uuid4().hex}"
         aggregation_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(
+            f"Aggregating {_summarize_inputs_for_log(files)} with CDO operator '{cdo_op}'."
+        )
 
         # Run `aggregate_files` on each matched input
-        for fpath in files_to_aggregate:
+        for fpath in files:
             aggregate_files(
-                input_path=p_input_dir,
-                file_name=fpath.name,
+                input_file=fpath,
                 output_path=aggregation_dir,
                 aggregation_type=aggregation_type,
                 long_term_mean_type=long_term_mean_type,
             )
 
-        # Re-define the list of files that will eventually be merged:
-        merged_pattern_dir = aggregation_dir
-        merged_pattern_name = f"{cdo_op}_{pattern_name}"
-        merge_candidates = sorted(merged_pattern_dir.glob(merged_pattern_name))
+        merge_candidates = sorted(aggregation_dir.glob(f"{cdo_op}_*.nc"))
 
     else:
-        # No aggregation: merge (or skip merging) the raw inputs
-        merged_pattern_dir = p_input_dir
-        merged_pattern_name = pattern_name
-        merge_candidates = sorted(merged_pattern_dir.glob(merged_pattern_name))
+        # No aggregation: merge (or skip merging) the already matched raw inputs
+        merge_candidates = files
+
+    if not merge_candidates:
+        msg = f"No files available for merging from pattern {p_in_dir / in_file}"
+        with ErrorLogger(logger):
+            raise FileNotFoundError(msg)
 
     # Determine whether to run `mergetime` or skip if there's only one file
     if len(merge_candidates) == 1:
@@ -202,11 +228,15 @@ def cal_long_term_mean(  # noqa: PLR0912, PLR0915
         tmp_merge = single_file
         logger.info(f"Single file '{single_file.name}' found; skipping mergetime.")
     else:
-        # Multiple files => run `mergetime` to concatenate along time dimension
-        tmp_merge = p_out_dir / f"mergetime_{pattern_name}"
+        # Multiple files => run `mergetime` to concatenate along time dimension.
+        # Use a unique temp name so concurrent/repeated runs in the same output
+        # folder never collide.
+        tmp_merge = p_out_dir / f"mergetime_{uuid.uuid4().hex}.nc"
         try:
             input_list_str = " ".join(str(p) for p in merge_candidates)
-            logger.info(f"Running CDO mergetime on {input_list_str} → {tmp_merge}")
+            logger.info(
+                f"Running CDO mergetime on {_summarize_inputs_for_log(merge_candidates)} → {tmp_merge}"
+            )
             cdo.mergetime(input=input_list_str, output=str(tmp_merge))
         except Exception as e:
             msg = f"CDO mergetime failed: {e}"
@@ -235,17 +265,17 @@ def cal_long_term_mean(  # noqa: PLR0912, PLR0915
     # Remove intermediate files if requested
     if not keep_temporal_files:
         # Remove cropped files
-        if crop:
-            for f in (p_out_dir / "cropped_files").glob("*"):
+        if crop and crop_dir is not None:
+            for f in crop_dir.glob("*"):
                 f.unlink()
-            (p_out_dir / "cropped_files").rmdir()
+            crop_dir.rmdir()
 
         # Remove aggregated files
-        if aggregate:
+        if aggregate and aggregation_dir is not None:
             for f in aggregation_dir.glob("*"):
                 f.unlink()
             aggregation_dir.rmdir()
 
         # If mergetime was run, remove its output
-        if isinstance(tmp_merge, Path) and tmp_merge.name.startswith("mergetime_"):
+        if isinstance(tmp_merge, Path) and tmp_merge.name.startswith("mergetime"):
             tmp_merge.unlink()

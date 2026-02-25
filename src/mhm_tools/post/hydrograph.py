@@ -11,6 +11,7 @@ from pathlib import Path
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
+import xarray as xr
 from matplotlib import gridspec
 
 from mhm_tools.common.file_handler import get_xarray_ds_from_file
@@ -108,8 +109,10 @@ class Hydrograph:
     calc_stats = False
 
     def __init__(self, simulation=None, observation=None, calc_stats=True):
-        self.plots = [0, 0, 0, 0]
+        self.plots = [0, 0, 0, 0, 0]
         self.calc_stats = calc_stats
+        self.sim_discharge_data_list = None
+        self.sim_discharge_data_median = None
         if simulation is not None and observation is not None:
             self.set_discharge(simulation=simulation, observation=observation)
 
@@ -278,6 +281,13 @@ class Hydrograph:
         msg = "No unused gridcell left"
         raise ValueError(msg)
 
+    def has_multi_sim(self):
+        """Return True if multiple simulation series are configured."""
+        return (
+            self.sim_discharge_data_list is not None
+            and len(self.sim_discharge_data_list) > 1
+        )
+
     def is_last_plot(self, n):
         """Check if the given plot index is the last plot.
 
@@ -376,7 +386,7 @@ class Hydrograph:
 
         A tuple is produced and saved as member variable. It has a one at the index of the selected plots and a zero otherwise.
         The indices of the plots are:
-        model timestep (0), yearly (1), seasonality (2), scatter (3)
+        model timestep (0), yearly (1), seasonality (2), flow duration (3), scatter (4)
 
         Args:
             code (str): A string indicating which plots to create.
@@ -393,8 +403,10 @@ class Hydrograph:
             self.plots[1] = 1
         if "s" in code:
             self.plots[2] = 1
-        if "c" in code and self.calc_stats:
+        if "p" in code:
             self.plots[3] = 1
+        if "c" in code and self.calc_stats:
+            self.plots[4] = 1
 
     @staticmethod
     def raise_if_not_directory(path):
@@ -493,12 +505,37 @@ class Hydrograph:
         #     yvalues=[self.sim_discharge_data, self.obs_discharge_data],
         #     s=1.0,
         # )
-        self.plot_on_axis(
-            function=ax1.plot,
-            yvalues=[self.sim_discharge_data, self.obs_discharge_data],
-            linewidth=0.3,
-            # labels=[],  # no labels
-        )
+        if self.has_multi_sim():
+            for sim in self.sim_discharge_data_list:
+                ax1.plot(
+                    sim.time,
+                    sim,
+                    color="0.7",
+                    linewidth=0.3,
+                    alpha=0.7,
+                    label=None,
+                )
+            ax1.plot(
+                self.sim_discharge_data_median.time,
+                self.sim_discharge_data_median,
+                color="red",
+                linewidth=0.6,
+                label="sim median",
+            )
+            ax1.plot(
+                self.obs_discharge_data.time,
+                self.obs_discharge_data,
+                color="#3A4F99",
+                linewidth=0.5,
+                label="observed discharge",
+            )
+        else:
+            self.plot_on_axis(
+                function=ax1.plot,
+                yvalues=[self.sim_discharge_data, self.obs_discharge_data],
+                linewidth=0.3,
+                # labels=[],  # no labels
+            )
         ax1.legend()
         title = ""
         if self.calc_stats:
@@ -508,7 +545,7 @@ class Hydrograph:
                 f"alpha = {self.objectives.alpha:.2f}, "
                 f"beta = {self.objectives.beta:.2f}"
             )
-            if not self.plots[3]:
+            if not self.plots[4]:
                 title += f", r = {self.objectives.gamma:.2f}"
         ax1.set_title(
             title,
@@ -550,9 +587,15 @@ class Hydrograph:
                 "Cannot create yearly plot because one of the dataarrays is empty except for nan values."
             )
             return
-        sim_discharge_yearly = self.sim_discharge_data_nonan.resample(time="YE").mean(
-            skipna=True
-        )
+        if self.has_multi_sim():
+            sim_aligned = xr.align(*self.sim_discharge_data_list, join="inner")
+            sim_stack = xr.concat(sim_aligned, dim="member")
+            sim_discharge_yearly = sim_stack.resample(time="YE").mean(skipna=True)
+            sim_discharge_yearly_median = sim_discharge_yearly.median(dim="member")
+        else:
+            sim_discharge_yearly = self.sim_discharge_data_nonan.resample(
+                time="YE"
+            ).mean(skipna=True)
         obs_discharge_yearly = self.obs_discharge_data_nonan.resample(time="YE").mean(
             skipna=True
         )
@@ -624,18 +667,42 @@ class Hydrograph:
         ax2.spines["top"].set_visible(False)
         ax2.spines["right"].set_visible(False)
 
-        self.plot_on_axis(
-            function=ax2.scatter,
-            xvalues=[time_yearly_sim, time_yearly_obs],
-            yvalues=[sim_discharge_yearly, obs_discharge_yearly],
-            s=1.0,
-        )
-        self.plot_on_axis(
-            function=ax2.plot,
-            xvalues=[time_yearly_sim, time_yearly_obs],
-            yvalues=[sim_discharge_yearly, obs_discharge_yearly],
-            linewidth=0.3,
-        )
+        if self.has_multi_sim():
+            for member in sim_discharge_yearly:
+                ax2.plot(
+                    time_yearly_sim,
+                    member,
+                    color="0.7",
+                    linewidth=0.3,
+                    alpha=0.7,
+                )
+            ax2.plot(
+                [int(y.dt.year.data) for y in sim_discharge_yearly_median.time],
+                sim_discharge_yearly_median,
+                color="red",
+                linewidth=0.6,
+                label="sim median",
+            )
+            ax2.plot(
+                time_yearly_obs,
+                obs_discharge_yearly,
+                color="#3A4F99",
+                linewidth=0.5,
+                label="observed discharge",
+            )
+        else:
+            self.plot_on_axis(
+                function=ax2.scatter,
+                xvalues=[time_yearly_sim, time_yearly_obs],
+                yvalues=[sim_discharge_yearly, obs_discharge_yearly],
+                s=1.0,
+            )
+            self.plot_on_axis(
+                function=ax2.plot,
+                xvalues=[time_yearly_sim, time_yearly_obs],
+                yvalues=[sim_discharge_yearly, obs_discharge_yearly],
+                linewidth=0.3,
+            )
         if r == 0:
             ax2.legend()
         ax2.set_ylabel(r"Q $[m^3 s^{-1}]$")
@@ -705,25 +772,61 @@ class Hydrograph:
             ax3.set_title("Seasonality", horizontalalignment="center")
         ax3.spines["top"].set_visible(False)
         ax3.spines["right"].set_visible(False)
-        season_sim = self.get_long_time_monthly_mean(self.sim_discharge_data, long=True)
+        if self.has_multi_sim():
+            sim_aligned = xr.align(*self.sim_discharge_data_list, join="inner")
+            sim_stack = xr.concat(sim_aligned, dim="member")
+            season_sim_all = [
+                self.get_long_time_monthly_mean(sim_stack.isel(member=i), long=True)
+                for i in range(sim_stack.sizes["member"])
+            ]
+            season_sim_all = np.array(season_sim_all)
+            season_sim = np.nanmedian(season_sim_all, axis=0)
+        else:
+            season_sim = self.get_long_time_monthly_mean(
+                self.sim_discharge_data, long=True
+            )
         season_obs = self.get_long_time_monthly_mean(self.obs_discharge_data, long=True)
         self.logger.debug(f"sim: {season_sim}")
         self.logger.debug(f"osb: {season_obs}")
-        self.plot_on_axis(
-            function=ax3.scatter,
-            xvalues=np.arange(0, 14),
-            yvalues=[
+        if self.has_multi_sim():
+            for series in season_sim_all:
+                ax3.plot(
+                    np.arange(0, 14),
+                    series,
+                    color="0.7",
+                    linewidth=0.3,
+                    alpha=0.7,
+                )
+            ax3.plot(
+                np.arange(0, 14),
                 season_sim,
+                color="red",
+                linewidth=0.6,
+                label="sim median",
+            )
+            ax3.plot(
+                np.arange(0, 14),
                 season_obs,
-            ],
-            s=1,
-        )
-        self.plot_on_axis(
-            function=ax3.plot,
-            xvalues=np.arange(0, 14),
-            yvalues=[season_sim, season_obs],
-            linewidth=0.3,
-        )
+                color="#3A4F99",
+                linewidth=0.5,
+                label="observed discharge",
+            )
+        else:
+            self.plot_on_axis(
+                function=ax3.scatter,
+                xvalues=np.arange(0, 14),
+                yvalues=[
+                    season_sim,
+                    season_obs,
+                ],
+                s=1,
+            )
+            self.plot_on_axis(
+                function=ax3.plot,
+                xvalues=np.arange(0, 14),
+                yvalues=[season_sim, season_obs],
+                linewidth=0.3,
+            )
 
         if r == 0:
             ax3.legend()
@@ -733,6 +836,78 @@ class Hydrograph:
             np.arange(1, 13),
         )
         ax3.set_ylabel(r"Q $[m^3 s^{-1}]$")
+
+    def create_plot_flow_duration(self, fig, gs):
+        """Create a flow duration plot.
+
+        Args:
+            fig (matplotlib.figure.Figure): The figure object to add the plot to.
+            gs (matplotlib.gridspec.GridSpec): The gridspec object specifying the subplot layout.
+
+        Returns
+        -------
+            None
+        """
+        self.logger.info("generating flow duration plot")
+        r, c = self.get_row_col()
+        if r == 0 or self.is_last_plot(3):
+            ax_p = fig.add_subplot(gs[r, c:])
+            self.grid[r] = [True for _ in self.grid[r]]
+        else:
+            ax_p = fig.add_subplot(gs[r, c])
+            self.grid[r][c] = True
+
+        if self.has_multi_sim():
+            sim_series = [
+                np.array(sim).flatten() for sim in self.sim_discharge_data_list
+            ]
+            sim_series = [s[~np.isnan(s)] for s in sim_series]
+            sim_median = np.array(self.sim_discharge_data_median).flatten()
+            sim_median = sim_median[~np.isnan(sim_median)]
+        else:
+            sim_median = np.array(self.sim_discharge_data_nonan).flatten()
+            sim_median = sim_median[~np.isnan(sim_median)]
+        obs = np.array(self.obs_discharge_data_nonan).flatten()
+        obs = obs[~np.isnan(obs)]
+        if sim_median.size == 0 or obs.size == 0:
+            self.logger.warning("Flow duration plot skipped: no valid discharge data.")
+            ax_p.set_axis_off()
+            return
+        if self.has_multi_sim():
+            sim_sorted_all = [np.sort(s)[::-1] for s in sim_series if s.size > 0]
+            for series in sim_sorted_all:
+                sim_p = (np.arange(1, series.size + 1) / (series.size + 1)) * 100.0
+                ax_p.plot(sim_p, series, color="0.7", linewidth=0.3, alpha=0.7)
+            sim_sorted = np.sort(sim_median)[::-1]
+            sim_p = (np.arange(1, sim_sorted.size + 1) / (sim_sorted.size + 1)) * 100.0
+            ax_p.plot(sim_p, sim_sorted, color="red", linewidth=0.6, label="sim median")
+            obs_sorted = np.sort(obs)[::-1]
+            obs_p = (np.arange(1, obs_sorted.size + 1) / (obs_sorted.size + 1)) * 100.0
+            ax_p.plot(
+                obs_p,
+                obs_sorted,
+                color="#3A4F99",
+                linewidth=0.5,
+                label="observed discharge",
+            )
+        else:
+            sim_sorted = np.sort(sim_median)[::-1]
+            obs_sorted = np.sort(obs)[::-1]
+            sim_p = (np.arange(1, sim_sorted.size + 1) / (sim_sorted.size + 1)) * 100.0
+            obs_p = (np.arange(1, obs_sorted.size + 1) / (obs_sorted.size + 1)) * 100.0
+            self.plot_on_axis(
+                function=ax_p.plot,
+                xvalues=[sim_p, obs_p],
+                yvalues=[sim_sorted, obs_sorted],
+                linewidth=0.6,
+            )
+        if r == 0:
+            ax_p.legend()
+        ax_p.set_xlabel("% time flow equaled or exceeded")
+        ax_p.set_ylabel(r"Q $[m^3 s^{-1}]$")
+        ax_p.set_title("Flow duration", horizontalalignment="center")
+        ax_p.spines["top"].set_visible(False)
+        ax_p.spines["right"].set_visible(False)
 
     def create_plot_scatter(self, fig, gs):
         """Create a discharge plot at the native temporal resolution (daily or hourly).
@@ -747,7 +922,7 @@ class Hydrograph:
         """
         self.logger.info("generating discharge scatter plot")
         r, c = self.get_row_col()
-        if r == 0 or self.is_last_plot(3):
+        if r == 0 or self.is_last_plot(4):
             self.logger.debug("scatter is last")
             ax4 = fig.add_subplot(gs[r, c:])
             self.grid[r] = [True for _ in self.grid[r][c:]]
@@ -904,7 +1079,7 @@ class Hydrograph:
             fontsize="x-large",
         )
 
-        # generateself plots
+        # generate plots
         if self.plots[0]:
             self.create_plot_at_timestep(fig, gs)
         if self.plots[1]:
@@ -912,6 +1087,8 @@ class Hydrograph:
         if self.plots[2]:
             self.create_plot_seasonality(fig, gs, self.pre)
         if self.plots[3]:
+            self.create_plot_flow_duration(fig, gs)
+        if self.plots[4]:
             self.create_plot_scatter(fig, gs)
         plt.tight_layout()
         if self.save:
@@ -922,7 +1099,7 @@ class Hydrograph:
             if not self.output_file.parent.is_dir():
                 self.output_file.parent.mkdir(parents=True)
             fig.savefig(self.output_file, bbox_inches="tight", dpi=800)
-            self.logger.info(f"saved hydrograph to '{self.output_file}'")
+            self.logger.info(f"saved hydrograph to {self.output_file}")
         if self.show:
             plt.show()
         else:
@@ -932,8 +1109,8 @@ class Hydrograph:
     def write_output(self):
         """Write calculated objective metrics to CSV."""
         out_dict = {k: [v] for k, v in {**self.objectives.__dict__}.items()}
-        if id is not None:
-            out_dict["id"] = str(id)
+        if self.catchment.name is not None:
+            out_dict["id"] = str(self.catchment.name)
         logger.info(f"generated metrics: {dict_to_multiline_string(out_dict)}")
         create_csv_from_dict(out_dict, self.output_file.parent / "kge.csv")
 
@@ -948,8 +1125,15 @@ def get_hydrograph_from_path(
     resolutions. Additionally, a seasonality plot and a scatter plot
     (simulated versus observed) are generated.
     """
-    hydro = Hydrograph()
+    input_paths = (
+        list(input_path) if isinstance(input_path, (list, tuple)) else [input_path]
+    )
+    multi_input = len(input_paths) > 1
+    input_path = input_paths if multi_input else input_paths[0]
+    hydro = Hydrograph(calc_stats=not multi_input)
     hydro.check_which_plots_to_create(plot_code)
+    if multi_input:
+        hydro.plots[4] = 0
     output_file = Path(output_file)
     if output_file.suffix and output_file.parent.exists():
         hydro.output_file = output_file
@@ -963,14 +1147,60 @@ def get_hydrograph_from_path(
     hydro.title = title
     hydro.show = show
     hydro.save = save
-    input_path = Path(input_path)
     prec_path = Path(prec_path)
-    if not hydro.load_data_from_discharge_nc(input_path):
-        msg = f"No discharge.nc file at {input_path}"
-        with ErrorLogger():
-            raise ValueError(msg)
+    if multi_input:
+        input_paths = [Path(p) for p in input_path]
+        sims = []
+        obs = None
+        obs_var_name = None
+        for path in input_paths:
+            discharge_file = path / "discharge.nc" if path.is_dir() else path
+            if not discharge_file.is_file():
+                msg = f"No discharge.nc file at {path}"
+                with ErrorLogger():
+                    raise ValueError(msg)
+            with get_xarray_ds_from_file(discharge_file) as ds:
+                discharge_data = ds.load()
+                sim_var = None
+                obs_var = None
+                for v in discharge_data.variables:
+                    if not isinstance(v, str):
+                        msg = f"variable name is not a string - {v} - {type(v)}"
+                        raise TypeError(msg)
+                    if "sim" in v:
+                        sim_var = v
+                    if "obs" in v:
+                        obs_var = v
+                if obs_var is None or sim_var is None:
+                    msg = f"Missing sim/obs variables in {discharge_file}"
+                    with ErrorLogger():
+                        raise ValueError(msg)
+                if obs_var_name is None:
+                    obs_var_name = obs_var
+                    obs = discharge_data[obs_var]
+                elif obs_var_name != obs_var:
+                    msg = (
+                        "Observed discharge variable name differs between inputs: "
+                        f"{obs_var_name} vs {obs_var}"
+                    )
+                    with ErrorLogger():
+                        raise ValueError(msg)
+                sims.append(discharge_data[sim_var])
+        sims_aligned = xr.align(*sims, join="inner")
+        sim_stack = xr.concat(sims_aligned, dim="member")
+        sim_median = sim_stack.median(dim="member")
+        hydro.set_discharge(simulation=sim_median, observation=obs)
+        hydro.sim_discharge_data_list = list(sims_aligned)
+        hydro.sim_discharge_data_median = sim_median
+        hydro.get_catchment_area(input_paths[0], ndecimal=0)
+    else:
+        input_path = Path(input_path)
+        if not hydro.load_data_from_discharge_nc(input_path):
+            msg = f"No discharge.nc file at {input_path}"
+            with ErrorLogger():
+                raise ValueError(msg)
+        hydro.get_catchment_area(input_path, ndecimal=0)
     hydro.load_precipiation_data(prec_path)
-    hydro.get_catchment_area(input_path, ndecimal=0)
     hydro.get_hydrograph()
     hydro.write_output()
 
