@@ -181,9 +181,13 @@ def set_netcdf_encoding(
         )
     data_vars = set(ds.data_vars) - bnds
     for name in aux_coords | data_vars:
+        if name in bnds:
+            continue
         ds[name].encoding = encoding
     for name in dim_coords | bnds:
-        ds[name].encoding = {"_FillValue": None}
+        enc = dict(ds[name].encoding) if ds[name].encoding else {}
+        enc["_FillValue"] = None
+        ds[name].encoding = enc
 
 
 def _ensure_bounds_exist(ds: xr.Dataset, bounds_dim: str = "bnds") -> None:

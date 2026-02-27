@@ -13,6 +13,7 @@ from mhm_tools.common.constants import NC_ENCODE_DEFAULTS, NO_DATA
 from mhm_tools.common.esri_grid import standardize_header, write_grid, write_header
 from mhm_tools.common.logger import ErrorLogger, log_arguments, log_errors
 from mhm_tools.common.netcdf import (
+    generate_bounds,
     read_dataset,
     sanitize_nc_encoding,
     set_netcdf_encoding,
@@ -426,6 +427,60 @@ def write_xarray_to_file(  # noqa: PLR0912, PLR0915
         else:
             # Ensure encoding only targets data variables (avoid coords/bounds)
             encoding = {k: v for k, v in encoding.items() if k in data_vars}
+        # Ensure time and its bounds have consistent encoding to avoid decode issues
+        time_key = get_coord_key(ds, time=True, raise_exception=False)
+        if time_key is not None:
+            time_da = ds[time_key]
+            bounds_name = time_da.attrs.get("bounds")
+            if bounds_name in ds:
+                bnds_da = ds[bounds_name]
+                # If bounds are numeric but time is datetime, regenerate bounds
+                if np.issubdtype(time_da.dtype, np.datetime64) and not np.issubdtype(
+                    bnds_da.dtype, np.datetime64
+                ):
+                    try:
+                        ds = ds.copy(deep=False)
+                        ds.coords[bounds_name] = generate_bounds(time_da)
+                        bnds_da = ds[bounds_name]
+                    except Exception:
+                        logger.debug("Could not regenerate time bounds", exc_info=True)
+                # If both are numeric but bounds look wildly out of scale, rebuild.
+                if np.issubdtype(time_da.dtype, np.number) and np.issubdtype(
+                    bnds_da.dtype, np.number
+                ):
+                    try:
+                        tmax = float(np.nanmax(np.abs(time_da.values)))
+                        bmax = float(np.nanmax(np.abs(bnds_da.values)))
+                        if tmax > 0 and bmax / tmax > 1e6:
+                            logger.warning(
+                                "Time bounds look out of scale (max=%s vs time max=%s); "
+                                "regenerating bounds from time.",
+                                bmax,
+                                tmax,
+                            )
+                            ds = ds.copy(deep=False)
+                            ds.coords[bounds_name] = generate_bounds(time_da)
+                            bnds_da = ds[bounds_name]
+                    except Exception:
+                        logger.debug(
+                            "Could not validate/regenerate numeric time bounds",
+                            exc_info=True,
+                        )
+                if "units" not in time_da.encoding:
+                    if "units" in time_da.attrs:
+                        time_da.encoding["units"] = time_da.attrs["units"]
+                    else:
+                        time_da.encoding["units"] = "days since 1970-01-01 00:00:00"
+                if "calendar" not in time_da.encoding and "calendar" in time_da.attrs:
+                    time_da.encoding["calendar"] = time_da.attrs["calendar"]
+                if "units" not in bnds_da.encoding:
+                    bnds_da.encoding["units"] = time_da.encoding.get("units")
+                if "calendar" in time_da.encoding and "calendar" not in bnds_da.encoding:
+                    bnds_da.encoding["calendar"] = time_da.encoding["calendar"]
+                # Avoid units/calendar in bounds attrs; xarray will set these during encoding.
+                for key in ("units", "calendar"):
+                    if key in bnds_da.attrs:
+                        bnds_da.attrs.pop(key, None)
         # if False and available_mem_gib is not None:
         #     # ds = chunk_dataset(ds, ChunkType.TIME, available_mem_gib//50)
         #     dask.config.set(
@@ -765,14 +820,12 @@ def move_reserved_attrs_to_encoding(
                     encoding[name][key] = val
         return ds, encoding
 
-    if isinstance(obj, xr.DataArray):  # DataArray
-        da = obj.copy()
-        _process_var(da)
-        names = [da.name] if da.name is not None else ["__dataarray__"]
+    if not isinstance(obj, xr.DataArray):
+        msg = f"wrong type {obj}"
+        raise ValueError(msg)
     # DataArray
     da = obj.copy(deep=False)
     _process_var(da)
-    names = [da.name] if da.name is not None else ["__dataarray__"]
 
     coord_encoding = {}
     if include_coords:
@@ -788,11 +841,5 @@ def move_reserved_attrs_to_encoding(
     if da.name is not None and da.encoding:
         data_encoding[da.name] = {k: v for k, v in da.encoding.items() if k in reserved}
 
-        # Merge data + coords encodings
-        encoding = {**coord_encoding, **data_encoding}
-        return da, encoding
-    msg = f"wrong type {obj}"
-    raise ValueError(msg)
-    # Merge data + coords encodings
     encoding = {**coord_encoding, **data_encoding}
     return da, encoding
