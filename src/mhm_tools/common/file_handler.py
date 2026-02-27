@@ -84,7 +84,11 @@ def set_grid(
     data_attrs: Optional[Dict[str, Union[str, float, int]]] = None,
 ) -> xr.Dataset:
     """Attach ``data`` to a preserved grid definition."""
-    coords = dict(grid.template.coords.items())
+    coords = {}
+    for name, coord in grid.template.coords.items():
+        # Only include coords compatible with the target variable dims.
+        if set(coord.dims).issubset(set(grid.dims)):
+            coords[name] = coord
     da = xr.DataArray(
         data,
         coords=coords,

@@ -220,6 +220,32 @@ class TestWriteXarrayToFile(unittest.TestCase, BaseDatasetMixin):
             with self.assertRaises(NotImplementedError):
                 fh.write_xarray_to_file(ds, out)
 
+    def test_set_grid_ignores_incompatible_coords(self):
+        time = np.array(["2017-01-01", "2017-01-02"], dtype="datetime64[ns]")
+        da = xr.DataArray(
+            np.random.rand(2, 2, 2),
+            dims=("time", "lat", "lon"),
+            coords={
+                "time": ("time", time, {"bounds": "time_bnds"}),
+                "lat": ("lat", [10.0, 11.0]),
+                "lon": ("lon", [100.0, 101.0]),
+            },
+            name="v",
+        )
+        ds = da.to_dataset()
+        ds["time_bnds"] = xr.DataArray(
+            np.stack([time - np.timedelta64(1, "D"), time], axis=1),
+            dims=("time", "bnds"),
+            coords={"time": ds["time"]},
+        )
+
+        grid = fh.get_grid(ds)
+        new_data = np.zeros((2, 2, 2))
+        out = fh.set_grid(new_data, grid, "pet")
+
+        self.assertEqual(out["pet"].dims, ("time", "lat", "lon"))
+        self.assertIn("time_bnds", out.variables)
+
 
 class TestGetXarrayDsFromFile(unittest.TestCase, BaseDatasetMixin):
     def test_get_xarray_ds_from_file_nc_flow(self):
