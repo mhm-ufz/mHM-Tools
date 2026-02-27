@@ -475,7 +475,10 @@ def write_xarray_to_file(  # noqa: PLR0912, PLR0915
                     time_da.encoding["calendar"] = time_da.attrs["calendar"]
                 if "units" not in bnds_da.encoding:
                     bnds_da.encoding["units"] = time_da.encoding.get("units")
-                if "calendar" in time_da.encoding and "calendar" not in bnds_da.encoding:
+                if (
+                    "calendar" in time_da.encoding
+                    and "calendar" not in bnds_da.encoding
+                ):
                     bnds_da.encoding["calendar"] = time_da.encoding["calendar"]
                 # Avoid units/calendar in bounds attrs; xarray will set these during encoding.
                 for key in ("units", "calendar"):
@@ -609,6 +612,33 @@ def write_xarray_to_file(  # noqa: PLR0912, PLR0915
             encoding = sanitize_nc_encoding(ds_clean, merged_encoding)
             logger.info(f"Using encoding: {encoding}")
             set_netcdf_encoding(ds_clean, encoding)
+            # Ensure time/bounds attrs do not contain units/calendar before encode
+            time_key_clean = get_coord_key(ds_clean, time=True, raise_exception=False)
+            if time_key_clean is not None:
+                time_var = ds_clean[time_key_clean]
+                bounds_name_clean = time_var.attrs.get("bounds")
+                # ensure time encoding has units/calendar
+                if "units" not in time_var.encoding:
+                    if "units" in time_var.attrs:
+                        time_var.encoding["units"] = time_var.attrs["units"]
+                    else:
+                        time_var.encoding["units"] = "days since 1970-01-01 00:00:00"
+                if "calendar" not in time_var.encoding and "calendar" in time_var.attrs:
+                    time_var.encoding["calendar"] = time_var.attrs["calendar"]
+                # remove units/calendar from time attrs to avoid xarray overwrite error
+                for key in ("units", "calendar"):
+                    time_var.attrs.pop(key, None)
+                if bounds_name_clean in ds_clean:
+                    bnds_var = ds_clean[bounds_name_clean]
+                    if "units" not in bnds_var.encoding:
+                        bnds_var.encoding["units"] = time_var.encoding.get("units")
+                    if (
+                        "calendar" in time_var.encoding
+                        and "calendar" not in bnds_var.encoding
+                    ):
+                        bnds_var.encoding["calendar"] = time_var.encoding["calendar"]
+                    for key in ("units", "calendar"):
+                        bnds_var.attrs.pop(key, None)
             ds_clean.to_netcdf(
                 file_path, engine=engine, format="NETCDF4", encoding=encoding
             )
@@ -616,6 +646,16 @@ def write_xarray_to_file(  # noqa: PLR0912, PLR0915
             logger.error(f"Error while writing to {file_path}")
             logger.error(ds)
             logger.info(f"Trying to write without encoding {encoding}")
+            # also scrub time/bounds attrs on fallback
+            time_key_raw = get_coord_key(ds, time=True, raise_exception=False)
+            if time_key_raw is not None:
+                time_var = ds[time_key_raw]
+                bounds_name_raw = time_var.attrs.get("bounds")
+                for key in ("units", "calendar"):
+                    time_var.attrs.pop(key, None)
+                if bounds_name_raw in ds:
+                    for key in ("units", "calendar"):
+                        ds[bounds_name_raw].attrs.pop(key, None)
             ds.to_netcdf(file_path, engine=engine, format="NETCDF4")
     else:
         msg = f"Writing to file types other than asci and netcdf is not implemented. The suffix of the file was: {file_path.suffix}"
