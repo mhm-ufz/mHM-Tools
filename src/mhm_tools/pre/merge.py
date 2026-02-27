@@ -13,7 +13,7 @@ except Exception:
     cdo = None
 from joblib import Parallel, delayed
 
-from mhm_tools.common.logger import ErrorLogger
+from mhm_tools.common.logger import ErrorLogger, log_arguments
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +109,7 @@ def merge_files_from_folder(
         )
     return [str(out_file)]
 
-
+@log_arguments()
 def merge_files(input_path, input_file_part, output, n_cpus, preserve_folders=False):
     """
     Merge NetCDF files along time using CDO via its Python API.
