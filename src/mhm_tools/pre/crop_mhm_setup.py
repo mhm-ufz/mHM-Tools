@@ -607,6 +607,7 @@ def crop_mhm_setup(  # noqa: PLR0913
             latslice=latslice,
             lonslice=lonslice,
             output_path=output_path,
+            input_path=input_path,
             overwrite=overwrite,
             available_mem_gib=available_mem_gib,
             force_header_creation=force_header_creation,
