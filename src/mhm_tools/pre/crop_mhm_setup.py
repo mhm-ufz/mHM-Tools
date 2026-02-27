@@ -394,7 +394,10 @@ def crop_file(  # noqa: PLR0912 PLR0915
 ):
     """Crops one file by lat and lon slice and may mask it with the mask dataarray."""
     logger.info(f"Cropping the file {input_file}")
-    output_file = output_path / input_file.relative_to(input_path)
+    if input_path.is_file():
+        output_file = output_path / input_file.name
+    else:
+        output_file = output_path / input_file.relative_to(input_path)
     output_file.parent.mkdir(parents=True, exist_ok=True)
     if output_suffix is not None:
         output_file = output_file.with_suffix(output_suffix)
@@ -453,7 +456,7 @@ def crop_file(  # noqa: PLR0912 PLR0915
             ds_cropped, header_path = crop_file_with_header(
                 ds,
                 input_file,
-                output_path / input_file.parent.relative_to(input_path),
+                output_file,
                 lonslice=lonslice,
                 latslice=latslice,
             )
@@ -604,7 +607,6 @@ def crop_mhm_setup(  # noqa: PLR0913
             latslice=latslice,
             lonslice=lonslice,
             output_path=output_path,
-            input_path=input_path,
             overwrite=overwrite,
             available_mem_gib=available_mem_gib,
             force_header_creation=force_header_creation,
