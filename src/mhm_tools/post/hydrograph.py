@@ -437,7 +437,7 @@ class Hydrograph:
         path = Path(path)
         discharge_file = path / "discharge.nc" if path.is_dir() else path
         if discharge_file.is_file():
-            with get_xarray_ds_from_file(path / "discharge.nc") as ds:
+            with get_xarray_ds_from_file(discharge_file) as ds:
                 discharge_data = ds.load()
                 for v in discharge_data.variables:
                     if not isinstance(v, str):
