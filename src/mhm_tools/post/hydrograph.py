@@ -31,8 +31,8 @@ class Catchment:
         area (float): The area of the catchment in square units.
     """
 
-    name = None
-    area = None
+    name = ""
+    area = ""
 
 
 class Objectives:
@@ -232,6 +232,12 @@ class Hydrograph:
         -------
             None
         """
+        if self.has_multi_sim():
+            if self.sim_discharge_data_median is None:
+                self.sim_discharge_data_median = np.nanmedian(
+                    np.array(self.sim_discharge_data_list), axis=0
+                )
+            simulated = self.sim_discharge_data_median
         if (
             self.obs_discharge_data_clean is None
             or self.sim_discharge_data_clean is None
@@ -437,7 +443,7 @@ class Hydrograph:
         path = Path(path)
         discharge_file = path / "discharge.nc" if path.is_dir() else path
         if discharge_file.is_file():
-            with get_xarray_ds_from_file(path / "discharge.nc") as ds:
+            with get_xarray_ds_from_file(discharge_file) as ds:
                 discharge_data = ds.load()
                 for v in discharge_data.variables:
                     if not isinstance(v, str):
@@ -724,6 +730,29 @@ class Hydrograph:
             None
         """
         self.logger.info("generating discharge seasonality plot")
+
+        if self.has_multi_sim():
+            sim_aligned = xr.align(*self.sim_discharge_data_list, join="inner")
+            sim_stack = xr.concat(sim_aligned, dim="member")
+            season_sim_all = [
+                self.get_long_time_monthly_mean(sim_stack.isel(member=i), long=True)
+                for i in range(sim_stack.sizes["member"])
+            ]
+            season_sim_all = np.array(season_sim_all)
+            season_sim = np.nanmedian(season_sim_all, axis=0)
+        else:
+            season_sim = self.get_long_time_monthly_mean(
+                self.sim_discharge_data, long=True
+            )
+        # check that there are at least 4 monthly values that are not nan in both sim and obs to create the plot
+        if (
+            np.sum(~np.isnan(season_sim)) < 4
+            or np.sum(~np.isnan(self.obs_discharge_data)) < 4
+        ):
+            logger.warning(
+                "Cannot create seasonality plot because there are less than 4 monthly values that are not nan in either sim or obs."
+            )
+            return
         r, c = self.get_row_col()
         if r == 0 or self.is_last_plot(2):
             outer_gs = gs[r, c:]
@@ -731,7 +760,6 @@ class Hydrograph:
         else:
             outer_gs = gs[r, c]
             self.grid[r][c] = True
-
         if pre is not None:
             inner_gs = gridspec.GridSpecFromSubplotSpec(
                 3, 1, subplot_spec=outer_gs, height_ratios=[1, 1, 1]
@@ -772,19 +800,6 @@ class Hydrograph:
             ax3.set_title("Seasonality", horizontalalignment="center")
         ax3.spines["top"].set_visible(False)
         ax3.spines["right"].set_visible(False)
-        if self.has_multi_sim():
-            sim_aligned = xr.align(*self.sim_discharge_data_list, join="inner")
-            sim_stack = xr.concat(sim_aligned, dim="member")
-            season_sim_all = [
-                self.get_long_time_monthly_mean(sim_stack.isel(member=i), long=True)
-                for i in range(sim_stack.sizes["member"])
-            ]
-            season_sim_all = np.array(season_sim_all)
-            season_sim = np.nanmedian(season_sim_all, axis=0)
-        else:
-            season_sim = self.get_long_time_monthly_mean(
-                self.sim_discharge_data, long=True
-            )
         season_obs = self.get_long_time_monthly_mean(self.obs_discharge_data, long=True)
         self.logger.debug(f"sim: {season_sim}")
         self.logger.debug(f"osb: {season_obs}")
@@ -1130,7 +1145,7 @@ def get_hydrograph_from_path(
     )
     multi_input = len(input_paths) > 1
     input_path = input_paths if multi_input else input_paths[0]
-    hydro = Hydrograph(calc_stats=not multi_input)
+    hydro = Hydrograph()
     hydro.check_which_plots_to_create(plot_code)
     if multi_input:
         hydro.plots[4] = 0
