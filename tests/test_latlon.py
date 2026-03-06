@@ -24,7 +24,6 @@ class TestLatLon:
             "cellsize": 500,
             "nodata_value": -9999,
         }
-        yield
 
     def test_latlon(self):
         mt.pre.create_latlon(

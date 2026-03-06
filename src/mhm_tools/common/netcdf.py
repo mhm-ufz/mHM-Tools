@@ -146,7 +146,15 @@ def read_dataset(
                 logger.error(f"Failed opening {p}: {exc}")
                 raise
             arrays.append(ds_tmp)
-        return xr.combine_by_coords(arrays, combine_attrs="override")
+        try:
+            return xr.combine_by_coords(
+                arrays,
+                combine_attrs="override",
+                compat="override",
+                coords="minimal",
+            )
+        except Exception:
+            return xr.combine_by_coords(arrays)
 
     # Single-file case
     single = paths[0]

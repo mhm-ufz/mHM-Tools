@@ -17,6 +17,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from mhm_tools.common.file_handler import (
     ChunkType,
     get_coord_values,
+    get_dataset_from_path,
     get_xarray_ds_from_file,
     write_xarray_to_file,
 )
@@ -872,18 +873,31 @@ def get_stats(
                 file_name=file_name,
             )
         elif path.is_dir() or path.is_file():
-            with get_dataset_from_path(
-                path, available_mem=available_mem, file_name=file_name
-            ) as ds_in:
-                stats_ds = get_file_stats(
-                    ds_in,
-                    var,
-                    factor,
-                    coordinate_slice,
-                    output_path=output_file,
-                    avaiable_years=available_years,
-                    direct_comp=direct_comp,
+            if path.is_file() and path.suffix == ".nc":
+                chunking = available_mem is not None
+                return get_xarray_ds_from_file(
+                    path,
+                    chunking=chunking,
+                    available_mem_gib=available_mem,
+                    chunk_type=ChunkType.SPACE,
+                    force_decending_y=True,
                 )
+            if path.is_dir():
+                file_list = get_files(
+                    path, available_years=available_years, file_name=file_name
+                )
+                with get_dataset_from_path(
+                    file_list, available_mem=available_mem, file_name=file_name
+                ) as ds_in:
+                    stats_ds = get_file_stats(
+                        ds_in,
+                        var,
+                        factor,
+                        coordinate_slice,
+                        output_path=output_file,
+                        avaiable_years=available_years,
+                        direct_comp=direct_comp,
+                    )
         else:
             msg = f"Path {path} is neither dir nor file."
             with ErrorLogger(logger):
@@ -1214,35 +1228,6 @@ def evaluate_boostraping_stat_files(stat_files, input_name, ref_name):
         "input_clim": input_clim_da.median(dim="bootstrap"),
         "ref_clim": ref_clim_da.median(dim="bootstrap"),
     }
-
-
-def get_dataset_from_path(
-    path, available_years=None, available_mem=None, file_name="*.*"
-):
-    """Load a dataset from a file or a directory of files."""
-    if path.is_file() and path.suffix == ".nc":
-        chunking = available_mem is not None
-        return get_xarray_ds_from_file(
-            path,
-            chunking=chunking,
-            available_mem_gib=available_mem,
-            chunk_type=ChunkType.SPACE,
-            force_decending_y=True,
-        )
-    if path.is_dir():
-        file_list = get_files(
-            path, available_years=available_years, file_name=file_name
-        )
-        logger.debug(file_list)
-        logger.debug("combining files by coords ...")
-        return xr.open_mfdataset(
-            file_list,
-            combine="by_coords",  # Ensures files are combined based on shared coordinates
-            data_vars="all",
-        )
-    with ErrorLogger(logger):
-        msg = f"Path {path} does not exist."
-        raise ValueError(msg)
 
 
 def regridd_to_higher_spatial_resolution(ds1, ds2):
