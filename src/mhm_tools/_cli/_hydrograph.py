@@ -70,6 +70,15 @@ def add_args(parser):
         default="",
         help="path of the precipiation file",
     )
+    parser.add_argument(
+        "--name",
+        dest="sim_names",
+        required=False,
+        nargs="+",
+        help="Optional simulation name(s). If one name is provided, it replaces 'sim' in the legend. "
+        "If multiple input paths are provided and the same number of names are given, each simulation "
+        "is plotted with its name.",
+    )
 
 
 def run(args):
@@ -90,4 +99,5 @@ def run(args):
         title=args.title,
         plot_code=args.plots_to_be_created,
         prec_path=args.prec,
+        sim_names=args.sim_names,
     )
