@@ -1,5 +1,4 @@
 import numpy as np
-import pytest
 import xarray as xr
 
 from mhm_tools.common.file_handler import write_xarray_to_file

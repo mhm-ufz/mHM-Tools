@@ -9,7 +9,7 @@ import pandas as pd
 import xarray as xr
 
 # Adjust this import to your actual module path/name
-import mhm_tools.post.GRDC_validation as gv
+import mhm_tools.post.discharge_evaluation as gv
 
 # -----------------------------
 # Small helpers to make datasets
@@ -128,6 +128,9 @@ class TestQDataToXarray(unittest.TestCase):
             self.ids, self.obs_times, self.xs, self.ys, self.facc, var="runoff_mean_mm"
         )
         self.sim_ds = make_sim_data(self.sim_times, var="Qrouted")
+        # Add id dimension so downstream selection by id is valid
+        if "id" not in self.sim_ds.dims:
+            self.sim_ds = self.sim_ds.expand_dims(id=np.array(self.ids, dtype=int))
 
     def _mock_overlapping_time_slice(self, sim_ds, obs_ds):
         t0 = max(sim_ds.time.min().item(), obs_ds.time.min().item())
@@ -149,7 +152,7 @@ class TestQDataToXarray(unittest.TestCase):
             ]
             gi = iter(sequence)
 
-            def gxarr_side_effect(path):
+            def gxarr_side_effect(path, **kwargs):
                 # Return the next prepared context manager
                 return next(gi)
 
@@ -166,7 +169,9 @@ class TestQDataToXarray(unittest.TestCase):
                 gv, "write_xarray_to_file"
             ) as mock_write:
                 # Make get_sim_data_for_one_gauge return per-id DA with time dimension
-                def _sim_for_gauge(id, index, sim_data, yarr, xarr, resolution):
+                def _sim_for_gauge(
+                    id, index, sim_data, yarr, xarr, resolution, **kwargs
+                ):
                     da = xr.DataArray(
                         np.arange(self.sim_times.size) + index,
                         dims=("time",),
@@ -267,9 +272,11 @@ class TestEvaluateDirect(unittest.TestCase):
                 return_value={"id": 42, "alpha": 1.0, "beta": 1.0, "gamma": 0.5},
             ), patch.object(
                 gv, "plot_cdf"
-            ) as mock_plot:
+            ) as mock_plot, patch.object(
+                gv, "plot_map"
+            ):
 
-                gv.evaludate_grdc_data(
+                gv.evaludate_discharge_data(
                     model_data_path="sim.nc",
                     observed_data_path="obs.nc",
                     mrm_restart_file="restart.nc",
@@ -286,8 +293,8 @@ class TestEvaluateDirect(unittest.TestCase):
                 df = pd.read_csv(results_csv, index_col=0)
                 self.assertIn("alpha", df.columns)
                 self.assertEqual(df.loc[0, "id"], 42)
-                # plot_cdf still called with direct results
-                mock_plot.assert_called()
+                # plot_cdf not called for small sample sizes
+                mock_plot.assert_not_called()
 
 
 # -----------------------------
@@ -336,9 +343,11 @@ class TestEvaluateBootstrap(unittest.TestCase):
                 },
             ), patch.object(
                 gv, "plot_cdf"
-            ) as mock_plot:
+            ) as mock_plot, patch.object(
+                gv, "plot_map"
+            ):
 
-                gv.evaludate_grdc_data(
+                gv.evaludate_discharge_data(
                     model_data_path="sim.nc",
                     observed_data_path="obs.nc",
                     mrm_restart_file="restart.nc",
@@ -356,8 +365,225 @@ class TestEvaluateBootstrap(unittest.TestCase):
                 df = pd.read_csv(results_csv, index_col=0)
                 self.assertIn("gamma", df.columns)
                 self.assertTrue((df["id"] == 7).all())
-                # plot called with bootstrap results
-                mock_plot.assert_called()
+                # plot_cdf not called for small sample sizes
+                mock_plot.assert_not_called()
+
+
+def cm_enter(ds):
+    """Build a context manager object returning ds on __enter__()."""
+    cm = MagicMock()
+    cm.__enter__.return_value = ds
+    cm.__exit__.return_value = False
+    return cm
+
+
+def make_observed_data(ids, times, xs, ys, facc, var="runoff_mean_mm", values=None):
+    if values is None:
+        values = np.arange(len(times) * len(ids)).reshape(len(times), len(ids))
+    da = xr.DataArray(
+        values,
+        dims=("time", "id"),
+        coords={"time": times, "id": np.array(ids, dtype=int)},
+        name=var,
+    )
+    ds = xr.Dataset(
+        {
+            "geo_x": (("id",), np.array(xs, dtype=float)),
+            "geo_y": (("id",), np.array(ys, dtype=float)),
+            "area": (("id",), np.array(facc, dtype=float)),
+            var: da,
+        },
+        coords={"id": np.array(ids, dtype=int), "time": times},
+    )
+    return ds
+
+
+def make_scc_gauges(ids, xs, ys):
+    return xr.Dataset(
+        {
+            "x": (("station",), np.array(xs, dtype=float)),
+            "y": (("station",), np.array(ys, dtype=float)),
+            "station": (("station",), np.array(ids, dtype=int)),
+        }
+    )
+
+
+def write_discharge_file(path, gid, times, obs_vals, sim_vals):
+    gid_str = f"{int(gid):010d}"
+    ds = xr.Dataset(
+        {
+            f"Qsim_{gid_str}": (("time",), np.array(sim_vals, dtype=float)),
+            f"Qobs_{gid_str}": (("time",), np.array(obs_vals, dtype=float)),
+        },
+        coords={"time": times},
+    )
+    ds.to_netcdf(path)
+
+
+def assert_discharge_equal(ds_a, ds_b):
+    da_a = ds_a["discharge"].sortby("id")
+    da_b = ds_b["discharge"].sortby("id")
+    if {"time", "id"}.issubset(set(da_a.dims)):
+        da_a = da_a.transpose("time", "id")
+    if {"time", "id"}.issubset(set(da_b.dims)):
+        da_b = da_b.transpose("time", "id")
+    xr.testing.assert_allclose(da_a, da_b)
+
+
+class TestGRDCValidation2Consistency(unittest.TestCase):
+    def test_q_data_to_xarray_consistent_across_inputs(self):
+        ids = [1, 2]
+        xs = [10.0, 10.1]
+        ys = [50.0, 49.9]
+        facc = [100.0, 200.0]
+        times = pd.date_range("2001-01-01", periods=4, freq="D")
+        date_slice = slice(times[1], times[-1])
+
+        obs_vals = np.array([[1.0, 2.0], [1.5, 2.5], [2.0, 3.0], [2.5, 3.5]])
+        sim_vals = np.array([[10.0, 20.0], [10.5, 20.5], [11.0, 21.0], [11.5, 21.5]])
+
+        obs_ds = make_observed_data(
+            ids, times, xs, ys, facc, var="runoff_mean_mm", values=obs_vals
+        )
+        sim_ds = xr.Dataset(
+            {
+                "Qrouted": (
+                    ("time", "id"),
+                    np.zeros((len(times), len(ids)), dtype=float),
+                )
+            },
+            coords={
+                "time": times,
+                "id": np.array(ids, dtype=int),
+            },
+        )
+        scc_ds = make_scc_gauges(ids, xs, ys)
+
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            discharge_root = td / "discharge_inputs"
+            discharge_root.mkdir()
+            for gid, i in zip(ids, range(len(ids))):
+                sub = discharge_root / f"gauge_{gid}"
+                sub.mkdir()
+                write_discharge_file(
+                    sub / "discharge.nc",
+                    gid,
+                    times,
+                    obs_vals[:, i],
+                    sim_vals[:, i],
+                )
+
+            def load_ds_discharge(path, file_name=None):
+                ds = xr.open_dataset(path)
+                return cm_enter(ds)
+
+            with patch.object(
+                gv, "load_ds", side_effect=load_ds_discharge
+            ), patch.object(gv, "write_xarray_to_file"):
+                obs_d, sim_d = gv.Q_data_to_xarray(
+                    model_data_path=discharge_root,
+                    observed_data_path="obs.nc",
+                    sim_variable=None,
+                    observed_variable=None,
+                    model_keyword="mrm",
+                    saving_path=td,
+                    model_file_name="discharge.nc",
+                    date_slice=date_slice,
+                    overwrite=True,
+                    direct_comparison=False,
+                )
+
+            def load_ds_side_effect(path, file_name=None):
+                path = Path(path)
+                if path.name == "obs.nc":
+                    return cm_enter(obs_ds)
+                if path.name == "sim.nc":
+                    return cm_enter(sim_ds)
+                if path.name == "scc.nc":
+                    return cm_enter(scc_ds)
+                if path.name == "restart.nc":
+                    return cm_enter(xr.Dataset())
+                raise FileNotFoundError(path)
+
+            def sim_from_nodes(*args, **kwargs):
+                da = xr.DataArray(
+                    sim_vals,
+                    dims=("time", "id"),
+                    coords={"time": times, "id": np.array(ids, dtype=int)},
+                    name="discharge",
+                )
+                da = da.sel(time=date_slice)
+                return da, np.array(xs), np.array(ys), np.array(ids, dtype=int)
+
+            def sim_for_gauge(id, index, sim_data, yarr, xarr, resolution, **kwargs):
+                da = xr.DataArray(
+                    sim_vals[:, index],
+                    dims=("time",),
+                    coords={"time": times},
+                    name="discharge",
+                )
+                da = da.sel(time=date_slice)
+                return da.expand_dims(dim={"id": [int(id)]})
+
+            with patch.object(
+                gv, "load_ds", side_effect=load_ds_side_effect
+            ), patch.object(
+                gv,
+                "resample_to_coarser_calendar",
+                return_value=(sim_ds, obs_ds),
+            ), patch.object(
+                gv, "get_sim_data_for_gauges_from_nodes", side_effect=sim_from_nodes
+            ), patch.object(
+                gv, "write_xarray_to_file"
+            ):
+                obs_s, sim_s = gv.Q_data_to_xarray(
+                    model_data_path="sim.nc",
+                    observed_data_path="obs.nc",
+                    scc_gauges_file="scc.nc",
+                    sim_variable="Qrouted",
+                    observed_variable="runoff_mean_mm",
+                    model_keyword="mrm",
+                    saving_path=td,
+                    model_file_name="mrm_output.nc",
+                    date_slice=date_slice,
+                    overwrite=True,
+                    direct_comparison=False,
+                )
+
+            with patch.object(
+                gv, "load_ds", side_effect=load_ds_side_effect
+            ), patch.object(
+                gv,
+                "resample_to_coarser_calendar",
+                return_value=(sim_ds, obs_ds),
+            ), patch.object(
+                gv,
+                "get_gauge_coords",
+                side_effect=[(xs[0], ys[0], facc[0]), (xs[1], ys[1], facc[1])],
+            ), patch.object(
+                gv, "get_sim_data_for_one_gauge", side_effect=sim_for_gauge
+            ), patch.object(
+                gv, "write_xarray_to_file"
+            ):
+                obs_g, sim_g = gv.Q_data_to_xarray(
+                    model_data_path="sim.nc",
+                    observed_data_path="obs.nc",
+                    mrm_restart_file="restart.nc",
+                    sim_variable="Qrouted",
+                    observed_variable="runoff_mean_mm",
+                    model_keyword="mrm",
+                    saving_path=td,
+                    model_file_name="mrm_output.nc",
+                    date_slice=date_slice,
+                    overwrite=True,
+                    direct_comparison=False,
+                )
+
+            assert_discharge_equal(obs_d, obs_s)
+            assert_discharge_equal(obs_d, obs_g)
+            assert_discharge_equal(sim_d, sim_s)
+            assert_discharge_equal(sim_d, sim_g)
 
 
 if __name__ == "__main__":

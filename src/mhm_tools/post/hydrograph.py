@@ -1254,8 +1254,14 @@ def gen_hydrograph_by_data_sets(
             hydro.catchment.area = area
             hydro.check_which_plots_to_create(plot_code)
             if not hydro.get_hydrograph():
+                logger.debug(
+                    f"get_hydrograph returned False for {id}. Simulations: {simulations}, Observation: {observation}"
+                )
                 logger.error(missing_data_error_msg)
         else:
+            logger.debug(
+                f"set_discharge returned False for {id}. Simulations: {simulations}, Observation: {observation}"
+            )
             logger.error(missing_data_error_msg)
     except Exception as e:
         logger.error(e)

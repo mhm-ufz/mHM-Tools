@@ -5,30 +5,55 @@ def add_args(parser):
     """Add CLI arguments for the grdc_validation subcommand."""
     required_args = parser.add_argument_group("required arguments")
     required_args.add_argument(
+        "--output_dir", help="Path for the output dir.", required=True
+    )
+    parser.add_argument(
+        "--observed_data_path",
+        required=False,
+        help=("Path to the observation data file."),
+    )
+    parser.add_argument(
+        "--model_data_path",
+        required=False,
+        help=("Path to the model data."),
+    )
+    parser.add_argument(
+        "--model_file_name",
+        required=False,
+        default="mrm_node_output.nc",
+        help=("File name pattern for model data files."),
+    )
+    parser.add_argument(
+        "--observed_variable",
+        required=False,
+        default="runoff_mean",
+        help=(""),
+    )
+    parser.add_argument(
+        "--model_variable",
+        required=False,
+        default=None,
+        help=("Variable name of the simulation data."),
+    )
+    parser.add_argument(
         "--mrm_restart",
-        required=True,
+        required=False,
         default=None,
         help=("Path to the mrm restart file."),
     )
-    required_args.add_argument(
-        "--observed_data_path",
-        required=True,
-        help=("Path to the observation data file."),
+    parser.add_argument(
+        "--scc_gauges_file",
+        required=False,
+        default=None,
+        help=("Path to the scc gauges file."),
     )
-    required_args.add_argument(
-        "--model_data_path",
-        required=True,
-        help=("Path to the model data."),
-    )
-    required_args.add_argument(
-        "--observed_variable",
-        required=True,
-        help=(""),
-    )
-    required_args.add_argument(
-        "--model_variable",
-        required=True,
-        help=("Variable name of the simulation data."),
+    parser.add_argument(
+        "--evaluation_gauges",
+        required=False,
+        default=None,
+        help=(
+            "Path to a file containing the gauge ids to be used for the evaluation. If not provided, all gauges will be used."
+        ),
     )
     parser.add_argument(
         "--ncpus",
@@ -79,13 +104,13 @@ def add_args(parser):
         type=str,
         help=("Lates year that is allowed in the analysis."),
     )
-    parser.add_argument(
-        "--direct_comparison",
-        action="store_true",
-        dest="direct_comparison",
-        required=False,
-        help=("Use no statistics but compare timeseries directly. Needs ref_path."),
-    )
+    # parser.add_argument(
+    #     "--direct_comparison",
+    #     action="store_true",
+    #     dest="direct_comparison",
+    #     required=False,
+    #     help=("Use no statistics but compare timeseries directly. Needs ref_path."),
+    # )
     parser.add_argument(
         "--overwrite",
         action="store_true",
@@ -95,7 +120,12 @@ def add_args(parser):
             "Overwrite existing files. Otherwise input data changes might not result in output changes."
         ),
     )
-    parser.add_argument("--output_dir", help="Path for the output dir.", required=True)
+    parser.add_argument(
+        "--only_plot",
+        help="Set Flag if existing output file should be used to create plot",
+        action="store_true",
+        required=False,
+    )
 
 
 def run(args):
@@ -107,16 +137,19 @@ def run(args):
         parsed command line arguments
     """
     from mhm_tools.common.cli_utils import get_coords
-    from mhm_tools.post.GRDC_validation import evaludate_grdc_data
+    from mhm_tools.post.discharge_evaluation import evaludate_discharge_data
 
     lon_min, lon_max, lat_min, lat_max, mask = get_coords(
         args.lonlatbox, args.mask_file, raise_exception=False
     )
-    evaludate_grdc_data(
+    evaludate_discharge_data(
         args.model_data_path,
         args.observed_data_path,
+        model_file_name=args.model_file_name,
         mrm_restart_file=args.mrm_restart,
+        scc_gauges_file=args.scc_gauges_file,
         output_path=args.output_dir,
+        evaluation_gauges=args.evaluation_gauges,
         n_jobs=int(args.ncpus),
         sim_variable=args.model_variable,
         observed_variable=args.observed_variable,
@@ -126,8 +159,10 @@ def run(args):
         lat_max=lat_max,
         n_boostrap_selections=args.n_bootstrap_selections,
         n_bootstrap_years=args.n_boostrap_years,
-        direct_comparison=args.direct_comparison,
+        direct_comparison=args.n_bootstrap_selections is None
+        or args.n_boostrap_years is None,
         start_date=args.start_date,
         end_date=args.end_date,
         overwrite=args.overwrite,
+        only_plot=args.only_plot,
     )

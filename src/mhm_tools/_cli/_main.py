@@ -15,8 +15,8 @@ from . import (
     _create_subdomain_masks,
     _crop_mhm_setup,
     _difference,
+    _discharge_evaluation,
     _file_converter,
-    _grdc_validation,
     _gridded_data_evaluation,
     _hydrograph,
     _landcover_ascii_to_nc,
@@ -92,7 +92,7 @@ def _get_parser():
     add_command_from_module(
         subparsers, "gridded_data_evaluation", _gridded_data_evaluation
     )
-    add_command_from_module(subparsers, "grdc_validation", _grdc_validation)
+    add_command_from_module(subparsers, "discharge_evaluation", _discharge_evaluation)
     add_command_from_module(subparsers, "latlon", _latlon)
     add_command_from_module(subparsers, "converter_nc_ascii", _file_converter)
     add_command_from_module(subparsers, "landcover_ascii_to_nc", _landcover_ascii_to_nc)

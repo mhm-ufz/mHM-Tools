@@ -887,3 +887,138 @@ def move_reserved_attrs_to_encoding(
 
     encoding = {**coord_encoding, **data_encoding}
     return da, encoding
+
+
+def get_dataset_from_path(
+    path,
+    var_name=None,
+    chunking=None,
+    available_mem_gib=None,
+    chunk_type=ChunkType.SPACE,
+    use_mfdataset=False,
+    engine="netcdf4",
+    normalize_latlon_coords=False,
+    force_decending_y=False,
+    force_ascending_y=False,
+    landcover=False,
+    landcover_year_start=None,
+    available_mem=None,
+    file_name="*.*",
+):
+    """Load a dataset from a file, directory, or pattern.
+
+    This mirrors ``get_xarray_ds_from_file`` for single-file inputs and
+    extends it to directories (multi-file datasets).
+    """
+    if path is None:
+        path_is_none_msg = "Input path is None. Please provide a valid file path, directory path, or glob pattern."
+        with ErrorLogger(logger):
+            raise ValueError(path_is_none_msg)
+
+    if available_mem_gib is None and available_mem is not None:
+        available_mem_gib = available_mem
+        if chunking is None:
+            chunking = True
+    if chunking is None:
+        chunking = False
+
+    def _postprocess(ds_out):
+        lat_key = get_coord_key(ds_out, lat=True, raise_exception=False)
+        lon_key = get_coord_key(ds_out, lon=True, raise_exception=False)
+        if lat_key is not None and (
+            (force_decending_y and ds_out[lat_key].data[0] < ds_out[lat_key].data[-1])
+            or (
+                force_ascending_y and ds_out[lat_key].data[0] > ds_out[lat_key].data[-1]
+            )
+        ):
+            ds_out = ds_out.sel({lat_key: slice(None, None, -1)})
+
+        logger.debug(ds_out)
+        logger.debug(lat_key)
+        logger.debug(lon_key)
+
+        if normalize_latlon_coords:
+            ds_out = normalize_lat_lon(ds_out, lat_key, lon_key, raise_exceptions=False)
+
+        if lon_key is None and lat_key is None:
+            logger.warning("Dataset does not have lon and lat key.")
+        elif lon_key is None or lat_key is None:
+            logger.error("Dataset has only one of lon at lat keys.")
+
+        if chunking and available_mem_gib is not None:
+            ds_out = chunk_dataset(ds_out, chunk_type, available_mem_gib)
+        else:
+            for name in list(ds_out.variables):
+                enc = ds_out.variables[name].encoding
+                enc.pop("chunksizes", None)
+                enc.pop("_ChunkSizes", None)
+                enc.pop("chunks", None)
+                enc["contiguous"] = True
+
+        return ds_out
+
+    def _is_dir_or_list(p):
+        if isinstance(p, list):
+            return True
+        if isinstance(p, str):
+            p = Path(p)
+        return p.is_dir()
+
+    if _is_dir_or_list(path):
+        if not isinstance(path, list):
+            path = Path(path)
+            file_list = list(path.rglob(file_name))
+        if not file_list:
+            with ErrorLogger(logger):
+                msg = f"No files found in {path}."
+                raise ValueError(msg)
+        if len(file_list) == 1:
+            return get_xarray_ds_from_file(
+                file_list[0],
+                var_name=var_name,
+                chunking=chunking,
+                available_mem_gib=available_mem_gib,
+                chunk_type=chunk_type,
+                use_mfdataset=use_mfdataset,
+                engine=engine,
+                normalize_latlon_coords=normalize_latlon_coords,
+                force_decending_y=force_decending_y,
+                force_ascending_y=force_ascending_y,
+                landcover=landcover,
+                landcover_year_start=landcover_year_start,
+            )
+        non_nc = [p for p in file_list if Path(p).suffix != ".nc"]
+        if non_nc:
+            with ErrorLogger(logger):
+                msg = "Multi-file loading supports NetCDF files only."
+                raise ValueError(msg)
+        ds_out = read_dataset(file_list, use_mfdataset=use_mfdataset, engine=engine)
+        return _postprocess(ds_out)
+
+    path_in = path
+    path = Path(path_in)
+
+    if path.is_file():
+        return get_xarray_ds_from_file(
+            path,
+            var_name=var_name,
+            chunking=chunking,
+            available_mem_gib=available_mem_gib,
+            chunk_type=chunk_type,
+            use_mfdataset=use_mfdataset,
+            engine=engine,
+            normalize_latlon_coords=normalize_latlon_coords,
+            force_decending_y=force_decending_y,
+            force_ascending_y=force_ascending_y,
+            landcover=landcover,
+            landcover_year_start=landcover_year_start,
+        )
+
+    path_str = str(path_in)
+    if any(w in path_str for w in ("*", "?", "[", "]")) and path_str.endswith(".nc"):
+        ds_out = read_dataset(path_str, use_mfdataset=use_mfdataset, engine=engine)
+        return _postprocess(ds_out)
+
+    with ErrorLogger(logger):
+        msg = f"Path {path} does not exist."
+        raise ValueError(msg)

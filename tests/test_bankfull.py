@@ -43,7 +43,6 @@ class TestBankfull:
             ],
             dtype=np.float32,
         )
-        yield
 
     def test_bankfull(self):
         mt.post.bankfull_discharge(self.in_file, self.out_file, wetted_perimeter=True)
