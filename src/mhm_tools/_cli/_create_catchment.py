@@ -193,6 +193,14 @@ def add_args(parser):
             "Number of cores used for parallelisation. Only needed if multiple gauges are created."
         ),
     )
+    optional_args.add_argument(
+        "--vars",
+        default="all",
+        help=(
+            "Comma-separated list of output variables to write. "
+            "Default is 'all'. Example: --vars basin,flwdir"
+        ),
+    )
 
 
 def run(args):
@@ -323,4 +331,5 @@ def run(args):
         max_error=args.max_error,
         gauge_ids=gauge_ids,
         ncpus=args.ncpus,
+        output_vars=None if str(args.vars).strip().lower() == "all" else args.vars,
     )

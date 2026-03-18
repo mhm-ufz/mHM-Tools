@@ -37,6 +37,7 @@ FDIR_FILLVALUE = {"d8": 247, "ldd": 255}
 FDIR_SINKVALUE = {"d8": 0, "ldd": 5}
 FACC_FILLVALUE = 0
 FILLVALUE = -9999
+OUTPUT_VARIABLES = ("flwdir", "basin", "uparea_grid", "upgrid", "grdare", "elevtn")
 # use d8 for basinex, ldd for mRM version in Ulysses
 OUTPUT_FTYPE = "ldd"
 CUTOFF_THRESHOLD = 175
@@ -71,6 +72,27 @@ def create_cell_area(ds, lat_name="lat", lon_name="lon"):
             "institution": "Helmholtz Centre for Environmental Research - UFZ",
         },
     )
+
+
+def _normalize_output_vars(output_vars):
+    if output_vars is None:
+        return set(OUTPUT_VARIABLES)
+    if isinstance(output_vars, str):
+        output_vars = [val.strip() for val in output_vars.split(",") if val.strip()]
+    selected = {val.strip() for val in output_vars if str(val).strip()}
+    if not selected:
+        msg = "output_vars must contain at least one variable name."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    unknown = selected - set(OUTPUT_VARIABLES)
+    if unknown:
+        msg = (
+            "Unknown output vars: "
+            f"{sorted(unknown)}. Valid options: {', '.join(OUTPUT_VARIABLES)}."
+        )
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    return selected
 
 
 # CLASSES
@@ -746,6 +768,7 @@ class Catchment:
         self._fdir = fdir_upscaled
         self.get_fdir()
         self.uparea_grid = uparea1  # replaces self.get_facc
+        self.cell_area = None # reset cell area to be recalculated at new resolution when needed
 
         if var == "dem":
             lat_size, lon_size = self.input_da.shape
@@ -843,12 +866,14 @@ class Catchment:
         mask_file=None,
         frame=1,
         buffer=0,
+        variables=None,
     ):
         """Write the produced data to one or multiple files."""
         data_vars = {}
         out_path = Path(out_path)
         if not out_path.is_dir():
             out_path.mkdir(parents=True, exist_ok=True)
+        selected_vars = _normalize_output_vars(variables)
         lat_slice_idx, lon_slice_idx = None, None
         lat_slice, lon_slice = None, None
         if cut_by_basin:
@@ -856,7 +881,7 @@ class Catchment:
         else:
             lat_slice, lon_slice = slice(84, -56), slice(None)
 
-        for var_name in self.VARIABLES:
+        for var_name in (v for v in self.VARIABLES if v in selected_vars):
             data_var = self.processing_data_variable(
                 var_name,
                 cut_by_basin,
@@ -874,29 +899,36 @@ class Catchment:
                     data_var, var_name, out_path, cellsize, format
                 )
         if single_file:
+            if not data_vars:
+                msg = "No data variables available to write."
+                with ErrorLogger(logger):
+                    raise ValueError(msg)
             ds = self.write_basin_id_file(data_vars, frame, out_path)
             # use basin_id to create a mask file
-            self.write_mask_file(ds, mask_file)
-            if self.gauge_ids:
-                logger.info("Writing gauges file.")
-                # create empty ds with mask l0 extend and fill the data_var called data with -9999 values
-                id_da = xr.DataArray(
-                    np.full(ds.basin.shape, -9999, dtype=int),
-                    coords={"lat": ds.lat, "lon": ds.lon},
-                    dims=["lat", "lon"],
-                )
-                id_ds = id_da.to_dataset(name="idgauges")
-                id_ds = write_gauge_id(
-                    ds=id_ds,
-                    id=self.gauge_ids,
-                    lat=self.gauge_lats,
-                    lon=self.gauge_lons,
-                    data_var="idgauges",
-                )
-                write_xarray_to_file(id_ds, out_path / "idgauges.nc", "idgauges")
-                write_xarray_to_file(id_ds, out_path / "idgauges.asc", "idgauges")
+            if "basin" in ds.data_vars:
+                self.write_mask_file(ds, mask_file)
+                if self.gauge_ids:
+                    logger.info("Writing gauges file.")
+                    # create empty ds with mask l0 extend and fill the data_var called data with -9999 values
+                    id_da = xr.DataArray(
+                        np.full(ds.basin.shape, -9999, dtype=int),
+                        coords={"lat": ds.lat, "lon": ds.lon},
+                        dims=["lat", "lon"],
+                    )
+                    id_ds = id_da.to_dataset(name="idgauges")
+                    id_ds = write_gauge_id(
+                        ds=id_ds,
+                        id=self.gauge_ids,
+                        lat=self.gauge_lats,
+                        lon=self.gauge_lons,
+                        data_var="idgauges",
+                    )
+                    write_xarray_to_file(id_ds, out_path / "idgauges.nc", "idgauges")
+                    write_xarray_to_file(id_ds, out_path / "idgauges.asc", "idgauges")
+                else:
+                    logger.info("No gauges to write, skipping gauges file.")
             else:
-                logger.info("No gauges to write, skipping gauges file.")
+                logger.info("No basin variable written; skipping mask/gauge files.")
 
     def write_single_variable_file(
         self, data_var, var_name, out_path, cellsize, format
@@ -1523,6 +1555,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
     max_error=0.1,
     gauge_ids=None,
     ncpus=1,
+    output_vars=None,
 ):
     """Create file containing catchment ids, flowdirection and upstream area from dem or flow direction."""
     logger.info(
@@ -1545,6 +1578,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
         with ErrorLogger(logger):
             msg = f"Unexpected value for var={var}, must be 'fdir' or 'dem'"
             raise ValueError(msg)
+    output_vars = _normalize_output_vars(output_vars)
     chunking = available_mem is not None
     with get_xarray_ds_from_file(
         input_file,
@@ -1559,58 +1593,99 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
 
         logger.info(transform)
 
+        def _compute_requested_outputs(catchment):
+            needs_uparea_grid = "uparea_grid" in output_vars
+            needs_upgrid = "upgrid" in output_vars
+            needs_grdare = "grdare" in output_vars
+            needs_basin = "basin" in output_vars
+
+            if resolutions.l1_resolution is not None and upscale:
+                catchment.upscale(var)
+            elif needs_uparea_grid:
+                catchment.get_facc()
+
+            if needs_basin and catchment.basin is None:
+                catchment.get_basins()
+
+            if needs_grdare:
+                catchment.get_grid_area()
+            elif needs_upgrid:
+                catchment.get_upstream_area()
+
         if gauge_coords is None and is_data_global(input_ds, coordinate_slices):
             logger.info("Creating global basin id file...")
-            temp_file1 = "hydro1.nc"
-            global_catchments = Catchment(
-                ds=input_ds,
-                var_name=var_name,
-                var=var,
-                ftype=ftype,
-                transform=transform,
-                latlon=latlon,
-                out_var_name=temp_file1,
-                do_shift=False,
-                resolutions=resolutions,
-                upscale=upscale,
-            )
-            # create a shifted version of the catchment to avoid border effects
-            temp_file2 = "hydro2.nc"
-            global_catchments_shifted = Catchment(
-                ds=input_ds,
-                var_name=var_name,
-                var=var,
-                ftype=ftype,
-                transform=transform,
-                latlon=latlon,
-                out_var_name=temp_file2,
-                do_shift=True,
-                resolutions=resolutions,
-                upscale=upscale,
-            )
-            catchments = [global_catchments, global_catchments_shifted]
+            if "basin" in output_vars:
+                temp_file1 = "hydro1.nc"
+                global_catchments = Catchment(
+                    ds=input_ds,
+                    var_name=var_name,
+                    var=var,
+                    ftype=ftype,
+                    transform=transform,
+                    latlon=latlon,
+                    out_var_name=temp_file1,
+                    do_shift=False,
+                    resolutions=resolutions,
+                    upscale=upscale,
+                )
+                # create a shifted version of the catchment to avoid border effects
+                temp_file2 = "hydro2.nc"
+                global_catchments_shifted = Catchment(
+                    ds=input_ds,
+                    var_name=var_name,
+                    var=var,
+                    ftype=ftype,
+                    transform=transform,
+                    latlon=latlon,
+                    out_var_name=temp_file2,
+                    do_shift=True,
+                    resolutions=resolutions,
+                    upscale=upscale,
+                )
+                catchments = [global_catchments, global_catchments_shifted]
 
-            for c in catchments:
-                if resolutions.l1_resolution is not None and upscale:
-                    c.upscale(var)
-                else:
-                    c.get_facc()
-                c.get_basins()
-                c.get_grid_area()
-                c.get_upstream_area()
-                c.write(output_path, single_file=True, frame=frame, mask_file=mask_file)
-            # add paths to the temp files
-            temp_file1 = Path(output_path, "hydro1.nc")
-            temp_file2 = Path(output_path, "hydro2.nc")
-            logger.info("Merging catchment files")
-            merge_catchment(
-                temp_file1,
-                temp_file2,
-                Path(output_path, "basin_ids.nc"),
-            )
-            # remove the temporary files
-            temp_file1.unlink()
-            temp_file2.unlink()
+                for c in catchments:
+                    _compute_requested_outputs(c)
+                    c.write(
+                        output_path,
+                        single_file=True,
+                        frame=frame,
+                        mask_file=mask_file,
+                        variables=output_vars,
+                    )
+                # add paths to the temp files
+                temp_file1 = Path(output_path, "hydro1.nc")
+                temp_file2 = Path(output_path, "hydro2.nc")
+                logger.info("Merging catchment files")
+                merge_catchment(
+                    temp_file1,
+                    temp_file2,
+                    Path(output_path, "basin_ids.nc"),
+                )
+                # remove the temporary files
+                temp_file1.unlink()
+                temp_file2.unlink()
+            else:
+                global_catchments = Catchment(
+                    ds=input_ds,
+                    var_name=var_name,
+                    var=var,
+                    ftype=ftype,
+                    transform=transform,
+                    latlon=latlon,
+                    out_var_name="basin_ids.nc",
+                    do_shift=False,
+                    resolutions=resolutions,
+                    upscale=upscale,
+                )
+                _compute_requested_outputs(global_catchments)
+                global_catchments.write(
+                    output_path,
+                    single_file=True,
+                    frame=frame,
+                    mask_file=mask_file,
+                    variables=output_vars,
+                )
             return
         input_ds_sliced = input_ds.sel(
             lat=coordinate_slices["lat"], lon=coordinate_slices["lon"]
@@ -1643,12 +1718,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                 max_error=max_error,
                 gauge_id=gauge_ids if not isinstance(gauge_ids, list) else gauge_ids[0],
             )
-            if resolutions.l1_resolution is not None and upscale:
-                c.upscale(var)
-            else:
-                c.get_facc()
-            c.get_grid_area()
-            c.get_upstream_area()
+            _compute_requested_outputs(c)
             c.write(
                 output_path,
                 single_file=True,
@@ -1656,6 +1726,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                 mask_file=mask_file,
                 frame=frame,
                 buffer=frame,
+                variables=output_vars,
             )
             return
         logger.info("Creating basin id file for region.")
@@ -1790,11 +1861,11 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                         continue
                     c.save_coords(gi["gauge_id"], gi["gauge_lat"], gi["gauge_lon"])
 
-        if resolutions.l1_resolution is not None and upscale:
-            c.upscale(var)
-        else:
-            c.get_facc()
-        c.get_basins()
-        c.get_grid_area()
-        c.get_upstream_area()
-        c.write(output_path, single_file=True, mask_file=mask_file, frame=frame)
+        _compute_requested_outputs(c)
+        c.write(
+            output_path,
+            single_file=True,
+            mask_file=mask_file,
+            frame=frame,
+            variables=output_vars,
+        )
