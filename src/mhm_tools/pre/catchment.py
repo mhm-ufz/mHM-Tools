@@ -608,9 +608,11 @@ class Catchment:
                 if error_bx < error_bu: 
                     logger.info('using BasinEx location')
                     outlet_idx = outlet_idx_bx
+                    error = error_bx
                 else: 
                     logger.info('Using Burek location')
                     outlet_idx = outlet_idx_bu
+                    error = error_bu
             new_lat = float(self.ds.lat.data[outlet_idx[0]])
             new_lon = float(self.ds.lon.data[outlet_idx[1]])
             gauge_lat = new_lat
