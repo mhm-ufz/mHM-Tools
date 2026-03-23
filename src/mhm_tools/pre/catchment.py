@@ -446,6 +446,7 @@ class Catchment:
 
         # Search for candidate cells whose upstream area matches ref_catchment_area
         if method == "basinex":
+            logger.info('Correcting gauge location using basinex method')
             # based on implementation in basinex https://git.ufz.de/schaefed/basin-extractor/-/blame/master/lib/gauges.py?ref_type=heads#L42
             size = float(ref_catchment_area)
             error = 0.0
@@ -498,6 +499,7 @@ class Catchment:
                     method=method,
                 )
         elif method == "burek":
+            logger.info('Correcting gauge location using burek method')
             # based on Burek et. al. 2023 https://essd.copernicus.org/articles/15/5617/2023/
             # implemented https://github.com/iiasa/CWATM_grdc_calibration_stations/blob/78979cbac8f8685d8dbc5330dba6f40a929716f4/scripts/1_findMeritcoord.py#L335
             size = float(ref_catchment_area)
