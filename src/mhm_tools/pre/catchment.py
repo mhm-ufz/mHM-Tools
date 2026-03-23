@@ -572,14 +572,45 @@ class Catchment:
     ):
         """Get best gauge coordinates given target catchment area."""
         if ref_catchment_area is not None:
-            outlet_idx, error = self.find_best_gauge_location(
-                upstream_area,
-                gauge_coords,
-                ref_catchment_area,
-                max_distance_cells,
-                max_error,
-                method=method,
-            )
+            if method != 'all':
+                outlet_idx, error = self.find_best_gauge_location(
+                    upstream_area,
+                    gauge_coords,
+                    ref_catchment_area,
+                    max_distance_cells,
+                    max_error,
+                    method=method,
+                )
+            else:
+                outlet_idx_bx, error_bx = self.find_best_gauge_location(
+                    upstream_area,
+                    gauge_coords,
+                    ref_catchment_area,
+                    max_distance_cells,
+                    max_error,
+                    method='basinex',
+                )
+                outlet_idx_bu, error_bu = self.find_best_gauge_location(
+                    upstream_area,
+                    gauge_coords,
+                    ref_catchment_area,
+                    max_distance_cells,
+                    max_error,
+                    method='burek',
+                )
+                logger.info('Results of basin correction:')
+                logger.info(f'Burek: lat: {float(self.ds.lat.data[outlet_idx_bu[0]])}')
+                logger.info(f'Burek: lon: {float(self.ds.lat.data[outlet_idx_bu[1]])}')
+                logger.info(f'Burek: error {error_bu}')
+                logger.info(f'BasinEx: lat: {float(self.ds.lat.data[outlet_idx_bx[0]])}')
+                logger.info(f'BasinEx: lon: {float(self.ds.lat.data[outlet_idx_bx[1]])}')
+                logger.info(f'BasinEx: error {error_bx}')
+                if error_bx < error_bu: 
+                    logger.info('using BasinEx location')
+                    outlet_idx = outlet_idx_bx
+                else: 
+                    logger.info('Using Burek location')
+                    outlet_idx = outlet_idx_bu
             new_lat = float(self.ds.lat.data[outlet_idx[0]])
             new_lon = float(self.ds.lon.data[outlet_idx[1]])
             gauge_lat = new_lat
