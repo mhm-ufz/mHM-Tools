@@ -201,6 +201,15 @@ def add_args(parser):
             "Default is 'all'. Example: --vars basin,flwdir"
         ),
     )
+    optional_args.add_argument(
+        "--gauge-optimization-method",
+        default="basinex",
+        help=(
+            "Selection of the gauge optimization method. There are two methods implemented: " \
+            "1. basinex: with increaing error (steps of 0.1) it selects all cells in the allowed radius and chooses the one closest to original gauge location. If none is found the allowed error is inceased up to max_error",
+            "2. burek: Based on Burek et. al. 2023 this calculates the metric as (distance_error + 2*facc_error) and chooses the minimum error"
+        )
+    )
 
 
 def run(args):
@@ -305,9 +314,9 @@ def run(args):
     else:
         mask_file = args.mask_file
     coarse_resolutions = Resolution(
-        l1_resolution=args.l1_resolution,
-        l11_resolution=args.l11_resolution,
-        l2_resolution=args.l2_resolution,
+        l1=args.l1_resolution,
+        l11=args.l11_resolution,
+        l2=args.l2_resolution,
         l2_file=args.meteo_file,
     )
     if args.ncpus > 1:
@@ -332,4 +341,5 @@ def run(args):
         gauge_ids=gauge_ids,
         ncpus=args.ncpus,
         output_vars=None if str(args.vars).strip().lower() == "all" else args.vars,
+        gauge_opti_method=args.gauge_optimization_method
     )
