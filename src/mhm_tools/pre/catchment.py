@@ -396,7 +396,7 @@ class Catchment:
             dx_m = res
         return np.sqrt((di * dy_m) ** 2 + (dj * dx_m) ** 2) / 100.0
 
-    def find_best_gauge_location( # noqa: PLR0915
+    def find_best_gauge_location(  # noqa: PLR0915
         self,
         upstream_area,
         gauge_coords,
@@ -446,7 +446,7 @@ class Catchment:
 
         # Search for candidate cells whose upstream area matches ref_catchment_area
         if method == "basinex":
-            logger.info('Correcting gauge location using basinex method')
+            logger.info("Correcting gauge location using basinex method")
             # based on implementation in basinex https://git.ufz.de/schaefed/basin-extractor/-/blame/master/lib/gauges.py?ref_type=heads#L42
             size = float(ref_catchment_area)
             error = 0.0
@@ -484,7 +484,9 @@ class Catchment:
                 logger.info(
                     f"Selected outlet candidate {best_coord} with upstream area {upstream_area[best_coord]} km2 (tolerance {error:.3f})"
                 )
-                return best_coord, error
+                return best_coord, np.abs(
+                    1 - sub[candidates[0][k], candidates[1][k]] / size
+                )
             logger.warning(
                 "No candidate found within tolerance; falling back to nearest stream cell by upstream area magnitude."
             )
@@ -499,7 +501,7 @@ class Catchment:
                     method=method,
                 )
         elif method == "burek":
-            logger.info('Correcting gauge location using burek method')
+            logger.info("Correcting gauge location using burek method")
             # based on Burek et. al. 2023 https://essd.copernicus.org/articles/15/5617/2023/
             # implemented https://github.com/iiasa/CWATM_grdc_calibration_stations/blob/78979cbac8f8685d8dbc5330dba6f40a929716f4/scripts/1_findMeritcoord.py#L335
             size = float(ref_catchment_area)
@@ -524,8 +526,8 @@ class Catchment:
                         "Multiple candidates with the same Burek metric found. The selected candidate can not be uniquely identified."
                     )
                 best_coord = (int(cand_i[k]), int(cand_j[k]))
-                error = candidates_error[k] / size
-                return best_coord, error
+                error = candidates_error[k]
+                return best_coord, error / 100
             logger.warning(
                 "No candidates found within error bounds. Consider increasing max_error or max_distance_cells."
             )
@@ -572,7 +574,7 @@ class Catchment:
     ):
         """Get best gauge coordinates given target catchment area."""
         if ref_catchment_area is not None:
-            if method != 'all':
+            if method != "all":
                 outlet_idx, error = self.find_best_gauge_location(
                     upstream_area,
                     gauge_coords,
@@ -588,7 +590,7 @@ class Catchment:
                     ref_catchment_area,
                     max_distance_cells,
                     max_error,
-                    method='basinex',
+                    method="basinex",
                 )
                 outlet_idx_bu, error_bu = self.find_best_gauge_location(
                     upstream_area,
@@ -596,21 +598,25 @@ class Catchment:
                     ref_catchment_area,
                     max_distance_cells,
                     max_error,
-                    method='burek',
+                    method="burek",
                 )
-                logger.info('Results of basin correction:')
-                logger.info(f'Burek: lat: {float(self.ds.lat.data[outlet_idx_bu[0]])}')
-                logger.info(f'Burek: lon: {float(self.ds.lat.data[outlet_idx_bu[1]])}')
-                logger.info(f'Burek: error {error_bu}')
-                logger.info(f'BasinEx: lat: {float(self.ds.lat.data[outlet_idx_bx[0]])}')
-                logger.info(f'BasinEx: lon: {float(self.ds.lat.data[outlet_idx_bx[1]])}')
-                logger.info(f'BasinEx: error {error_bx}')
-                if error_bx < error_bu: 
-                    logger.info('using BasinEx location')
+                logger.info("Results of basin correction:")
+                logger.info(f"Burek: lat: {float(self.ds.lat.data[outlet_idx_bu[0]])}")
+                logger.info(f"Burek: lon: {float(self.ds.lat.data[outlet_idx_bu[1]])}")
+                logger.info(f"Burek: error {error_bu}")
+                logger.info(
+                    f"BasinEx: lat: {float(self.ds.lat.data[outlet_idx_bx[0]])}"
+                )
+                logger.info(
+                    f"BasinEx: lon: {float(self.ds.lat.data[outlet_idx_bx[1]])}"
+                )
+                logger.info(f"BasinEx: error {error_bx}")
+                if error_bx < error_bu:
+                    logger.info("using BasinEx location")
                     outlet_idx = outlet_idx_bx
                     error = error_bx
-                else: 
-                    logger.info('Using Burek location')
+                else:
+                    logger.info("Using Burek location")
                     outlet_idx = outlet_idx_bu
                     error = error_bu
             new_lat = float(self.ds.lat.data[outlet_idx[0]])
