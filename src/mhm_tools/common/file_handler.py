@@ -1,5 +1,6 @@
 """File handling utils."""
 
+import contextlib
 import logging
 from dataclasses import dataclass
 from enum import Enum
@@ -324,7 +325,8 @@ def get_xarray_ds_from_file(
         msg = f"File path does not point to an existing file: {file_path}"
         with ErrorLogger(logger):
             raise ValueError(msg)
-    if file_path.suffix == ".asc":
+    suffix = file_path.suffix.lower()
+    if suffix == ".asc":
         if landcover:
             logger.info("Reading ascii landcover file.")
             ds_out = read_ascii_to_xarray(
@@ -339,14 +341,40 @@ def get_xarray_ds_from_file(
                 var_name=var_name,
             )
         chunk_type = ChunkType.SPACE
-    elif file_path.suffix == ".nc":
+    elif suffix == ".nc":
         ds_out = read_dataset(
             file_path=file_path,
             use_mfdataset=use_mfdataset,
             engine=engine,
         )
+    elif suffix in {".tif", ".tiff"}:
+        import rioxarray as rxr
+
+        da = rxr.open_rasterio(file_path)
+        if var_name is not None:
+            da = da.rename(var_name)
+        else:
+            da.name = "data"
+        if "band" in da.dims and da.sizes.get("band", 0) == 1:
+            da = da.squeeze("band", drop=True)
+        nodata = None
+        with contextlib.suppress(Exception):
+            nodata = da.rio.nodata
+        if nodata is not None:
+            da.attrs.setdefault("nodata_value", nodata)
+            da.attrs.setdefault("_FillValue", nodata)
+        if "x" in da.coords:
+            da["x"].attrs.setdefault("axis", "X")
+        if "y" in da.coords:
+            da["y"].attrs.setdefault("axis", "Y")
+        ds_out = da.to_dataset()
+        if "spatial_ref" in ds_out.coords:
+            ds_out = ds_out.drop_vars("spatial_ref")
     else:
-        msg = f"Reading file types other than asci and netcdf is not implemented. The suffix of the file was: {file_path.suffix}"
+        msg = (
+            "Reading file types other than asci, netcdf, and geotiff is not "
+            f"implemented. The suffix of the file was: {file_path.suffix}"
+        )
         with ErrorLogger(logger):
             raise NotImplementedError(msg)
     lat_key = get_coord_key(ds_out, lat=True, raise_exception=False)
