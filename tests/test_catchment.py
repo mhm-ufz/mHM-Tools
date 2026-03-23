@@ -292,12 +292,11 @@ class TestCatchment(unittest.TestCase):
 
     def test_distance_100m_units_scales_with_resolution(self):
         res_small = 1.0 / 1200.0  # 3 arc sec
-        res_large = 1.0 / 600.0   # 6 arc sec
+        res_large = 1.0 / 600.0  # 6 arc sec
         lon_small = np.array([0.0, res_small, 2 * res_small], dtype=float)
         lat_small = np.array([res_small, 0.0, -res_small], dtype=float)
         lon_large = np.array([0.0, res_large, 2 * res_large], dtype=float)
         lat_large = np.array([res_large, 0.0, -res_large], dtype=float)
-
 
         ds_small = xr.Dataset(
             {"dem": (["lat", "lon"], np.zeros((len(lat_small), len(lon_small))))},
@@ -584,9 +583,7 @@ class TestCatchment(unittest.TestCase):
             )
 
         snapped = []
-        resolutions = catchment.Resolution(
-            l0=0.001953125, l1=1 / 32
-        )
+        resolutions = catchment.Resolution(l0=0.001953125, l1=1 / 32)
         for idx, (lat, lon) in enumerate(gauge_coords):
             out_dir = self.tmp_path / f"single_{idx}"
             out_dir.mkdir(parents=True, exist_ok=True)
@@ -668,9 +665,7 @@ class TestCatchment(unittest.TestCase):
                 else list(ds.data_vars)[0]
             )
 
-        resolutions = catchment.Resolution(
-            l0=0.001953125, l1=1 / 32
-        )
+        resolutions = catchment.Resolution(l0=0.001953125, l1=1 / 32)
 
         seq_dir = self.tmp_path / "seq"
         par_dir = self.tmp_path / "par"
