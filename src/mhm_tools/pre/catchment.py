@@ -484,8 +484,13 @@ class Catchment:
                 logger.info(
                     f"Selected outlet candidate {best_coord} with upstream area {upstream_area[best_coord]} km2 (tolerance {error:.3f})"
                 )
-                return best_coord, np.abs(
-                    1 - sub[candidates[0][k], candidates[1][k]] / size
+                distanance_100m = self._distance_100m_units(
+                    cand_i[k] - gi, cand_j[k] - gj, lat_deg=lat_deg
+                )
+                return (
+                    best_coord,
+                    np.abs(1 - sub[candidates[0][k], candidates[1][k]] / size),
+                    distanance_100m,
                 )
             logger.warning(
                 "No candidate found within tolerance; falling back to nearest stream cell by upstream area magnitude."
@@ -527,7 +532,7 @@ class Catchment:
                     )
                 best_coord = (int(cand_i[k]), int(cand_j[k]))
                 error = candidates_error[k]
-                return best_coord, error / 100
+                return best_coord, error / 100, candidates_distance[k]
             logger.warning(
                 "No candidates found within error bounds. Consider increasing max_error or max_distance_cells."
             )
@@ -575,7 +580,7 @@ class Catchment:
         """Get best gauge coordinates given target catchment area."""
         if ref_catchment_area is not None:
             if method != "all":
-                outlet_idx, error = self.find_best_gauge_location(
+                outlet_idx, error, distance_error = self.find_best_gauge_location(
                     upstream_area,
                     gauge_coords,
                     ref_catchment_area,
@@ -584,26 +589,31 @@ class Catchment:
                     method=method,
                 )
             else:
-                outlet_idx_bx, error_bx = self.find_best_gauge_location(
-                    upstream_area,
-                    gauge_coords,
-                    ref_catchment_area,
-                    max_distance_cells,
-                    max_error,
-                    method="basinex",
+                outlet_idx_bx, error_bx, distance_error_bx = (
+                    self.find_best_gauge_location(
+                        upstream_area,
+                        gauge_coords,
+                        ref_catchment_area,
+                        max_distance_cells,
+                        max_error,
+                        method="basinex",
+                    )
                 )
-                outlet_idx_bu, error_bu = self.find_best_gauge_location(
-                    upstream_area,
-                    gauge_coords,
-                    ref_catchment_area,
-                    max_distance_cells,
-                    max_error,
-                    method="burek",
+                outlet_idx_bu, error_bu, distance_error_bu = (
+                    self.find_best_gauge_location(
+                        upstream_area,
+                        gauge_coords,
+                        ref_catchment_area,
+                        max_distance_cells,
+                        max_error,
+                        method="burek",
+                    )
                 )
                 logger.info("Results of basin correction:")
                 logger.info(f"Burek: lat: {float(self.ds.lat.data[outlet_idx_bu[0]])}")
                 logger.info(f"Burek: lon: {float(self.ds.lat.data[outlet_idx_bu[1]])}")
                 logger.info(f"Burek: error {error_bu}")
+                logger.info(f"Burek: distance chamge {distance_error_bu/10}km")
                 logger.info(
                     f"BasinEx: lat: {float(self.ds.lat.data[outlet_idx_bx[0]])}"
                 )
@@ -611,20 +621,23 @@ class Catchment:
                     f"BasinEx: lon: {float(self.ds.lat.data[outlet_idx_bx[1]])}"
                 )
                 logger.info(f"BasinEx: error {error_bx}")
+                logger.info(f"BasinEx: distance chamge {distance_error_bx/10}km")
                 if error_bx < error_bu:
                     logger.info("using BasinEx location")
                     outlet_idx = outlet_idx_bx
                     error = error_bx
+                    distance_error = distance_error_bx
                 else:
                     logger.info("Using Burek location")
                     outlet_idx = outlet_idx_bu
                     error = error_bu
+                    distance_error = distance_error_bu
             new_lat = float(self.ds.lat.data[outlet_idx[0]])
             new_lon = float(self.ds.lon.data[outlet_idx[1]])
             gauge_lat = new_lat
             gauge_lon = new_lon
             logger.info(
-                f"Moved outlet latitude {float(gauge_coords[0])} to {new_lat} and longitude {float(gauge_coords[1])} to {new_lon}."
+                f"Moved outlet latitude {float(gauge_coords[0])} by {distance_error/10:.2}km to {new_lat} and longitude {float(gauge_coords[1])} to {new_lon}."
             )
 
         else:
