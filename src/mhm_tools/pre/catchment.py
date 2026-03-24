@@ -238,6 +238,7 @@ class Catchment:
             self.out_var_name = f"{var_name}.nc"
         self.do_shift = do_shift
         self.latlon = latlon
+        self.latlon = latlon
         self.ds = ds
         logger.debug(f"self.ds: {self.ds}")
         self.transform = transform
@@ -408,7 +409,7 @@ class Catchment:
         raise_on_fallback=True,
     ):
         """Find best gauge location given reference gauge location, refernce cathcment area and allowed area and value deviation."""
-        if not recursion:
+        if not recursion and method == "basinex":
             max_distance_cells = max_distance_cells // 2
 
         # Determine whether gauge_coords are lat/lon floats or array indices
@@ -535,16 +536,6 @@ class Catchment:
             logger.warning(
                 "No candidates found within error bounds. Consider increasing max_error or max_distance_cells."
             )
-            if not recursion:
-                return self.find_best_gauge_location(
-                    upstream_area,
-                    gauge_coords,
-                    ref_catchment_area,
-                    max_distance_cells,
-                    max_error,
-                    recursion=True,
-                    method=method,
-                )
         else:
             msg = f"Unknown method: {method}. Valid options are 'basinex' and 'burek'."
             with ErrorLogger(logger):

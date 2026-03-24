@@ -149,6 +149,16 @@ def add_args(parser):
         ),
     )
     optional_args.add_argument(
+        "--gauge-optimization-method",
+        default="basinex",
+        help=(
+            "Selection of the gauge optimization method. There are two methods implemented: "
+            "1. basinex: with increaing error (steps of 0.1) it selects all cells in the allowed radius and chooses the one closest to original gauge location. If none is found the allowed error is inceased up to max_error"
+            "2. burek: Based on Burek et. al. 2023 this calculates the metric as (distance_error + 2*facc_error) and chooses the minimum error"
+            "3. all: Uses both loggs comparison and then uses the one with over error value usually basinex"
+        ),
+    )
+    optional_args.add_argument(
         "--ref_catchment_area",
         default=None,
         help=(

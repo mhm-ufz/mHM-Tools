@@ -30,6 +30,23 @@ class TestCatchment(unittest.TestCase):
             latlon=True,
         )
 
+    def _make_small_catchment(self):
+        lon = np.array([0, 1, 2, 3, 4], dtype=float)
+        lat = np.array([4, 3, 2, 1, 0], dtype=float)
+        data = np.zeros((len(lat), len(lon)), dtype=float)
+        ds = xr.Dataset(
+            {"dem": (["lat", "lon"], data)},
+            coords={"lon": lon, "lat": lat},
+        )
+        return catchment.Catchment(
+            ds,
+            "dem",
+            var="dem",
+            ftype="ldd",
+            transform=(1.0, 0.0, 0.0, 0.0, 1.0, 0.0),
+            latlon=True,
+        )
+
     def setUp(self):
         lon = np.linspace(-180, 180, 360)
         lat = np.linspace(90, -90, 180)
