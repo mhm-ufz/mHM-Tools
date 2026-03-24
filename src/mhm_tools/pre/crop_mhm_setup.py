@@ -247,7 +247,9 @@ def crop_file_with_header(ds_in, file_path, output_path, lonslice, latslice):
     logger.debug(f"x: {index_x_min}, {index_x_max}")
     logger.debug(f"y: {index_y_min}, {index_y_max}")
     # write header file
-    header_out_path = output_path / header.name
+    header_out_dir = output_path if output_path.is_dir() else output_path.parent
+    header_out_dir.mkdir(parents=True, exist_ok=True)
+    header_out_path = header_out_dir / header.name
     xll = header_information["xllcorner"] + header_information["cellsize"] * index_x_min
     yll = header_information["yllcorner"] + header_information["cellsize"] * (
         header_information["nrows"] - index_y_max
@@ -401,6 +403,14 @@ def crop_file(  # noqa: PLR0912 PLR0915
     output_file.parent.mkdir(parents=True, exist_ok=True)
     if output_suffix is not None:
         output_file = output_file.with_suffix(output_suffix)
+    if output_file.exists() and output_file.is_dir():
+        msg = (
+            f"Target path {output_file} is a directory. "
+            "This can happen if a previous run wrote header.txt into a file path. "
+            "Please remove or rename this directory and retry."
+        )
+        with ErrorLogger(logger):
+            raise ValueError(msg)
     latlon_files = LatlonFiles()
     if output_file.is_file() and not overwrite:
         logger.info("Target file already exists. Cropping is skipped.")
