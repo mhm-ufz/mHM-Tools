@@ -141,13 +141,6 @@ def add_args(parser):
         type=int,
         help=("Number of boostrap experiments"),
     )
-    # optional.add_argument(
-    #     "--direct_comparison",
-    #     action="store_true",
-    #     dest="direct_comparison",
-    #     required=False,
-    #     help=("Use no statistics but compare timeseries directly. Needs ref_path."),
-    # )
     optional.add_argument(
         "--start_year",
         required=False,
@@ -298,7 +291,7 @@ def run(args):
         n_cpus=args.ncpus,
         n_bootstrap_years=args.n_boostrap_years,
         n_bootstrap_selections=args.n_bootstrap_selections,
-        direct_comparison=args.n_bootstrap_selections is None
+        direct_comp=args.n_bootstrap_selections is None
         or args.n_boostrap_years is None,
         year_slice=year_slice,
         avaiable_mem=available_mem,
