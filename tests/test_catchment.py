@@ -217,14 +217,16 @@ class TestCatchment(unittest.TestCase):
         upstream_area = np.zeros((5, 5), dtype=float)
         upstream_area[2, 1] = 100.0
         upstream_area[2, 3] = 105.0
-        best_coord_basinex, error_basinex, distance_basinex = c.find_best_gauge_location(
-            upstream_area,
-            gauge_coords=(2.0, 2.0),
-            ref_catchment_area=103.0,
-            max_distance_cells=4,
-            max_error=0.05,
-            method="basinex",
-            raise_on_fallback=True,
+        best_coord_basinex, error_basinex, distance_basinex = (
+            c.find_best_gauge_location(
+                upstream_area,
+                gauge_coords=(2.0, 2.0),
+                ref_catchment_area=103.0,
+                max_distance_cells=4,
+                max_error=0.05,
+                method="basinex",
+                raise_on_fallback=True,
+            )
         )
         best_coord_burek, error_burek, distance_burek = c.find_best_gauge_location(
             upstream_area,
@@ -245,14 +247,16 @@ class TestCatchment(unittest.TestCase):
         upstream_area[2, 1] = 100.0
         upstream_area[0, 2] = 98.2
         upstream_area[3, 2] = 102.0
-        best_coord_basinex, error_basinex, distance_basinex = c.find_best_gauge_location(
-            upstream_area,
-            gauge_coords=(2.0, 2.0),
-            ref_catchment_area=100.0,
-            max_distance_cells=4,
-            max_error=0.05,
-            method="basinex",
-            raise_on_fallback=True,
+        best_coord_basinex, error_basinex, distance_basinex = (
+            c.find_best_gauge_location(
+                upstream_area,
+                gauge_coords=(2.0, 2.0),
+                ref_catchment_area=100.0,
+                max_distance_cells=4,
+                max_error=0.05,
+                method="basinex",
+                raise_on_fallback=True,
+            )
         )
         best_coord_burek, error_burek, distance_burek = c.find_best_gauge_location(
             upstream_area,
