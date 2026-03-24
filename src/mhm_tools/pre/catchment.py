@@ -443,7 +443,7 @@ class Catchment:
             logger.warning("Search bbox empty, falling back to full-domain search")
             sub = upstream_area
             i_min, j_min = 0, 0
-
+        lat_deg = float(self.ds.lat.data[gi]) if self.latlon else None
         # Search for candidate cells whose upstream area matches ref_catchment_area
         if method == "basinex":
             logger.info("Correcting gauge location using basinex method")
@@ -518,7 +518,6 @@ class Catchment:
                 cand_j = candidates_indices[1] + j_min
                 di = cand_i - gi
                 dj = cand_j - gj
-                lat_deg = float(self.ds.lat.data[gi]) if self.latlon else None
                 candidates_distance = self._distance_100m_units(di, dj, lat_deg=lat_deg)
                 # candidates_distance = np.sqrt(di**2+dj**2)*0.92
                 candidates_error = 100 * np.abs(
