@@ -1135,7 +1135,7 @@ def plot_map(
 
 
 @log_errors()
-def plot_cdf(df, output_path, boostrap_iterations=None, mask_any=True):  # noqa: ARG001
+def plot_cdf(df, output_path, boostrap_iterations=None, mask_any=True):  # noqa: ARG001, PLR0915
     """Create CDF plots for alpha, beta, and gamma.
 
     The plots are generated for different subselections
@@ -1186,8 +1186,7 @@ def plot_cdf(df, output_path, boostrap_iterations=None, mask_any=True):  # noqa:
 
     # --- 2) Check number of unique IDs ---
     unique_ids = df["id"].unique()
-    logger.info(f'Creating a cdf plot with {len(unique_ids)} stations')
-
+    logger.info(f"Creating a cdf plot with {len(unique_ids)} stations")
 
     logger.info("All values")
     for var in variables:
@@ -1268,9 +1267,8 @@ def plot_cdf(df, output_path, boostrap_iterations=None, mask_any=True):  # noqa:
                 continue
             fig, ax = plt.subplots(figsize=(6, 4))
             for i, region_id in enumerate(region_ids):
-                s = (
-                    df_var.loc[df_var["wmo_region"] == region_id, var]
-                    .to_numpy(dtype=float)
+                s = df_var.loc[df_var["wmo_region"] == region_id, var].to_numpy(
+                    dtype=float
                 )
                 s = s[~np.isnan(s)]
                 if s.size == 0:
@@ -1306,5 +1304,4 @@ def plot_cdf(df, output_path, boostrap_iterations=None, mask_any=True):  # noqa:
             fig.savefig(output_path / f"cdf_{var}_by_wmo_region.png", dpi=450)
             plt.close(fig)
 
-    
     logger.info("Done! Check the saved PNG files for your CDF plots.")

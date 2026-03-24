@@ -303,7 +303,7 @@ def chunk_dataset(ds, chunk_type, available_mem_gib):
             raise e
 
 
-def get_xarray_ds_from_file(
+def get_xarray_ds_from_file( # noqa: PLR0912
     file_path,
     var_name=None,
     chunking=False,
