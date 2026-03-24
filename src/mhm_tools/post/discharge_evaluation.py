@@ -511,9 +511,14 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
                     sim_data_in, observed_data_in
                 )
 
-            logger.info("Selecting data for date slice...")
+            logger.info("Cropping data...")
+            if date_slice is not None and date_slice != slice(None, None):
+                logger.info(
+                    f"Selecting data from {date_slice.start} to {date_slice.stop}..."
+                )
             obs_discharge_data = obs_rs[observed_variable].sel(time=date_slice)
             if slicing_condition is not None:
+                logger.info("Applying spatial slicing to sim data...")
                 sim_data_cropped = sim_rs.sel(
                     {
                         get_coord_key(sim_rs, lat=True): slice(lat_max, lat_min),
@@ -524,6 +529,9 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
                 sim_data_cropped = sim_rs.sel(time=date_slice)
 
             if direct_comparison:
+                logger.info(
+                    "Selecting overlapping time period for direct comparison..."
+                )
                 overlapping_time_slice = get_overlapping_time_slice(sim_rs, obs_rs)
                 logger.info(
                     f"Overlapping time is from {overlapping_time_slice.start} "
@@ -548,7 +556,6 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
     y = y.sel(id=valid_ids)
     facc = facc.sel(id=valid_ids)
     obs_discharge_data = obs_discharge_data.sel(id=valid_ids)
-    sim_data_cropped = sim_data_cropped.sel(id=valid_ids)
     logger.info(
         f"There are {len(gauge_ids.data)} gauges with observed data in the selected time range."
     )
@@ -644,6 +651,7 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
                 msg = "Could not determine simulation discharge variable."
                 with ErrorLogger(logger):
                     raise ValueError(msg)
+            logger.info(f"Extracting discharge variable '{sim_variable}' from nodes...")
             sim, matched_x, matched_y, gauge_ids_with_values = (
                 get_sim_data_for_gauges_from_nodes(
                     sim_data_cropped,
@@ -684,6 +692,26 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
                 simulation_discharge = xr.concat(sim, dim="id")
             else:
                 simulation_discharge = sim
+        # Ensure sim ids align with observed valid_ids (node outputs may miss some)
+        sim_ids = np.asarray(simulation_discharge["id"].values)
+        valid_id_values = np.asarray(valid_ids)
+        common_ids = np.intersect1d(sim_ids, valid_id_values)
+        if common_ids.size == 0:
+            msg = "No overlapping gauge ids between simulation and observations."
+            with ErrorLogger(logger):
+                raise ValueError(msg)
+        ids_arr = np.asarray(gauge_ids_with_values)
+        keep_mask = np.isin(ids_arr, common_ids)
+        if not np.all(keep_mask):
+            logger.info(
+                "Dropping %d gauges missing in simulation output.",
+                int((~keep_mask).sum()),
+            )
+        gauge_ids_with_values = ids_arr[keep_mask]
+        x_new = np.asarray(x_new)[keep_mask]
+        y_new = np.asarray(y_new)[keep_mask]
+        facc_new = np.asarray(facc_new)[keep_mask]
+        simulation_discharge = simulation_discharge.sel(id=gauge_ids_with_values)
         if "lat" in simulation_discharge.dims or "lat" in simulation_discharge.coords:
             simulation_discharge = simulation_discharge.drop_dims(["lat"])
         if "lon" in simulation_discharge.dims or "lon" in simulation_discharge.coords:
@@ -1133,40 +1161,34 @@ def plot_cdf(df, output_path, boostrap_iterations=None, mask_any=True):  # noqa:
     logger.info(
         f"   {len(df.dropna(subset=['alpha', 'beta', 'gamma'], how='any')['id'].unique())} have all values "
     )
+    df_all = df.copy()
     df = df.dropna(subset=["alpha", "beta", "gamma"], how="any")
     logger.info(df.head())
     variables = ["alpha", "beta", "gamma", "kge", "nse"]
+    regions = {
+        1: "Africa",
+        2: "Asia",
+        3: "South America",
+        4: "North/Central America",
+        5: "SW Pacific",
+        6: "Europe",
+    }
+    cb_colors = [
+        "#000000",
+        "#E69F00",
+        "#56B4E9",
+        "#009E73",
+        "#F0E442",
+        "#0072B2",
+        "#D55E00",
+        "#CC79A7",
+    ]
 
     # --- 2) Check number of unique IDs ---
     unique_ids = df["id"].unique()
+    logger.info(f'Creating a cdf plot with {len(unique_ids)} stations')
 
-    # --- 3 & 4) Branch based on the number of unique IDs ---
-    # if n_ids < 9 or plot_all:
-    #     logger.info("Single ids")
-    #     # Plot a separate CDF for each ID, for each variable
-    #     for var in variables:
-    #         plt.figure(figsize=(6, 4))
-    #         for uid in unique_ids:
-    #             # Extract all values of `var` for the given ID
-    #             subdata = df.loc[df["id"] == uid, var].sort_values()
-    #             if len(subdata) == 0:
-    #                 continue  # no data for this ID
 
-    #             # Compute the empirical CDF
-    #             cdfvals = np.arange(1, len(subdata) + 1) / float(len(subdata))
-
-    #             # Plot
-    #             plt.plot(subdata, cdfvals, label=f"id = {int(uid)}")
-
-    #         plt.title(f"CDF of {var} (Separate lines per ID)")
-    #         plt.xlabel(var)
-    #         plt.ylabel("CDF")
-    #         plt.legend()
-    #         plt.tight_layout()
-    #         plt.savefig(output_path / f"cdf_{var}_by_id.png", dpi=150)
-    #         plt.close()
-
-    # if n_ids < 10 or plot_all:
     logger.info("All values")
     for var in variables:
         plt.figure(figsize=(6, 4))
@@ -1220,23 +1242,69 @@ def plot_cdf(df, output_path, boostrap_iterations=None, mask_any=True):  # noqa:
         plt.savefig(output_path / f"cdf_{var}_all_stations.png", dpi=450)
         plt.close()
 
-    # if n_ids > 9 or plot_all:
-    #     # Many IDs => plot the distribution of mean values by ID, for each variable
-    #     # 1) Compute average (mean) across all rows belonging to each ID
-    #     means_by_id = df.groupby("id")[variables].mean()
+    # --- 3) CDF by WMO region (only if more than one region present) ---
+    def _wmo_region_from_id(val):
+        if pd.isna(val):
+            return np.nan
+        try:
+            s = str(int(val))
+        except Exception:
+            s = str(val)
+        s = s.lstrip("0")
+        if not s or not s[0].isdigit():
+            return np.nan
+        return int(s[0])
 
-    #     for var in variables:
-    #         # This is now one mean value per ID
-    #         data = means_by_id[var].sort_values()
-    #         cdfvals = np.arange(1, len(data) + 1) / float(len(data))
+    df_region = df_all.copy()
+    df_region["wmo_region"] = df_region["id"].apply(_wmo_region_from_id)
+    region_ids = np.sort(df_region["wmo_region"].dropna().unique())
+    if len(region_ids) > 1:
+        logger.info(
+            f"Creating CDF plots by WMO region for regions: {region_ids.tolist()}"
+        )
+        for var in variables:
+            df_var = df_region.dropna(subset=[var, "wmo_region"]).copy()
+            if df_var.empty:
+                continue
+            fig, ax = plt.subplots(figsize=(6, 4))
+            for i, region_id in enumerate(region_ids):
+                s = (
+                    df_var.loc[df_var["wmo_region"] == region_id, var]
+                    .to_numpy(dtype=float)
+                )
+                s = s[~np.isnan(s)]
+                if s.size == 0:
+                    continue
+                s.sort()
+                cdf = (np.arange(s.size) + 1) / s.size
+                med = np.nanmedian(s)
+                region_name = regions.get(int(region_id), f"Region {region_id}")
+                color = cb_colors[i % len(cb_colors)]
+                ax.plot(
+                    s,
+                    cdf,
+                    marker=".",
+                    linestyle="none",
+                    color=color,
+                    label=region_name,
+                    markersize=4,
+                )
+                ax.axvline(med, color=color, linestyle="dotted", linewidth=1)
 
-    #         plt.figure(figsize=(6, 4))
-    #         plt.plot(data, cdfvals, marker="o")
-    #         plt.title(f"CDF of mean {var} across {n_ids} IDs")
-    #         plt.xlabel(f"mean {var}")
-    #         plt.ylabel("CDF")
-    #         plt.tight_layout()
-    #         plt.savefig(output_path / f"cdf_{var}_mean_across_ids.png", dpi=150)
-    #         plt.close()
+            ax.set_xlabel(var)
+            ax.set_ylabel("CDF")
+            ax.grid(True, alpha=0.3)
+            ax.legend(title="WMO Region", ncols=min(len(region_ids), 6), fontsize=8)
+            ax.set_title(f"CDF of {var} by WMO region")
+            ax.set_xlim(min(df_var[var].min(), 0), max(df_var[var].max(), 1))
+            if var in ["kge", "nse"]:
+                ax.set_xlim(-0.5, 1.0)
+                ax.set_ylim(0.0, 1.01)
+            else:
+                ax.set_ylim(0, 1.05)
+            fig.tight_layout()
+            fig.savefig(output_path / f"cdf_{var}_by_wmo_region.png", dpi=450)
+            plt.close(fig)
 
+    
     logger.info("Done! Check the saved PNG files for your CDF plots.")
