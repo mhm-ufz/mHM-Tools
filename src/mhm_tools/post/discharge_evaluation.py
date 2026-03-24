@@ -1135,7 +1135,9 @@ def plot_map(
 
 
 @log_errors()
-def plot_cdf(df, output_path, boostrap_iterations=None, mask_any=True):  # noqa: ARG001, PLR0915
+def plot_cdf(
+    df, output_path, boostrap_iterations=None, mask_any=True
+):  # noqa: ARG001, PLR0915
     """Create CDF plots for alpha, beta, and gamma.
 
     The plots are generated for different subselections

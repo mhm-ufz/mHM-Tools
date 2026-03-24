@@ -213,20 +213,23 @@ def get_files(path, n_bootstrap_years=None, available_years=None, file_name="*.*
     """Recursevely find all netcdf files in directory."""
     nc_files = []
     # Search for .nc files at each depth level
-    all_years = get_years_from_path(path, file_name=file_name)
-    if available_years is not None:
-        selectable_years = [y for y in all_years if y in available_years]
+    if len(year_structure_paths(path, file_name=file_name)) > 0:
+        all_years = get_years_from_path(path, file_name=file_name)
+        if available_years is not None:
+            selectable_years = [y for y in all_years if y in available_years]
+        else:
+            selectable_years = all_years
+        logger.debug(
+            f"selectable years are {selectable_years} - n_bootstrap_years is {n_bootstrap_years}"
+        )
+        if n_bootstrap_years is not None:
+            # needs fixed folder structure of y/m/file
+            selectable_years = random.choices(selectable_years, k=n_bootstrap_years)
+        for year in selectable_years:
+            folder_path = path / str(year)
+            nc_files.extend(list(folder_path.rglob(file_name)))
     else:
-        selectable_years = all_years
-    logger.debug(
-        f"selectable years are {selectable_years} - n_bootstrap_years is {n_bootstrap_years}"
-    )
-    if n_bootstrap_years is not None:
-        # needs fixed folder structure of y/m/file
-        selectable_years = random.choices(selectable_years, k=n_bootstrap_years)
-    for year in selectable_years:
-        folder_path = path / str(year)
-        nc_files.extend(folder_path.rglob(file_name))
+        nc_files = list(path.rglob(file_name))
     return nc_files
 
 
@@ -1313,27 +1316,21 @@ def regridd_to_higher_spatial_resolution(ds1, ds2):
 def get_years_from_path(path, raise_exception=True, file_name="*.*"):
     """Get available years from a dataset folder structure or file."""
     if path.is_dir():
+        if len(year_structure_paths(path, file_name=file_name)) == 0:
+            with get_dataset_from_path(list(path.rglob(file_name))) as ds:
+                if "time" in ds.coords:
+                    return [int(y) for y in np.unique(ds.time.dt.year.data)]
+                msg = f"No year structure found in directory {path} and files do not contain a time coordinate to determine years."
+                with ErrorLogger(logger):
+                    raise ValueError(msg)
         return [int(p.name) for p in year_structure_paths(path, file_name=file_name)]
     if path.is_file():
         with get_xarray_ds_from_file(path, force_decending_y=True) as input_ds:
-            return [int(y) for y in np.unique(input_ds.time.dt.year.data)]
-    if raise_exception:
-        msg = f"The provided path {path} is neither file nor directory."
-        with ErrorLogger(logger):
-            raise ValueError(msg)
-    return []
-
-
-def get_files_from_path(path, raise_exception=True, file_name="*.*"):
-    """Get years for one dataset from the folder structure or the xarray dataset."""
-    if path.is_dir():
-        all_files = []
-        all_dirs = year_structure_paths(path, file_name=file_name)
-        for dir in all_dirs:
-            all_files.extend(list(dir.glob(file_name)))
-        return all_files
-    if path.is_file():
-        return [path]
+            if "time" in input_ds.coords:
+                return [int(y) for y in np.unique(input_ds.time.dt.year.data)]
+            msg = f"File {path} does not contain a time coordinate to determine years."
+            with ErrorLogger(logger):
+                raise ValueError(msg)
     if raise_exception:
         msg = f"The provided path {path} is neither file nor directory."
         with ErrorLogger(logger):

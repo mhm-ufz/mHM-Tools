@@ -252,7 +252,7 @@ def _ensure_bounds_exist(ds: xr.Dataset, bounds_dim: str = "bnds") -> None:
         )
 
 
-def sanitize_nc_encoding(ds: "xr.Dataset", encoding: dict) -> dict: # noqa: PLR0912
+def sanitize_nc_encoding(ds: "xr.Dataset", encoding: dict) -> dict:  # noqa: PLR0912
     """Return a safe encoding dict and clean ds attrs so netCDF4 won't error."""
     enc_out = {}
     for name in ds.data_vars:
