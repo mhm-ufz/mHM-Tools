@@ -9,6 +9,7 @@ Authors
 
 import itertools
 import logging
+from glob import glob
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -168,8 +169,29 @@ def _reduce_node_coord(da):
 
 def _load_discharge_nc_collection(model_data_path, date_slice=None):
     """Load discharge.nc files containing Qsim/Qobs_<id> and return sim/obs datasets."""
-    path = Path(model_data_path)
-    discharge_files = sorted(path.rglob("discharge.nc")) if path.is_dir() else [path]
+    def _expand_paths(path_like):
+        if isinstance(path_like, (list, tuple)):
+            return [Path(p) for p in path_like]
+        path_str = str(path_like)
+        if any(w in path_str for w in ("*", "?", "[", "]")):
+            matches = [Path(p) for p in glob(path_str)]
+            if not matches:
+                msg = f"No paths match pattern {path_str}"
+                with ErrorLogger(logger):
+                    raise FileNotFoundError(msg)
+            return matches
+        return [Path(path_like)]
+
+    discharge_files = []
+    for path in _expand_paths(model_data_path):
+        if path.is_dir():
+            discharge_files.extend(sorted(path.rglob("discharge.nc")))
+        elif path.is_file():
+            discharge_files.append(path)
+        else:
+            msg = f"Path {path} does not exist."
+            with ErrorLogger(logger):
+                raise FileNotFoundError(msg)
     if not discharge_files:
         msg = f"No discharge.nc files found under {model_data_path}"
         with ErrorLogger(logger):
