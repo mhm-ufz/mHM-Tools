@@ -466,6 +466,18 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
             obs_discharge_data = obs_discharge_data.sel(time=overlapping_time_slice)
             sim_data_cropped = sim_data_cropped.sel(time=overlapping_time_slice)
         gauge_ids = obs_discharge_data["id"]
+        # Ensure unique gauge ids (xarray .sel requires unique index)
+        id_index = pd.Index(gauge_ids.values)
+        if not id_index.is_unique:
+            _, unique_pos = np.unique(id_index.values, return_index=True)
+            unique_pos = np.sort(unique_pos)
+            dup_count = len(id_index) - len(unique_pos)
+            logger.warning(
+                f"Found {dup_count} duplicate gauge id(s). Keeping first occurrence."
+            )
+            gauge_ids = gauge_ids.isel(id=unique_pos)
+            obs_discharge_data = obs_discharge_data.isel(id=unique_pos)
+            sim_data_cropped = sim_data_cropped.isel(id=unique_pos)
         # facc/x/y not available in discharge.nc
         x = xr.DataArray(
             np.full(gauge_ids.size, np.nan), dims=["id"], coords={"id": gauge_ids}
