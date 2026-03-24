@@ -511,6 +511,21 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
                     sim_data_in, observed_data_in
                 )
 
+            # Ensure unique gauge ids (xarray .sel requires unique index)
+            id_index = pd.Index(gauge_ids.values)
+            if not id_index.is_unique:
+                _, unique_pos = np.unique(id_index.values, return_index=True)
+                unique_pos = np.sort(unique_pos)
+                dup_count = len(id_index) - len(unique_pos)
+                logger.warning(
+                    f"Found {dup_count} duplicate gauge id(s). Keeping first occurrence."
+                )
+                gauge_ids = gauge_ids.isel(id=unique_pos)
+                x = x.isel(id=unique_pos)
+                y = y.isel(id=unique_pos)
+                facc = facc.isel(id=unique_pos)
+                obs_rs = obs_rs.isel(id=unique_pos)
+
             logger.info("Cropping data...")
             if date_slice is not None and date_slice != slice(None, None):
                 logger.info(
