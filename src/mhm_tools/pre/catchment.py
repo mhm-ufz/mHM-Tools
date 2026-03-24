@@ -612,7 +612,7 @@ class Catchment:
                 logger.info(f"Burek: lat: {float(self.ds.lat.data[outlet_idx_bu[0]])}")
                 logger.info(f"Burek: lon: {float(self.ds.lat.data[outlet_idx_bu[1]])}")
                 logger.info(f"Burek: error {error_bu}")
-                logger.info(f"Burek: distance chamge {distance_error_bu/10}km")
+                logger.info(f"Burek: distance change {distance_error_bu/10}km")
                 logger.info(
                     f"BasinEx: lat: {float(self.ds.lat.data[outlet_idx_bx[0]])}"
                 )
@@ -620,7 +620,7 @@ class Catchment:
                     f"BasinEx: lon: {float(self.ds.lat.data[outlet_idx_bx[1]])}"
                 )
                 logger.info(f"BasinEx: error {error_bx}")
-                logger.info(f"BasinEx: distance chamge {distance_error_bx/10}km")
+                logger.info(f"BasinEx: distance change {distance_error_bx/10}km")
                 if error_bx < error_bu:
                     logger.info("using BasinEx location")
                     outlet_idx = outlet_idx_bx
