@@ -1087,6 +1087,10 @@ def plot_map(
             raise ValueError(msg)
 
     df = results_df.copy()
+    # Coerce lon/lat to numeric (handles object values like array(nan))
+    for col in (lon_col, lat_col):
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
     df = df.replace([np.inf, -np.inf], np.nan)
     df = df.dropna(subset=[lon_col, lat_col])
     if df.empty:
