@@ -13,6 +13,23 @@ HERE = Path(__file__).parent
 
 
 class TestCatchment(unittest.TestCase):
+    def _make_small_catchment(self):
+        lon = np.array([0, 1, 2, 3, 4], dtype=float)
+        lat = np.array([4, 3, 2, 1, 0], dtype=float)
+        data = np.zeros((len(lat), len(lon)), dtype=float)
+        ds = xr.Dataset(
+            {"dem": (["lat", "lon"], data)},
+            coords={"lon": lon, "lat": lat},
+        )
+        return catchment.Catchment(
+            ds,
+            "dem",
+            var="dem",
+            ftype="ldd",
+            transform=(1.0, 0.0, 0.0, 0.0, 1.0, 0.0),
+            latlon=True,
+        )
+
     def setUp(self):
         lon = np.linspace(-180, 180, 360)
         lat = np.linspace(90, -90, 180)
@@ -194,6 +211,122 @@ class TestCatchment(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             catchment.Resolution(l2_resolution=0.500002, l2_file=l2_path)
+
+    def test_find_best_gauge_location_best_candidate(self):
+        c = self._make_small_catchment()
+        upstream_area = np.zeros((5, 5), dtype=float)
+        upstream_area[2, 1] = 100.0
+        upstream_area[2, 3] = 105.0
+        best_coord_basinex, error_basinex, distance_basinex = c.find_best_gauge_location(
+            upstream_area,
+            gauge_coords=(2.0, 2.0),
+            ref_catchment_area=103.0,
+            max_distance_cells=4,
+            max_error=0.05,
+            method="basinex",
+            raise_on_fallback=True,
+        )
+        best_coord_burek, error_burek, distance_burek = c.find_best_gauge_location(
+            upstream_area,
+            gauge_coords=(2.0, 2.0),
+            ref_catchment_area=103.0,
+            max_distance_cells=4,
+            max_error=0.05,
+            method="burek",
+            raise_on_fallback=True,
+        )
+        self.assertEqual(best_coord_basinex, (2, 3))
+        self.assertLessEqual(error_basinex, 0.05)
+        self.assertEqual(best_coord_burek, (2, 3))
+        self.assertLessEqual(error_burek, 0.05)
+
+        c = self._make_small_catchment()
+        upstream_area = np.zeros((5, 5), dtype=float)
+        upstream_area[2, 1] = 100.0
+        upstream_area[0, 2] = 98.2
+        upstream_area[3, 2] = 102.0
+        best_coord_basinex, error_basinex, distance_basinex = c.find_best_gauge_location(
+            upstream_area,
+            gauge_coords=(2.0, 2.0),
+            ref_catchment_area=100.0,
+            max_distance_cells=4,
+            max_error=0.05,
+            method="basinex",
+            raise_on_fallback=True,
+        )
+        best_coord_burek, error_burek, distance_burek = c.find_best_gauge_location(
+            upstream_area,
+            gauge_coords=(2.0, 2.0),
+            ref_catchment_area=100.0,
+            max_distance_cells=4,
+            max_error=0.05,
+            method="burek",
+            raise_on_fallback=True,
+        )
+        self.assertEqual(best_coord_basinex, best_coord_burek)
+        self.assertAlmostEqual(error_basinex, error_burek)
+        self.assertEqual(best_coord_basinex, (2, 1))
+        self.assertAlmostEqual(error_basinex, 0.0)
+        self.assertEqual(best_coord_burek, (2, 1))
+        self.assertAlmostEqual(error_burek, 0.0)
+
+    def test_distance_100m_units_3_arcsec(self):
+        res = 1.0 / 1200.0  # 3 arc sec in degrees
+        lon = np.array([0.0, res, 2 * res], dtype=float)
+        lat = np.array([res, 0.0, -res], dtype=float)
+        ds = xr.Dataset(
+            {"dem": (["lat", "lon"], np.zeros((len(lat), len(lon))))},
+            coords={"lon": lon, "lat": lat},
+        )
+        c = catchment.Catchment(
+            ds,
+            "dem",
+            var="dem",
+            ftype="ldd",
+            transform=(res, 0.0, 0.0, 0.0, res, 0.0),
+            latlon=True,
+        )
+        d = c._distance_100m_units(1, 0, lat_deg=0.0)
+        self.assertGreater(d, 0.90)
+        self.assertLess(d, 0.95)
+
+    def test_distance_100m_units_scales_with_resolution(self):
+        res_small = 1.0 / 1200.0  # 3 arc sec
+        res_large = 1.0 / 600.0  # 6 arc sec
+        lon_small = np.array([0.0, res_small, 2 * res_small], dtype=float)
+        lat_small = np.array([res_small, 0.0, -res_small], dtype=float)
+        lon_large = np.array([0.0, res_large, 2 * res_large], dtype=float)
+        lat_large = np.array([res_large, 0.0, -res_large], dtype=float)
+
+        ds_small = xr.Dataset(
+            {"dem": (["lat", "lon"], np.zeros((len(lat_small), len(lon_small))))},
+            coords={"lon": lon_small, "lat": lat_small},
+        )
+        ds_large = xr.Dataset(
+            {"dem": (["lat", "lon"], np.zeros((len(lat_large), len(lon_large))))},
+            coords={"lon": lon_large, "lat": lat_large},
+        )
+
+        c_small = catchment.Catchment(
+            ds_small,
+            "dem",
+            var="dem",
+            ftype="ldd",
+            transform=(res_small, 0.0, 0.0, 0.0, res_small, 0.0),
+            latlon=True,
+        )
+        c_large = catchment.Catchment(
+            ds_large,
+            "dem",
+            var="dem",
+            ftype="ldd",
+            transform=(res_large, 0.0, 0.0, 0.0, res_large, 0.0),
+            latlon=True,
+        )
+
+        d_small = c_small._distance_100m_units(1, 0, lat_deg=0.0)
+        d_large = c_large._distance_100m_units(1, 0, lat_deg=0.0)
+        self.assertAlmostEqual(d_large / d_small, 2.0, places=2)
 
     def test_cut_to_filled_area_l2_alignment_mismatch_raises(self):
         lon = np.arange(0.5, 64.5, 1.0)
@@ -450,9 +583,7 @@ class TestCatchment(unittest.TestCase):
             )
 
         snapped = []
-        resolutions = catchment.Resolution(
-            l0_resolution=0.001953125, l1_resolution=1 / 32
-        )
+        resolutions = catchment.Resolution(l0_resolution=0.001953125, l1_resolution=1 / 32)
         for idx, (lat, lon) in enumerate(gauge_coords):
             out_dir = self.tmp_path / f"single_{idx}"
             out_dir.mkdir(parents=True, exist_ok=True)
@@ -534,9 +665,7 @@ class TestCatchment(unittest.TestCase):
                 else list(ds.data_vars)[0]
             )
 
-        resolutions = catchment.Resolution(
-            l0_resolution=0.001953125, l1_resolution=1 / 32
-        )
+        resolutions = catchment.Resolution(l0_resolution=0.001953125, l1_resolution=1 / 32)
 
         seq_dir = self.tmp_path / "seq"
         par_dir = self.tmp_path / "par"
