@@ -403,14 +403,6 @@ def crop_file(  # noqa: PLR0912 PLR0915
     output_file.parent.mkdir(parents=True, exist_ok=True)
     if output_suffix is not None:
         output_file = output_file.with_suffix(output_suffix)
-    if output_file.exists() and output_file.is_dir():
-        msg = (
-            f"Target path {output_file} is a directory. "
-            "This can happen if a previous run wrote header.txt into a file path. "
-            "Please remove or rename this directory and retry."
-        )
-        with ErrorLogger(logger):
-            raise ValueError(msg)
     latlon_files = LatlonFiles()
     if output_file.is_file() and not overwrite:
         logger.info("Target file already exists. Cropping is skipped.")
