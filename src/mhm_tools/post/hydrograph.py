@@ -490,6 +490,9 @@ class Hydrograph:
         """
         if not code:
             self.logger.warning("No plots will be produced since none were specified.")
+            return
+        if not self.save and not self.show:
+            return
         if "t" in code:
             self.plots[0] = 1
         if "y" in code:
@@ -1269,7 +1272,8 @@ class Hydrograph:
                 self.obs_discharge_data, self.sim_discharge_data
             ):
                 return False
-
+        if np.sum(self.plots) == 0:
+            return True
         # create figure and determining the number of rows and cols
         fig = plt.figure(figsize=(7, 8))
         nrows = sum(self.plots) // 2 + 1
