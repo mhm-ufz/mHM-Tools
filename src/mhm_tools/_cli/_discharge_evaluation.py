@@ -104,13 +104,6 @@ def add_args(parser):
         type=str,
         help=("Lates year that is allowed in the analysis."),
     )
-    # parser.add_argument(
-    #     "--direct_comparison",
-    #     action="store_true",
-    #     dest="direct_comparison",
-    #     required=False,
-    #     help=("Use no statistics but compare timeseries directly. Needs ref_path."),
-    # )
     parser.add_argument(
         "--overwrite",
         action="store_true",
@@ -119,6 +112,12 @@ def add_args(parser):
         help=(
             "Overwrite existing files. Otherwise input data changes might not result in output changes."
         ),
+    )
+    parser.add_argument(
+        "--save_hydrograph",
+        help="Set flag if the calculated hydrographs should be saved and not just the metrics calculated.",
+        action="store_true",
+        required=False,
     )
     parser.add_argument(
         "--only_plot",
@@ -165,4 +164,5 @@ def run(args):
         end_date=args.end_date,
         overwrite=args.overwrite,
         only_plot=args.only_plot,
+        save_hydrograph=args.save_hydrograph
     )

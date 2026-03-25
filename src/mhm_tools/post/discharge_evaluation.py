@@ -877,6 +877,7 @@ def evaludate_discharge_data(  # noqa: PLR0913
     end_date=None,
     overwrite=False,
     only_plot=False,
+    save_hydrograph=True
 ):
     """Compare simulated with observed discharge directly or via bootstrapping.
 
@@ -961,6 +962,7 @@ def evaludate_discharge_data(  # noqa: PLR0913
                 title=f"{id} at {model_ds['x'].sel(id=id).data} - {model_ds['y'].sel(id=id).data}",
                 x=model_ds["x"].sel(id=id).data,
                 y=model_ds["y"].sel(id=id).data,
+                save=save_hydrograph
             )
             for id in observed_ds.id.values
             if id in model_ds.id.values
