@@ -615,7 +615,7 @@ class Catchment:
             gauge_lat = new_lat
             gauge_lon = new_lon
             logger.info(
-                f"Moved outlet latitude {float(gauge_coords[0])} by {distance_error/10:.2}km to {new_lat} and longitude {float(gauge_coords[1])} to {new_lon}."
+                f"Moved outlet {distance_error/10:.2}km shifting latitude {float(gauge_coords[0])} to {new_lat} and longitude {float(gauge_coords[1])} to {new_lon}."
             )
 
         else:
