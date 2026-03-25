@@ -1262,7 +1262,7 @@ def plot_cdf(df, output_path, boostrap_iterations=None):  # noqa: PLR0915
 
     logger.info("All values")
     for var in variables:
-        plt.figure(figsize=(6, 4))
+        fig, ax = plt.subplots(figsize=(6, 4))
         # Extract all values of `var` for the given ID
         da = xr.DataArray(df[var], dims=["index"], name=var).dropna(
             how="all", dim="index"
@@ -1275,42 +1275,31 @@ def plot_cdf(df, output_path, boostrap_iterations=None):  # noqa: PLR0915
 
         # Compute the fraction => empirical CDF
         cdf = ranks / n
-        # subdata = df[var].sort_values()
-        # if len(subdata) == 0:
-        # continue  # no data for this ID
-        # logger.info(float(len(subdata)))
-        logger.info(n)
-        logger.info(da_sorted.values)
-        logger.info(cdf.values)
-        plt.plot(da_sorted, cdf, marker="+", linestyle="-")  # step or line is typical
         med = np.nanmedian(da_sorted.values)
-        plt.axvline(
-            med,
-            linestyle="dotted",
-            linewidth=1,
-            color="red",
-            label=f"median = {med:.3f}",
+        ax.plot(
+            da_sorted,
+            cdf,
+            marker=".",
+            linestyle="none",
+            color='darkblue',
+            markersize=4,
         )
-        # Compute the empirical CDF
-        # cdfvals = np.arange(1, len(subdata) + 1) / float(len(subdata))
-        # Plot
-        # plt.scatter(subdata, cdfvals, s=0.5, color='blue')
-        # plt.plot(subdata, cdfvals, linewidth=0.3, color='blue')
+        ax.axvline(med, color='red', linestyle="dotted", linewidth=1, label=f"median = {med:.3f}")
         title = f"CDF of {var} for {len(unique_ids)} stations"
         if boostrap_iterations is not None and boostrap_iterations > 0:
             title += f" and {boostrap_iterations} bootstrap iterations"
-        plt.title(title)
-        plt.xlabel(var)
-        plt.ylabel("CDF")
-        plt.legend()
-        plt.xlim(min(da_sorted.min(), 0), max(da_sorted.max(), 1))
+        ax.set_title(title)
+        ax.set_xlabel(var)
+        ax.set_ylabel("CDF")
+        ax.legend()
+        ax.set_xlim(np.nanmin([da_sorted.min(), 0]), np.nanmax([da_sorted.max(), 1]))
         if var in ["kge", "nse"]:
-            plt.xlim(-0.5, 1.0)
-            plt.ylim(0.0, 1.01)
+            ax.set_xlim(-0.5, 1.0)
+            ax.set_ylim(0.0, 1.01)
         else:
-            plt.ylim(0, 1.05)
-        plt.tight_layout()
-        plt.savefig(output_path / f"cdf_{var}_all_stations.png", dpi=450)
+            ax.set_ylim(0, 1.05)
+        fig.tight_layout()
+        fig.savefig(output_path / f"cdf_{var}_all_stations.png", dpi=450)
         plt.close()
 
     # --- 3) CDF by WMO region (only if more than one region present) ---
@@ -1326,54 +1315,55 @@ def plot_cdf(df, output_path, boostrap_iterations=None):  # noqa: PLR0915
             return np.nan
         return int(s[0])
 
-    df_region = df_all.copy()
+    df_region = df.copy()
     df_region["wmo_region"] = df_region["id"].apply(_wmo_region_from_id)
     region_ids = np.sort(df_region["wmo_region"].dropna().unique())
-    if len(region_ids) > 1:
-        logger.info(
-            f"Creating CDF plots by WMO region for regions: {region_ids.tolist()}"
-        )
-        for var in variables:
+    if len(region_ids) < 2:
+        return 
+    for var in variables:
+        fig, ax = plt.subplots(figsize=(6, 4))
+        # Extract all values of `var` for the given ID
+        for i, region_id in enumerate(region_ids):
             df_var = df_region.dropna(subset=[var, "wmo_region"]).copy()
-            if df_var.empty:
-                continue
-            fig, ax = plt.subplots(figsize=(6, 4))
-            for i, region_id in enumerate(region_ids):
-                s = df_var.loc[df_var["wmo_region"] == region_id, var].to_numpy(
-                    dtype=float
-                )
-                s = s[~np.isnan(s)]
-                if s.size == 0:
-                    continue
-                s.sort()
-                cdf = (np.arange(s.size) + 1) / s.size
-                med = np.nanmedian(s)
-                region_name = regions.get(int(region_id), f"Region {region_id}")
-                color = cb_colors[i % len(cb_colors)]
-                ax.plot(
-                    s,
+            da = xr.DataArray(df_var, dims=["index"], name=var).dropna(
+                how="all", dim="index"
+            )
+            da_sorted = da.sortby(da)  # sort by the data values
+            n = da_sorted.sizes["index"]
+
+            # Create an array of ranks: [1, 2, ..., n]
+            ranks = xr.DataArray(np.arange(1, n + 1), dims=["index"])
+
+            # Compute the fraction => empirical CDF
+            cdf = ranks / n
+            plt.plot(da_sorted, cdf, marker="+", linestyle="-", )  # step or line is typical
+            med = np.nanmedian(da_sorted)
+            region_name = regions.get(int(region_id), f"Region {region_id}")
+            color = cb_colors[i % len(cb_colors)]
+            ax.plot(
+                    da_sorted,
                     cdf,
                     marker=".",
                     linestyle="none",
                     color=color,
-                    label=region_name,
                     markersize=4,
                 )
-                ax.axvline(med, color=color, linestyle="dotted", linewidth=1)
+            ax.axvline(med, color=color, linestyle="dotted", linewidth=1, label=f"{region_name} = {med:.3f}")
 
-            ax.set_xlabel(var)
-            ax.set_ylabel("CDF")
-            ax.grid(True, alpha=0.3)
-            ax.legend(title="WMO Region", ncols=min(len(region_ids), 6), fontsize=8)
-            ax.set_title(f"CDF of {var} by WMO region")
-            ax.set_xlim(min(df_var[var].min(), 0), max(df_var[var].max(), 1))
-            if var in ["kge", "nse"]:
-                ax.set_xlim(-0.5, 1.0)
-                ax.set_ylim(0.0, 1.01)
-            else:
-                ax.set_ylim(0, 1.05)
-            fig.tight_layout()
-            fig.savefig(output_path / f"cdf_{var}_by_wmo_region.png", dpi=450)
-            plt.close(fig)
-
-    logger.info("Done! Check the saved PNG files for your CDF plots.")
+        title = f"CDF of {var} for {len(unique_ids)} stations"
+        if boostrap_iterations is not None and boostrap_iterations > 0:
+            title += f" and {boostrap_iterations} bootstrap iterations"
+        ax.set_xlabel(var)
+        ax.set_ylabel("CDF")
+        ax.grid(True, alpha=0.3)
+        ax.legend(title="WMO Region median", ncols=min(len(region_ids), 6), fontsize=8)
+        ax.set_title(f"CDF of {var} by WMO region")
+        ax.set_xlim(np.nanmin([df_var[var].min(), 0]), np.nanmax([df_var[var].max(), 1]))
+        if var in ["kge", "nse"]:
+            ax.set_xlim(-0.5, 1.0)
+            ax.set_ylim(0.0, 1.01)
+        else:
+            ax.set_ylim(0, 1.05)
+        fig.tight_layout()
+        fig.savefig(output_path / f"cdf_{var}_by_wmo_region.png", dpi=450)
+        plt.close(fig)
