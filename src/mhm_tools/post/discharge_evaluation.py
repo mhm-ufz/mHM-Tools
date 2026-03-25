@@ -1322,10 +1322,11 @@ def plot_cdf(df, output_path, boostrap_iterations=None):  # noqa: PLR0915
         return 
     for var in variables:
         fig, ax = plt.subplots(figsize=(6, 4))
+        df_var = df_region.dropna(subset=[var, "wmo_region"]).copy()
         # Extract all values of `var` for the given ID
         for i, region_id in enumerate(region_ids):
-            df_var = df_region.dropna(subset=[var, "wmo_region"]).copy()
-            da = xr.DataArray(df_var, dims=["index"], name=var).dropna(
+            
+            da = xr.DataArray(df_var[region_name], dims=["index"], name=var).dropna(
                 how="all", dim="index"
             )
             da_sorted = da.sortby(da)  # sort by the data values
