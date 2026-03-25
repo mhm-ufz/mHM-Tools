@@ -24,6 +24,19 @@ from mhm_tools.common.utils import dict_to_multiline_string
 logger = logging.getLogger(__name__)
 
 
+def _ensure_non_interactive_backend(show):
+    """Switch to a non-interactive backend when plots are not shown.
+
+    This avoids X/GUI backend issues in headless or multi-process runs.
+    """
+    if show:
+        return
+    try:
+        plt.switch_backend("Agg")
+    except Exception as exc:
+        logger.debug("Failed to switch matplotlib backend to Agg: %s", exc)
+
+
 class Catchment:
     """Represents a catchment.
 
@@ -1241,6 +1254,7 @@ class Hydrograph:
         if sum(self.plots) == 0:
             self.logger.warning("Create no plots")
             return None
+        _ensure_non_interactive_backend(self.show)
         # load data
 
         # calculate metrics at timestep resolution (generally hourly)
