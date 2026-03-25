@@ -636,8 +636,8 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
             x_new, y_new = [], []
             with load_ds(scc_gauges_file) as ds:
                 logger.info("get the gauge coordinates from scc gauges file")
-                x_new = ds.x.values
-                y_new = ds.y.values
+                x_new = ds.lon.values
+                y_new = ds.lat.values
                 gauge_ids_with_values = ds.station.values
             valid_id_set = set(np.asarray(gauge_ids.values))
             keep_mask = np.isin(gauge_ids_with_values, list(valid_id_set))
