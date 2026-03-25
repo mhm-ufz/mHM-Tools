@@ -1254,15 +1254,8 @@ class Hydrograph:
         bool | None
             True on success, False/None if no plots are created or data are insufficient.
         """
-        if sum(self.plots) == 0:
-            self.logger.warning("Create no plots")
-            return None
         _ensure_non_interactive_backend(self.show)
-        # load data
-
         # calculate metrics at timestep resolution (generally hourly)
-        self.logger.debug(self.sim_discharge_data)
-        self._infer_catchment_name()
         if self.calc_stats:
             logger.info("Crop to overlapping time.")
             if not self.crop_data_to_overlapping_time():
@@ -1272,8 +1265,10 @@ class Hydrograph:
                 self.obs_discharge_data, self.sim_discharge_data
             ):
                 return False
-        if np.sum(self.plots) == 0:
+        if sum(self.plots) == 0:
+            self.logger.warning("Create no plots")
             return True
+        self._infer_catchment_name()
         # create figure and determining the number of rows and cols
         fig = plt.figure(figsize=(7, 8))
         nrows = sum(self.plots) // 2 + 1
