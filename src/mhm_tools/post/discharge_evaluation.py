@@ -1353,7 +1353,7 @@ def plot_cdf(df, output_path, boostrap_iterations=None):  # noqa: PLR0915
         ax.set_xlabel(var)
         ax.set_ylabel("CDF")
         ax.grid(True, alpha=0.3)
-        ax.legend(title="WMO Region median", nrows=min(len(region_ids), 6), fontsize=8)
+        ax.legend(title="WMO Region median", ncols=1, fontsize=8)
         ax.set_title(f"CDF of {var} by WMO region")
         ax.set_xlim(
             np.nanmin([df_var[var].min(), 0]), np.nanmax([df_var[var].max(), 1])
