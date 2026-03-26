@@ -1315,8 +1315,9 @@ def plot_cdf(df, output_path, boostrap_iterations=None):  # noqa: PLR0915
         df_var = df_region.dropna(subset=[var, "wmo_region"]).copy()
         # Extract all values of `var` for the given ID
         for i, region_id in enumerate(region_ids):
-
-            da = xr.DataArray(df_var[region_id], dims=["index"], name=var).dropna(
+            region_mask = df_var["wmo_region"] == region_id
+            region_values = df_var.loc[region_mask, var]
+            da = xr.DataArray(region_values, dims=["index"], name=var).dropna(
                 how="all", dim="index"
             )
             da_sorted = da.sortby(da)  # sort by the data values
@@ -1327,12 +1328,6 @@ def plot_cdf(df, output_path, boostrap_iterations=None):  # noqa: PLR0915
 
             # Compute the fraction => empirical CDF
             cdf = ranks / n
-            plt.plot(
-                da_sorted,
-                cdf,
-                marker="+",
-                linestyle="-",
-            )  # step or line is typical
             med = np.nanmedian(da_sorted)
             region_name = regions.get(int(region_id), f"Region {region_id}")
             color = cb_colors[i % len(cb_colors)]
