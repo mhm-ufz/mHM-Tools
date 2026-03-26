@@ -509,20 +509,21 @@ class Catchment:
         elif method == "burek":
             logger.info("Correcting gauge location using burek method")
             # based on Burek et. al. 2023 https://essd.copernicus.org/articles/15/5617/2023/
+            # based on Lehner 2012 Derivation of watershed boundaries for GRDC gauging stations based on the HydroSHEDS drainage network – Technical Report prepared for the GRDC
             # implemented https://github.com/iiasa/CWATM_grdc_calibration_stations/blob/78979cbac8f8685d8dbc5330dba6f40a929716f4/scripts/1_findMeritcoord.py#L335
             size = float(ref_catchment_area)
-            low = size * (1.0 - max_error)
-            high = size * (1.0 + max_error)
-            candidates_indices = np.where((sub >= low) & (sub <= high))
+            # error implementation closer to paper description
+            candidates_error = 1 - np.where(sub > size, size / sub, sub / size)
+            candidates_indices = np.where(candidates_error <= max_error)
             if len(candidates_indices[0]) > 0:
                 cand_i = candidates_indices[0] + i_min
                 cand_j = candidates_indices[1] + j_min
                 di = cand_i - gi
                 dj = cand_j - gj
                 candidates_distance = self._distance_100m_units(di, dj, lat_deg=lat_deg)
-                # candidates_distance = np.sqrt(di**2+dj**2)*0.92
-                candidates_error = 100 * np.abs(
-                    1 - sub[candidates_indices] / size
+                # change error to percent
+                candidates_error = (
+                    100 * candidates_error[candidates_indices]
                 )  # 100 * np.abs(1 - ups[y, x] / upsreal)
                 burek_metric = candidates_error + 2 * candidates_distance
                 k = int(np.argmin(burek_metric))
