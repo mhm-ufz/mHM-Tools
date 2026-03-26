@@ -212,6 +212,7 @@ def add_args(parser):
         ),
     )
 
+
 def run(args):
     """Create the catchment file.
 

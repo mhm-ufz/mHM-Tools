@@ -164,5 +164,5 @@ def run(args):
         end_date=args.end_date,
         overwrite=args.overwrite,
         only_plot=args.only_plot,
-        save_hydrograph=args.save_hydrograph
+        save_hydrograph=args.save_hydrograph,
     )

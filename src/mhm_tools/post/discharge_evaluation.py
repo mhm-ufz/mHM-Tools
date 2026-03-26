@@ -169,6 +169,7 @@ def _reduce_node_coord(da):
 
 def _load_discharge_nc_collection(model_data_path, date_slice=None):
     """Load discharge.nc files containing Qsim/Qobs_<id> and return sim/obs datasets."""
+
     def _expand_paths(path_like):
         if isinstance(path_like, (list, tuple)):
             return [Path(p) for p in path_like]
@@ -877,7 +878,7 @@ def evaludate_discharge_data(  # noqa: PLR0913
     end_date=None,
     overwrite=False,
     only_plot=False,
-    save_hydrograph=True
+    save_hydrograph=True,
 ):
     """Compare simulated with observed discharge directly or via bootstrapping.
 
@@ -962,7 +963,7 @@ def evaludate_discharge_data(  # noqa: PLR0913
                 title=f"{id} at {model_ds['x'].sel(id=id).data} - {model_ds['y'].sel(id=id).data}",
                 x=model_ds["x"].sel(id=id).data,
                 y=model_ds["y"].sel(id=id).data,
-                save=save_hydrograph
+                save=save_hydrograph,
             )
             for id in observed_ds.id.values
             if id in model_ds.id.values
@@ -1089,29 +1090,13 @@ def plot_map(
             raise ValueError(msg)
 
     df = results_df.copy()
-    # Coerce lon/lat to numeric (handles object values like array(nan))
-    def _as_float(val):
-        if val is None:
-            return np.nan
-        if isinstance(val, (np.floating, float, int)):
-            return float(val)
-        try:
-            arr = np.asarray(val)
-            if arr.ndim == 0:
-                return float(arr)
-            if arr.size == 0:
-                return np.nan
-            if arr.size == 1:
-                return float(arr.ravel()[0])
-        except Exception:
-            return np.nan
-        return np.nan
 
+    # Coerce lon/lat to numeric (handles object values like array(nan))
+    df = df.dropna(subset=[lon_col, lat_col])
     for col in (lon_col, lat_col):
         if col in df.columns:
-            df[col] = df[col].map(_as_float)
+            df[col] = pd.to_numeric(df[col], errors="coerce")
     df = df.replace([np.inf, -np.inf], np.nan)
-    df = df.dropna(subset=[lon_col, lat_col])
     if df.empty:
         logger.warning("No valid gauge coordinates available for map plotting.")
         return
@@ -1233,7 +1218,6 @@ def plot_cdf(df, output_path, boostrap_iterations=None):  # noqa: PLR0915
     logger.info(
         f"   {len(df.dropna(subset=['alpha', 'beta', 'gamma'], how='any')['id'].unique())} have all values "
     )
-    df_all = df.copy()
     df = df.dropna(subset=["alpha", "beta", "gamma"], how="any")
     logger.info(df.head())
     variables = ["alpha", "beta", "gamma", "kge", "nse"]
@@ -1281,10 +1265,16 @@ def plot_cdf(df, output_path, boostrap_iterations=None):  # noqa: PLR0915
             cdf,
             marker=".",
             linestyle="none",
-            color='darkblue',
+            color="darkblue",
             markersize=4,
         )
-        ax.axvline(med, color='red', linestyle="dotted", linewidth=1, label=f"median = {med:.3f}")
+        ax.axvline(
+            med,
+            color="red",
+            linestyle="dotted",
+            linewidth=1,
+            label=f"median = {med:.3f}",
+        )
         title = f"CDF of {var} for {len(unique_ids)} stations"
         if boostrap_iterations is not None and boostrap_iterations > 0:
             title += f" and {boostrap_iterations} bootstrap iterations"
@@ -1319,14 +1309,14 @@ def plot_cdf(df, output_path, boostrap_iterations=None):  # noqa: PLR0915
     df_region["wmo_region"] = df_region["id"].apply(_wmo_region_from_id)
     region_ids = np.sort(df_region["wmo_region"].dropna().unique())
     if len(region_ids) < 2:
-        return 
+        return
     for var in variables:
         fig, ax = plt.subplots(figsize=(6, 4))
         df_var = df_region.dropna(subset=[var, "wmo_region"]).copy()
         # Extract all values of `var` for the given ID
         for i, region_id in enumerate(region_ids):
-            
-            da = xr.DataArray(df_var[region_name], dims=["index"], name=var).dropna(
+
+            da = xr.DataArray(df_var[region_id], dims=["index"], name=var).dropna(
                 how="all", dim="index"
             )
             da_sorted = da.sortby(da)  # sort by the data values
@@ -1337,19 +1327,30 @@ def plot_cdf(df, output_path, boostrap_iterations=None):  # noqa: PLR0915
 
             # Compute the fraction => empirical CDF
             cdf = ranks / n
-            plt.plot(da_sorted, cdf, marker="+", linestyle="-", )  # step or line is typical
+            plt.plot(
+                da_sorted,
+                cdf,
+                marker="+",
+                linestyle="-",
+            )  # step or line is typical
             med = np.nanmedian(da_sorted)
             region_name = regions.get(int(region_id), f"Region {region_id}")
             color = cb_colors[i % len(cb_colors)]
             ax.plot(
-                    da_sorted,
-                    cdf,
-                    marker=".",
-                    linestyle="none",
-                    color=color,
-                    markersize=4,
-                )
-            ax.axvline(med, color=color, linestyle="dotted", linewidth=1, label=f"{region_name} = {med:.3f}")
+                da_sorted,
+                cdf,
+                marker=".",
+                linestyle="none",
+                color=color,
+                markersize=4,
+            )
+            ax.axvline(
+                med,
+                color=color,
+                linestyle="dotted",
+                linewidth=1,
+                label=f"{region_name} = {med:.3f}",
+            )
 
         title = f"CDF of {var} for {len(unique_ids)} stations"
         if boostrap_iterations is not None and boostrap_iterations > 0:
@@ -1359,7 +1360,9 @@ def plot_cdf(df, output_path, boostrap_iterations=None):  # noqa: PLR0915
         ax.grid(True, alpha=0.3)
         ax.legend(title="WMO Region median", ncols=min(len(region_ids), 6), fontsize=8)
         ax.set_title(f"CDF of {var} by WMO region")
-        ax.set_xlim(np.nanmin([df_var[var].min(), 0]), np.nanmax([df_var[var].max(), 1]))
+        ax.set_xlim(
+            np.nanmin([df_var[var].min(), 0]), np.nanmax([df_var[var].max(), 1])
+        )
         if var in ["kge", "nse"]:
             ax.set_xlim(-0.5, 1.0)
             ax.set_ylim(0.0, 1.01)
