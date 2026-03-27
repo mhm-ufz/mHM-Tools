@@ -33,27 +33,6 @@ def add_args(parser):
     # optional
     optional_args = parser.add_argument_group("optional arguments")
     optional_args.add_argument(
-        "-S",
-        "--split_file",
-        action="store_false",
-        default=True,
-        help=(
-            "Write out multiple files. By default a single file is written "
-            "alternative is that the file is split up by variables."
-        ),
-    )
-    optional_args.add_argument(
-        "-C",
-        "--creator",
-        default=None,
-        help=(
-            "Level-2 (meteorology) information. Either an ascii (header) file, "
-            "a dictionary containing the header information "
-            "or a cell-size to determine information from level-0. "
-            "Level-2 information wont be written to the latlon file."
-        ),
-    )
-    optional_args.add_argument(
         "--vn",
         "--varname",
         default="flwdir",

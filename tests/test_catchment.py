@@ -13,6 +13,13 @@ HERE = Path(__file__).parent
 
 
 class TestCatchment(unittest.TestCase):
+    def _require_geospatial(self):
+        try:
+            import geopandas  # noqa: F401
+            import rasterio  # noqa: F401
+        except Exception as exc:
+            self.skipTest(f"Geospatial dependencies missing: {exc}")
+
     def _make_small_catchment(self):
         lon = np.array([0, 1, 2, 3, 4], dtype=float)
         lat = np.array([4, 3, 2, 1, 0], dtype=float)
@@ -171,6 +178,15 @@ class TestCatchment(unittest.TestCase):
             c.write(self.output_path, single_file=True)
             output_file = self.output_path / out_var_name
             self.assertTrue(output_file.exists(), f"Failed to create {out_var_name}")
+
+    def test_write_basin_shape_outputs_files(self):
+        self._require_geospatial()
+        c = self._make_small_catchment()
+        c.catchment_mask = np.zeros((5, 5), dtype=bool)
+        c.catchment_mask[2:4, 2:4] = True
+        shapes_dir = self.tmp_path / "shapes"
+        c.write_basin_shape(shapes_dir, gauge_id=123)
+        self.assertTrue((shapes_dir / "basin_123.shp").exists())
 
     def test_merge_catchment(self):
         self.test_write()  # Ensure files are written first
@@ -728,4 +744,130 @@ class TestCatchment(unittest.TestCase):
         with xr.open_dataset(seq_path) as seq_ds, xr.open_dataset(par_path) as par_ds:
             np.testing.assert_array_equal(
                 seq_ds["idgauges"].values, par_ds["idgauges"].values
+            )
+
+    def test_shape_comparison_l0(self):
+        self._require_geospatial()
+        if (
+            not self.FDIR_PATH.exists()
+            or self.GAUGE_LAT is None
+            or self.GAUGE_LON is None
+            or self.REF_AREA is None
+        ):
+            self.skipTest(
+                "Set FDIR_PATH, GAUGE_LAT, GAUGE_LON and REF_AREA in this test file to run this integration test."
+            )
+
+        with get_xarray_ds_from_file(str(self.FDIR_PATH)) as ds:
+            var_name = (
+                self.FDIR_VAR if self.FDIR_VAR in ds.data_vars else list(ds.data_vars)[0]
+            )
+            transform = catchment.get_transformation_matrix_nc(ds, var_name)
+            c = catchment.Catchment(
+                ds,
+                var_name,
+                var="fdir",
+                ftype="d8",
+                transform=transform,
+                latlon=True,
+            )
+            c.delineate_basin(
+                (self.GAUGE_LAT[0], self.GAUGE_LON[0]),
+                ref_catchment_area=self.REF_AREA[0],
+                raise_on_sanity_check=False,
+            )
+            self.assertIsNotNone(c.catchment_mask)
+            l0_shape = catchment._vectorize_mask_to_gdf(
+                c.catchment_mask, c.transform, catchment._shape_crs(c.latlon)
+            )
+            upstream_area = c.calc_upstream_area()
+            result = c.find_best_gauge_location_shape(
+                upstream_area=upstream_area,
+                gauge_coords=(self.GAUGE_LAT[0], self.GAUGE_LON[0]),
+                ref_catchment_area=self.REF_AREA[0],
+                shape_folder=None,
+                gauge_id=None,
+                reference_shape_gdf=l0_shape,
+            )
+            self.assertIsNotNone(result)
+
+            candidate_idx, _, _ = result
+            linear = np.ravel_multi_index(candidate_idx, c._fdir.shape)
+            basin = c._fdir.basins(idxs=np.array([linear], dtype=np.int64))
+            candidate_mask = basin > 0
+            candidate_gdf = catchment._vectorize_mask_to_gdf(
+                candidate_mask, c.transform, catchment._shape_crs(c.latlon)
+            )
+            iou = catchment._shape_iou(l0_shape, candidate_gdf)
+            self.assertGreaterEqual(iou, 0.7)
+
+    def test_shape_correction_after_upscale(self):
+        self._require_geospatial()
+        if (
+            not self.FDIR_PATH.exists()
+            or self.GAUGE_LAT is None
+            or self.GAUGE_LON is None
+            or self.REF_AREA is None
+        ):
+            self.skipTest(
+                "Set FDIR_PATH, GAUGE_LAT, GAUGE_LON and REF_AREA in this test file to run this integration test."
+            )
+
+        with get_xarray_ds_from_file(str(self.FDIR_PATH)) as ds:
+            var_name = (
+                self.FDIR_VAR if self.FDIR_VAR in ds.data_vars else list(ds.data_vars)[0]
+            )
+            transform = catchment.get_transformation_matrix_nc(ds, var_name)
+            lon_vals = ds.lon.data
+            l0_res = abs(lon_vals[1] - lon_vals[0])
+            resolutions = catchment.Resolution(l1=l0_res * 2)
+            c = catchment.Catchment(
+                ds,
+                var_name,
+                var="fdir",
+                ftype="d8",
+                transform=transform,
+                latlon=True,
+                resolutions=resolutions,
+                upscale=True,
+            )
+            c.delineate_basin(
+                (self.GAUGE_LAT[0], self.GAUGE_LON[0]),
+                ref_catchment_area=self.REF_AREA[0],
+                raise_on_sanity_check=False,
+            )
+            l0_shape = catchment._vectorize_mask_to_gdf(
+                c.catchment_mask, c.transform, catchment._shape_crs(c.latlon)
+            )
+            c.upscale("fdir")
+            corrected_coords = c.correct_gauge_location_l1_from_shape(
+                l0_shape,
+                (self.GAUGE_LAT[0], self.GAUGE_LON[0]),
+                reference_upstream_area=self.REF_AREA[0],
+            )
+            self.assertIsNotNone(corrected_coords)
+
+            lon_l1, lat_l1 = c._coords_l1()
+            gauge_row = int(np.abs(lat_l1 - float(self.GAUGE_LAT[0])).argmin())
+            gauge_col = int(np.abs(lon_l1 - float(self.GAUGE_LON[0])).argmin())
+            naive_linear = np.ravel_multi_index((gauge_row, gauge_col), c._fdir.shape)
+            naive_basin = c._fdir.basins(idxs=np.array([naive_linear], dtype=np.int64))
+            naive_gdf = catchment._vectorize_mask_to_gdf(
+                naive_basin > 0, c._fdir.transform, catchment._shape_crs(c.latlon)
+            )
+            naive_iou = catchment._shape_iou(l0_shape, naive_gdf)
+
+            corr_row = int(np.abs(lat_l1 - float(corrected_coords[0])).argmin())
+            corr_col = int(np.abs(lon_l1 - float(corrected_coords[1])).argmin())
+            corr_linear = np.ravel_multi_index((corr_row, corr_col), c._fdir.shape)
+            corr_basin = c._fdir.basins(idxs=np.array([corr_linear], dtype=np.int64))
+            corr_gdf = catchment._vectorize_mask_to_gdf(
+                corr_basin > 0, c._fdir.transform, catchment._shape_crs(c.latlon)
+            )
+            corr_iou = catchment._shape_iou(l0_shape, corr_gdf)
+
+            self.assertGreaterEqual(
+                corr_iou,
+                naive_iou,
+                "L1 shape correction did not improve shape agreement.",
             )
