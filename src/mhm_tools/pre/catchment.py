@@ -164,6 +164,81 @@ def _coords_from_transform(affine_transform, grid_shape):
     return x_coords, y_coords
 
 
+def _combine_shape_bounds(bounds_list):
+    """Combine multiple (minx, miny, maxx, maxy) tuples into a single bounding box."""
+    if not bounds_list:
+        return None
+    min_x = min(b[0] for b in bounds_list)
+    min_y = min(b[1] for b in bounds_list)
+    max_x = max(b[2] for b in bounds_list)
+    max_y = max(b[3] for b in bounds_list)
+    return min_x, min_y, max_x, max_y
+
+
+def _buffer_bounds(bounds, latlon):
+    """Apply a buffer to bounds (degrees if latlon, otherwise meters)."""
+    if bounds is None:
+        return None
+    buffer_value = 1.0 if latlon else 100_000.0
+    min_x, min_y, max_x, max_y = bounds
+    return (
+        min_x - buffer_value,
+        min_y - buffer_value,
+        max_x + buffer_value,
+        max_y + buffer_value,
+    )
+
+
+def _slices_from_bounds(bounds, lat_values):
+    """Create lon/lat slices from bounds, respecting latitude ordering."""
+    if bounds is None:
+        return None
+    min_x, min_y, max_x, max_y = bounds
+    if lat_values[0] > lat_values[-1]:
+        lat_slice = slice(max_y, min_y)
+    else:
+        lat_slice = slice(min_y, max_y)
+    lon_slice = slice(min_x, max_x)
+    return {"lat": lat_slice, "lon": lon_slice}
+
+
+def _shape_bounds_from_folder(shape_folder, gauge_ids, latlon):
+    """Compute a buffered bounding box from available gauge shapefiles."""
+    if not shape_folder or gauge_ids is None:
+        return None
+    try:
+        import geopandas as gpd
+    except Exception as exc:
+        logger.warning("geopandas missing; cannot use shapefile bounds: %s", exc)
+        return None
+
+    if not isinstance(gauge_ids, list):
+        gauge_id_list = [gauge_ids]
+    else:
+        gauge_id_list = gauge_ids
+
+    bounds_list = []
+    for gauge_id in gauge_id_list:
+        shape_path = _find_shape_file(shape_folder, gauge_id)
+        if shape_path is None:
+            continue
+        try:
+            gdf = gpd.read_file(shape_path)
+        except Exception as exc:
+            logger.warning("Failed to read shapefile %s: %s", shape_path, exc)
+            continue
+        bounds_list.append(tuple(gdf.total_bounds))
+
+    combined_bounds = _combine_shape_bounds(bounds_list)
+    if combined_bounds is None:
+        return None
+    buffered_bounds = _buffer_bounds(combined_bounds, latlon)
+    logger.info(
+        "Using shapefile bounds with buffer for slicing: %s", buffered_bounds
+    )
+    return buffered_bounds
+
+
 def create_cell_area(ds, lat_name="lat", lon_name="lon"):
     """Create a cell area data array in km2."""
     logger.info("Create cell area data array.")
@@ -2131,6 +2206,18 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
         available_mem_gib=available_mem,
         chunking=chunking,
     ) as input_ds:
+        coord_slices_default = (
+            coordinate_slices.get("lat") == slice(None, None)
+            and coordinate_slices.get("lon") == slice(None, None)
+        )
+        if coord_slices_default and shape_folder:
+            bounds = _shape_bounds_from_folder(
+                shape_folder, gauge_ids, latlon=latlon
+            )
+            if bounds is not None:
+                slices = _slices_from_bounds(bounds, input_ds.lat.data)
+                if slices is not None:
+                    coordinate_slices = slices
         # transform
         transform = get_transformation_matrix_nc(input_ds, var_name)
 
