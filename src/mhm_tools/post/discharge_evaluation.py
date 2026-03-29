@@ -1382,7 +1382,7 @@ def plot_map(
     lon_col="x",
     lat_col="y",
     cmap="viridis",
-    point_size=18,
+    point_size=6,
     dpi=200,
 ):
     """Plot gauge maps for each variable using color-coded points.
@@ -1441,6 +1441,12 @@ def plot_map(
     lon_pad = lon_range * 0.1 if lon_range > 0 else 0.1
     lat_pad = lat_range * 0.1 if lat_range > 0 else 0.1
 
+    n_points = len(df)
+    size_scale = 1.0
+    if n_points > 200:
+        size_scale = (200 / n_points) ** 0.5
+    point_size = max(4, point_size * size_scale)
+
     for var in variables:
         vals = df[var].astype(float).values
         if np.all(np.isnan(vals)):
@@ -1495,8 +1501,9 @@ def plot_map(
             cmap=cmap_obj,
             norm=norm,
             s=point_size,
-            edgecolor="black",
-            linewidth=0.2,
+            alpha=0.85,
+            edgecolor="white",
+            linewidth=0.25,
             transform=ccrs.PlateCarree(),
         )
         cb = plt.colorbar(sc, ax=ax, orientation="vertical", shrink=0.8, extend=extend)
