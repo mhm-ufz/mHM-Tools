@@ -577,6 +577,7 @@ class Catchment:
         self.resolutions = resolutions if resolutions is not None else Resolution()
         self.resolutions.l0 = round(abs(ds.lon.data[1] - ds.lon.data[0]), l0_presision)
         self.do_upscale = upscale
+        self.is_upscaled = False
         self.out_var_name = (
             out_var_name if out_var_name is not None else f"{var_name}.nc"
         )
@@ -693,6 +694,61 @@ class Catchment:
                 data=data, ftype=self.ftype, transform=self.transform, latlon=latlon
             )
         self.get_fdir()
+    
+    def get_current_coordinates(self):
+        """Build L1 coordinate arrays based on the dataset extent and L1 resolution."""
+        lon_coords = self.ds.lon.data
+        lat_coords = self.ds.lat.data
+        input_resolution = self.resolutions.l0
+        if (
+            self.resolutions.l1 is not None
+            and input_resolution != self.resolutions.l1
+            and self.do_upscale and self.is_upscaled
+        ):
+            # Rebuild coordinates for the coarser L1 grid
+            lon_coords = np.arange(
+                lon_coords.min() - input_resolution / 2 + self.resolutions.l1 / 2,
+                lon_coords.max() + self.resolutions.l1 / 2,
+                self.resolutions.l1,
+            )
+            lat_coords = np.arange(
+                lat_coords.max() + input_resolution / 2 - self.resolutions.l1 / 2,
+                lat_coords.min() - self.resolutions.l1 / 2,
+                -self.resolutions.l1,
+            )
+        logger.debug(
+            "Computed L1 coords: lon=%d, lat=%d", len(lon_coords), len(lat_coords)
+        )
+        return lon_coords, lat_coords
+    
+    def compute_cell_area(self, lat_name="lat", lon_name="lon"):
+        """Create a cell area data array in km2."""
+        logger.info("Create cell area data array.")
+        lon, lat = self.get_current_coordinates()
+        # calculate cellsize in kilometers
+        R = 6371  # radius of the earth in kilometers
+        lat_rad = np.deg2rad(lat)
+        lon_rad = np.deg2rad(lon)
+        dlat = np.abs(np.gradient(lat_rad))
+        dlon = np.abs(np.gradient(lon_rad))
+        # create 2D arrays for lat and lon
+        dlat_2d, dlon_2d = np.meshgrid(dlat, dlon, indexing="ij")
+        lat_2d = np.tile(lat_rad[:, np.newaxis], (1, len(lon)))
+        # calculate area
+        cell_areas = R**2 * dlat_2d * dlon_2d * np.cos(lat_2d)
+        self.cell_area = xr.DataArray(
+            cell_areas,
+            coords={lat_name: lat, lon_name: lon},
+            dims=[lat_name, lon_name],
+            name="cell_area",
+            attrs={
+                "title": "cell area",
+                "units": "km2",
+                "creator": "Department of Computational Hydrosystems",
+                "institution": "Helmholtz Centre for Environmental Research - UFZ",
+            },
+        )
+
 
     def calc_upstream_area(self):
         """Use pyflwdir to calculate the upstream area from flow direction by providing cell areas."""
@@ -700,7 +756,14 @@ class Catchment:
             logger.error("Flow direction is not initialized.")
             return None
         if self.cell_area is None:
-            self.cell_area = create_cell_area(self.ds).data
+            self.compute_cell_area()
+        if self.cell_area.shape != self._fdir.shape:
+            msg = (
+                f"cell_area shape {self.cell_area.shape} does not match "
+                f"flow-direction shape {self._fdir.shape}."
+            )
+            with ErrorLogger(logger):
+                raise ValueError(msg)
         return self._fdir.accuflux(self.cell_area, nodata=-9999)
 
     def _coord_to_index(self, lat, lon, lat_vals=None, lon_vals=None):
@@ -1631,9 +1694,8 @@ class Catchment:
         self._fdir = fdir_upscaled
         self.get_fdir()
         self.uparea_grid = uparea1  # replaces self.get_facc
-        self.cell_area = (
-            None  # reset cell area to be recalculated at new resolution when needed
-        )
+        self.cell_area = None  # reset cell area to be recalculated at new resolution when needed
+        self.is_upscaled = True
 
         if var == "dem":
             lat_size, lon_size = self.input_da.shape
@@ -2673,8 +2735,6 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
         ):
             logger.info(f"Creating catchments for gauge coordinates {gauge_coords}")
             upstream_area = c.calc_upstream_area()
-            if c.cell_area is None:
-                c.cell_area = create_cell_area(c.ds).data
 
             lon = get_coord_values(input_ds_sliced, lon=True)
             lat = get_coord_values(input_ds_sliced, lat=True)

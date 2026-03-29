@@ -579,9 +579,8 @@ class TestCatchment(unittest.TestCase):
         )
 
         # compute area of resulting catchment using create_cell_area
-        cell_area = catchment.create_cell_area(
-            ds, lat_name=lat_key, lon_name=lon_key
-        ).data
+        c.compute_cell_area(lat_name=lat_key, lon_name=lon_key)
+        cell_area = c.cell_area.data
         area_km2 = float(np.sum(cell_area[c.catchment_mask]))
         self.assertGreater(area_km2, 0.0)
         rel_diff = abs(area_km2 - float(self.REF_AREA[1])) / float(self.REF_AREA[1])
@@ -642,9 +641,8 @@ class TestCatchment(unittest.TestCase):
                 "No catchment cells found for provided gauge coordinates and ref area",
             )
 
-            cell_area = catchment.create_cell_area(
-                ds, lat_name=lat_key, lon_name=lon_key
-            ).data
+            c.compute_cell_area(lat_name=lat_key, lon_name=lon_key)
+            cell_area = c.cell_area.data
             area_km2 = float(np.sum(cell_area[c.catchment_mask]))
 
             # check that computed area is reasonably close to the reference (5% tolerance)

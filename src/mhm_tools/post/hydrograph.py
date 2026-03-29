@@ -492,9 +492,7 @@ class Hydrograph:
             self.logger.warning("No plots will be produced since none were specified.")
             return
         if not self.save and not self.show:
-            self.logger.info(
-                'No plots will be produced since both "save" and "show" are False.'
-            )
+            self.logger.info('No plots will be produced since both "save" and "show" are False.')
             return
         if "t" in code:
             self.plots[0] = 1
