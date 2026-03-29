@@ -580,7 +580,7 @@ class TestCatchment(unittest.TestCase):
 
         # compute area of resulting catchment using create_cell_area
         c.compute_cell_area(lat_name=lat_key, lon_name=lon_key)
-        cell_area = c.cell_area.data
+        cell_area = c.cell_area
         area_km2 = float(np.sum(cell_area[c.catchment_mask]))
         self.assertGreater(area_km2, 0.0)
         rel_diff = abs(area_km2 - float(self.REF_AREA[1])) / float(self.REF_AREA[1])
@@ -642,7 +642,7 @@ class TestCatchment(unittest.TestCase):
             )
 
             c.compute_cell_area(lat_name=lat_key, lon_name=lon_key)
-            cell_area = c.cell_area.data
+            cell_area = c.cell_area
             area_km2 = float(np.sum(cell_area[c.catchment_mask]))
 
             # check that computed area is reasonably close to the reference (5% tolerance)

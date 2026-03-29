@@ -736,19 +736,7 @@ class Catchment:
         lat_2d = np.tile(lat_rad[:, np.newaxis], (1, len(lon)))
         # calculate area
         cell_areas = R**2 * dlat_2d * dlon_2d * np.cos(lat_2d)
-        self.cell_area = xr.DataArray(
-            cell_areas,
-            coords={lat_name: lat, lon_name: lon},
-            dims=[lat_name, lon_name],
-            name="cell_area",
-            attrs={
-                "title": "cell area",
-                "units": "km2",
-                "creator": "Department of Computational Hydrosystems",
-                "institution": "Helmholtz Centre for Environmental Research - UFZ",
-            },
-        )
-
+        self.cell_area = cell_areas
 
     def calc_upstream_area(self):
         """Use pyflwdir to calculate the upstream area from flow direction by providing cell areas."""
@@ -1524,7 +1512,7 @@ class Catchment:
         gauge_id = getattr(gauge, "gauge_id", getattr(gauge, "id", None))
         # Compute upstream area (in km2) using accuflux and cell areas
         if self.cell_area is None:
-            self.cell_area = create_cell_area(self.ds).data
+            self.compute_cell_area()
         if upstream_area is None:
             try:
                 upstream_area = self.calc_upstream_area()

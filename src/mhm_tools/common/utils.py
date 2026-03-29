@@ -210,11 +210,15 @@ def find_best_gauge_location_by_area(  # noqa: PLR0915
         sub = upstream_area
         i_min, j_min = 0, 0
     lat_deg = float(ds.lat.data[gi]) if latlon else None
+    size = float(ref_catchment_area)
+    if size <= 0:
+        msg = f"Reference catchment area must be > 0 for burek, got {size}."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
     # Search for candidate cells whose upstream area matches ref_catchment_area
     if method == "basinex":
         logger.info("Correcting gauge location using basinex method")
         # based on implementation in basinex https://git.ufz.de/schaefed/basin-extractor/-/blame/master/lib/gauges.py?ref_type=heads#L42
-        size = float(ref_catchment_area)
         if size <= 0:
             msg = f"Reference catchment area must be > 0 for basinex, got {size}."
             with ErrorLogger(logger):
@@ -270,10 +274,15 @@ def find_best_gauge_location_by_area(  # noqa: PLR0915
         # based on Burek et. al. 2023 https://essd.copernicus.org/articles/15/5617/2023/
         # based on Lehner 2012 Derivation of watershed boundaries for GRDC gauging stations based on the HydroSHEDS drainage network - Technical Report prepared for the GRDC
         # implemented https://github.com/iiasa/CWATM_grdc_calibration_stations/blob/78979cbac8f8685d8dbc5330dba6f40a929716f4/scripts/1_findMeritcoord.py#L335
-        size = float(ref_catchment_area)
-        # error implementation closer to paper description
-        candidates_error = 1 - np.where(sub > size, size / sub, sub / size)
-        candidates_indices = np.where(candidates_error <= max_error)
+        ratio = np.full(sub.shape, np.nan, dtype=float)
+        valid_sub = np.isfinite(sub) & (sub > 0)
+        ratio[valid_sub] = np.where(
+            sub[valid_sub] > size, size / sub[valid_sub], sub[valid_sub] / size
+        )
+        candidates_error = 1 - ratio
+        candidates_indices = np.where(
+            np.isfinite(candidates_error) & (candidates_error <= max_error)
+        )
         if len(candidates_indices[0]) > 0:
             cand_i = candidates_indices[0] + i_min
             cand_j = candidates_indices[1] + j_min

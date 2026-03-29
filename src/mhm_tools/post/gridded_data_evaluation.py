@@ -705,7 +705,7 @@ def normalize_time_axis(ds: xr.Dataset, alias: str) -> xr.Dataset:
         ds_out = ds
     elif alias.endswith("H"):
         try:
-            ds_out = ds.assign_coords(time=ds.time.dt.floor("H"))
+            ds_out = ds.assign_coords(time=ds.time.dt.floor("h"))
         except ValueError:
             ds_out = ds.assign_coords(time=ds.time.dt.floor("h"))
     elif alias == "D":
