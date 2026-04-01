@@ -385,7 +385,7 @@ class Catchment:
             dx_m = res
         return np.sqrt((di * dy_m) ** 2 + (dj * dx_m) ** 2) / 100.0
 
-    def find_best_gauge_location(  # noqa: PLR0915
+    def find_best_gauge_location(
         self,
         upstream_area,
         gauge_coords,
@@ -397,7 +397,7 @@ class Catchment:
         raise_on_fallback=True,
     ):
         """Find best gauge location given reference gauge location, refernce cathcment area and allowed area and value deviation."""
-        if not recursion and method == 'basinex':
+        if not recursion and method == "basinex":
             max_distance_cells = max_distance_cells // 2
 
         # Determine whether gauge_coords are lat/lon floats or array indices
@@ -481,9 +481,6 @@ class Catchment:
                     np.abs(1 - sub[candidates[0][k], candidates[1][k]] / size),
                     distanance_100m,
                 )
-            logger.warning(
-                "No candidate found within tolerance; falling back to nearest stream cell by upstream area magnitude."
-            )
             if not recursion:
                 return self.find_best_gauge_location(
                     upstream_area,
@@ -521,9 +518,6 @@ class Catchment:
                 best_coord = (int(cand_i[k]), int(cand_j[k]))
                 error = candidates_error[k]
                 return best_coord, error / 100, candidates_distance[k]
-            logger.warning(
-                "No candidates found within error bounds. Consider increasing max_error or max_distance_cells."
-            )
         else:
             msg = f"Unknown method: {method}. Valid options are 'basinex' and 'burek'."
             with ErrorLogger(logger):
@@ -536,15 +530,19 @@ class Catchment:
             )
             with ErrorLogger(logger):
                 raise ValueError(msg)
-        # fallback: pick the cell in bbox with upstream area closest to target
-        flat = np.abs(sub - size)
-        idx = int(np.argmin(flat))
-        ri, rj = np.unravel_index(idx, sub.shape)
-        best_coord = (ri + i_min, rj + j_min)
-        logger.info(
-            f"The selected outlet candidate is {best_coord} with upstream area {upstream_area[best_coord]} km2 resulting in error {(ref_catchment_area - upstream_area[best_coord]) / ref_catchment_area:.3f}."
+        logger.warning(
+            "No candidate found within tolerance; doubling search radius and error tolerance."
         )
-        return best_coord, abs(upstream_area[best_coord] - size) / size
+        return self.find_best_gauge_location(
+            upstream_area,
+            gauge_coords,
+            ref_catchment_area,
+            max_distance_cells * 2,
+            max_error * 2,
+            recursion=True,
+            method=method,
+            raise_on_fallback=True,
+        )
 
     def get_best_gauge_coordinate(
         self,
@@ -567,26 +565,48 @@ class Catchment:
                     method=method,
                 )
             else:
-                outlet_idx_bx, error_bx, distance_error_bx = (
-                    self.find_best_gauge_location(
-                        upstream_area,
-                        gauge_coords,
-                        ref_catchment_area,
-                        max_distance_cells,
-                        max_error,
-                        method="basinex",
+                try:
+                    outlet_idx_bx, error_bx, distance_error_bx = (
+                        self.find_best_gauge_location(
+                            upstream_area,
+                            gauge_coords,
+                            ref_catchment_area,
+                            max_distance_cells,
+                            max_error,
+                            method="basinex",
+                            raise_on_fallback=False,
+                        )
                     )
-                )
-                outlet_idx_bu, error_bu, distance_error_bu = (
-                    self.find_best_gauge_location(
-                        upstream_area,
-                        gauge_coords,
-                        ref_catchment_area,
-                        max_distance_cells,
-                        max_error,
-                        method="burek",
+                except ValueError as e:
+                    logger.warning(
+                        f"Error occurred while finding BasinEx candidate: {e}"
                     )
-                )
+                    outlet_idx_bx, error_bx, distance_error_bx = (None, None, None)
+                try:
+                    outlet_idx_bu, error_bu, distance_error_bu = (
+                        self.find_best_gauge_location(
+                            upstream_area,
+                            gauge_coords,
+                            ref_catchment_area,
+                            max_distance_cells,
+                            max_error,
+                            method="burek",
+                            raise_on_fallback=False,
+                        )
+                    )
+                except ValueError as e:
+                    logger.warning(f"Error occurred while finding Burek candidate: {e}")
+                    if outlet_idx_bx is not None:
+                        logger.info(
+                            "Using BasinEx candidate since Burek candidate failed."
+                        )
+                        return outlet_idx_bx, error_bx, distance_error_bx
+                    logger.warning(
+                        "Both BasinEx and Burek candidates failed; falling back to original gauge coordinates."
+                    )
+                    msg = "No suitable outlet candidate found using either BasinEx or Burek method."
+                    with ErrorLogger(logger):
+                        raise ValueError(msg) from None
                 logger.info("Results of basin correction:")
                 logger.info(f"Burek: lat: {float(self.ds.lat.data[outlet_idx_bu[0]])}")
                 logger.info(f"Burek: lon: {float(self.ds.lon.data[outlet_idx_bu[1]])}")
