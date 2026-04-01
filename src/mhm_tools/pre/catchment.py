@@ -385,7 +385,7 @@ class Catchment:
             dx_m = res
         return np.sqrt((di * dy_m) ** 2 + (dj * dx_m) ** 2) / 100.0
 
-    def find_best_gauge_location(
+    def find_best_gauge_location( # noqa: PLR0915
         self,
         upstream_area,
         gauge_coords,
@@ -397,9 +397,6 @@ class Catchment:
         raise_on_fallback=True,
     ):
         """Find best gauge location given reference gauge location, refernce cathcment area and allowed area and value deviation."""
-        if not recursion and method == "basinex":
-            max_distance_cells = max_distance_cells // 2
-
         # Determine whether gauge_coords are lat/lon floats or array indices
         lat_vals = self.ds.lat.data
         lon_vals = self.ds.lon.data
@@ -481,16 +478,6 @@ class Catchment:
                     np.abs(1 - sub[candidates[0][k], candidates[1][k]] / size),
                     distanance_100m,
                 )
-            if not recursion:
-                return self.find_best_gauge_location(
-                    upstream_area,
-                    gauge_coords,
-                    ref_catchment_area,
-                    max_distance_cells,
-                    max_error,
-                    recursion=True,
-                    method=method,
-                )
         elif method == "burek":
             logger.info("Correcting gauge location using burek method")
             # based on Burek et. al. 2023 https://essd.copernicus.org/articles/15/5617/2023/
@@ -509,7 +496,11 @@ class Catchment:
                 candidates_error = 100 * np.abs(
                     1 - sub[candidates_indices] / size
                 )  # 100 * np.abs(1 - ups[y, x] / upsreal)
-                burek_metric = candidates_error + 2 * candidates_distance
+                if not recursion:
+                    burek_metric = candidates_error + 2 * candidates_distance
+                else:
+                    # in recursive step we double the max distance burek proposes to use distance and error with equal weight
+                    burek_metric = candidates_error + candidates_distance
                 k = int(np.argmin(burek_metric))
                 if np.sum(burek_metric == burek_metric[k]) > 1:
                     logger.warning(
@@ -530,8 +521,28 @@ class Catchment:
             )
             with ErrorLogger(logger):
                 raise ValueError(msg)
+        if not recursion:
+            logger.warning(
+                "No candidate found within initial tolerance; trying again with doubled radius."
+            )
+            logger.warning(
+                f"Radius: {max_distance_cells*2} cells, error tolerance: {max_error*100:.2f}%."
+            )
+            return self.find_best_gauge_location(
+                upstream_area,
+                gauge_coords,
+                ref_catchment_area,
+                max_distance_cells * 2,
+                max_error,
+                recursion=True,
+                method=method,
+                raise_on_fallback=False,
+            )
         logger.warning(
-            "No candidate found within tolerance; doubling search radius and error tolerance."
+            "No candidate found within tolerance; doubling search radius again and doubling error tolerance."
+        )
+        logger.warning(
+            f"Radius: {max_distance_cells*2} cells, error tolerance: {max_error*200:.2f}%."
         )
         return self.find_best_gauge_location(
             upstream_area,
@@ -552,6 +563,7 @@ class Catchment:
         max_distance_cells,
         max_error,
         method,
+        raise_on_fallback=True,
     ):
         """Get best gauge coordinates given target catchment area."""
         if ref_catchment_area is not None:
@@ -563,6 +575,7 @@ class Catchment:
                     max_distance_cells,
                     max_error,
                     method=method,
+                    raise_on_fallback=raise_on_fallback,
                 )
             else:
                 try:
@@ -745,6 +758,7 @@ class Catchment:
         mask_catchment: Optional[bool] = True,
         save_coords: Optional[bool] = True,
         gauge_opti_method: Optional[str] = "basinex",
+        raise_on_fallback: Optional[bool] = True,
     ):
         """Delineate the basin for a given lat and lon."""
         # Target area in km2 we want to match (can be adjusted/replaced by caller later)
@@ -773,6 +787,7 @@ class Catchment:
             max_distance_cells,
             max_error,
             gauge_opti_method,
+            raise_on_fallback=raise_on_fallback,
         )
         outlet_linear_idx = np.ravel_multi_index(outlet_idx, self._fdir.shape)
 
@@ -1685,6 +1700,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
     gauge_ids=None,
     ncpus=1,
     gauge_opti_method="basinex",
+    raise_on_fallback=True,
 ):
     """Create file containing catchment ids, flowdirection and upstream area from dem or flow direction."""
     logger.info(
@@ -1805,6 +1821,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                 max_error=max_error,
                 gauge_id=gauge_ids if not isinstance(gauge_ids, list) else gauge_ids[0],
                 gauge_opti_method=gauge_opti_method,
+                raise_on_fallback=raise_on_fallback,
             )
             if resolutions.l1_resolution is not None and upscale:
                 c.upscale(var)
@@ -1869,6 +1886,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                     max_distance_cells,
                     max_error,
                     method=gauge_opti_method,
+                    raise_on_fallback=raise_on_fallback,
                 )
                 return {
                     "gauge_id": gauge_ids[i],

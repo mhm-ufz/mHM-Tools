@@ -217,14 +217,16 @@ class TestCatchment(unittest.TestCase):
         upstream_area = np.zeros((5, 5), dtype=float)
         upstream_area[2, 1] = 100.0
         upstream_area[2, 3] = 105.0
-        best_coord_basinex, error_basinex, distance_basinex = c.find_best_gauge_location(
-            upstream_area,
-            gauge_coords=(2.0, 2.0),
-            ref_catchment_area=103.0,
-            max_distance_cells=4,
-            max_error=0.05,
-            method="basinex",
-            raise_on_fallback=True,
+        best_coord_basinex, error_basinex, distance_basinex = (
+            c.find_best_gauge_location(
+                upstream_area,
+                gauge_coords=(2.0, 2.0),
+                ref_catchment_area=103.0,
+                max_distance_cells=4,
+                max_error=0.05,
+                method="basinex",
+                raise_on_fallback=True,
+            )
         )
         best_coord_burek, error_burek, distance_burek = c.find_best_gauge_location(
             upstream_area,
@@ -245,14 +247,16 @@ class TestCatchment(unittest.TestCase):
         upstream_area[2, 1] = 100.0
         upstream_area[0, 2] = 98.2
         upstream_area[3, 2] = 102.0
-        best_coord_basinex, error_basinex, distance_basinex = c.find_best_gauge_location(
-            upstream_area,
-            gauge_coords=(2.0, 2.0),
-            ref_catchment_area=100.0,
-            max_distance_cells=4,
-            max_error=0.05,
-            method="basinex",
-            raise_on_fallback=True,
+        best_coord_basinex, error_basinex, distance_basinex = (
+            c.find_best_gauge_location(
+                upstream_area,
+                gauge_coords=(2.0, 2.0),
+                ref_catchment_area=100.0,
+                max_distance_cells=4,
+                max_error=0.05,
+                method="basinex",
+                raise_on_fallback=True,
+            )
         )
         best_coord_burek, error_burek, distance_burek = c.find_best_gauge_location(
             upstream_area,
@@ -583,7 +587,9 @@ class TestCatchment(unittest.TestCase):
             )
 
         snapped = []
-        resolutions = catchment.Resolution(l0_resolution=0.001953125, l1_resolution=1 / 32)
+        resolutions = catchment.Resolution(
+            l0_resolution=0.001953125, l1_resolution=1 / 32
+        )
         for idx, (lat, lon) in enumerate(gauge_coords):
             out_dir = self.tmp_path / f"single_{idx}"
             out_dir.mkdir(parents=True, exist_ok=True)
@@ -605,6 +611,7 @@ class TestCatchment(unittest.TestCase):
                     latlon=True,
                     frame=1,
                     resolutions=resolutions,
+                    raise_on_fallback=True,
                 )
             id_path = out_dir / "idgauges.nc"
             self.assertTrue(id_path.is_file())
@@ -630,6 +637,7 @@ class TestCatchment(unittest.TestCase):
             latlon=True,
             frame=1,
             resolutions=resolutions,
+            raise_on_fallback=True,
         )
         combined_path = combined_dir / "idgauges.nc"
         self.assertTrue(combined_path.is_file())
@@ -665,7 +673,9 @@ class TestCatchment(unittest.TestCase):
                 else list(ds.data_vars)[0]
             )
 
-        resolutions = catchment.Resolution(l0_resolution=0.001953125, l1_resolution=1 / 32)
+        resolutions = catchment.Resolution(
+            l0_resolution=0.001953125, l1_resolution=1 / 32
+        )
 
         seq_dir = self.tmp_path / "seq"
         par_dir = self.tmp_path / "par"
@@ -684,6 +694,7 @@ class TestCatchment(unittest.TestCase):
             frame=1,
             resolutions=resolutions,
             ncpus=1,
+            raise_on_fallback=True,
         )
         catchment.create_catchment(
             input_file=str(self.FDIR_PATH),
@@ -697,6 +708,7 @@ class TestCatchment(unittest.TestCase):
             frame=1,
             resolutions=resolutions,
             ncpus=2,
+            raise_on_fallback=True,
         )
 
         seq_path = seq_dir / "idgauges.nc"

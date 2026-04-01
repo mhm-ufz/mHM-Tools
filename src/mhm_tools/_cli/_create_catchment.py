@@ -203,6 +203,14 @@ def add_args(parser):
             "Number of cores used for parallelisation. Only needed if multiple gauges are created."
         ),
     )
+    optional_args.add_argument(
+        "--allow_fallback",
+        action="store_true",
+        default=False,
+        help=(
+            "If enabled, if the optimization method fails to find a suitable cell for the gauge location, it will fall back to a less strict method by first doubling the search radius then doubling the radius again and doubling the error tolerance. If disabled, it will raise an error instead."
+        ),
+    )
 
 
 def run(args):
@@ -334,4 +342,5 @@ def run(args):
         gauge_ids=gauge_ids,
         ncpus=args.ncpus,
         gauge_opti_method=args.gauge_optimization_method,
+        raise_on_fallback=not args.allow_fallback,
     )
