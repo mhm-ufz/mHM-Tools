@@ -621,7 +621,7 @@ class Catchment:
                     with ErrorLogger(logger):
                         raise ValueError(msg) from None
             logger.info("Results of basin correction:")
-            if method in ("all", "burek") and outlet_idx_bu is not None:
+            if method in ("all", "burek"):
                 if method == "burek":
                     outlet_idx_bu = outlet_idx
                     error_bu = error
