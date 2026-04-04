@@ -620,11 +620,17 @@ class Catchment:
                     msg = "No suitable outlet candidate found using either BasinEx or Burek method."
                     with ErrorLogger(logger):
                         raise ValueError(msg) from None
-                logger.info("Results of basin correction:")
+            logger.info("Results of basin correction:")
+            if method in ("all", "burek") and outlet_idx_bu is not None:
+                if method == "burek":
+                    outlet_idx_bu = outlet_idx
                 logger.info(f"Burek: lat: {float(self.ds.lat.data[outlet_idx_bu[0]])}")
                 logger.info(f"Burek: lon: {float(self.ds.lon.data[outlet_idx_bu[1]])}")
                 logger.info(f"Burek: error {error_bu}")
                 logger.info(f"Burek: distance change {distance_error_bu/10}km")
+            if method in ("all", "basinex"):
+                if method == "basinex":
+                    outlet_idx_bx = outlet_idx
                 logger.info(
                     f"BasinEx: lat: {float(self.ds.lat.data[outlet_idx_bx[0]])}"
                 )
@@ -633,6 +639,7 @@ class Catchment:
                 )
                 logger.info(f"BasinEx: error {error_bx}")
                 logger.info(f"BasinEx: distance change {distance_error_bx/10}km")
+            if method == "all":
                 if error_bx < error_bu:
                     logger.info("using BasinEx location")
                     outlet_idx = outlet_idx_bx
