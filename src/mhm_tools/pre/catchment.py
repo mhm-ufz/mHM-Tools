@@ -385,7 +385,7 @@ class Catchment:
             dx_m = res
         return np.sqrt((di * dy_m) ** 2 + (dj * dx_m) ** 2) / 100.0
 
-    def find_best_gauge_location( # noqa: PLR0915
+    def find_best_gauge_location(  # noqa: PLR0915
         self,
         upstream_area,
         gauge_coords,
@@ -624,6 +624,8 @@ class Catchment:
             if method in ("all", "burek") and outlet_idx_bu is not None:
                 if method == "burek":
                     outlet_idx_bu = outlet_idx
+                    error_bu = error
+                    distance_error_bu = distance_error
                 logger.info(f"Burek: lat: {float(self.ds.lat.data[outlet_idx_bu[0]])}")
                 logger.info(f"Burek: lon: {float(self.ds.lon.data[outlet_idx_bu[1]])}")
                 logger.info(f"Burek: error {error_bu}")
@@ -631,6 +633,8 @@ class Catchment:
             if method in ("all", "basinex"):
                 if method == "basinex":
                     outlet_idx_bx = outlet_idx
+                    error_bx = error
+                    distance_error_bx = distance_error
                 logger.info(
                     f"BasinEx: lat: {float(self.ds.lat.data[outlet_idx_bx[0]])}"
                 )
@@ -799,20 +803,27 @@ class Catchment:
         outlet_linear_idx = np.ravel_multi_index(outlet_idx, self._fdir.shape)
 
         # Now delineate basin using pyflwdir basins()
-        if ref_catchment_area is not None:
-            streams_mask = (upstream_area > ref_catchment_area * (1 - error - 1e-6)) & (
-                upstream_area < ref_catchment_area * (1 + error + 1e-6)
-            ).astype(bool)
-        else:
-            streams_mask = self._fdir.stream_order() >= stream_order
+        streams_mask = None
+        # if ref_catchment_area is not None:
+        #     low = ref_catchment_area * (1 - error - 1e-6)
+        #     high = ref_catchment_area * (1 + error + 1e-6)
+        #     streams_mask = np.asarray(
+        #         (upstream_area > low) & (upstream_area < high), dtype=bool
+        #     )
+        # else:
+        #     streams_mask = np.asarray(
+        #         self._fdir.stream_order() >= stream_order, dtype=bool
+        #     )
         try:
             basin = self._fdir.basins(
                 idxs=np.array([outlet_linear_idx], dtype=np.int64),
                 streams=streams_mask,
             )
         except Exception as e:
-            logger.exception(f"pyflwdir.basins(idxs=...) failed for {outlet_idx}: {e}")
             # try computing all basins and pick id at outlet
+            logger.warning(
+                f"basins() with idxs failed: {e}. Trying fallback method to compute all basins and select the one at the outlet."
+            )
             try:
                 all_basins = self._fdir.basins()
                 basin_id = int(all_basins[outlet_idx])
@@ -1923,32 +1934,31 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                 )
                 # combine all river masks
                 streams_mask = None
-                logger.info("Creating stream masks for all gauges.")
-                for gi in gauge_infos:
-                    if gi["ref_area"] is None or gi["error"] is None:
-                        continue
-                    if streams_mask is None:
-                        streams_mask = (
-                            upstream_area > gi["ref_area"] * (1 - gi["error"] - 1e-6)
-                        ) & (
-                            upstream_area < gi["ref_area"] * (1 + gi["error"] + 1e-6)
-                        ).astype(
-                            bool
-                        )
-                    else:
-                        streams_mask |= (
-                            upstream_area > gi["ref_area"] * (1 - gi["error"] - 1e-6)
-                        ) & (
-                            upstream_area < gi["ref_area"] * (1 + gi["error"] + 1e-6)
-                        ).astype(
-                            bool
-                        )
+                # logger.info("Creating stream masks for all gauges.")
+                # for gi in gauge_infos:
+                #     if gi["ref_area"] is None or gi["error"] is None:
+                #         continue
+                # if streams_mask is None:
+                #     low = gi["ref_area"] * (1 - gi["error"] - 1e-6)
+                #     high = gi["ref_area"] * (1 + gi["error"] + 1e-6)
+                #     streams_mask = np.asarray(
+                #         (upstream_area > low) & (upstream_area < high), dtype=bool
+                #     )
+                # else:
+                # low = gi["ref_area"] * (1 - gi["error"] - 1e-6)
+                # high = gi["ref_area"] * (1 + gi["error"] + 1e-6)
+                # streams_mask |= np.asarray(
+                #     (upstream_area > low) & (upstream_area < high), dtype=bool
+                # )
                 logger.info("Delineating basins for all gauges.")
-                if streams_mask is None or not np.any(streams_mask):
-                    logger.warning("No river mask found for any gauge.")
-                    streams_mask = c._fdir.stream_order() >= 4
+                # if streams_mask is None or not np.any(streams_mask):
+                # logger.warning("No river mask found for any gauge.")
+                # streams_mask = np.asarray(c._fdir.stream_order() >= 4, dtype=bool)
                 try:
-                    basins = c._fdir.basins(idxs=outlet_linear, streams=streams_mask)
+                    basins = c._fdir.basins(
+                        idxs=outlet_linear,
+                        streams=streams_mask,
+                    )
                 except Exception as exc:
                     logger.exception("pyflwdir.basins(idxs=...) failed: %s", exc)
                     with ErrorLogger(logger):
