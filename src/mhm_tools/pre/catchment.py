@@ -12,6 +12,11 @@ import logging
 from pathlib import Path
 from typing import Optional
 
+from mhm_tools.common.utils import (
+    coord_to_index,
+    distance_100m_units,
+    find_best_gauge_location,
+)
 import numpy as np
 import pyflwdir
 import xarray as xr
@@ -313,79 +318,17 @@ class Catchment:
             self.cell_area = create_cell_area(self.ds).data
         return self._fdir.accuflux(self.cell_area, nodata=-9999)
 
-    def _coord_to_index(self, lat, lon):
-        """Map latitude/longitude or indices to integer grid indices."""
-        if "lat" not in self.ds.coords or "lon" not in self.ds.coords:
-            msg = "Dataset is missing latitude/longitude coordinates."
-            with ErrorLogger(logger):
-                raise ValueError(msg)
-        lat_vals = self.ds.lat.data
-        lon_vals = self.ds.lon.data
-
-        if isinstance(lat, (int, np.integer)):
-            i = int(lat)
-            logger.debug(
-                f"Was given latitude index {i} directly. Corresponding lat_value {lat_vals[i]}"
-            )
-        elif lat < min(lat_vals) or lat > max(lat_vals):
-            logger.error(
-                f"Given latitude {lat} is outside dataset bounds ({min(lat_vals)}, {max(lat_vals)}). Clipping to bounds."
-            )
-            i = None
-        else:
-            i = int(np.abs(lat_vals - float(lat)).argmin())
-            logger.debug(
-                f"Mapped latitude {float(lat)} to index {i} with lat_value {lat_vals[i]}"
-            )
-
-        if isinstance(lon, (int, np.integer)):
-            j = int(lon)
-            logger.debug(
-                f"Was given longitude index {j} directly. Corresponding lon_value {lon_vals[j]}"
-            )
-        elif lon < min(lon_vals) or lon > max(lon_vals):
-            logger.error(
-                f"Given longitude {lon} is outside dataset bounds ({min(lon_vals)}, {max(lon_vals)}). Clipping to bounds."
-            )
-            j = None
-        else:
-            j = int(np.abs(lon_vals - float(lon)).argmin())
-            logger.debug(
-                f"Mapped longitude {float(lon)} to index {j} with lon_value {lon_vals[j]}"
-            )
-        if i is None or j is None:
-            msg = (
-                "Could not map given coordinates to valid indices within "
-                "dataset bounds."
-            )
-            with ErrorLogger(logger):
-                raise ValueError(msg)
-        i = int(np.clip(i, 0, len(lat_vals) - 1))
-        j = int(np.clip(j, 0, len(lon_vals) - 1))
-
-        return i, j
-
     def _distance_100m_units(self, di, dj, lat_deg=None):
-        """Convert index deltas to distance in ~100 m units using l0_resolution."""
-        res = float(abs(self.resolutions.l0_resolution))
-        if self.latlon:
-            if lat_deg is None:
-                lat_deg = 0.0
-            # approximate meters per degree
-            meters_per_deg_lat = 111_132.92
-            dy_m = meters_per_deg_lat * res
-            # Not used since burek assumes square cell sizes:
-            # lat_rad = np.deg2rad(lat_deg)
-            # meters_per_deg_lon = 111_320.0 * np.cos(lat_rad)
-            # dx_m = meters_per_deg_lon * res
-            dx_m = dy_m
-        else:
-            # assume resolution already in meters for projected grids
-            dy_m = res
-            dx_m = res
-        return np.sqrt((di * dy_m) ** 2 + (dj * dx_m) ** 2) / 100.0
+        """Backwards-compatible wrapper around the shared distance helper."""
+        return distance_100m_units(
+            di=di,
+            dj=dj,
+            l0_resolution=self.resolutions.l0_resolution,
+            lat_deg=lat_deg,
+            latlon=self.latlon,
+        )
 
-    def find_best_gauge_location(  # noqa: PLR0915
+    def find_best_gauge_location(
         self,
         upstream_area,
         gauge_coords,
@@ -396,163 +339,19 @@ class Catchment:
         method="basinex",
         raise_on_fallback=True,
     ):
-        """Find best gauge location given reference gauge location, refernce cathcment area and allowed area and value deviation."""
-        # Determine whether gauge_coords are lat/lon floats or array indices
-        lat_vals = self.ds.lat.data
-        lon_vals = self.ds.lon.data
-        gi, gj = self._coord_to_index(gauge_coords[0], gauge_coords[1])
-
-        logger.debug(f"Gauge index (row, col): {(gi, gj)}")
-
-        # We will search for candidate outlet cells within a bbox around the gauge
-        # (in degrees). These parameters are conservative defaults and can be
-        # tuned later or exposed as args.
-        max_cells = int(max(0, round(max_distance_cells)))
-
-        # find index window (clamp to domain)
-        i_min = max(0, gi - max_cells)
-        i_max = min(len(lat_vals) - 1, gi + max_cells)
-        j_min = max(0, gj - max_cells)
-        j_max = min(len(lon_vals) - 1, gj + max_cells)
-
-        # Ensure min <= max
-        if i_min > i_max:
-            i_min, i_max = i_max, i_min
-        if j_min > j_max:
-            j_min, j_max = j_max, j_min
-
-        # Extract subgrid of upstream_area
-        sub = upstream_area[i_min : i_max + 1, j_min : j_max + 1]
-
-        # If subgrid is empty fallback to whole domain
-        if sub.size == 0:
-            logger.warning("Search bbox empty, falling back to full-domain search")
-            sub = upstream_area
-            i_min, j_min = 0, 0
-        lat_deg = float(self.ds.lat.data[gi]) if self.latlon else None
-        # Search for candidate cells whose upstream area matches ref_catchment_area
-        if method == "basinex":
-            logger.info("Correcting gauge location using basinex method")
-            # based on implementation in basinex https://git.ufz.de/schaefed/basin-extractor/-/blame/master/lib/gauges.py?ref_type=heads#L42
-            size = float(ref_catchment_area)
-            error = 0.0
-            step = 0.01
-            candidates = None
-            while error <= max_error and (
-                candidates is None or len(candidates[0]) == 0
-            ):
-                low = size * (1.0 - error)
-                high = size * (1.0 + error)
-                candidates = np.where((sub >= low) & (sub <= high))
-                if len(candidates[0]) == 0:
-                    error += step
-
-            best_coord = None
-            if len(candidates[0]) > 0:
-                # convert sub indices to global indices
-                cand_i = candidates[0] + i_min
-                cand_j = candidates[1] + j_min
-                # choose the candidate nearest to the gauge index
-                d2 = (cand_i - gi) ** 2 + (cand_j - gj) ** 2
-                k = int(np.argmin(d2))
-                # if there is more than one candidate with the same distance, choose the one with the smallest area error
-                if np.sum(d2 == d2[k]) > 1:
-                    logger.warning(
-                        "Multiple candidates with the same distance to gauge found. Choosing the one with smallest area error."
-                    )
-                    error_cand = np.abs(sub[candidates] - size)
-                    k = int(np.argmin(error_cand))
-                    if np.sum(error_cand == error_cand[k]) > 1:
-                        logger.warning(
-                            "Multiple candidates with the same area error and same distance to gauge found. The selected candidate can not be uniquely identified."
-                        )
-                best_coord = (int(cand_i[k]), int(cand_j[k]))
-                logger.info(
-                    f"Selected outlet candidate {best_coord} with upstream area {upstream_area[best_coord]} km2 (tolerance {error:.3f})"
-                )
-                distanance_100m = self._distance_100m_units(
-                    cand_i[k] - gi, cand_j[k] - gj, lat_deg=lat_deg
-                )
-                return (
-                    best_coord,
-                    np.abs(1 - sub[candidates[0][k], candidates[1][k]] / size),
-                    distanance_100m,
-                )
-        elif method == "burek":
-            logger.info("Correcting gauge location using burek method")
-            # based on Burek et. al. 2023 https://essd.copernicus.org/articles/15/5617/2023/
-            # implemented https://github.com/iiasa/CWATM_grdc_calibration_stations/blob/78979cbac8f8685d8dbc5330dba6f40a929716f4/scripts/1_findMeritcoord.py#L335
-            size = float(ref_catchment_area)
-            low = size * (1.0 - max_error)
-            high = size * (1.0 + max_error)
-            candidates_indices = np.where((sub >= low) & (sub <= high))
-            if len(candidates_indices[0]) > 0:
-                cand_i = candidates_indices[0] + i_min
-                cand_j = candidates_indices[1] + j_min
-                di = cand_i - gi
-                dj = cand_j - gj
-                candidates_distance = self._distance_100m_units(di, dj, lat_deg=lat_deg)
-                # candidates_distance = np.sqrt(di**2+dj**2)*0.92
-                candidates_error = 100 * np.abs(
-                    1 - sub[candidates_indices] / size
-                )  # 100 * np.abs(1 - ups[y, x] / upsreal)
-                if not recursion:
-                    burek_metric = candidates_error + 2 * candidates_distance
-                else:
-                    # in recursive step we double the max distance burek proposes to use distance and error with equal weight
-                    burek_metric = candidates_error + candidates_distance
-                k = int(np.argmin(burek_metric))
-                if np.sum(burek_metric == burek_metric[k]) > 1:
-                    logger.warning(
-                        "Multiple candidates with the same Burek metric found. The selected candidate can not be uniquely identified."
-                    )
-                best_coord = (int(cand_i[k]), int(cand_j[k]))
-                error = candidates_error[k]
-                return best_coord, error / 100, candidates_distance[k]
-        else:
-            msg = f"Unknown method: {method}. Valid options are 'basinex' and 'burek'."
-            with ErrorLogger(logger):
-                raise ValueError(msg)
-
-        if raise_on_fallback:
-            msg = (
-                f"No suitable outlet candidate found within {max_distance_cells} cells and {max_error*100:.2f}% area error. "
-                "Consider increasing max_distance_cells or max_error."
-            )
-            with ErrorLogger(logger):
-                raise ValueError(msg)
-        if not recursion:
-            logger.warning(
-                "No candidate found within initial tolerance; trying again with doubled radius."
-            )
-            logger.warning(
-                f"Radius: {max_distance_cells*2} cells, error tolerance: {max_error*100:.2f}%."
-            )
-            return self.find_best_gauge_location(
-                upstream_area,
-                gauge_coords,
-                ref_catchment_area,
-                max_distance_cells * 2,
-                max_error,
-                recursion=True,
-                method=method,
-                raise_on_fallback=False,
-            )
-        logger.warning(
-            "No candidate found within tolerance; doubling search radius again and doubling error tolerance."
-        )
-        logger.warning(
-            f"Radius: {max_distance_cells*2} cells, error tolerance: {max_error*200:.2f}%."
-        )
-        return self.find_best_gauge_location(
-            upstream_area,
-            gauge_coords,
-            ref_catchment_area,
-            max_distance_cells * 2,
-            max_error * 2,
-            recursion=True,
+        """Backwards-compatible wrapper to find the best outlet cell."""
+        return find_best_gauge_location(
+            ds=self.ds,
+            upstream_area=upstream_area,
+            gauge_coords=gauge_coords,
+            ref_catchment_area=ref_catchment_area,
+            resolutions=self.resolutions,
+            max_distance_cells=max_distance_cells,
+            max_error=max_error,
+            recursion=recursion,
             method=method,
-            raise_on_fallback=True,
+            raise_on_fallback=raise_on_fallback,
+            latlon=self.latlon,
         )
 
     def get_best_gauge_coordinate(
@@ -568,26 +367,32 @@ class Catchment:
         """Get best gauge coordinates given target catchment area."""
         if ref_catchment_area is not None:
             if method != "all":
-                outlet_idx, error, distance_error = self.find_best_gauge_location(
+                outlet_idx, error, distance_error = find_best_gauge_location(
+                    self.ds,
                     upstream_area,
                     gauge_coords,
                     ref_catchment_area,
+                    self.resolutions,
                     max_distance_cells,
                     max_error,
                     method=method,
                     raise_on_fallback=raise_on_fallback,
+                    latlon=self.latlon
                 )
             else:
                 try:
                     outlet_idx_bx, error_bx, distance_error_bx = (
-                        self.find_best_gauge_location(
+                        find_best_gauge_location(
+                            self.ds,
                             upstream_area,
                             gauge_coords,
                             ref_catchment_area,
+                            self.resolutions,
                             max_distance_cells,
                             max_error,
                             method="basinex",
                             raise_on_fallback=False,
+                            latlon=self.latlon
                         )
                     )
                 except ValueError as e:
@@ -597,14 +402,17 @@ class Catchment:
                     outlet_idx_bx, error_bx, distance_error_bx = (None, None, None)
                 try:
                     outlet_idx_bu, error_bu, distance_error_bu = (
-                        self.find_best_gauge_location(
+                        find_best_gauge_location(
+                            self.ds,
                             upstream_area,
                             gauge_coords,
                             ref_catchment_area,
+                            self.resolutions,
                             max_distance_cells,
                             max_error,
                             method="burek",
                             raise_on_fallback=False,
+                            latlon=self.latlon
                         )
                     )
                 except ValueError as e:
@@ -666,7 +474,7 @@ class Catchment:
             logger.warning(
                 "No catchment area provided; falling back to original gauge coordinates."
             )
-            outlet_idx = self._coord_to_index(gauge_coords[0], gauge_coords[1])
+            outlet_idx = coord_to_index(self.ds, gauge_coords[0], gauge_coords[1])
             gauge_lat = float(gauge_coords[0])
             gauge_lon = float(gauge_coords[1])
             error = None
