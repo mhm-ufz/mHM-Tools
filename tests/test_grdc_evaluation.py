@@ -187,7 +187,7 @@ class TestQDataToXarray(unittest.TestCase):
             # Prepare a sequenced side_effect for get_xarray_ds_from_file:
             # call 1: observed_data_path again (observed data)
             # call 2: model_data_path (sim data)
-            # call 3: mrm_restart_file (we won't use; mock get_gauge_coords instead)
+            # call 3: facc_file (we won't use; mock get_gauge_coords instead)
             sequence = [
                 cm_enter(self.obs_ds),
                 cm_enter(self.sim_ds),
@@ -229,7 +229,7 @@ class TestQDataToXarray(unittest.TestCase):
                 obs_out, sim_out = gv.Q_data_to_xarray(
                     model_data_path="sim.nc",
                     observed_data_path="obs.nc",
-                    mrm_restart_file="restart.nc",
+                    facc_file="restart.nc",
                     sim_variable="Qrouted",
                     observed_variable="runoff_mean_mm",
                     model_keyword="mrm",
@@ -330,7 +330,7 @@ class TestEvaluateDirect(unittest.TestCase):
                 gv.evaludate_discharge_data(
                     model_data_path="sim.nc",
                     observed_data_path="obs.nc",
-                    mrm_restart_file="restart.nc",
+                    facc_file="restart.nc",
                     output_path=outdir,
                     n_jobs=1,
                     direct_comparison=True,  # direct path
@@ -400,7 +400,7 @@ class TestEvaluateBootstrap(unittest.TestCase):
                 gv.evaludate_discharge_data(
                     model_data_path="sim.nc",
                     observed_data_path="obs.nc",
-                    mrm_restart_file="restart.nc",
+                    facc_file="restart.nc",
                     output_path=outdir,
                     n_jobs=1,
                     direct_comparison=False,  # take bootstrap branch
@@ -619,7 +619,7 @@ class TestGRDCValidation2Consistency(unittest.TestCase):
                 obs_g, sim_g = gv.Q_data_to_xarray(
                     model_data_path="sim.nc",
                     observed_data_path="obs.nc",
-                    mrm_restart_file="restart.nc",
+                    facc_file="restart.nc",
                     sim_variable="Qrouted",
                     observed_variable="runoff_mean_mm",
                     model_keyword="mrm",

@@ -91,56 +91,56 @@ def pretty_print_df(df: pd.DataFrame, max_col_width: int = 30) -> None:
     logger.info(out_string)
 
 def coord_to_index(ds, lat, lon):
-        """Map latitude/longitude or indices to integer grid indices."""
-        if "lat" not in ds.coords or "lon" not in ds.coords:
-            msg = "Dataset is missing latitude/longitude coordinates."
-            with ErrorLogger(logger):
-                raise ValueError(msg)
-        lat_vals = ds.lat.data
-        lon_vals = ds.lon.data
+    """Map latitude/longitude or indices to integer grid indices."""
+    if "lat" not in ds.coords or "lon" not in ds.coords:
+        msg = "Dataset is missing latitude/longitude coordinates."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    lat_vals = ds.lat.data
+    lon_vals = ds.lon.data
 
-        if isinstance(lat, (int, np.integer)):
-            i = int(lat)
-            logger.debug(
-                f"Was given latitude index {i} directly. Corresponding lat_value {lat_vals[i]}"
-            )
-        elif lat < min(lat_vals) or lat > max(lat_vals):
-            logger.error(
-                f"Given latitude {lat} is outside dataset bounds ({min(lat_vals)}, {max(lat_vals)}). Clipping to bounds."
-            )
-            i = None
-        else:
-            i = int(np.abs(lat_vals - float(lat)).argmin())
-            logger.debug(
-                f"Mapped latitude {float(lat)} to index {i} with lat_value {lat_vals[i]}"
-            )
+    if isinstance(lat, (int, np.integer)):
+        i = int(lat)
+        logger.debug(
+            f"Was given latitude index {i} directly. Corresponding lat_value {lat_vals[i]}"
+        )
+    elif lat < min(lat_vals) or lat > max(lat_vals):
+        logger.error(
+            f"Given latitude {lat} is outside dataset bounds ({min(lat_vals)}, {max(lat_vals)}). Clipping to bounds."
+        )
+        i = None
+    else:
+        i = int(np.abs(lat_vals - float(lat)).argmin())
+        logger.debug(
+            f"Mapped latitude {float(lat)} to index {i} with lat_value {lat_vals[i]}"
+        )
 
-        if isinstance(lon, (int, np.integer)):
-            j = int(lon)
-            logger.debug(
-                f"Was given longitude index {j} directly. Corresponding lon_value {lon_vals[j]}"
-            )
-        elif lon < min(lon_vals) or lon > max(lon_vals):
-            logger.error(
-                f"Given longitude {lon} is outside dataset bounds ({min(lon_vals)}, {max(lon_vals)}). Clipping to bounds."
-            )
-            j = None
-        else:
-            j = int(np.abs(lon_vals - float(lon)).argmin())
-            logger.debug(
-                f"Mapped longitude {float(lon)} to index {j} with lon_value {lon_vals[j]}"
-            )
-        if i is None or j is None:
-            msg = (
-                "Could not map given coordinates to valid indices within "
-                "dataset bounds."
-            )
-            with ErrorLogger(logger):
-                raise ValueError(msg)
-        i = int(np.clip(i, 0, len(lat_vals) - 1))
-        j = int(np.clip(j, 0, len(lon_vals) - 1))
+    if isinstance(lon, (int, np.integer)):
+        j = int(lon)
+        logger.debug(
+            f"Was given longitude index {j} directly. Corresponding lon_value {lon_vals[j]}"
+        )
+    elif lon < min(lon_vals) or lon > max(lon_vals):
+        logger.error(
+            f"Given longitude {lon} is outside dataset bounds ({min(lon_vals)}, {max(lon_vals)}). Clipping to bounds."
+        )
+        j = None
+    else:
+        j = int(np.abs(lon_vals - float(lon)).argmin())
+        logger.debug(
+            f"Mapped longitude {float(lon)} to index {j} with lon_value {lon_vals[j]}"
+        )
+    if i is None or j is None:
+        msg = (
+            "Could not map given coordinates to valid indices within "
+            "dataset bounds."
+        )
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    i = int(np.clip(i, 0, len(lat_vals) - 1))
+    j = int(np.clip(j, 0, len(lon_vals) - 1))
 
-        return i, j
+    return i, j
 
 def distance_100m_units(di, dj, l0_resolution, lat_deg=None, latlon=False):
         """Convert index deltas to distance in ~100 m units using l0_resolution."""

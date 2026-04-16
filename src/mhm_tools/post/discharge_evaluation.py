@@ -10,6 +10,7 @@ Authors
 import itertools
 import logging
 from pathlib import Path
+from types import SimpleNamespace
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -25,6 +26,7 @@ from mhm_tools.common.file_handler import (
     write_xarray_to_file,
 )
 from mhm_tools.common.logger import ErrorLogger, log_arguments, log_errors
+from mhm_tools.common.utils import coord_to_index, find_best_gauge_location
 from mhm_tools.common.xarray_utils import (
     get_clim_from_ds,
     get_coord_key,
@@ -293,88 +295,185 @@ def get_sim_data_for_gauges_from_nodes(
 def get_gauge_coords(
     ds,
     facc,
+    facc_variable="L11_fAcc",
     lonlat=None,
     xy=None,
-    cell_diff=1,
-    max_cell_diff=3,
-    diff_percent=10,
+    max_distance_cells=3,
+    max_error=0.1,
+    method="basinex",
     id=None,
 ):
-    """Find correct gauge location.
+    """Find gauge coordinates by matching reference and simulated catchment area.
 
-    Takes mrm_restart file, an approximate lat lon value and and then,
-    finds the cell with the value closest to a given flow accumulation.
-    Returns lon,lat, flow accumulation.
+    Uses :func:`mhm_tools.common.utils.find_best_gauge_location`.
     """
-    if lonlat is not None:
-        lon = lonlat[0]
-        lat = lonlat[1]
-        lon_col = int((lon - ds.xllcorner_L0) / ds.cellsize_L1)
-        lat_row = int(ds.nrows_L1 - (lat - (ds.yllcorner_L0)) / ds.cellsize_L1)
-    else:
-        lon_col = xy[0]
-        lat_row = xy[1]
-    if cell_diff > 0:
-        ds_cut = ds.sel(
-            nrows0=slice(lat_row - cell_diff, lat_row + cell_diff),
-            nrows1=slice(lat_row - cell_diff, lat_row + cell_diff),
-            nrows11=slice(lat_row - cell_diff, lat_row + cell_diff),
-            ncols0=slice(lon_col - cell_diff, lon_col + cell_diff),
-            ncols1=slice(lon_col - cell_diff, lon_col + cell_diff),
-            ncols11=slice(lon_col - cell_diff, lon_col + cell_diff),
+    method_norm = str(method).strip().lower().replace("-", "")
+    method_norm = {"basinex": "basinex", "burek": "burek"}.get(method_norm, method_norm)
+    if method_norm not in {"basinex", "burek"}:
+        msg = f"Unknown gauge optimization method '{method}'. Use 'basinex' or 'burek'."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+
+    max_error = float(max_error)
+    if max_error < 0:
+        max_error = 0.0
+    max_distance_cells = max(0, int(max_distance_cells))
+
+    if facc_variable not in ds:
+        logger.warning(
+            "Variable '%s' not found in flow-accumulation dataset for gauge %s.",
+            facc_variable,
+            id,
         )
-        abs_diff = np.abs(ds_cut.L11_fAcc - facc)
-        try:
-            min_index = np.unravel_index(
-                np.argmin(abs_diff.data), ds_cut.L11_fAcc.shape
+        return None, None, None
+    facc_da = ds[facc_variable].squeeze()
+    upstream_area = np.asarray(facc_da.data)
+    if upstream_area.ndim != 2:
+        logger.warning(
+            "Expected 2D upstream area in '%s', got shape %s for gauge %s.",
+            facc_variable,
+            upstream_area.shape,
+            id,
+        )
+        return None, None, None
+    if not np.isfinite(facc):
+        logger.warning("Invalid reference catchment area for gauge %s: %s", id, facc)
+        return None, None, None
+
+    search_upstream = upstream_area
+    latlon_search = False
+    l0_resolution = 1.0
+
+    # mRM restart structure fallback: L11_fAcc typically [lon, lat], coords in L1_domain_lon/lat.
+    if "L1_domain_lon" in ds and "L1_domain_lat" in ds:
+        lon_data = np.asarray(ds["L1_domain_lon"].data)
+        lat_data = np.asarray(ds["L1_domain_lat"].data)
+        if (
+            lon_data.ndim == 2
+            and lat_data.ndim == 2
+            and lon_data.shape == upstream_area.shape
+            and lat_data.shape == upstream_area.shape
+        ):
+            search_upstream = upstream_area.T
+            search_ds = xr.Dataset(
+                coords={
+                    "lat": np.asarray(lat_data[0, :], dtype=float),
+                    "lon": np.asarray(lon_data[:, 0], dtype=float),
+                }
             )
-        except ValueError as ve:
-            logger.error(str(ve))
-            logger.info(abs_diff)
-            logger.info(ds_cut.L11_fAcc)
-            logger.info(facc)
-            return None, None, None
-        if lonlat:
-            lon_x = ds_cut.L1_domain_lon.data[min_index[0], 0]
-            lat_y = ds_cut.L1_domain_lat.data[0, min_index[1]]
-        # else:
-        #     lon_x, lat_y = ds_cut.nrows0.values[1], ds_cut.nrows0.values[1] ## Not yet working
-        found_facc = ds_cut.L11_fAcc.data[min_index[0], min_index[1]]
-    else:
-        ds_cut = ds.sel(
-            nrows0=lat_row,
-            nrows1=lat_row,
-            nrows11=lat_row,
-            ncols0=lon_col,
-            ncols1=lon_col,
-            ncols11=lon_col,
-        )
-        if lonlat:
-            lon_x = ds_cut.L1_domain_lon.data
-            lat_y = ds_cut.L1_domain_lat.data
+            latlon_search = True
+            if search_ds["lon"].size > 1:
+                l0_resolution = float(
+                    abs(search_ds["lon"].values[1] - search_ds["lon"].values[0])
+                )
+            elif search_ds["lat"].size > 1:
+                l0_resolution = float(
+                    abs(search_ds["lat"].values[1] - search_ds["lat"].values[0])
+                )
+            elif hasattr(ds, "cellsize_L1"):
+                l0_resolution = float(ds.cellsize_L1)
         else:
-            lon_x = lon_col
-            lat_y = lat_row
-        found_facc = ds_cut.L11_fAcc.data
-    if abs(found_facc - facc) < diff_percent / 100 * facc:
-        logger.info(f"{lon_x}, {lat_y}, {found_facc}, {facc}, {cell_diff}")
-        return lon_x, lat_y, found_facc
-    if cell_diff < max_cell_diff:
-        logger.debug(
-            f"No similar flow acc found. Increasing search radius to {cell_diff + 1} cells in each direction."
+            search_ds = xr.Dataset(
+                coords={
+                    "lat": np.arange(search_upstream.shape[0], dtype=float),
+                    "lon": np.arange(search_upstream.shape[1], dtype=float),
+                }
+            )
+    else:
+        # Standard georeferenced facc file (lat/lon coords on facc variable)
+        lat_key = get_coord_key(facc_da, lat=True, raise_exception=False)
+        lon_key = get_coord_key(facc_da, lon=True, raise_exception=False)
+        if (
+            lat_key is not None
+            and lon_key is not None
+            and lat_key in facc_da.dims
+            and lon_key in facc_da.dims
+        ):
+            facc_std = facc_da.transpose(lat_key, lon_key)
+            search_upstream = np.asarray(facc_std.data)
+            search_ds = xr.Dataset(
+                coords={
+                    "lat": np.asarray(facc_std[lat_key].values, dtype=float),
+                    "lon": np.asarray(facc_std[lon_key].values, dtype=float),
+                }
+            )
+            latlon_search = True
+            if search_ds["lon"].size > 1:
+                l0_resolution = float(
+                    abs(search_ds["lon"].values[1] - search_ds["lon"].values[0])
+                )
+            elif search_ds["lat"].size > 1:
+                l0_resolution = float(
+                    abs(search_ds["lat"].values[1] - search_ds["lat"].values[0])
+                )
+        else:
+            search_ds = xr.Dataset(
+                coords={
+                    "lat": np.arange(search_upstream.shape[0], dtype=float),
+                    "lon": np.arange(search_upstream.shape[1], dtype=float),
+                }
+            )
+
+    if lonlat is not None:
+        lon, lat = float(lonlat[0]), float(lonlat[1])
+        try:
+            idx0_guess, idx1_guess = coord_to_index(search_ds, lat, lon)
+        except Exception:
+            idx0_guess = int(search_upstream.shape[0] / 2)
+            idx1_guess = int(search_upstream.shape[1] / 2)
+    else:
+        idx0_guess = int(xy[0])
+        idx1_guess = int(xy[1])
+
+    idx0_guess = int(np.clip(idx0_guess, 0, search_upstream.shape[0] - 1))
+    idx1_guess = int(np.clip(idx1_guess, 0, search_upstream.shape[1] - 1))
+
+    resolutions = SimpleNamespace(l0_resolution=l0_resolution)
+
+    try:
+        best_idx, area_error, distance_100m = find_best_gauge_location(
+            ds=search_ds,
+            upstream_area=search_upstream,
+            gauge_coords=(idx0_guess, idx1_guess),
+            ref_catchment_area=float(facc),
+            resolutions=resolutions,
+            max_distance_cells=max_distance_cells,
+            max_error=max_error,
+            method=method_norm,
+            raise_on_fallback=True,
+            latlon=latlon_search,
         )
-        return get_gauge_coords(
-            ds,
-            facc,
-            lonlat=[lon, lat],
-            cell_diff=cell_diff + 1,
-            max_cell_diff=3,
-            diff_percent=10,
-            id=id,
+    except Exception:
+        logger.warning(
+            "No suitable gauge match found for gauge %s within %d cells and %.2f%% error.",
+            id,
+            max_distance_cells,
+            max_error * 100.0,
         )
-    logger.warning(f"No similar flow accumulation found nearby for gauge {id}.")
-    logger.debug("None, None, None")
-    return None, None, None
+        return None, None, None
+
+    idx0, idx1 = int(best_idx[0]), int(best_idx[1])
+    found_facc = float(search_upstream[idx0, idx1])
+
+    if latlon_search:
+        lon_x = float(search_ds["lon"].values[idx1])
+        lat_y = float(search_ds["lat"].values[idx0])
+    elif lonlat is not None:
+        lon_x, lat_y = lonlat[0], lonlat[1]
+    else:
+        lon_x, lat_y = idx0, idx1
+
+    logger.info(
+        "Gauge %s matched at lon=%s lat=%s with facc=%.3f (target=%.3f, error=%.2f%%, distance=%.2f x100m).",
+        id,
+        lon_x,
+        lat_y,
+        found_facc,
+        float(facc),
+        float(area_error) * 100.0,
+        float(distance_100m),
+    )
+    return lon_x, lat_y, found_facc
 
 
 def load_ds(file_path, file_name=None):
@@ -422,7 +521,8 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
     sim_variable,
     observed_variable,
     model_keyword,
-    mrm_restart_file=None,
+    facc_file=None,
+    facc_variable="L11_fAcc",
     scc_gauges_file=None,
     evaluation_gauges=None,
     saving_path=None,
@@ -438,6 +538,9 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
     direct_comparison=False,
     write_input_data_cache=False,
     min_overlapping_years=1,
+    gauge_location_method="basinex",
+    gauge_max_distance_cells=3,
+    gauge_max_error=0.1,
 ):
     """Get observed and model Q data and save it as CSV files to be opened later.
 
@@ -561,7 +664,7 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
         facc = xr.DataArray(
             np.full(gauge_ids.size, np.nan), dims=["id"], coords={"id": gauge_ids}
         )
-    # 2. no discharge.nc files provided. In this case the observed data is read from a given path and the sim data is extracted based on gauge coordinates from either a provided scc gauges file or by matching flow accumulation and coordinates in an mrm restart file.
+    # 2. no discharge.nc files provided. In this case the observed data is read from a given path and the sim data is extracted based on gauge coordinates from either a provided scc gauges file or by matching flow accumulation and coordinates in a facc file.
     else:
         # Load observed data and gauge info
         with load_ds(observed_data_path) as observed_data_in:
@@ -775,9 +878,9 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
             facc_new = facc.sel(id=gauge_ids_with_values).values
         except Exception:
             facc_new = np.full(len(gauge_ids_with_values), np.nan)
-    # Case 3: mrm restart file provided. This contains flow accumulation and enables matching based on coodinates and flow acculumlation. (mRM v5)
-    elif mrm_restart_file is not None:
-        with load_ds(mrm_restart_file) as ds:
+    # Case 3: flow-accumulation file provided. This enables matching based on coordinates and flow accumulation. (mRM v5 style)
+    elif facc_file is not None:
+        with load_ds(facc_file) as ds:
             logger.info(
                 "get the gauge coordinates by matching coordinates and flow accumulation"
             )
@@ -785,10 +888,11 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
                 delayed(get_gauge_coords)(
                     ds,
                     facc=facc_i,
+                    facc_variable=facc_variable,
                     lonlat=[x_i, y_i],
-                    cell_diff=1,
-                    max_cell_diff=3,
-                    diff_percent=10,
+                    method=gauge_location_method,
+                    max_distance_cells=gauge_max_distance_cells,
+                    max_error=gauge_max_error,
                     id=id_i,
                 )
                 for x_i, y_i, facc_i, id_i in zip(
@@ -824,7 +928,10 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
             for i, id in enumerate(gauge_ids_with_values)
         )
     else:
-        error_msg = "Neither mrm restart file or scc gauges file are provided. Gauge location can not be determined"
+        error_msg = (
+            "Neither facc_file or scc gauges file are provided. "
+            "Gauge location can not be determined"
+        )
         with ErrorLogger(logger):
             raise ValueError(error_msg)
 
@@ -1008,7 +1115,8 @@ def _filter_ids_by_overlapping_years(model_da, observed_da, min_overlapping_year
 def evaludate_discharge_data(  # noqa: PLR0913
     model_data_path,
     observed_data_path,
-    mrm_restart_file=None,
+    facc_file=None,
+    facc_variable="L11_fAcc",
     scc_gauges_file=None,
     output_path=None,
     evaluation_gauges=None,
@@ -1031,6 +1139,9 @@ def evaludate_discharge_data(  # noqa: PLR0913
     save_hydrograph=False,
     min_overlapping_years=1,
     write_input_data_cache=False,
+    gauge_location_method="basinex",
+    gauge_max_distance_cells=3,
+    gauge_max_error=0.1,
 ):
     """Compare simulated with observed discharge directly or via bootstrapping.
 
@@ -1043,7 +1154,8 @@ def evaludate_discharge_data(  # noqa: PLR0913
         observed_ds, model_ds = Q_data_to_xarray(
             model_data_path=model_data_path,
             observed_data_path=observed_data_path,
-            mrm_restart_file=mrm_restart_file,
+            facc_file=facc_file,
+            facc_variable=facc_variable,
             scc_gauges_file=scc_gauges_file,
             observed_variable=observed_variable,
             sim_variable=sim_variable,
@@ -1062,6 +1174,9 @@ def evaludate_discharge_data(  # noqa: PLR0913
             direct_comparison=direct_comparison,
             write_input_data_cache=write_input_data_cache,
             min_overlapping_years=min_overlapping_years,
+            gauge_location_method=gauge_location_method,
+            gauge_max_distance_cells=gauge_max_distance_cells,
+            gauge_max_error=gauge_max_error,
         )
         logger.info("Procured discharge data")
         model_da = model_ds["discharge"]
