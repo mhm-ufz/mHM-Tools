@@ -104,13 +104,20 @@ def add_args(parser):
         type=str,
         help=("Lates year that is allowed in the analysis."),
     )
-    # parser.add_argument(
-    #     "--direct_comparison",
-    #     action="store_true",
-    #     dest="direct_comparison",
-    #     required=False,
-    #     help=("Use no statistics but compare timeseries directly. Needs ref_path."),
-    # )
+    parser.add_argument(
+        "--min_overlapping_years",
+        "--min-overlapping-years",
+        required=False,
+        default=5,
+        type=int,
+        help=("Minimum number of overlapping years for evaluation."),
+    )
+    parser.add_argument(
+        "--save_hydrograph",
+        help="Set flag if the calculated hydrographs should be saved and not just the metrics calculated.",
+        action="store_true",
+        required=False,
+    )
     parser.add_argument(
         "--overwrite",
         action="store_true",
@@ -123,6 +130,14 @@ def add_args(parser):
     parser.add_argument(
         "--only_plot",
         help="Set Flag if existing output file should be used to create plot",
+        action="store_true",
+        required=False,
+    )
+    parser.add_argument(
+        "--no_input_data_cache",
+        help=(
+            "Set flag to not write the processed input data to file. This avoids unnecessary file I/O but may slow down subsequent runs with the same input data. If file is written overwriting is controlled by the --overwrite flag."
+        ),
         action="store_true",
         required=False,
     )
@@ -165,4 +180,7 @@ def run(args):
         end_date=args.end_date,
         overwrite=args.overwrite,
         only_plot=args.only_plot,
+        save_hydrograph=args.save_hydrograph,
+        min_overlapping_years=args.min_overlapping_years,
+        write_input_data_cache=not args.no_input_data_cache,
     )

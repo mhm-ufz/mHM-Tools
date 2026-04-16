@@ -406,6 +406,7 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
     date_slice=None,
     overwrite=False,
     direct_comparison=False,
+    write_input_data_cache=False,
 ):
     """Get observed and model Q data and save it as CSV files to be opened later.
 
@@ -431,17 +432,33 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
     obs_output_file = Path(f"{saving_path}/GRDC_data.nc")
 
     # ignored if overwrite is True
+    sim_data = None
+    observed_data = None
     if sim_output_file.is_file() and not overwrite:
         logger.info("reading sim data from file...")
-        sim_data = load_ds(sim_output_file)
-        sim_data = sim_data.sel(time=date_slice)
+        try:
+            sim_data = load_ds(sim_output_file)
+            sim_data = sim_data.sel(time=date_slice)
+        except Exception:
+            logger.warning(
+                f"Failed reading cached simulation data from {sim_output_file}. Recomputing."
+            )
     if obs_output_file.is_file() and not overwrite:
         logger.info("reading obs data from file...")
-        observed_data = load_ds(obs_output_file)
-        observed_data = observed_data.sel(time=date_slice)
-    if obs_output_file.is_file() and sim_output_file.is_file() and not overwrite:
+        try:
+            observed_data = load_ds(obs_output_file)
+            observed_data = observed_data.sel(time=date_slice)
+        except Exception:
+            logger.warning(
+                f"Failed reading cached observation data from {obs_output_file}. Recomputing."
+            )
+    if sim_data is not None and observed_data is not None:
+        logger.info("Successfully loaded cached data. Returning.")
         return observed_data, sim_data
-
+    overwrite = True  # if either data is not loaded, we need to overwrite
+    logger.info(
+        "Cached data not available or failed to load. Computing from source data."
+    )
     # creating saving path
     saving_path = Path(saving_path)
     if not saving_path.is_dir():
@@ -466,6 +483,18 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
             obs_discharge_data = obs_discharge_data.sel(time=overlapping_time_slice)
             sim_data_cropped = sim_data_cropped.sel(time=overlapping_time_slice)
         gauge_ids = obs_discharge_data["id"]
+        # Ensure unique gauge ids (xarray .sel requires unique index)
+        id_index = pd.Index(gauge_ids.values)
+        if not id_index.is_unique:
+            _, unique_pos = np.unique(id_index.values, return_index=True)
+            unique_pos = np.sort(unique_pos)
+            dup_count = len(id_index) - len(unique_pos)
+            logger.warning(
+                f"Found {dup_count} duplicate gauge id(s). Keeping first occurrence."
+            )
+            gauge_ids = gauge_ids.isel(id=unique_pos)
+            obs_discharge_data = obs_discharge_data.isel(id=unique_pos)
+            sim_data_cropped = sim_data_cropped.isel(id=unique_pos)
         # facc/x/y not available in discharge.nc
         x = xr.DataArray(
             np.full(gauge_ids.size, np.nan), dims=["id"], coords={"id": gauge_ids}
@@ -511,9 +540,29 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
                     sim_data_in, observed_data_in
                 )
 
-            logger.info("Selecting data for date slice...")
+            # Ensure unique gauge ids (xarray .sel requires unique index)
+            id_index = pd.Index(gauge_ids.values)
+            if not id_index.is_unique:
+                _, unique_pos = np.unique(id_index.values, return_index=True)
+                unique_pos = np.sort(unique_pos)
+                dup_count = len(id_index) - len(unique_pos)
+                logger.warning(
+                    f"Found {dup_count} duplicate gauge id(s). Keeping first occurrence."
+                )
+                gauge_ids = gauge_ids.isel(id=unique_pos)
+                x = x.isel(id=unique_pos)
+                y = y.isel(id=unique_pos)
+                facc = facc.isel(id=unique_pos)
+                obs_rs = obs_rs.isel(id=unique_pos)
+
+            logger.info("Cropping data...")
+            if date_slice is not None and date_slice != slice(None, None):
+                logger.info(
+                    f"Selecting data from {date_slice.start} to {date_slice.stop}..."
+                )
             obs_discharge_data = obs_rs[observed_variable].sel(time=date_slice)
             if slicing_condition is not None:
+                logger.info("Applying spatial slicing to sim data...")
                 sim_data_cropped = sim_rs.sel(
                     {
                         get_coord_key(sim_rs, lat=True): slice(lat_max, lat_min),
@@ -524,6 +573,9 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
                 sim_data_cropped = sim_rs.sel(time=date_slice)
 
             if direct_comparison:
+                logger.info(
+                    "Selecting overlapping time period for direct comparison..."
+                )
                 overlapping_time_slice = get_overlapping_time_slice(sim_rs, obs_rs)
                 logger.info(
                     f"Overlapping time is from {overlapping_time_slice.start} "
@@ -548,7 +600,6 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
     y = y.sel(id=valid_ids)
     facc = facc.sel(id=valid_ids)
     obs_discharge_data = obs_discharge_data.sel(id=valid_ids)
-    sim_data_cropped = sim_data_cropped.sel(id=valid_ids)
     logger.info(
         f"There are {len(gauge_ids.data)} gauges with observed data in the selected time range."
     )
@@ -560,9 +611,14 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
             facc, name="facc", dims=["id"], coords={"id": gauge_ids.data}
         )
         observed_data = xr.Dataset({"facc": facc_da, "discharge": obs_discharge_data})
-
-        logger.info(f"Saving obs data to {obs_output_file}...")
-        write_xarray_to_file(observed_data, obs_output_file)
+        if write_input_data_cache:
+            logger.info(f"Saving obs data to {obs_output_file}...")
+            write_xarray_to_file(observed_data, obs_output_file)
+        else:
+            logger.info(
+                "Skipping saving obs data to file as write_input_data_cache is False."
+            )
+            observed_data.load()
 
     if not sim_output_file.is_file() or overwrite:
         logger.info("preparing sim data...")
@@ -580,8 +636,12 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
             x_new, y_new = [], []
             with load_ds(scc_gauges_file) as ds:
                 logger.info("get the gauge coordinates from scc gauges file")
-                x_new = ds.x.values
-                y_new = ds.y.values
+                try:
+                    x_new = ds.lon.values
+                    y_new = ds.lat.values
+                except Exception:
+                    x_new = ds.x.values
+                    y_new = ds.y.values
                 gauge_ids_with_values = ds.station.values
             valid_id_set = set(np.asarray(gauge_ids.values))
             keep_mask = np.isin(gauge_ids_with_values, list(valid_id_set))
@@ -644,6 +704,7 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
                 msg = "Could not determine simulation discharge variable."
                 with ErrorLogger(logger):
                     raise ValueError(msg)
+            logger.info(f"Extracting discharge variable '{sim_variable}' from nodes...")
             sim, matched_x, matched_y, gauge_ids_with_values = (
                 get_sim_data_for_gauges_from_nodes(
                     sim_data_cropped,
@@ -684,6 +745,26 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
                 simulation_discharge = xr.concat(sim, dim="id")
             else:
                 simulation_discharge = sim
+        # Ensure sim ids align with observed valid_ids (node outputs may miss some)
+        sim_ids = np.asarray(simulation_discharge["id"].values)
+        valid_id_values = np.asarray(valid_ids)
+        common_ids = np.intersect1d(sim_ids, valid_id_values)
+        if common_ids.size == 0:
+            msg = "No overlapping gauge ids between simulation and observations."
+            with ErrorLogger(logger):
+                raise ValueError(msg)
+        ids_arr = np.asarray(gauge_ids_with_values)
+        keep_mask = np.isin(ids_arr, common_ids)
+        if not np.all(keep_mask):
+            logger.info(
+                "Dropping %d gauges missing in simulation output.",
+                int((~keep_mask).sum()),
+            )
+        gauge_ids_with_values = ids_arr[keep_mask]
+        x_new = np.asarray(x_new)[keep_mask]
+        y_new = np.asarray(y_new)[keep_mask]
+        facc_new = np.asarray(facc_new)[keep_mask]
+        simulation_discharge = simulation_discharge.sel(id=gauge_ids_with_values)
         if "lat" in simulation_discharge.dims or "lat" in simulation_discharge.coords:
             simulation_discharge = simulation_discharge.drop_dims(["lat"])
         if "lon" in simulation_discharge.dims or "lon" in simulation_discharge.coords:
@@ -712,8 +793,14 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
                 "y": y_ids,
             }
         )
-        logger.info(f"Saving sim data to {sim_output_file}...")
-        write_xarray_to_file(sim_data, sim_output_file)
+        if write_input_data_cache:
+            logger.info(f"Saving sim data to {sim_output_file}...")
+            write_xarray_to_file(sim_data, sim_output_file)
+        else:
+            logger.info(
+                "Skipping saving sim data to file as write_input_data_cache is False."
+            )
+            sim_data.load()
     return observed_data, sim_data
 
 
@@ -776,6 +863,42 @@ def boostap_statistics(
     }
 
 
+def _count_overlapping_years(sim_da, obs_da):
+    """Count calendar years with at least one non-NaN overlapping timestep."""
+    sim_aligned, obs_aligned = xr.align(sim_da, obs_da, join="inner")
+    if "time" not in sim_aligned.dims or sim_aligned.sizes.get("time", 0) == 0:
+        return 0
+
+    overlap_mask = np.asarray((sim_aligned.notnull() & obs_aligned.notnull()).values)
+    if overlap_mask.ndim > 1:
+        overlap_mask = np.any(overlap_mask, axis=tuple(range(1, overlap_mask.ndim)))
+    overlap_mask = overlap_mask.astype(bool)
+    if overlap_mask.size == 0 or not np.any(overlap_mask):
+        return 0
+
+    overlap_times = np.asarray(sim_aligned["time"].values)[overlap_mask]
+    overlap_years = np.unique(pd.to_datetime(overlap_times).year)
+    return int(overlap_years.size)
+
+
+def _filter_ids_by_overlapping_years(model_da, observed_da, min_overlapping_years):
+    """Return ids with at least the requested overlap years plus dropped-id details."""
+    model_ids = set(np.asarray(model_da["id"].values).tolist())
+    eligible_ids = []
+    dropped_ids = []
+    for gauge_id in np.asarray(observed_da["id"].values):
+        if gauge_id not in model_ids:
+            continue
+        overlap_years = _count_overlapping_years(
+            model_da.sel(id=gauge_id), observed_da.sel(id=gauge_id)
+        )
+        if overlap_years >= min_overlapping_years:
+            eligible_ids.append(gauge_id)
+        else:
+            dropped_ids.append((gauge_id, overlap_years))
+    return np.asarray(eligible_ids), dropped_ids
+
+
 @log_arguments()
 def evaludate_discharge_data(  # noqa: PLR0913
     model_data_path,
@@ -800,6 +923,9 @@ def evaludate_discharge_data(  # noqa: PLR0913
     end_date=None,
     overwrite=False,
     only_plot=False,
+    save_hydrograph=False,
+    min_overlapping_years=1,
+    write_input_data_cache=False,
 ):
     """Compare simulated with observed discharge directly or via bootstrapping.
 
@@ -829,12 +955,37 @@ def evaludate_discharge_data(  # noqa: PLR0913
             date_slice=slice(start_date, end_date),
             overwrite=overwrite,
             direct_comparison=direct_comparison,
+            write_input_data_cache=write_input_data_cache,
         )
         logger.info("Procured discharge data")
         model_da = model_ds["discharge"]
         observed_da = observed_ds["discharge"]
         logger.debug(f"Model dataarray: {model_da}")
         logger.debug(f"Observed dataarray: {observed_da}")
+        eligible_ids, dropped_ids = _filter_ids_by_overlapping_years(
+            model_da=model_da,
+            observed_da=observed_da,
+            min_overlapping_years=min_overlapping_years,
+        )
+        if dropped_ids:
+            logger.info(
+                f"Dropping {len(dropped_ids)} gauges with less than {min_overlapping_years} overlapping years.",
+            )
+            logger.debug(
+                f"Dropped gauges due to overlap threshold (id, years): {dropped_ids}"
+            )
+        if eligible_ids.size == 0:
+            msg = (
+                "No gauges meet the minimum overlap requirement of "
+                f"{min_overlapping_years} years."
+            )
+            with ErrorLogger(logger):
+                raise ValueError(msg)
+        observed_ds = observed_ds.sel(id=eligible_ids)
+        model_ds = model_ds.sel(id=eligible_ids)
+        observed_da = observed_ds["discharge"]
+        model_da = model_ds["discharge"]
+        logger.info(f"Evaluating {eligible_ids.size} gauges after overlap filtering.")
         logger.info("Starting to calculate metrics")
         results = []
         if (
@@ -884,6 +1035,7 @@ def evaludate_discharge_data(  # noqa: PLR0913
                 title=f"{id} at {model_ds['x'].sel(id=id).data} - {model_ds['y'].sel(id=id).data}",
                 x=model_ds["x"].sel(id=id).data,
                 y=model_ds["y"].sel(id=id).data,
+                save=save_hydrograph,
             )
             for id in observed_ds.id.values
             if id in model_ds.id.values
