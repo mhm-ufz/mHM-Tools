@@ -279,6 +279,7 @@ class TestQDataToXarray(unittest.TestCase):
                     pd.Timestamp(sim_out.time.max().values), pd.Timestamp(tmax)
                 )
 
+
 # -----------------------------
 # evaluate_grdc_data: direct comparison path
 # -----------------------------
@@ -346,6 +347,7 @@ class TestEvaluateDirect(unittest.TestCase):
                 self.assertEqual(df.loc[0, "id"], 42)
                 # plot_cdf not called for small sample sizes
                 mock_plot.assert_not_called()
+
 
 # -----------------------------
 # evaluate_grdc_data: bootstrap path

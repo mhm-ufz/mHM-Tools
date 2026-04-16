@@ -91,6 +91,7 @@ def pretty_print_df(df: pd.DataFrame, max_col_width: int = 30) -> None:
 
     logger.info(out_string)
 
+
 def coord_to_index(ds, lat, lon):
     """Map latitude/longitude or indices to integer grid indices."""
     if "lat" not in ds.coords or "lon" not in ds.coords:
@@ -133,8 +134,7 @@ def coord_to_index(ds, lat, lon):
         )
     if i is None or j is None:
         msg = (
-            "Could not map given coordinates to valid indices within "
-            "dataset bounds."
+            "Could not map given coordinates to valid indices within " "dataset bounds."
         )
         with ErrorLogger(logger):
             raise ValueError(msg)
@@ -143,25 +143,26 @@ def coord_to_index(ds, lat, lon):
 
     return i, j
 
+
 def distance_100m_units(di, dj, l0_resolution, lat_deg=None, latlon=False):
-        """Convert index deltas to distance in ~100 m units using l0_resolution."""
-        res = float(abs(l0_resolution))
-        if latlon:
-            if lat_deg is None:
-                lat_deg = 0.0
-            # approximate meters per degree
-            meters_per_deg_lat = 111_132.92
-            dy_m = meters_per_deg_lat * res
-            # Not used since burek assumes square cell sizes:
-            # lat_rad = np.deg2rad(lat_deg)
-            # meters_per_deg_lon = 111_320.0 * np.cos(lat_rad)
-            # dx_m = meters_per_deg_lon * res
-            dx_m = dy_m
-        else:
-            # assume resolution already in meters for projected grids
-            dy_m = res
-            dx_m = res
-        return np.sqrt((di * dy_m) ** 2 + (dj * dx_m) ** 2) / 100.0
+    """Convert index deltas to distance in ~100 m units using l0_resolution."""
+    res = float(abs(l0_resolution))
+    if latlon:
+        if lat_deg is None:
+            lat_deg = 0.0
+        # approximate meters per degree
+        meters_per_deg_lat = 111_132.92
+        dy_m = meters_per_deg_lat * res
+        # Not used since burek assumes square cell sizes:
+        # lat_rad = np.deg2rad(lat_deg)
+        # meters_per_deg_lon = 111_320.0 * np.cos(lat_rad)
+        # dx_m = meters_per_deg_lon * res
+        dx_m = dy_m
+    else:
+        # assume resolution already in meters for projected grids
+        dy_m = res
+        dx_m = res
+    return np.sqrt((di * dy_m) ** 2 + (dj * dx_m) ** 2) / 100.0
 
 
 def find_best_gauge_location(  # noqa: PLR0915
@@ -219,9 +220,7 @@ def find_best_gauge_location(  # noqa: PLR0915
         error = 0.0
         step = 0.01
         candidates = None
-        while error <= max_error and (
-            candidates is None or len(candidates[0]) == 0
-        ):
+        while error <= max_error and (candidates is None or len(candidates[0]) == 0):
             low = size * (1.0 - error)
             high = size * (1.0 + error)
             candidates = np.where((sub >= low) & (sub <= high))
@@ -252,7 +251,11 @@ def find_best_gauge_location(  # noqa: PLR0915
                 f"Selected outlet candidate {best_coord} with upstream area {upstream_area[best_coord]} km2 (tolerance {error:.3f})"
             )
             distanance_100m = distance_100m_units(
-                cand_i[k] - gi, cand_j[k] - gj, l0_resolution=resolutions.l0_resolution, lat_deg=lat_deg, latlon=latlon
+                cand_i[k] - gi,
+                cand_j[k] - gj,
+                l0_resolution=resolutions.l0_resolution,
+                lat_deg=lat_deg,
+                latlon=latlon,
             )
             return (
                 best_coord,

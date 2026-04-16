@@ -377,7 +377,7 @@ class Catchment:
                     max_error,
                     method=method,
                     raise_on_fallback=raise_on_fallback,
-                    latlon=self.latlon
+                    latlon=self.latlon,
                 )
             else:
                 try:
@@ -392,7 +392,7 @@ class Catchment:
                             max_error,
                             method="basinex",
                             raise_on_fallback=False,
-                            latlon=self.latlon
+                            latlon=self.latlon,
                         )
                     )
                 except ValueError as e:
@@ -412,7 +412,7 @@ class Catchment:
                             max_error,
                             method="burek",
                             raise_on_fallback=False,
-                            latlon=self.latlon
+                            latlon=self.latlon,
                         )
                     )
                 except ValueError as e:

@@ -290,7 +290,7 @@ def get_sim_data_for_gauges_from_nodes(
     return sim_sel, matched_x, matched_y, ids_arr
 
 
-def get_gauge_coords( # noqa: PLR0912
+def get_gauge_coords(  # noqa: PLR0912
     ds,
     ref_facc,
     facc_variable="L11_fAcc",
@@ -574,7 +574,9 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
                     f"Failed reading cached observation data from {obs_output_file}. Recomputing."
                 )
         if sim_data is not None and observed_data is not None:
-            logger.info("Successfully loaded cached data. Selecting stations with sufficient overlap.")
+            logger.info(
+                "Successfully loaded cached data. Selecting stations with sufficient overlap."
+            )
             if min_overlapping_years is not None:
                 eligible_ids, dropped_ids = _filter_ids_by_overlapping_years(
                     model_da=sim_data["discharge"],
@@ -659,10 +661,14 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
             observed_data = observed_data_in
             if evaluation_gauges is not None:
                 logger.info("Filtering gauges for evaluation.")
-                eval_gauge_ids = pd.read_csv(evaluation_gauges, header=None).iloc[:, 0].values
+                eval_gauge_ids = (
+                    pd.read_csv(evaluation_gauges, header=None).iloc[:, 0].values
+                )
                 valid_ids = np.intersect1d(observed_data["id"].data, eval_gauge_ids)
                 observed_data = observed_data.sel(id=valid_ids)
-                logger.info(f"Kept {len(valid_ids)} gauges for evaluation based on provided list {evaluation_gauges}.")
+                logger.info(
+                    f"Kept {len(valid_ids)} gauges for evaluation based on provided list {evaluation_gauges}."
+                )
             gauge_ids = observed_data["id"]
             x = observed_data["geo_x"]
             y = observed_data["geo_y"]
@@ -735,7 +741,9 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
                 logger.info(
                     "Selecting overlapping time period for direct comparison..."
                 )
-                overlapping_time_slice = get_overlapping_time_slice(sim_data_cropped, obs_discharge_data)
+                overlapping_time_slice = get_overlapping_time_slice(
+                    sim_data_cropped, obs_discharge_data
+                )
                 logger.info(
                     f"Overlapping time is from {overlapping_time_slice.start} "
                     f"to {overlapping_time_slice.stop}"
@@ -764,7 +772,9 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
             f"Gauge count after observed-year filter: {int(ids_before.size)} -> {int(np.asarray(valid_ids).size)}"
         )
         if dropped_year_filter:
-            logger.debug(f"Dropped gauges by observed-year filter (id, observed_years): {dropped_year_filter}")
+            logger.debug(
+                f"Dropped gauges by observed-year filter (id, observed_years): {dropped_year_filter}"
+            )
 
     if valid_ids.size == 0:
         msg = "No gauges with observed data in the selected time range."
@@ -927,9 +937,7 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
             # Drop per-gauge location coords before concat; they differ across ids and
             # trigger expensive coord-merging logic without adding value here.
             sim = [
-                da.drop_vars(
-                    [coord for coord in ("lat", "lon") if coord in da.coords]
-                )
+                da.drop_vars([coord for coord in ("lat", "lon") if coord in da.coords])
                 for da in sim
             ]
             simulation_discharge = xr.concat(
@@ -948,7 +956,9 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
     ids_arr = np.asarray(gauge_ids_with_values)
     keep_mask = np.isin(ids_arr, common_ids)
     if not np.all(keep_mask):
-        logger.info(f"Dropping {int((~keep_mask).sum())} gauges missing in simulation output.")
+        logger.info(
+            f"Dropping {int((~keep_mask).sum())} gauges missing in simulation output."
+        )
     gauge_ids_with_values = ids_arr[keep_mask]
     x_new = np.asarray(x_new)[keep_mask]
     y_new = np.asarray(y_new)[keep_mask]
@@ -1059,6 +1069,7 @@ def boostap_statistics(
         "gamma": float(gamma),
     }
 
+
 def _filter_ids_by_overlapping_years(model_da, observed_da, min_overlapping_years):
     """Return ids with at least the requested overlap years plus dropped-id details."""
     model_ids = set(np.asarray(model_da["id"].values).tolist())
@@ -1100,7 +1111,6 @@ def _filter_ids_by_overlapping_years(model_da, observed_da, min_overlapping_year
             dropped_ids.append((gauge_id, years))
 
     return np.asarray(eligible_ids), dropped_ids
-
 
 
 @log_arguments()
