@@ -107,6 +107,50 @@ class TestLowLevelHelpers(unittest.TestCase):
         out = gv.get_grdc_for_one_gauge(1, da)
         self.assertEqual(out.size, 2)
 
+    def test_filter_ids_by_observed_years_threshold(self):
+        ids = np.array([101, 202], dtype=int)
+        times = pd.date_range("2000-01-01", "2002-12-01", freq="MS")
+        vals = np.full((len(times), len(ids)), np.nan, dtype=float)
+        years = times.year
+        vals[np.isin(years, [2000, 2001]), 0] = 1.0
+        vals[years == 2001, 1] = 1.0
+        obs_da = xr.DataArray(
+            vals,
+            dims=("time", "id"),
+            coords={"time": times, "id": ids},
+            name="discharge",
+        )
+
+        filtered_ids, dropped = gv.filter_ids_by_observed_years(
+            valid_ids=ids,
+            obs_discharge_data=obs_da,
+            min_overlapping_years=2,
+        )
+        self.assertListEqual(filtered_ids.tolist(), [101])
+        self.assertIn((202, 1), dropped)
+
+    def test_filter_ids_by_observed_years_preserves_order(self):
+        ids = np.array([30, 10, 20], dtype=int)
+        times = pd.date_range("2000-01-01", "2001-12-01", freq="MS")
+        vals = np.full((len(times), len(ids)), np.nan, dtype=float)
+        years = times.year
+        vals[np.isin(years, [2000, 2001]), 0] = 1.0  # id 30 passes
+        vals[years == 2001, 1] = 1.0  # id 10 fails
+        vals[np.isin(years, [2000, 2001]), 2] = 1.0  # id 20 passes
+        obs_da = xr.DataArray(
+            vals,
+            dims=("time", "id"),
+            coords={"time": times, "id": ids},
+            name="discharge",
+        )
+
+        filtered_ids, _dropped = gv.filter_ids_by_observed_years(
+            valid_ids=ids,
+            obs_discharge_data=obs_da,
+            min_overlapping_years=2,
+        )
+        self.assertListEqual(filtered_ids.tolist(), [30, 20])
+
 
 # -----------------------------
 # Q_data_to_xarray integration (no plotting)
@@ -302,77 +346,6 @@ class TestEvaluateDirect(unittest.TestCase):
                 self.assertEqual(df.loc[0, "id"], 42)
                 # plot_cdf not called for small sample sizes
                 mock_plot.assert_not_called()
-
-    def test_evaludate_grdc_data_filters_by_min_overlapping_years(self):
-        with tempfile.TemporaryDirectory() as td:
-            outdir = Path(td)
-            ids = [101, 202]
-            times = pd.date_range("2000-01-01", "2003-12-01", freq="MS")
-
-            obs_vals = np.ones((len(times), len(ids)), dtype=float)
-            sim_vals = np.full((len(times), len(ids)), np.nan, dtype=float)
-            years = times.year
-            # Gauge 101 has overlap in 2000, 2001, 2002 (3 years).
-            sim_vals[np.isin(years, [2000, 2001, 2002]), 0] = 2.0
-            # Gauge 202 has overlap only in 2001 (1 year).
-            sim_vals[years == 2001, 1] = 2.0
-
-            obs_ds = xr.Dataset(
-                {"discharge": (("time", "id"), obs_vals)},
-                coords={"time": times, "id": np.array(ids, dtype=int)},
-            )
-            sim_ds = xr.Dataset(
-                {
-                    "discharge": (("time", "id"), sim_vals),
-                    "facc": (("id",), np.array([1000.0, 1500.0])),
-                    "x": (("id",), np.array([10.0, 10.1])),
-                    "y": (("id",), np.array([50.0, 49.9])),
-                },
-                coords={"time": times, "id": np.array(ids, dtype=int)},
-            )
-
-            def _fake_hydrograph(**kwargs):
-                return {
-                    "id": int(kwargs["id"]),
-                    "alpha": 1.0,
-                    "beta": 1.0,
-                    "gamma": 1.0,
-                }
-
-            with patch.object(
-                gv, "Q_data_to_xarray", return_value=(obs_ds, sim_ds)
-            ), patch.object(
-                gv,
-                "gen_hydrograph_by_data_sets",
-                side_effect=_fake_hydrograph,
-            ) as mock_hydro, patch.object(
-                gv, "plot_cdf"
-            ), patch.object(
-                gv, "plot_map"
-            ):
-                gv.evaludate_discharge_data(
-                    model_data_path="sim.nc",
-                    observed_data_path="obs.nc",
-                    output_path=outdir,
-                    n_jobs=1,
-                    direct_comparison=True,
-                    n_boostrap_selections=0,
-                    min_overlapping_years=2,
-                    overwrite=True,
-                )
-
-                called_ids = [
-                    int(call.kwargs["id"]) for call in mock_hydro.call_args_list
-                ]
-                self.assertListEqual(called_ids, [101])
-
-                results_csv = outdir / "results.csv"
-                self.assertTrue(results_csv.is_file())
-                df = pd.read_csv(results_csv, index_col=0)
-                self.assertListEqual(
-                    sorted(df["id"].astype(int).unique().tolist()), [101]
-                )
-
 
 # -----------------------------
 # evaluate_grdc_data: bootstrap path
