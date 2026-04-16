@@ -12,11 +12,6 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from mhm_tools.common.utils import (
-    coord_to_index,
-    distance_100m_units,
-    find_best_gauge_location,
-)
 import numpy as np
 import pyflwdir
 import xarray as xr
@@ -31,6 +26,11 @@ from mhm_tools.common.file_handler import (
 )
 from mhm_tools.common.logger import ErrorLogger, log_arguments
 from mhm_tools.common.netcdf import generate_bounds
+from mhm_tools.common.utils import (
+    coord_to_index,
+    distance_100m_units,
+    find_best_gauge_location,
+)
 from mhm_tools.common.xarray_utils import get_dtype
 from mhm_tools.pre.create_id_gauges import write_gauge_id
 

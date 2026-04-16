@@ -565,7 +565,7 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
     sim_output_file = Path(f"{saving_path}/{model_keyword}_data.nc")
     obs_output_file = Path(f"{saving_path}/GRDC_data.nc")
 
-    # if both sim and obs data cachefiles exist and overwrite is False, try to load and return them 
+    # if both sim and obs data cachefiles exist and overwrite is False, try to load and return them
     sim_data = None
     observed_data = None
     if not overwrite:
@@ -615,7 +615,7 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
         logger.info(
             "Cached data not available or failed to load. Computing from source data."
         )
-    
+
     # creating saving path
     saving_path = Path(saving_path)
     if not saving_path.is_dir():
@@ -670,16 +670,17 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
         with load_ds(observed_data_path) as observed_data_in:
             logger.info("Loaded observed data and gauge info.")
             # if only a subset of gauges should be evaluated discard the rest already at this stage to speed up the following processing steps
+            observed_data = observed_data_in
             if evaluation_gauges is not None:
                 logger.info("Filtering gauges for evaluation.")
                 eval_gauge_ids = pd.read_csv(evaluation_gauges, header=None).iloc[:, 0].values
-                valid_ids = np.intersect1d(observed_data_in["id"].data, eval_gauge_ids)
-                observed_data_in = observed_data_in.sel(id=valid_ids)
+                valid_ids = np.intersect1d(observed_data["id"].data, eval_gauge_ids)
+                observed_data = observed_data.sel(id=valid_ids)
                 logger.info(f"Kept {len(valid_ids)} gauges for evaluation based on provided list {evaluation_gauges}.")
-            gauge_ids = observed_data_in["id"]
-            x = observed_data_in["geo_x"]
-            y = observed_data_in["geo_y"]
-            facc = observed_data_in["area"]
+            gauge_ids = observed_data["id"]
+            x = observed_data["geo_x"]
+            y = observed_data["geo_y"]
+            facc = observed_data["area"]
             slicing_condition = None
             if (
                 lon_min is not None
@@ -696,7 +697,7 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
                 gauge_ids = gauge_ids.where(slicing_condition, drop=True)
             logger.info(f"There are {len(gauge_ids.data)} gauges in total.")
             observed_variable = (
-                get_single_data_var(observed_data_in)
+                get_single_data_var(observed_data)
                 if observed_variable is None
                 else observed_variable
             )
@@ -704,14 +705,14 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
 
             # reading sim data and resampling if needed
             with load_ds(model_data_path, file_name=model_file_name) as ds_sim:
-                sim_data_in = ds_sim 
-                
+                sim_data_in = ds_sim
+
             logger.info("Cropping data...")
             if date_slice is not None and date_slice != slice(None, None):
                 logger.info(
-                    f"Selecting data from {date_slice.start} to {date_slice.stop}..."
+                    f"Selecting data from {date_slice.start} to {date_slice.stop}"
                 )
-            obs_discharge_data = observed_data_in[observed_variable].sel(time=date_slice)
+            obs_discharge_data = observed_data[observed_variable].sel(time=date_slice)
 
             if slicing_condition is not None:
                 logger.info("Applying spatial slicing to sim data...")
@@ -723,7 +724,7 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
                 ).sel(time=date_slice)
             else:
                 sim_data_cropped = sim_data_in.sel(time=date_slice)
-            
+
             logger.info("Resampling to coarser calendar if needed...")
             sim_rs, obs_rs = resample_to_coarser_calendar(
                 sim_data_cropped, obs_discharge_data
@@ -797,8 +798,8 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
     logger.info(
         f"There are {len(gauge_ids.data)} gauges with observed data in the selected time range."
     )
-    
-    # Preparing observed data 
+
+    # Preparing observed data
     logger.info("preparing obs data...")
     obs_discharge_data = obs_discharge_data.reindex(id=gauge_ids.data)
     facc_da = xr.DataArray(
@@ -806,7 +807,7 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
     )
     observed_data = xr.Dataset({"facc": facc_da, "discharge": obs_discharge_data})
     if write_input_data_cache:
-        logger.info(f"Saving obs data to {obs_output_file}...")
+        logger.info(f"Saving obs data to {obs_output_file}")
         write_xarray_to_file(observed_data, obs_output_file)
     else:
         logger.info(
@@ -829,7 +830,7 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
         )
     # Case 2: scc gauges file provided. Input is node based (mRM v6+)
     elif scc_gauges_file is not None:
-        # read gauge coordinates from scc gauges file and keep only those that have observed data based on gauge ids. 
+        # read gauge coordinates from scc gauges file and keep only those that have observed data based on gauge ids.
         x_new, y_new = [], []
         with load_ds(scc_gauges_file) as ds:
             logger.info("get the gauge coordinates from scc gauges file")
@@ -995,7 +996,7 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
         }
     )
     if write_input_data_cache:
-        logger.info(f"Saving sim data to {sim_output_file}...")
+        logger.info(f"Saving sim data to {sim_output_file}")
         write_xarray_to_file(sim_data, sim_output_file)
     else:
         logger.info(

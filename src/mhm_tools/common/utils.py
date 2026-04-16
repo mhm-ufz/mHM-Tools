@@ -2,10 +2,11 @@
 
 import logging
 
-import pandas as pd
-from mhm_tools.common.logger import ErrorLogger
 import numpy as np
+import pandas as pd
 import xarray as xr
+
+from mhm_tools.common.logger import ErrorLogger
 
 logger = logging.getLogger(__name__)
 
@@ -161,7 +162,7 @@ def distance_100m_units(di, dj, l0_resolution, lat_deg=None, latlon=False):
             dy_m = res
             dx_m = res
         return np.sqrt((di * dy_m) ** 2 + (dj * dx_m) ** 2) / 100.0
-    
+
 
 def find_best_gauge_location(  # noqa: PLR0915
     ds: xr.Dataset,
