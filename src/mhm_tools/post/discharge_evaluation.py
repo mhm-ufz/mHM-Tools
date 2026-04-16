@@ -878,7 +878,7 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
             out = Parallel(n_jobs=n_jobs, backend="loky")(
                 delayed(get_gauge_coords)(
                     ds,
-                    facc_ref=facc_i,
+                    ref_facc=facc_i,
                     facc_variable=facc_variable,
                     lonlat=[x_i, y_i],
                     method=gauge_location_method,
