@@ -24,6 +24,19 @@ from mhm_tools.common.utils import dict_to_multiline_string
 logger = logging.getLogger(__name__)
 
 
+def _ensure_non_interactive_backend(show):
+    """Switch to a non-interactive backend when plots are not shown.
+
+    This avoids X/GUI backend issues in headless or multi-process runs.
+    """
+    if show:
+        return
+    try:
+        plt.switch_backend("Agg")
+    except Exception as exc:
+        logger.debug("Failed to switch matplotlib backend to Agg: %s", exc)
+
+
 class Catchment:
     """Represents a catchment.
 
@@ -477,6 +490,12 @@ class Hydrograph:
         """
         if not code:
             self.logger.warning("No plots will be produced since none were specified.")
+            return
+        if not self.save and not self.show:
+            self.logger.info(
+                'No plots will be produced since both "save" and "show" are False.'
+            )
+            return
         if "t" in code:
             self.plots[0] = 1
         if "y" in code:
@@ -1238,14 +1257,8 @@ class Hydrograph:
         bool | None
             True on success, False/None if no plots are created or data are insufficient.
         """
-        if sum(self.plots) == 0:
-            self.logger.warning("Create no plots")
-            return None
-        # load data
-
+        _ensure_non_interactive_backend(self.show)
         # calculate metrics at timestep resolution (generally hourly)
-        self.logger.debug(self.sim_discharge_data)
-        self._infer_catchment_name()
         if self.calc_stats:
             logger.info("Crop to overlapping time.")
             if not self.crop_data_to_overlapping_time():
@@ -1255,7 +1268,10 @@ class Hydrograph:
                 self.obs_discharge_data, self.sim_discharge_data
             ):
                 return False
-
+        if sum(self.plots) == 0:
+            self.logger.warning("Create no plots")
+            return True
+        self._infer_catchment_name()
         # create figure and determining the number of rows and cols
         fig = plt.figure(figsize=(7, 8))
         nrows = sum(self.plots) // 2 + 1
@@ -1364,22 +1380,22 @@ def get_hydrograph_from_path(  # noqa: PLR0912, PLR0915
         sim_names = None
 
     hydro = Hydrograph(calc_stats=not named_multi)
+    hydro.show = show
+    hydro.save = save
     hydro.check_which_plots_to_create(plot_code)
     if multi_input:
         hydro.plots[4] = 0
     output_file = Path(output_file)
-    if output_file.suffix and output_file.parent.exists():
+    if output_file.is_dir():
+        hydro.output_file = output_file / "hydrograph.png"
+    elif output_file.suffix:
+        output_file.parent.mkdir(parents=True, exist_ok=True)
         hydro.output_file = output_file
-    else:
-        if output_file.suffix:
-            output_file = output_file.parent
-        if not output_file.is_dir():
-            output_file.mkdir(parents=True)
+    else:  # is non existing directory
+        output_file.mkdir(parents=True)
         hydro.output_file = output_file / "hydrograph.png"
 
     hydro.title = title
-    hydro.show = show
-    hydro.save = save
     if not multi_input and sim_names:
         hydro.sim_name = sim_names[0]
     prec_path = Path(prec_path)

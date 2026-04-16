@@ -122,7 +122,6 @@ class TestQDataToXarray(unittest.TestCase):
         # observed hourly, sim 3-hourly (mismatched temporal resolution)
         self.obs_times = pd.date_range("2001-01-01", periods=6, freq="h")
         self.sim_times = pd.date_range("2001-01-01", periods=4, freq="3h")
-
         # datasets for mocked file reads
         self.obs_ds = make_observed_data(
             self.ids, self.obs_times, self.xs, self.ys, self.facc, var="runoff_mean_mm"
@@ -172,15 +171,15 @@ class TestQDataToXarray(unittest.TestCase):
                 def _sim_for_gauge(
                     id, index, sim_data, yarr, xarr, resolution, **kwargs
                 ):
+                    sim_times = pd.to_datetime(np.asarray(sim_data.time.values))
                     da = xr.DataArray(
-                        np.arange(self.sim_times.size) + index,
+                        np.arange(sim_times.size) + index,
                         dims=("time",),
-                        coords={"time": self.sim_times},
+                        coords={"time": sim_times},
                         name="discharge",
                     )
                     return da.expand_dims(dim={"id": [int(id)]})
 
-                print(self.sim_times)
                 mock_sim_for_gauge.side_effect = _sim_for_gauge
 
                 obs_out, sim_out = gv.Q_data_to_xarray(
@@ -200,6 +199,7 @@ class TestQDataToXarray(unittest.TestCase):
                     date_slice=None,
                     overwrite=True,  # force writing, skip file existence branch
                     direct_comparison=True,  # apply overlap slice
+                    write_input_data_cache=True,
                 )
 
                 # Observed output dataset shape and coords
@@ -222,11 +222,18 @@ class TestQDataToXarray(unittest.TestCase):
                 # Ensure temporal overlap was respected: times within intersection
                 tmin = max(self.obs_times.min(), self.sim_times.min())
                 tmax = min(self.obs_times.max(), self.sim_times.max())
-                # self.assertGreaterEqual(obs_out.time.min().item(), tmin)
-                # self.assertLessEqual(obs_out.time.max().item(), tmax)
-                # self.assertGreaterEqual(sim_out.time.min().item(), tmin)
-                # self.assertLessEqual(sim_out.time.max().item(), tmax)
-
+                self.assertGreaterEqual(
+                    pd.Timestamp(obs_out.time.min().values), pd.Timestamp(tmin)
+                )
+                self.assertLessEqual(
+                    pd.Timestamp(obs_out.time.max().values), pd.Timestamp(tmax)
+                )
+                self.assertGreaterEqual(
+                    pd.Timestamp(sim_out.time.min().values), pd.Timestamp(tmin)
+                )
+                self.assertLessEqual(
+                    pd.Timestamp(sim_out.time.max().values), pd.Timestamp(tmax)
+                )
 
 # -----------------------------
 # evaluate_grdc_data: direct comparison path
@@ -295,6 +302,76 @@ class TestEvaluateDirect(unittest.TestCase):
                 self.assertEqual(df.loc[0, "id"], 42)
                 # plot_cdf not called for small sample sizes
                 mock_plot.assert_not_called()
+
+    def test_evaludate_grdc_data_filters_by_min_overlapping_years(self):
+        with tempfile.TemporaryDirectory() as td:
+            outdir = Path(td)
+            ids = [101, 202]
+            times = pd.date_range("2000-01-01", "2003-12-01", freq="MS")
+
+            obs_vals = np.ones((len(times), len(ids)), dtype=float)
+            sim_vals = np.full((len(times), len(ids)), np.nan, dtype=float)
+            years = times.year
+            # Gauge 101 has overlap in 2000, 2001, 2002 (3 years).
+            sim_vals[np.isin(years, [2000, 2001, 2002]), 0] = 2.0
+            # Gauge 202 has overlap only in 2001 (1 year).
+            sim_vals[years == 2001, 1] = 2.0
+
+            obs_ds = xr.Dataset(
+                {"discharge": (("time", "id"), obs_vals)},
+                coords={"time": times, "id": np.array(ids, dtype=int)},
+            )
+            sim_ds = xr.Dataset(
+                {
+                    "discharge": (("time", "id"), sim_vals),
+                    "facc": (("id",), np.array([1000.0, 1500.0])),
+                    "x": (("id",), np.array([10.0, 10.1])),
+                    "y": (("id",), np.array([50.0, 49.9])),
+                },
+                coords={"time": times, "id": np.array(ids, dtype=int)},
+            )
+
+            def _fake_hydrograph(**kwargs):
+                return {
+                    "id": int(kwargs["id"]),
+                    "alpha": 1.0,
+                    "beta": 1.0,
+                    "gamma": 1.0,
+                }
+
+            with patch.object(
+                gv, "Q_data_to_xarray", return_value=(obs_ds, sim_ds)
+            ), patch.object(
+                gv,
+                "gen_hydrograph_by_data_sets",
+                side_effect=_fake_hydrograph,
+            ) as mock_hydro, patch.object(
+                gv, "plot_cdf"
+            ), patch.object(
+                gv, "plot_map"
+            ):
+                gv.evaludate_discharge_data(
+                    model_data_path="sim.nc",
+                    observed_data_path="obs.nc",
+                    output_path=outdir,
+                    n_jobs=1,
+                    direct_comparison=True,
+                    n_boostrap_selections=0,
+                    min_overlapping_years=2,
+                    overwrite=True,
+                )
+
+                called_ids = [
+                    int(call.kwargs["id"]) for call in mock_hydro.call_args_list
+                ]
+                self.assertListEqual(called_ids, [101])
+
+                results_csv = outdir / "results.csv"
+                self.assertTrue(results_csv.is_file())
+                df = pd.read_csv(results_csv, index_col=0)
+                self.assertListEqual(
+                    sorted(df["id"].astype(int).unique().tolist()), [101]
+                )
 
 
 # -----------------------------
@@ -401,8 +478,8 @@ def make_observed_data(ids, times, xs, ys, facc, var="runoff_mean_mm", values=No
 def make_scc_gauges(ids, xs, ys):
     return xr.Dataset(
         {
-            "x": (("station",), np.array(xs, dtype=float)),
-            "y": (("station",), np.array(ys, dtype=float)),
+            "lon": (("station",), np.array(xs, dtype=float)),
+            "lat": (("station",), np.array(ys, dtype=float)),
             "station": (("station",), np.array(ids, dtype=int)),
         }
     )
