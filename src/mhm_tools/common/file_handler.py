@@ -318,7 +318,7 @@ def get_xarray_ds_from_file(
 ):
     """Read file and return xarray dataset."""
     file_path = Path(file_path)
-    logger.info(f"Reading {file_path} to xarray with chunking = {chunking}")
+    logger.debug(f"Reading {file_path} to xarray with chunking = {chunking}")
     ds_out = None
     if not file_path.is_file():
         msg = f"File path does not point to an existing file: {file_path}"

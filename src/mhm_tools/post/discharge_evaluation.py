@@ -272,10 +272,8 @@ def get_sim_data_for_gauges_from_nodes(
         far_mask = distances > max_dist
         if np.any(far_mask):
             logger.warning(
-                "Some gauges are farther than %.6f from nearest node; "
-                "using nearest anyway (max %.6f).",
-                max_dist,
-                float(np.max(distances[far_mask])),
+                f"Some gauges are farther than {max_dist:.6f} from nearest node; "
+                f"using nearest anyway (max {float(np.max(distances[far_mask])):.6f})."
             )
 
     id_indexer = xr.DataArray(ids_arr, dims="id", coords={"id": ids_arr})
@@ -292,9 +290,9 @@ def get_sim_data_for_gauges_from_nodes(
     return sim_sel, matched_x, matched_y, ids_arr
 
 
-def get_gauge_coords(
+def get_gauge_coords( # noqa: PLR0912
     ds,
-    facc,
+    ref_facc,
     facc_variable="L11_fAcc",
     lonlat=None,
     xy=None,
@@ -321,23 +319,18 @@ def get_gauge_coords(
 
     if facc_variable not in ds:
         logger.warning(
-            "Variable '%s' not found in flow-accumulation dataset for gauge %s.",
-            facc_variable,
-            id,
+            f"Variable '{facc_variable}' not found in flow-accumulation dataset for gauge {id}."
         )
         return None, None, None
     facc_da = ds[facc_variable].squeeze()
     upstream_area = np.asarray(facc_da.data)
     if upstream_area.ndim != 2:
         logger.warning(
-            "Expected 2D upstream area in '%s', got shape %s for gauge %s.",
-            facc_variable,
-            upstream_area.shape,
-            id,
+            f"Expected 2D upstream area in '{facc_variable}', got shape {upstream_area.shape} for gauge {id}."
         )
         return None, None, None
-    if not np.isfinite(facc):
-        logger.warning("Invalid reference catchment area for gauge %s: %s", id, facc)
+    if not np.isfinite(ref_facc):
+        logger.warning(f"Invalid reference catchment area for gauge {id}: {ref_facc}")
         return None, None, None
 
     search_upstream = upstream_area
@@ -435,7 +428,7 @@ def get_gauge_coords(
             ds=search_ds,
             upstream_area=search_upstream,
             gauge_coords=(idx0_guess, idx1_guess),
-            ref_catchment_area=float(facc),
+            ref_catchment_area=float(ref_facc),
             resolutions=resolutions,
             max_distance_cells=max_distance_cells,
             max_error=max_error,
@@ -445,10 +438,8 @@ def get_gauge_coords(
         )
     except Exception:
         logger.warning(
-            "No suitable gauge match found for gauge %s within %d cells and %.2f%% error.",
-            id,
-            max_distance_cells,
-            max_error * 100.0,
+            f"No suitable gauge match found for gauge {id} within {max_distance_cells} "
+            f"cells and {max_error * 100.0:.2f}% error."
         )
         return None, None, None
 
@@ -464,14 +455,9 @@ def get_gauge_coords(
         lon_x, lat_y = idx0, idx1
 
     logger.info(
-        "Gauge %s matched at lon=%s lat=%s with facc=%.3f (target=%.3f, error=%.2f%%, distance=%.2f x100m).",
-        id,
-        lon_x,
-        lat_y,
-        found_facc,
-        float(facc),
-        float(area_error) * 100.0,
-        float(distance_100m),
+        f"Gauge {id} matched at lon={lon_x} lat={lat_y} with facc={found_facc:.3f} "
+        f"(target={float(ref_facc):.3f}, error={float(area_error) * 100.0:.2f}%, "
+        f"distance={float(distance_100m):.2f} x100m)."
     )
     return lon_x, lat_y, found_facc
 
@@ -767,8 +753,7 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
     if min_overlapping_years is not None:
         ids_before = np.asarray(valid_ids)
         logger.info(
-            "Applying minimum observed-year filter in aligned period: >= %d years.",
-            int(min_overlapping_years),
+            f"Applying minimum observed-year filter in aligned period: >= {int(min_overlapping_years)} years."
         )
         valid_ids, dropped_year_filter = filter_ids_by_observed_years(
             valid_ids=ids_before,
@@ -776,15 +761,10 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
             min_overlapping_years=min_overlapping_years,
         )
         logger.info(
-            "Gauge count after observed-year filter: %d -> %d",
-            int(ids_before.size),
-            int(np.asarray(valid_ids).size),
+            f"Gauge count after observed-year filter: {int(ids_before.size)} -> {int(np.asarray(valid_ids).size)}"
         )
         if dropped_year_filter:
-            logger.debug(
-                "Dropped gauges by observed-year filter (id, observed_years): %s",
-                dropped_year_filter,
-            )
+            logger.debug(f"Dropped gauges by observed-year filter (id, observed_years): {dropped_year_filter}")
 
     if valid_ids.size == 0:
         msg = "No gauges with observed data in the selected time range."
@@ -944,7 +924,17 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
     logger.info("creating sim dataset")
     if not discharge_nc_files:
         if isinstance(sim, list):
-            simulation_discharge = xr.concat(sim, dim="id")
+            # Drop per-gauge location coords before concat; they differ across ids and
+            # trigger expensive coord-merging logic without adding value here.
+            sim = [
+                da.drop_vars(
+                    [coord for coord in ("lat", "lon") if coord in da.coords]
+                )
+                for da in sim
+            ]
+            simulation_discharge = xr.concat(
+                sim, dim="id", coords="minimal", compat="override"
+            )
         else:
             simulation_discharge = sim
     # Ensure sim ids align with observed valid_ids (node outputs may miss some)
@@ -958,19 +948,24 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
     ids_arr = np.asarray(gauge_ids_with_values)
     keep_mask = np.isin(ids_arr, common_ids)
     if not np.all(keep_mask):
-        logger.info(
-            "Dropping %d gauges missing in simulation output.",
-            int((~keep_mask).sum()),
-        )
+        logger.info(f"Dropping {int((~keep_mask).sum())} gauges missing in simulation output.")
     gauge_ids_with_values = ids_arr[keep_mask]
     x_new = np.asarray(x_new)[keep_mask]
     y_new = np.asarray(y_new)[keep_mask]
     facc_new = np.asarray(facc_new)[keep_mask]
     simulation_discharge = simulation_discharge.sel(id=gauge_ids_with_values)
-    if "lat" in simulation_discharge.dims or "lat" in simulation_discharge.coords:
-        simulation_discharge = simulation_discharge.drop_dims(["lat"])
-    if "lon" in simulation_discharge.dims or "lon" in simulation_discharge.coords:
-        simulation_discharge = simulation_discharge.drop_dims(["lon"])
+    # DataArray has no drop_dims(); remove leftover singleton dims/coords safely.
+    for dim in ("lat", "lon"):
+        if dim in simulation_discharge.dims:
+            if simulation_discharge.sizes.get(dim, 0) == 1:
+                simulation_discharge = simulation_discharge.isel({dim: 0}, drop=True)
+            else:
+                logger.warning(
+                    f"Simulation discharge still has non-singleton '{dim}' dimension; keeping it."
+                )
+    simulation_discharge = simulation_discharge.drop_vars(
+        [coord for coord in ("lat", "lon") if coord in simulation_discharge.coords]
+    )
     # if "lat" in simulation_discharge.data_vars:
     #     simulation_discharge = simulation_discharge.drop_vars(["lat"])
     # if "lon" in simulation_discharge.data_vars:
@@ -1063,10 +1058,6 @@ def boostap_statistics(
         "beta": float(beta),
         "gamma": float(gamma),
     }
-
-
-
-
 
 def _filter_ids_by_overlapping_years(model_da, observed_da, min_overlapping_years):
     """Return ids with at least the requested overlap years plus dropped-id details."""
