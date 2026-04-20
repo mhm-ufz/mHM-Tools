@@ -108,7 +108,7 @@ def add_args(parser):
         "--min_overlapping_years",
         "--min-overlapping-years",
         required=False,
-        default=5,
+        default=None,
         type=int,
         help=("Minimum number of overlapping years for evaluation."),
     )
