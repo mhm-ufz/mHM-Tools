@@ -1299,8 +1299,16 @@ class Hydrograph:
                 horizontalalignment="center",
                 fontsize="x-large",
             )
+        suptitle_text = f"\n{self.title}\n"
+        # If seasonality is the only selected plot, show only alpha and beta in suptitle.
+        if self.calc_stats and self.plots[2] and sum(self.plots) == 1:
+            stats = (
+                f"alpha = {self.objectives.alpha:.2f}, "
+                f"beta = {self.objectives.beta:.2f}"
+            )
+            suptitle_text = f"\n{self.title}\n{stats}\n" if self.title else f"\n{stats}\n"
         fig.suptitle(
-            t=f"\n{self.title}\n",
+            t=suptitle_text,
             x=0.5,
             y=0.97,
             horizontalalignment="center",

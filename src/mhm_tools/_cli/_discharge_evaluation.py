@@ -149,6 +149,14 @@ def add_args(parser):
         required=False,
     )
     parser.add_argument(
+        "--hydrograph_plots",
+        default="tysc",
+        required=False,
+        help="specifies which graphics are generated."
+        "t model timestep, y yearly, s seasonality, p flow duration, c scatter e.g. "
+        "all with out seasonality (advised for performance) = typc",
+    )
+    parser.add_argument(
         "--overwrite",
         action="store_true",
         dest="overwrite",
@@ -217,4 +225,5 @@ def run(args):
         gauge_location_method=args.gauge_location_method,
         gauge_max_distance_cells=args.gauge_max_distance_cells,
         gauge_max_error=args.gauge_max_error,
+        hydrograph_plots=args.hydrograph_plots,
     )

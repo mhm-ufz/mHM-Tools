@@ -1165,6 +1165,7 @@ def evaludate_discharge_data(  # noqa: PLR0913
     gauge_location_method="basinex",
     gauge_max_distance_cells=3,
     gauge_max_error=0.1,
+    hydrograph_plots=None,
 ):
     """Compare simulated with observed discharge directly or via bootstrapping.
 
@@ -1256,6 +1257,7 @@ def evaludate_discharge_data(  # noqa: PLR0913
                 x=model_ds["x"].sel(id=id).data,
                 y=model_ds["y"].sel(id=id).data,
                 save=save_hydrograph,
+                plot_code=hydrograph_plots
             )
             for id in observed_ds.id.values
             if id in model_ds.id.values
