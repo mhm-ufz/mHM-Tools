@@ -694,18 +694,24 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
                 else observed_variable
             )
             logger.debug(f"Using observed variable: {observed_variable}")
-
+            logger.debug(
+                f"Observed data variable info: {observed_data[observed_variable]}"
+            )
             # reading sim data and resampling if needed
             with load_ds(model_data_path, file_name=model_file_name) as ds_sim:
                 sim_data_in = ds_sim
+            logger.debug(f"Sim Data: {sim_data_in}")
 
+            # cropping data in space and time
             logger.info("Cropping data...")
             if date_slice is not None and date_slice != slice(None, None):
                 logger.info(
                     f"Selecting data from {date_slice.start} to {date_slice.stop}"
                 )
             obs_discharge_data = observed_data[observed_variable].sel(time=date_slice)
-
+            logger.debug(
+                f"Observed discharge data after time selection: {obs_discharge_data}"
+            )
             if slicing_condition is not None:
                 logger.info("Applying spatial slicing to sim data...")
                 sim_data_cropped = sim_data_in.sel(
@@ -716,11 +722,18 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
                 ).sel(time=date_slice)
             else:
                 sim_data_cropped = sim_data_in.sel(time=date_slice)
+            logger.debug(
+                f"Sim data after cropping (time and space): {sim_data_cropped}"
+            )
 
             logger.info("Resampling to coarser calendar if needed...")
-            sim_rs, obs_rs = resample_to_coarser_calendar(
+            # Harmonize temporal frequency between simulation and observations.
+            # The helper returns the possibly resampled simulation first.
+            resampled_sim_data, resampled_obs_data = resample_to_coarser_calendar(
                 sim_data_cropped, obs_discharge_data
             )
+            logger.debug(f"Obs data.time after resampling: {resampled_obs_data.time}")
+            logger.debug(f"Sim data.time after resampling: {resampled_sim_data.time}")
 
             # Ensure unique gauge ids (xarray .sel requires unique index)
             id_index = pd.Index(gauge_ids.values)
@@ -735,21 +748,29 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
                 x = x.isel(id=unique_pos)
                 y = y.isel(id=unique_pos)
                 facc = facc.isel(id=unique_pos)
-                obs_rs = obs_rs.isel(id=unique_pos)
+                resampled_obs_data = resampled_obs_data.isel(id=unique_pos)
 
             if direct_comparison:
                 logger.info(
                     "Selecting overlapping time period for direct comparison..."
                 )
-                overlapping_time_slice = get_overlapping_time_slice(
+                # Determine one common inclusive time window and apply it to both
+                # series to ensure metric computation compares the same period.
+                common_time_window = get_overlapping_time_slice(
                     sim_data_cropped, obs_discharge_data
                 )
                 logger.info(
-                    f"Overlapping time is from {overlapping_time_slice.start} "
-                    f"to {overlapping_time_slice.stop}"
+                    f"Overlapping time is from {common_time_window.start} "
+                    f"to {common_time_window.stop}"
                 )
-                obs_discharge_data = obs_discharge_data.sel(time=overlapping_time_slice)
-                sim_data_cropped = sim_data_cropped.sel(time=overlapping_time_slice)
+                obs_discharge_data = obs_discharge_data.sel(time=common_time_window)
+                sim_data_cropped = sim_data_cropped.sel(time=common_time_window)
+                logger.debug(
+                    f"Observed data.time after overlapping slice: {obs_discharge_data.time}"
+                )
+                logger.debug(
+                    f"Sim data.time after overlapping slice: {sim_data_cropped.time}"
+                )
 
     # Drop gauges without any observed data in the selected period
     logger.info("Filtering gauges without observed data in the provided time range...")
@@ -1464,12 +1485,6 @@ def plot_cdf(df, output_path, boostrap_iterations=None, mask_any=True):  # noqa:
     The plots are generated for different subselections
     (by catchment, bootstrap-mean, or all results).
     """
-    # --- 1) Read your CSV ---
-    # Adjust 'mydata.csv' to your actual file path
-    # df = pd.read_csv('/work/kelbling/ecflow_work/gloria_hourly_t2k/output/gloria_0p05deg/discharge_validation/results.csv', index_col=0)
-    # output_path = Path('/work/luedke/tmp/test_discharge_plots')
-    # if not output_path.is_dir():
-    #     output_path.mkdir()
     # The variables to plot
     logger.info(f"In total there are {len(df['id'].unique())} catchments of which ")
     logger.info(
@@ -1488,36 +1503,8 @@ def plot_cdf(df, output_path, boostrap_iterations=None, mask_any=True):  # noqa:
     logger.info(df.head())
     variables = ["alpha", "beta", "gamma", "kge", "nse"]
 
-    # --- 2) Check number of unique IDs ---
     unique_ids = df["id"].unique()
 
-    # --- 3 & 4) Branch based on the number of unique IDs ---
-    # if n_ids < 9 or plot_all:
-    #     logger.info("Single ids")
-    #     # Plot a separate CDF for each ID, for each variable
-    #     for var in variables:
-    #         plt.figure(figsize=(6, 4))
-    #         for uid in unique_ids:
-    #             # Extract all values of `var` for the given ID
-    #             subdata = df.loc[df["id"] == uid, var].sort_values()
-    #             if len(subdata) == 0:
-    #                 continue  # no data for this ID
-
-    #             # Compute the empirical CDF
-    #             cdfvals = np.arange(1, len(subdata) + 1) / float(len(subdata))
-
-    #             # Plot
-    #             plt.plot(subdata, cdfvals, label=f"id = {int(uid)}")
-
-    #         plt.title(f"CDF of {var} (Separate lines per ID)")
-    #         plt.xlabel(var)
-    #         plt.ylabel("CDF")
-    #         plt.legend()
-    #         plt.tight_layout()
-    #         plt.savefig(output_path / f"cdf_{var}_by_id.png", dpi=150)
-    #         plt.close()
-
-    # if n_ids < 10 or plot_all:
     logger.info("All values")
     for var in variables:
         plt.figure(figsize=(6, 4))
@@ -1533,10 +1520,6 @@ def plot_cdf(df, output_path, boostrap_iterations=None, mask_any=True):  # noqa:
 
         # Compute the fraction => empirical CDF
         cdf = ranks / n
-        # subdata = df[var].sort_values()
-        # if len(subdata) == 0:
-        # continue  # no data for this ID
-        # logger.info(float(len(subdata)))
         logger.info(n)
         logger.info(da_sorted.values)
         logger.info(cdf.values)
@@ -1552,8 +1535,6 @@ def plot_cdf(df, output_path, boostrap_iterations=None, mask_any=True):  # noqa:
         # Compute the empirical CDF
         # cdfvals = np.arange(1, len(subdata) + 1) / float(len(subdata))
         # Plot
-        # plt.scatter(subdata, cdfvals, s=0.5, color='blue')
-        # plt.plot(subdata, cdfvals, linewidth=0.3, color='blue')
         title = f"CDF of {var} for {len(unique_ids)} stations"
         if boostrap_iterations is not None and boostrap_iterations > 0:
             title += f" and {boostrap_iterations} bootstrap iterations"
@@ -1570,24 +1551,5 @@ def plot_cdf(df, output_path, boostrap_iterations=None, mask_any=True):  # noqa:
         plt.tight_layout()
         plt.savefig(output_path / f"cdf_{var}_all_stations.png", dpi=450)
         plt.close()
-
-    # if n_ids > 9 or plot_all:
-    #     # Many IDs => plot the distribution of mean values by ID, for each variable
-    #     # 1) Compute average (mean) across all rows belonging to each ID
-    #     means_by_id = df.groupby("id")[variables].mean()
-
-    #     for var in variables:
-    #         # This is now one mean value per ID
-    #         data = means_by_id[var].sort_values()
-    #         cdfvals = np.arange(1, len(data) + 1) / float(len(data))
-
-    #         plt.figure(figsize=(6, 4))
-    #         plt.plot(data, cdfvals, marker="o")
-    #         plt.title(f"CDF of mean {var} across {n_ids} IDs")
-    #         plt.xlabel(f"mean {var}")
-    #         plt.ylabel("CDF")
-    #         plt.tight_layout()
-    #         plt.savefig(output_path / f"cdf_{var}_mean_across_ids.png", dpi=150)
-    #         plt.close()
 
     logger.info("Done! Check the saved PNG files for your CDF plots.")
