@@ -1306,7 +1306,9 @@ class Hydrograph:
                 f"alpha = {self.objectives.alpha:.2f}, "
                 f"beta = {self.objectives.beta:.2f}"
             )
-            suptitle_text = f"\n{self.title}\n{stats}\n" if self.title else f"\n{stats}\n"
+            suptitle_text = (
+                f"\n{self.title}\n{stats}\n" if self.title else f"\n{stats}\n"
+            )
         fig.suptitle(
             t=suptitle_text,
             x=0.5,

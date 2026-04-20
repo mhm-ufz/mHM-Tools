@@ -1257,7 +1257,7 @@ def evaludate_discharge_data(  # noqa: PLR0913
                 x=model_ds["x"].sel(id=id).data,
                 y=model_ds["y"].sel(id=id).data,
                 save=save_hydrograph,
-                plot_code=hydrograph_plots
+                plot_code=hydrograph_plots,
             )
             for id in observed_ds.id.values
             if id in model_ds.id.values
@@ -1550,14 +1550,21 @@ def plot_cdf(df, output_path, boostrap_iterations=None, mask_any=True):  # noqa:
             plt.ylim(0.0, 1.01)
         else:
             plt.ylim(0, 1.05)
-            xmin = da_sorted.min().values if da_sorted.min().values > -2 else np.quantile(da_sorted.values, 0.05)
-            xmax = da_sorted.max().values if da_sorted.max().values < 3 else np.quantile(da_sorted.values, 0.95)
+            xmin = (
+                da_sorted.min().values
+                if da_sorted.min().values > -2
+                else np.quantile(da_sorted.values, 0.05)
+            )
+            xmax = (
+                da_sorted.max().values
+                if da_sorted.max().values < 3
+                else np.quantile(da_sorted.values, 0.95)
+            )
             if xmax - xmin > 6:
                 xmin = max(xmin, da_sorted.median().values - 3)
                 xmax = min(xmax, da_sorted.median().values + 3)
             plt.xlim(xmin, xmax)
 
-                
         plt.tight_layout()
         plt.savefig(output_path / f"cdf_{var}_all_stations.png", dpi=450)
         plt.close()

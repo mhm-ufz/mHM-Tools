@@ -134,7 +134,7 @@ def coord_to_index(ds, lat, lon):
         )
     if i is None or j is None:
         msg = (
-            "Could not map given coordinates to valid indices within " "dataset bounds."
+            "Could not map given coordinates to valid indices within dataset bounds."
         )
         with ErrorLogger(logger):
             raise ValueError(msg)

@@ -212,7 +212,8 @@ def get_overlapping_time_slice(input_ds, ref_ds):
         input_ds: Simulation (or first) xarray object with a ``time`` dimension.
         ref_ds: Reference (or second) xarray object with a ``time`` dimension.
 
-    Returns:
+    Returns
+    -------
         ``slice(start, end)`` with ``pandas.Timestamp`` endpoints.
     """
     input_non_nan_time = input_ds.dropna(dim="time", how="all").time.data
