@@ -965,9 +965,17 @@ def get_dataset_from_path(
         return p.is_dir()
 
     if _is_dir_or_list(path):
+        file_list = []
         if not isinstance(path, list):
             path = Path(path)
             file_list = list(path.rglob(file_name))
+        else:
+            for p in path:
+                p = Path(p)
+                if p.is_file():
+                    file_list.append(p)
+                elif p.is_dir():
+                    file_list.extend(list(p.rglob(file_name)))
         if not file_list:
             with ErrorLogger(logger):
                 msg = f"No files found in {path}."

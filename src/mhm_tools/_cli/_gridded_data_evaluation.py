@@ -222,6 +222,13 @@ def add_args(parser):
         help=("Only compare bias spatially and for the seasonality."),
     )
     optional.add_argument(
+        "--global_climate",
+        action="store_true",
+        required=False,
+        help=("Only compare bias and temporal standard deviation (no Spearman)."),
+    )
+
+    optional.add_argument(
         "--resample_time_to",
         required=False,
         default=None,
@@ -289,6 +296,10 @@ def run(args):
         file_name=args.ref_file_name,
     )
     target_freq = normalize_target_frequency(args.resample_time_to)
+    if args.bias_only and args.global_climate:
+        error_msg = "Options --bias_only and --global_climate are mutually exclusive."
+        with ErrorLogger(logger):
+            raise ValueError(error_msg)
     gridded_data_evaluation(
         input=input,
         ref=ref,
@@ -298,10 +309,10 @@ def run(args):
         n_cpus=args.ncpus,
         n_bootstrap_years=args.n_boostrap_years,
         n_bootstrap_selections=args.n_bootstrap_selections,
-        direct_comparison=args.n_bootstrap_selections is None
-        or args.n_boostrap_years is None,
+        direct_comp=args.n_bootstrap_selections is None or args.n_boostrap_years is None,
         year_slice=year_slice,
         avaiable_mem=available_mem,
         bias_only=args.bias_only,
+        global_climate=args.global_climate,
         target_time_freq=target_freq,
     )

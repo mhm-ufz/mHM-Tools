@@ -818,30 +818,157 @@ def plot_map_bias_only(
     logger.info("created et_map")
 
 
+@log_errors(raise_exceptions=True)
+def plot_map_global_climate(
+    rel_mean,
+    rel_std,
+    ref_clim,
+    input_clim,
+    input_name,
+    ref_name,
+    output_path,
+    overlapping_years=None,
+):
+    """Create a plot showing relative mean, relative std and seasonality."""
+    rel_mean = np.where(rel_mean == np.inf, np.nan, rel_mean)
+    rel_std = np.where(rel_std == np.inf, np.nan, rel_std)
+    fig, axes = plt.subplots(3, 1, figsize=(10.5, 6.2))
+    if input_name is not None and ref_name is not None:
+        title = f"Comparision {input_name} with {ref_name}"
+    if overlapping_years is not None and len(overlapping_years) > 1:
+        title += f" for years {overlapping_years[0]}-{overlapping_years[-1]}"
+    fig.suptitle(title, fontweight="normal", fontsize="x-large")
+
+    mean_diff_1 = max(np.abs(1 - np.nanmin(rel_mean)), np.abs(1 - np.nanmax(rel_mean)))
+    im0, bounds0, extend0 = plot_single_map(
+        axes[0], rel_mean, mean_diff_1, bounds_type="fixed"
+    )
+    axes[0].set_title(f"Relative temporal Mean (median={np.nanmedian(rel_mean):.2f})")
+
+    std_diff_1 = max(np.abs(1 - np.nanmin(rel_std)), np.abs(1 - np.nanmax(rel_std)))
+    im1, bounds1, extend1 = plot_single_map(
+        axes[1], rel_std, std_diff_1, bounds_type="quantiles"
+    )
+    axes[1].set_title(
+        f"Relative temporal Standarddeviation (median={np.nanmedian(rel_std):.2f})"
+    )
+
+    months = np.arange(1, 13, 1)
+    bar_width = 0.4
+    axes[2].bar(
+        months - bar_width / 2,
+        np.nanmean(ref_clim, axis=(1, 2)),
+        width=bar_width,
+        color="#008176",
+        label=ref_name,
+        alpha=0.8,
+    )
+    axes[2].bar(
+        months + bar_width / 2,
+        np.nanmean(input_clim, axis=(1, 2)),
+        width=bar_width,
+        color="#79A3E6",
+        label=input_name,
+        alpha=0.8,
+    )
+
+    ax_twy = axes[2].twinx()
+    ref_clim = np.where(ref_clim != 0, ref_clim, np.nan)
+    rel_clim = np.nanmean(input_clim, axis=(1, 2)) / np.nanmean(ref_clim, axis=(1, 2))
+    rel_clim_diff_1 = max(
+        np.abs(1 - np.nanmin(rel_clim)), np.abs(1 - np.nanmax(rel_clim))
+    )
+    ax_twy.errorbar(
+        months, rel_clim, label=f"{input_name}/{ref_name}", color="#0000A7", fmt="--"
+    )
+    ax_twy.axhline(y=1, color="#0000A7", linewidth=0.5)
+    axes[2].set_xlabel("month of year")
+    handles, labels = [], []
+    for ax in [axes[2], ax_twy]:
+        for handle, label in zip(*ax.get_legend_handles_labels()):
+            handles.append(handle)
+            labels.append(label)
+
+    axes[2].legend(handles, labels, loc="upper right")
+    axes[2].set_title("Seasonality")
+    axes[2].set_ylabel("ET [mm/day]")
+    axes[2].tick_params(axis="y", labelcolor="black")
+    axes[2].set_xlim(1 - (1.1 * bar_width), 12 + (1.1 * bar_width))
+    axes[2].set_xticks(months)
+    axes[2].set_xticklabels(months)
+    ymax = 1 + rel_clim_diff_1 * 1.05 if not np.isnan(rel_clim_diff_1) else 1
+    ax_twy.set_ylim(np.nanmax([0, 1 - rel_clim_diff_1 * 1.05]), ymax)
+    ax_twy.set_ylabel("Ratio (Input / Reference)", color="#0000A7")
+    ax_twy.tick_params(axis="y", labelcolor="#0000A7")
+
+    divider0 = make_axes_locatable(axes[0])
+    cax0 = divider0.append_axes("right", size="5%", pad=0.1)
+    fig.colorbar(im0, cax=cax0, label="", boundaries=bounds0, extend=extend0)
+
+    divider1 = make_axes_locatable(axes[1])
+    cax1 = divider1.append_axes("right", size="5%", pad=0.1)
+    fig.colorbar(im1, cax=cax1, label="", boundaries=bounds1, extend=extend1)
+
+    for ax in axes.flat:
+        for spine in ax.spines.values():
+            spine.set_linewidth(0.5)
+    axes[2].spines["top"].set_linewidth(0.25)
+    for ax in [axes[0], axes[1]]:
+        ax.set_yticks([])
+        ax.set_xticks([])
+        ax.yaxis.labelpad = 0
+        for spine in ax.spines.values():
+            spine.set_linewidth(0.25)
+    plt.tight_layout()
+
+    plt.savefig(output_path / "et_map_global_climate.png", dpi=800)
+    logger.info("created et_map")
+
+
 def create_map_from_output(output_path, input_name, ref_name):
     """Read in statistics netcdf and create a map plots from it."""
     file = get_rel_stat_file(output_path, input_name, ref_name)
     logger.info(f"Plotting data from {file}")
     with get_xarray_ds_from_file(file, force_decending_y=True) as ds:
-        rel_std = ds["rel_std"]
         rel_mean = ds["rel_mean"]
-        spearman = ds["spearman"]
+        rel_std = ds["rel_std"] if "rel_std" in ds else None
+        spearman = ds["spearman"] if "spearman" in ds else None
         input_clim = (
             ds[f"{input_name}_clim"] if f"{input_name}_clim" in ds else ds["input_clim"]
         )
         ref_clim = (
             ds[f"{ref_name}_clim"] if f"{ref_name}_clim" in ds else ds["ref_clim"]
         )
-    plot_map(
-        rel_std=rel_std,
-        rel_mean=rel_mean,
-        spearman=spearman,
-        ref_clim=ref_clim,
-        input_clim=input_clim,
-        input_name=input_name,
-        ref_name=ref_name,
-        output_path=output_path,
-    )
+    if rel_std is not None and spearman is not None:
+        plot_map(
+            rel_std=rel_std,
+            rel_mean=rel_mean,
+            spearman=spearman,
+            ref_clim=ref_clim,
+            input_clim=input_clim,
+            input_name=input_name,
+            ref_name=ref_name,
+            output_path=output_path,
+        )
+    elif rel_std is not None:
+        plot_map_global_climate(
+            rel_mean=rel_mean,
+            rel_std=rel_std,
+            ref_clim=ref_clim,
+            input_clim=input_clim,
+            input_name=input_name,
+            ref_name=ref_name,
+            output_path=output_path,
+        )
+    else:
+        plot_map_bias_only(
+            rel_mean=rel_mean,
+            ref_clim=ref_clim,
+            input_clim=input_clim,
+            input_name=input_name,
+            ref_name=ref_name,
+            output_path=output_path,
+        )
 
 
 def get_stats(
@@ -945,6 +1072,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
     target_freq=None,
     plot=True,
     bias_only=False,
+    global_climate=False,
     input_file_name=None,
     ref_file_name=None,
 ):
@@ -952,6 +1080,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
     output_path = Path(output_path)
     if bootstrap_index is not None:
         random.seed(bootstrap_index)
+    overlapping_years = None
 
     # get input statistics
     input_stats_file = None
@@ -996,6 +1125,9 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
     input, ref = regridd_to_higher_spatial_resolution(input, ref)
     output_name = f"{input_name}-{ref_name}.csv".replace(" ", "_")
     # compare and save statistics
+    full_metrics = not bias_only and not global_climate
+    with_std = not bias_only
+
     if direct_comp:
         input_ts, ref_ts = input["time_series"], ref["time_series"]
 
@@ -1006,6 +1138,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
             input_ts, ref_ts = resample_to_coarser_calendar(input_ts, ref_ts)
 
         input_ts, ref_ts, time_slice = crop_data_to_overlapping_time(input_ts, ref_ts)
+        overlapping_years = [time_slice.start.year, time_slice.stop.year]
         if input_ts.shape != ref_ts.shape:
             msg = f"Input and ref time_series shapes differ after resampling/cropping: {input_ts.shape} vs {ref_ts.shape}"
             with ErrorLogger(logger):
@@ -1021,7 +1154,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
             logger.error(msg)
             raise ValueError(msg)
         try:
-            if not bias_only:
+            if full_metrics:
                 input_ts_np = np.asarray(input_ts.values)
                 ref_ts_np = np.asarray(ref_ts.values)
                 spearman, spearman_pval = spearman_spatial_joblib(
@@ -1039,7 +1172,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
             logger.info(input_ts.time)
             logger.info(ref_ts.time)
             raise ve
-    elif not bias_only:
+    elif full_metrics:
         logger.info("Calculating spearman correlation from seasonalities.")
         input_clim_np = np.asarray(input["clim"].values)
         ref_clim_np = np.asarray(ref["clim"].values)
@@ -1063,7 +1196,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
     rel_mean = xr.DataArray(
         rel_mean, coords=input["mean"].coords, dims=input["mean"].dims
     )
-    if not bias_only:
+    if with_std:
         if input["std"].shape != ref["std"].shape:
             msg = f"Input and ref std shapes differ after regridding: {input['std'].shape} vs {ref['std'].shape}"
             with ErrorLogger(logger):
@@ -1073,6 +1206,9 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
         rel_std = xr.DataArray(
             rel_std, coords=input["std"].coords, dims=input["std"].dims
         )
+    else:
+        rel_std = None
+    if full_metrics:
         spearman = xr.DataArray(
             spearman.data, coords=input["std"].coords, dims=input["std"].dims
         )
@@ -1080,7 +1216,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
             spearman_pval.data, coords=input["std"].coords, dims=input["std"].dims
         )
     else:
-        rel_std, spearman, spearman_pval = None, None, None
+        spearman, spearman_pval = None, None
     if input["clim"].shape != ref["clim"].shape:
         msg = f"Input and ref clim shapes differ after regridding: {input['clim'].shape} vs {ref['clim'].shape}"
         with ErrorLogger(logger):
@@ -1115,10 +1251,11 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
             "lon": get_coord_values(input, lon=True),
         },
     )
-    if not bias_only:
+    if with_std:
+        output["rel_std"] = rel_std
+    if full_metrics:
         output["spearman"] = spearman
         output["spearman_pval"] = spearman_pval
-        output["rel_std"] = rel_std
     file_name = "relative_stats"
     if input_name is not None:
         file_name += f"_{input_name}"
@@ -1139,7 +1276,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
     write_xarray_to_file(ds=output, file_path=file_name)
     logger.info(f"Written output to {file_name}")
     if plot:
-        if not bias_only:
+        if full_metrics:
             plot_map(
                 rel_std=rel_std,
                 rel_mean=rel_mean,
@@ -1149,7 +1286,18 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
                 input_name=input_name,
                 ref_name=ref_name,
                 output_path=output_path,
-                overlapping_years=[time_slice.start.year, time_slice.stop.year],
+                overlapping_years=overlapping_years,
+            )
+        elif with_std:
+            plot_map_global_climate(
+                rel_mean=rel_mean,
+                rel_std=rel_std,
+                ref_clim=ref_clim,
+                input_clim=input_clim,
+                input_name=input_name,
+                ref_name=ref_name,
+                output_path=output_path,
+                overlapping_years=overlapping_years,
             )
         else:
             plot_map_bias_only(
@@ -1159,7 +1307,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
                 input_name=input_name,
                 ref_name=ref_name,
                 output_path=output_path,
-                overlapping_years=[time_slice.start.year, time_slice.stop.year],
+                overlapping_years=overlapping_years,
             )
     return file_name
 
@@ -1195,10 +1343,13 @@ def evaluate_boostraping_stat_files(stat_files, input_name, ref_name):
                 f"{ref_name}_clim" if f"{ref_name}_clim" in first_file else "ref_clim"
             )
 
-            # Preallocate arrays for all variables
+            has_rel_std = "rel_std" in first_file
+            has_spearman = "spearman" in first_file
+
+            # Preallocate arrays for all available variables
             mean = np.empty((n_bootstrap, *shape))
-            std = np.empty((n_bootstrap, *shape))
-            spearman = np.empty((n_bootstrap, *shape))
+            std = np.empty((n_bootstrap, *shape)) if has_rel_std else None
+            spearman = np.empty((n_bootstrap, *shape)) if has_spearman else None
             input_clim = np.empty((n_bootstrap, 12, *shape))  # Month x lat x lon
             ref_clim = np.empty((n_bootstrap, 12, *shape))  # Month x lat x lon
     except ValueError as ve:
@@ -1208,26 +1359,35 @@ def evaluate_boostraping_stat_files(stat_files, input_name, ref_name):
     for i, file in enumerate(stat_files):
         with get_xarray_ds_from_file(file, force_decending_y=True) as ds:
             mean[i] = ds["rel_mean"].values
-            std[i] = ds["rel_std"].values
-            spearman[i] = ds["spearman"].values
+            if std is not None:
+                std[i] = ds["rel_std"].values
+            if spearman is not None:
+                spearman[i] = ds["spearman"].values
             input_clim[i] = ds[input_clim_key].values
             ref_clim[i] = ds[ref_clim_key].values
 
     # Convert the arrays into xarray DataArrays
     mean_da = xr.DataArray(mean, dims=["bootstrap", "lat", "lon"])
-    std_da = xr.DataArray(std, dims=["bootstrap", "lat", "lon"])
-    spearman_da = xr.DataArray(spearman, dims=["bootstrap", "lat", "lon"])
+    std_da = xr.DataArray(std, dims=["bootstrap", "lat", "lon"]) if std is not None else None
+    spearman_da = (
+        xr.DataArray(spearman, dims=["bootstrap", "lat", "lon"])
+        if spearman is not None
+        else None
+    )
     input_clim_da = xr.DataArray(input_clim, dims=["bootstrap", "month", "lat", "lon"])
     ref_clim_da = xr.DataArray(ref_clim, dims=["bootstrap", "month", "lat", "lon"])
 
     # Combine results into an xarray Dataset
-    return {
+    results = {
         "rel_mean": mean_da.median(dim="bootstrap"),
-        "rel_std": std_da.median(dim="bootstrap"),
-        "spearman": spearman_da.median(dim="bootstrap"),
         "input_clim": input_clim_da.median(dim="bootstrap"),
         "ref_clim": ref_clim_da.median(dim="bootstrap"),
     }
+    if std_da is not None:
+        results["rel_std"] = std_da.median(dim="bootstrap")
+    if spearman_da is not None:
+        results["spearman"] = spearman_da.median(dim="bootstrap")
+    return results
 
 
 def regridd_to_higher_spatial_resolution(ds1, ds2):
@@ -1451,6 +1611,7 @@ def gridded_data_evaluation(
     year_slice=None,
     avaiable_mem=None,
     bias_only=False,
+    global_climate=False,
     target_time_freq=None,
 ):
     """Validate a spatial variable by comparing dataset climatologies."""
@@ -1567,6 +1728,7 @@ def gridded_data_evaluation(
                     ref_file_name=ref.file_name,
                     target_freq=target_time_freq,
                     bias_only=bias_only,
+                    global_climate=global_climate,
                 )
                 for bootstrap_index in range(n_bootstrap_selections)
             )
@@ -1575,12 +1737,32 @@ def gridded_data_evaluation(
             results = evaluate_boostraping_stat_files(
                 stat_files, input_name=input.name, ref_name=ref.name
             )
-            plot_map(
-                **results,
-                output_path=output_path,
-                input_name=input.name,
-                ref_name=ref.name,
-            )
+            if "spearman" in results and "rel_std" in results:
+                plot_map(
+                    **results,
+                    output_path=output_path,
+                    input_name=input.name,
+                    ref_name=ref.name,
+                )
+            elif "rel_std" in results:
+                plot_map_global_climate(
+                    rel_mean=results["rel_mean"],
+                    rel_std=results["rel_std"],
+                    input_clim=results["input_clim"],
+                    ref_clim=results["ref_clim"],
+                    output_path=output_path,
+                    input_name=input.name,
+                    ref_name=ref.name,
+                )
+            else:
+                plot_map_bias_only(
+                    rel_mean=results["rel_mean"],
+                    input_clim=results["input_clim"],
+                    ref_clim=results["ref_clim"],
+                    output_path=output_path,
+                    input_name=input.name,
+                    ref_name=ref.name,
+                )
         else:
             logger.error("There are no statfiles created from the evaluation.")
     else:
@@ -1604,4 +1786,5 @@ def gridded_data_evaluation(
             ref_file_name=ref.file_name,
             target_freq=target_time_freq,
             bias_only=bias_only,
+            global_climate=global_climate,
         )
