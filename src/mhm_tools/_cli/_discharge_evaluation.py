@@ -157,12 +157,12 @@ def add_args(parser):
         "all with out seasonality (advised for performance) = typc",
     )
     parser.add_argument(
-        "--overwrite",
+        "--use_cached_input_data",
         action="store_true",
-        dest="overwrite",
+        dest="use_cached_input_data",
         required=False,
         help=(
-            "Overwrite existing files. Otherwise input data changes might not result in output changes."
+            "Use cached input data if available. Otherwise, process the input data from scratch."
         ),
     )
     parser.add_argument(
@@ -217,7 +217,7 @@ def run(args):
         or args.n_boostrap_years is None,
         start_date=args.start_date,
         end_date=args.end_date,
-        overwrite=args.overwrite,
+        overwrite=not args.use_cached_input_data,
         only_plot=args.only_plot,
         save_hydrograph=args.save_hydrograph,
         min_overlapping_years=args.min_overlapping_years,
