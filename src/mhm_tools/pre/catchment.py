@@ -47,6 +47,202 @@ OUTPUT_FTYPE = "ldd"
 CUTOFF_THRESHOLD = 175
 # FUNCTIONS
 
+def get_upscaling_factor(resolutions, max_resolution=False, l1=False, l2=True):
+    """Create upscaling factor."""
+    input_res = resolutions.l0_resolution
+    if l1:
+        upscale_res = resolutions.l1_resolution
+    elif l2:
+        upscale_res = resolutions.l2_resolution
+    else:
+        error_msg = "Either l1 or l2 must be True"
+        with ErrorLogger(logger):
+            raise ValueError(error_msg)
+    upscale_res = resolutions.l2_resolution
+    if max_resolution:
+        upscale_res = resolutions.get_max_resolution()
+    if upscale_res is None:
+        return 1
+    if int(upscale_res / input_res + 0.5) - (upscale_res / input_res) < 1e6:
+        return int(upscale_res / input_res + 0.5)
+    not_int_multiple_msg = f"Upscaling only works if L1 resolution is integer muplipe of L0 resolution but L1 = {self.resolutions.l1_resolution / input_res:.4f} * L0"
+    raise ValueError(not_int_multiple_msg)
+
+
+def align_bounds_to_l2(ds, resolutions, min_row, max_row, min_col, max_col):
+    """Align the given bounds to the L2 grid."""
+    if resolutions.l2_file is None:
+        return min_row, max_row, min_col, max_col
+
+    with get_xarray_ds_from_file(
+        resolutions.l2_file,
+        force_decending_y=True,
+        normalize_latlon_coords=True,
+    ) as ds:
+        l2_lon = get_coord_values(ds, lon=True)
+        l2_lat = get_coord_values(ds, lat=True)
+        if l2_lon is None or l2_lat is None:
+            logger.warning(
+                f"Could not get lon/lat from L2 file {resolutions.l2_file}, using raw values."
+            )
+
+    lon = ds.lon.values
+    lat = ds.lat.values
+    tol = resolutions.l0_resolution / 2 + 1e-9
+
+    # get lower and upper edges of mask lon/lat
+    lon_bounds = generate_bounds(
+        xr.DataArray(lon, dims=["lon"], coords={"lon": lon})
+    ).values
+    lat_bounds = generate_bounds(
+        xr.DataArray(lat, dims=["lat"], coords={"lat": lat})
+    ).values
+    lon_lower_edges = np.minimum(lon_bounds[:, 0], lon_bounds[:, 1])
+    lon_upper_edges = np.maximum(lon_bounds[:, 0], lon_bounds[:, 1])
+    lat_lower_edges = np.minimum(lat_bounds[:, 0], lat_bounds[:, 1])
+    lat_upper_edges = np.maximum(lat_bounds[:, 0], lat_bounds[:, 1])
+
+    cur_lon_min = min(lon_lower_edges[min_col], lon_lower_edges[max_col])
+    cur_lon_max = max(lon_upper_edges[min_col], lon_upper_edges[max_col])
+    cur_lat_min = min(lat_lower_edges[min_row], lat_lower_edges[max_row])
+    cur_lat_max = max(lat_upper_edges[min_row], lat_upper_edges[max_row])
+
+    def _bound_to_grid(values, lower, upper):
+        bounds = generate_bounds(
+            xr.DataArray(values, dims=["coord"], coords={"coord": values})
+        ).values
+        lower_edges = np.minimum(bounds[:, 0], bounds[:, 1])
+        upper_edges = np.maximum(bounds[:, 0], bounds[:, 1])
+        lower_vals = lower_edges[lower_edges <= lower]
+        upper_vals = upper_edges[upper_edges >= upper]
+        lower_target = lower_vals.max() if lower_vals.size else lower_edges.min()
+        upper_target = upper_vals.min() if upper_vals.size else upper_edges.max()
+        logger.debug(
+            '_bound_to_grid: "values" min: %.6f, max: %.6f',
+            lower_target,
+            upper_target,
+        )
+        return lower_target, upper_target
+
+    l2_lon_min, l2_lon_max = _bound_to_grid(l2_lon, cur_lon_min, cur_lon_max)
+    l2_lat_min, l2_lat_max = _bound_to_grid(l2_lat, cur_lat_min, cur_lat_max)
+
+    def _idx_for(coordinate_values, target_values, name):
+        asc_factor = 1 if coordinate_values[1] > coordinate_values[0] else -1
+        target = target_values + resolutions.l0_resolution / 2 * asc_factor
+        idx = int(np.argmin(np.abs(coordinate_values - target)))
+        logger.debug(
+            f"_idx_for: {name} target: {target}, L0 coord: {coordinate_values[idx]}, idx: {idx}"
+        )
+        if not np.isclose(coordinate_values[idx], target, atol=tol):
+            logger.warning(
+                f"L2 {name} bound {target} not aligned with L0 grid; using {coordinate_values[idx]}"
+            )
+        return idx
+
+    lon_min_idx = _idx_for(lon, l2_lon_min, "lon-min")
+    lon_max_idx = _idx_for(lon, l2_lon_max, "lon-max")
+    lat_min_idx = _idx_for(lat, l2_lat_min, "lat-min")
+    lat_max_idx = _idx_for(lat, l2_lat_max, "lat-max")
+
+    min_col = min(lon_min_idx, lon_max_idx)
+    max_col = max(lon_min_idx, lon_max_idx)
+    min_row = min(lat_min_idx, lat_max_idx)
+    max_row = max(lat_min_idx, lat_max_idx)
+    return min_row, max_row, min_col, max_col
+
+def cut_to_filled_area(
+    ds, resolutions, catchment_mask, buffer=0, repeat=False, raise_on_l2_alignment_mismatch=False
+):
+    """Create lat and lon slices to cut the data to the filled area."""
+    logger.info("Cutting to filled area.")
+    # Find the non-zero elements
+    cols = np.any(
+        catchment_mask, axis=0
+    )  # Boolean array for columns with any filled cells
+    rows = np.any(
+        catchment_mask, axis=1
+    )  # Boolean array for rows with any filled cells
+
+    logger.info(
+        f"shape {np.shape(catchment_mask)}  cols: {len(cols)}, rows: {len(rows)}"
+    )
+    logger.info(f"lon {len(ds.lon.values)}  lat: {len(ds.lat.values)}")
+
+    # Get the indices of the non-zero rows and columns
+    min_row, max_row = np.where(rows)[0][[0, -1]]
+    min_col, max_col = np.where(cols)[0][[0, -1]]
+
+    if buffer > 0:
+        # Add a buffer of buffer cells
+        logger.info(f"Using a min buffer of {buffer}")
+        min_row = max(0, min_row - buffer)
+        min_col = max(0, min_col - buffer)
+        max_row = min(catchment_mask.shape[0] - 1, max_row + buffer)
+        max_col = min(catchment_mask.shape[1] - 1, max_col + buffer)
+    logger.info(
+        f"L0 initial window (rows, cols): [{min_row}:{max_row}], [{min_col}:{max_col}]"
+    )
+    factor = get_upscaling_factor(resolutions, l2=True)
+    if factor > 1:
+        logger.info(
+            f"Regridding to fit coarse grid with res {max([r for r in [resolutions.l1_resolution, resolutions.l11_resolution, resolutions.l2_resolution] if r is not None ])} (factor {factor})"
+        )
+
+        if resolutions.l2_file is not None and not repeat:
+            logger.debug(
+                f"Aligning to L2 grid from file {resolutions.l2_file}"
+            )
+            min_row, max_row, min_col, max_col = align_bounds_to_l2(
+                min_row, max_row, min_col, max_col
+            )
+        else:
+            # Calculating min_row/col it needs:
+            #  integer division to get the coarse grid cell containing the min_row/col
+            #  multiply back to get the min_row/col of that coarse grid cell
+            min_row = min_row // factor * factor
+            min_col = min_col // factor * factor
+            #  Calculating max_row/col it needs:
+            #  +1 to include the whole last coarse grid cell
+            max_row = (max_row // factor + 1) * factor
+            max_col = (max_col // factor + 1) * factor
+        # clamp
+        min_row = max(min_row, 0)
+        min_col = max(min_col, 0)
+        max_row = min(max_row, catchment_mask.shape[0] - 1)
+        max_col = min(max_col, catchment_mask.shape[1] - 1)
+        logger.info(
+            f"After shifting to L2 grid (rows, cols): [{min_row}:{max_row}], [{min_col}:{max_col}]"
+        )
+    # build index slice
+    lat_slice_idx = slice(min_row, max_row)
+    lon_slice_idx = slice(min_col, max_col)
+
+    # Sanity: cropped shape divisible by factor ---
+    n_lat = lat_slice_idx.stop - lat_slice_idx.start
+    n_lon = lon_slice_idx.stop - lon_slice_idx.start
+    if factor > 1 and ((n_lat % factor) != 0 or (n_lon % factor) != 0):
+        msg = (
+            "Cropped L0 shape "
+            f"({n_lat}, {n_lon}) not divisible by factor={factor}"
+        )
+        if (
+            not repeat
+            and resolutions.l2_file is not None
+            and not raise_on_l2_alignment_mismatch
+        ):
+            logger.warning(
+                f"{msg} after aligning to L2 grid; check l2 file and alignment calculations."
+            )
+            return cut_to_filled_area(ds=ds, resolutions=resolutions, catchment_mask=catchment_mask, buffer=buffer, repeat=True)
+        with ErrorLogger(logger):
+            raise AssertionError(msg)
+
+    logger.info(f"lat_slice: {lat_slice_idx}, lon_slice: {lon_slice_idx}")
+    return lat_slice_idx, lon_slice_idx
+
+
+
 
 def create_cell_area(ds, lat_name="lat", lon_name="lon"):
     """Create a cell area data array in km2."""
@@ -700,30 +896,9 @@ class Catchment:
         self.gauge_lats.append(gauge_lat)
         self.gauge_lons.append(gauge_lon)
 
-    def get_upscaling_factor(self, max_resolution=False, l1=False, l2=True):
-        """Create upscaling factor."""
-        input_res = self.resolutions.l0_resolution
-        if l1:
-            upscale_res = self.resolutions.l1_resolution
-        elif l2:
-            upscale_res = self.resolutions.l2_resolution
-        else:
-            error_msg = "Either l1 or l2 must be True"
-            with ErrorLogger(logger):
-                raise ValueError(error_msg)
-        upscale_res = self.resolutions.l2_resolution
-        if max_resolution:
-            upscale_res = self.resolutions.get_max_resolution()
-        if upscale_res is None:
-            return 1
-        if int(upscale_res / input_res + 0.5) - (upscale_res / input_res) < 1e6:
-            return int(upscale_res / input_res + 0.5)
-        not_int_multiple_msg = f"Upscaling only works if L1 resolution is integer muplipe of L0 resolution but L1 = {self.resolutions.l1_resolution / input_res:.4f} * L0"
-        raise ValueError(not_int_multiple_msg)
-
     def upscale(self, var):
         """Upscale flow direction to l1_resolution if that is int multipe of data resolution."""
-        factor = self.get_upscaling_factor(l1=True)
+        factor = get_upscaling_factor(self.resolutions, l1=True)
 
         if factor == 1:
             self.get_facc()
@@ -854,7 +1029,7 @@ class Catchment:
         lat_slice_idx, lon_slice_idx = None, None
         lat_slice, lon_slice = None, None
         if cut_by_basin:
-            lat_slice_idx, lon_slice_idx = self.cut_to_filled_area(buffer)
+            lat_slice_idx, lon_slice_idx = cut_to_filled_area(ds=self.ds, resolutions=self.resolutions, catchment_mask=self.catchment_mask, buffer=buffer)
         else:
             lat_slice, lon_slice = slice(84, -56), slice(None)
 
@@ -955,88 +1130,6 @@ class Catchment:
             with ErrorLogger(logger):
                 msg = f'Format "{format}" unknown, use one of ["nc", "asc"]'
                 raise Exception(msg)
-
-    def align_bounds_to_l2(self, min_row, max_row, min_col, max_col):
-        """Align the given bounds to the L2 grid."""
-        if self.resolutions.l2_file is None:
-            return min_row, max_row, min_col, max_col
-
-        with get_xarray_ds_from_file(
-            self.resolutions.l2_file,
-            force_decending_y=True,
-            normalize_latlon_coords=True,
-        ) as ds:
-            l2_lon = get_coord_values(ds, lon=True)
-            l2_lat = get_coord_values(ds, lat=True)
-            if l2_lon is None or l2_lat is None:
-                logger.warning(
-                    f"Could not get lon/lat from L2 file {self.resolutions.l2_file}, using raw values."
-                )
-
-        lon = self.ds.lon.values
-        lat = self.ds.lat.values
-        tol = self.resolutions.l0_resolution / 2 + 1e-9
-
-        # get lower and upper edges of mask lon/lat
-        lon_bounds = generate_bounds(
-            xr.DataArray(lon, dims=["lon"], coords={"lon": lon})
-        ).values
-        lat_bounds = generate_bounds(
-            xr.DataArray(lat, dims=["lat"], coords={"lat": lat})
-        ).values
-        lon_lower_edges = np.minimum(lon_bounds[:, 0], lon_bounds[:, 1])
-        lon_upper_edges = np.maximum(lon_bounds[:, 0], lon_bounds[:, 1])
-        lat_lower_edges = np.minimum(lat_bounds[:, 0], lat_bounds[:, 1])
-        lat_upper_edges = np.maximum(lat_bounds[:, 0], lat_bounds[:, 1])
-
-        cur_lon_min = min(lon_lower_edges[min_col], lon_lower_edges[max_col])
-        cur_lon_max = max(lon_upper_edges[min_col], lon_upper_edges[max_col])
-        cur_lat_min = min(lat_lower_edges[min_row], lat_lower_edges[max_row])
-        cur_lat_max = max(lat_upper_edges[min_row], lat_upper_edges[max_row])
-
-        def _bound_to_grid(values, lower, upper):
-            bounds = generate_bounds(
-                xr.DataArray(values, dims=["coord"], coords={"coord": values})
-            ).values
-            lower_edges = np.minimum(bounds[:, 0], bounds[:, 1])
-            upper_edges = np.maximum(bounds[:, 0], bounds[:, 1])
-            lower_vals = lower_edges[lower_edges <= lower]
-            upper_vals = upper_edges[upper_edges >= upper]
-            lower_target = lower_vals.max() if lower_vals.size else lower_edges.min()
-            upper_target = upper_vals.min() if upper_vals.size else upper_edges.max()
-            logger.debug(
-                '_bound_to_grid: "values" min: %.6f, max: %.6f',
-                lower_target,
-                upper_target,
-            )
-            return lower_target, upper_target
-
-        l2_lon_min, l2_lon_max = _bound_to_grid(l2_lon, cur_lon_min, cur_lon_max)
-        l2_lat_min, l2_lat_max = _bound_to_grid(l2_lat, cur_lat_min, cur_lat_max)
-
-        def _idx_for(coordinate_values, target_values, name):
-            asc_factor = 1 if coordinate_values[1] > coordinate_values[0] else -1
-            target = target_values + self.resolutions.l0_resolution / 2 * asc_factor
-            idx = int(np.argmin(np.abs(coordinate_values - target)))
-            logger.debug(
-                f"_idx_for: {name} target: {target}, L0 coord: {coordinate_values[idx]}, idx: {idx}"
-            )
-            if not np.isclose(coordinate_values[idx], target, atol=tol):
-                logger.warning(
-                    f"L2 {name} bound {target} not aligned with L0 grid; using {coordinate_values[idx]}"
-                )
-            return idx
-
-        lon_min_idx = _idx_for(lon, l2_lon_min, "lon-min")
-        lon_max_idx = _idx_for(lon, l2_lon_max, "lon-max")
-        lat_min_idx = _idx_for(lat, l2_lat_min, "lat-min")
-        lat_max_idx = _idx_for(lat, l2_lat_max, "lat-max")
-
-        min_col = min(lon_min_idx, lon_max_idx)
-        max_col = max(lon_min_idx, lon_max_idx)
-        min_row = min(lat_min_idx, lat_max_idx)
-        max_row = max(lat_min_idx, lat_max_idx)
-        return min_row, max_row, min_col, max_col
 
     def processing_data_variable(
         self,
@@ -1183,7 +1276,7 @@ class Catchment:
         so that coarse *edges* equal fine *edges* of the cropped window.
         """
         if factor is None:
-            factor = self.get_upscaling_factor(l2=True)
+            factor = get_upscaling_factor(self.resolutions, l2=True)
         if factor < 1:
             msg = "factor must be >= 1"
             with ErrorLogger(logger):
@@ -1327,109 +1420,6 @@ class Catchment:
             logger.info(f"Mask file has been written to {mask_file}")
         else:
             logger.info("No mask file path specified.")
-
-    def cut_to_filled_area(
-        self, buffer=0, repeat=False, raise_on_l2_alignment_mismatch=False
-    ):
-        """Create lat and lon slices to cut the data to the filled area."""
-        logger.info("Cutting to filled area.")
-        # Find the non-zero elements
-        cols = np.any(
-            self.catchment_mask, axis=0
-        )  # Boolean array for columns with any filled cells
-        rows = np.any(
-            self.catchment_mask, axis=1
-        )  # Boolean array for rows with any filled cells
-
-        logger.info(
-            f"shape {np.shape(self.catchment_mask)}  cols: {len(cols)}, rows: {len(rows)}"
-        )
-        logger.info(f"lon {len(self.ds.lon.values)}  lat: {len(self.ds.lat.values)}")
-
-        # Get the indices of the non-zero rows and columns
-        min_row, max_row = np.where(rows)[0][[0, -1]]
-        min_col, max_col = np.where(cols)[0][[0, -1]]
-
-        if buffer > 0:
-            # Add a buffer of buffer cells
-            logger.info(f"Using a min buffer of {buffer}")
-            min_row = max(0, min_row - buffer)
-            min_col = max(0, min_col - buffer)
-            max_row = min(self.catchment_mask.shape[0] - 1, max_row + buffer)
-            max_col = min(self.catchment_mask.shape[1] - 1, max_col + buffer)
-        logger.info(
-            f"L0 initial window (rows, cols): [{min_row}:{max_row}], [{min_col}:{max_col}]"
-        )
-
-        factor = self.get_upscaling_factor(l2=True)
-        if factor > 1:
-            logger.info(
-                f"Regridding to fit coarse grid with res {max([r for r in [self.resolutions.l1_resolution, self.resolutions.l11_resolution, self.resolutions.l2_resolution] if r is not None ])} (factor {factor})"
-            )
-
-            if self.resolutions.l2_file is not None and not repeat:
-                logger.debug(
-                    f"Aligning to L2 grid from file {self.resolutions.l2_file}"
-                )
-                min_row, max_row, min_col, max_col = self.align_bounds_to_l2(
-                    min_row, max_row, min_col, max_col
-                )
-            else:
-                # Calculating min_row/col it needs:
-                #  integer division to get the coarse grid cell containing the min_row/col
-                #  multiply back to get the min_row/col of that coarse grid cell
-                min_row = min_row // factor * factor
-                min_col = min_col // factor * factor
-                #  Calculating max_row/col it needs:
-                #  +1 to include the whole last coarse grid cell
-                max_row = (max_row // factor + 1) * factor
-                max_col = (max_col // factor + 1) * factor
-            # clamp
-            min_row = max(min_row, 0)
-            min_col = max(min_col, 0)
-            max_row = min(max_row, self.catchment_mask.shape[0] - 1)
-            max_col = min(max_col, self.catchment_mask.shape[1] - 1)
-            logger.info(
-                f"After shifting to L2 grid (rows, cols): [{min_row}:{max_row}], [{min_col}:{max_col}]"
-            )
-        # build index slice
-        lat_slice_idx = slice(min_row, max_row)
-        lon_slice_idx = slice(min_col, max_col)
-
-        # Sanity: cropped shape divisible by factor ---
-        n_lat = lat_slice_idx.stop - lat_slice_idx.start
-        n_lon = lon_slice_idx.stop - lon_slice_idx.start
-        if factor > 1 and ((n_lat % factor) != 0 or (n_lon % factor) != 0):
-            msg = (
-                "Cropped L0 shape "
-                f"({n_lat}, {n_lon}) not divisible by factor={factor}"
-            )
-            if (
-                not repeat
-                and self.resolutions.l2_file is not None
-                and not raise_on_l2_alignment_mismatch
-            ):
-                logger.warning(
-                    f"{msg} after aligning to L2 grid; check l2 file and alignment calculations."
-                )
-                return self.cut_to_filled_area(buffer=buffer, repeat=True)
-            with ErrorLogger(logger):
-                raise AssertionError(msg)
-
-        # # Slice the array to extract the filled part
-        # lon_min, lon_max = (
-        #     np.round(self.ds.lon.values[min_col], 8),
-        #     np.round(self.ds.lon.values[max_col], 8),
-        # )
-        # lat_min, lat_max = (
-        #     np.round(self.ds.lat.values[max_row], 8),
-        #     np.round(self.ds.lat.values[min_row], 8),
-        # )
-        # lat_slice = slice(lat_max, lat_min)
-        # lon_slice = slice(lon_min, lon_max)
-        logger.info(f"lat_slice: {lat_slice_idx}, lon_slice: {lon_slice_idx}")
-        return lat_slice_idx, lon_slice_idx
-
 
 def merge_catchment(path1, path2, out_path):
     """Merge the rolled and non-rolled file."""

@@ -141,13 +141,12 @@ def add_args(parser):
         type=int,
         help=("Number of boostrap experiments"),
     )
-    # optional.add_argument(
-    #     "--direct_comparison",
-    #     action="store_true",
-    #     dest="direct_comparison",
-    #     required=False,
-    #     help=("Use no statistics but compare timeseries directly. Needs ref_path."),
-    # )
+    optional.add_argument(
+        "--no_direct_comparison",
+        action="store_true",
+        required=False,
+        help=("Use statistics and do not compare timeseries directly. Needs ref_path."),
+    )
     optional.add_argument(
         "--start_year",
         required=False,
@@ -306,10 +305,11 @@ def run(args):
         output_path=args.output_dir,
         only_plot=args.only_plot,
         coordinate_slice=coordinate_slice,
+        mask_da=mask_da,
         n_cpus=args.ncpus,
         n_bootstrap_years=args.n_boostrap_years,
         n_bootstrap_selections=args.n_bootstrap_selections,
-        direct_comp=args.n_bootstrap_selections is None or args.n_boostrap_years is None,
+        direct_comp=(args.n_bootstrap_selections is None and args.n_boostrap_years is None ) and not (args.global_climate or args.no_direct_comparison),
         year_slice=year_slice,
         avaiable_mem=available_mem,
         bias_only=args.bias_only,
