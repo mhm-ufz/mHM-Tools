@@ -1,3 +1,4 @@
+import csv
 import tempfile
 import unittest
 from pathlib import Path
@@ -178,6 +179,42 @@ class TestCatchment(unittest.TestCase):
             c.write(self.output_path, single_file=True)
             output_file = self.output_path / out_var_name
             self.assertTrue(output_file.exists(), f"Failed to create {out_var_name}")
+
+    def test_write_gauge_info_csv(self):
+        out_dir = self.tmp_path / "gauge_csv"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        rows = [
+            {
+                "id": 101,
+                "lon": 10.0,
+                "lat": 50.0,
+                "lon_old": 10.1,
+                "lat_old": 50.1,
+                "distance": 1.25,
+                "area": 1000.0,
+                "old_area": 980.0,
+                "area_error": 0.02,
+            }
+        ]
+        gauge = catchment.Gauge(gauge_id=101, lat=50.0, lon=10.0, area=1000.0)
+        gauge.update(lon=10.1, lat=50.1, distance_error=1.25, area=980.0,area_error=0.02)
+        catchment.write_gauges_to_csv([gauge], out_dir, "gauges_info.csv")
+
+        out_file = out_dir / "gauges_info.csv"
+        self.assertTrue(out_file.exists())
+        with out_file.open("r", encoding="utf-8", newline="") as csv_file:
+            reader = csv.DictReader(csv_file)
+            written_rows = list(reader)
+            self.assertEqual(reader.fieldnames, list(catchment.GAUGE_INFO_COLUMNS))
+        self.assertEqual(len(written_rows), 1)
+        self.assertEqual(written_rows[0]["id"], "101")
+        self.assertAlmostEqual(float(written_rows[0]["distance"]), 1.25)
+
+    def test_write_gauge_info_csv_no_rows(self):
+        out_dir = self.tmp_path / "gauge_csv_empty"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        catchment.write_gauges_to_csv([], out_dir, "gauges_info.csv")
+        self.assertFalse((out_dir / "gauges_info.csv").exists())
 
     def test_write_basin_shape_outputs_files(self):
         self._require_geospatial()
@@ -482,7 +519,7 @@ class TestCatchment(unittest.TestCase):
     REF_AREA = [113.33, 1123.61]  # optional reference area in km2, e.g. 25400
 
     def test_delineate_basin_without_ref(self):
-        """Integration-style test: delineate a basin using gauge coords without providing a ref area."""
+        """Integration-style test: delineate a basin using a Gauge object without a reference area."""
         if (
             not self.FDIR_PATH.exists()
             or self.GAUGE_LAT is None
@@ -510,9 +547,13 @@ class TestCatchment(unittest.TestCase):
             transform=self.transform,
             latlon=True,
         )
-        c.delineate_basin(
-            (self.GAUGE_LAT[1], self.GAUGE_LON[1]), raise_on_sanity_check=False
+        gauge = catchment.Gauge(
+            gauge_id=202,
+            lat=float(self.GAUGE_LAT[1]),
+            lon=float(self.GAUGE_LON[1]),
+            area=None,
         )
+        c.delineate_basin(gauge, raise_on_sanity_check=False)
 
         self.assertIsNotNone(c.basin)
         self.assertTrue(
@@ -537,7 +578,7 @@ class TestCatchment(unittest.TestCase):
         )
 
     def test_delineate_basin_with_ref(self):
-        """Integration-style test: delineate a basin with an explicit reference area and check closeness."""
+        """Integration-style test: delineate a basin with Gauge-provided reference area."""
         if (
             not self.FDIR_PATH.exists()
             or self.GAUGE_LAT is None
@@ -565,12 +606,14 @@ class TestCatchment(unittest.TestCase):
                 transform=self.transform,
                 latlon=True,
             )
+            gauge = catchment.Gauge(
+                gauge_id=101,
+                lat=float(lat),
+                lon=float(lon),
+                area=float(ref_area),
+            )
             c.delineate_basin(
-                (lat, lon),
-                ref_catchment_area=float(ref_area),
-                max_distance_cells=10,
-                max_error=0.05,
-                raise_on_sanity_check=False,
+                gauge, max_distance_cells=10, max_error=0.05, raise_on_sanity_check=False
             )
 
             self.assertIsNotNone(c.basin)
@@ -601,9 +644,10 @@ class TestCatchment(unittest.TestCase):
             not self.FDIR_PATH.exists()
             or self.GAUGE_LAT is None
             or self.GAUGE_LON is None
+            or self.REF_AREA is None
         ):
             self.skipTest(
-                "Set FDIR_PATH, GAUGE_LAT and GAUGE_LON in this test file to run this integration test."
+                "Set FDIR_PATH, GAUGE_LAT, GAUGE_LON and REF_AREA in this test file to run this integration test."
             )
 
         gauge_ids = [101, 202]
@@ -611,6 +655,7 @@ class TestCatchment(unittest.TestCase):
             (float(self.GAUGE_LAT[0]), float(self.GAUGE_LON[0])),
             (float(self.GAUGE_LAT[1]), float(self.GAUGE_LON[1])),
         ]
+        gauge_areas = [float(self.REF_AREA[0]), float(self.REF_AREA[1])]
 
         with get_xarray_ds_from_file(str(self.FDIR_PATH)) as ds:
             var_name = (
@@ -639,6 +684,9 @@ class TestCatchment(unittest.TestCase):
                     ftype="d8",
                     gauge_coords=(lat, lon),
                     gauge_ids=[gauge_ids[idx]],
+                    ref_catchment_area=gauge_areas[idx],
+                    max_distance_cells=10,
+                    max_error=0.25,
                     latlon=True,
                     frame=1,
                     resolutions=resolutions,
@@ -664,6 +712,9 @@ class TestCatchment(unittest.TestCase):
             ftype="d8",
             gauge_coords=gauge_coords,
             gauge_ids=gauge_ids,
+            ref_catchment_area=gauge_areas,
+            max_distance_cells=10,
+            max_error=0.25,
             latlon=True,
             frame=1,
             resolutions=resolutions,
@@ -771,11 +822,13 @@ class TestCatchment(unittest.TestCase):
                 transform=transform,
                 latlon=True,
             )
-            c.delineate_basin(
-                (self.GAUGE_LAT[0], self.GAUGE_LON[0]),
-                ref_catchment_area=self.REF_AREA[0],
-                raise_on_sanity_check=False,
+            gauge = catchment.Gauge(
+                gauge_id=101,
+                lat=float(self.GAUGE_LAT[0]),
+                lon=float(self.GAUGE_LON[0]),
+                area=float(self.REF_AREA[0]),
             )
+            c.delineate_basin(gauge, raise_on_sanity_check=False)
             self.assertIsNotNone(c.catchment_mask)
             l0_shape = catchment._vectorize_mask_to_gdf(
                 c.catchment_mask, c.transform, catchment._shape_crs(c.latlon)
@@ -831,11 +884,13 @@ class TestCatchment(unittest.TestCase):
                 resolutions=resolutions,
                 upscale=True,
             )
-            c.delineate_basin(
-                (self.GAUGE_LAT[0], self.GAUGE_LON[0]),
-                ref_catchment_area=self.REF_AREA[0],
-                raise_on_sanity_check=False,
+            gauge = catchment.Gauge(
+                gauge_id=101,
+                lat=float(self.GAUGE_LAT[0]),
+                lon=float(self.GAUGE_LON[0]),
+                area=float(self.REF_AREA[0]),
             )
+            c.delineate_basin(gauge, raise_on_sanity_check=False)
             l0_shape = catchment._vectorize_mask_to_gdf(
                 c.catchment_mask, c.transform, catchment._shape_crs(c.latlon)
             )

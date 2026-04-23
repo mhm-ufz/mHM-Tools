@@ -1,5 +1,6 @@
 """Create basin id file and deliniate catchments."""
 
+import csv
 import logging
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,14 @@ def add_args(parser):
         help=(
             "Gauge coordinates in the form 'lat,lon' or multiple pairs like "
             "'lat1,lon1;lat2,lon2' (quote the value)."
+        ),
+    )
+    optional_args.add_argument(
+        "--gauges_csv",
+        default=None,
+        help=(
+            "Path to CSV with gauge definitions. Required columns: id, lat, lon. "
+            "Optional column: area (km2)."
         ),
     )
     optional_args.add_argument(
@@ -158,12 +167,29 @@ def add_args(parser):
         help=("""Maximum error allowed when searching for the outlet cell."""),
     )
     optional_args.add_argument(
+        "--shape_folder",
+        default=None,
+        help=(
+            "Folder with gauge shapefiles used for shape-based outlet matching. "
+            "Files are matched by gauge id contained in the filename."
+        ),
+    )
+    optional_args.add_argument(
         "--gauge_id",
         required=False,
         default=None,
         help=(
             "If Gauge id is provided in addition to the other output a id_gauges file is created in the output_folder. "
             "For multiple gauges, pass a comma-separated list."
+        ),
+    )
+    optional_args.add_argument(
+        "--gauge_info_csv",
+        required=False,
+        default="gauges_info.csv",
+        help=(
+            "Output gauge info csv (default: gauges_info.csv). "
+            "Columns: id, lon, lat, lon_old, lat_old, distance, area, old_area, area_error."
         ),
     )
     optional_args.add_argument(
@@ -213,7 +239,68 @@ def run(args):
     gauge_ids = None
     ref_catchment_area = None
 
-    if args.gauge_coords is not None:
+    if args.gauges_csv is not None:
+        csv_path = Path(args.gauges_csv)
+        if not csv_path.is_file():
+            msg = f"Gauge CSV file not found: {csv_path}"
+            with ErrorLogger(logger):
+                raise FileNotFoundError(msg)
+        with csv_path.open("r", encoding="utf-8", newline="") as fp:
+            reader = csv.DictReader(fp)
+            if reader.fieldnames is None:
+                msg = f"Gauge CSV '{csv_path}' has no header."
+                with ErrorLogger(logger):
+                    raise ValueError(msg)
+            field_map = {name.strip().lower(): name for name in reader.fieldnames}
+            required = ("id", "lat", "lon")
+            missing = [col for col in required if col not in field_map]
+            if missing:
+                msg = (
+                    f"Gauge CSV '{csv_path}' is missing required column(s): {missing}. "
+                    "Required columns are: id, lat, lon."
+                )
+                with ErrorLogger(logger):
+                    raise ValueError(msg)
+            area_col = field_map.get("area")
+            gauge_coords = []
+            gauge_ids = []
+            areas = []
+            for row_no, row in enumerate(reader, start=2):
+                try:
+                    gid = int(str(row[field_map["id"]]).strip())
+                    lat = float(str(row[field_map["lat"]]).strip())
+                    lon = float(str(row[field_map["lon"]]).strip())
+                except Exception as exc:
+                    msg = f"Invalid id/lat/lon at row {row_no} in '{csv_path}': {exc}"
+                    with ErrorLogger(logger):
+                        raise ValueError(msg)
+                gauge_ids.append(gid)
+                gauge_coords.append((lat, lon))
+                if area_col is not None:
+                    raw_area = str(row[area_col]).strip()
+                    areas.append(float(raw_area) if raw_area else None)
+            if not gauge_coords:
+                msg = f"Gauge CSV '{csv_path}' does not contain any gauge rows."
+                with ErrorLogger(logger):
+                    raise ValueError(msg)
+            if area_col is not None and any(area is not None for area in areas):
+                ref_catchment_area = areas
+            else:
+                ref_catchment_area = None
+        if (
+            args.gauge_coords is not None
+            or args.gauge_id is not None
+            or args.ref_catchment_area is not None
+        ):
+            logger.warning(
+                "Using gauges from --gauges_csv and ignoring --gauge_coords, --gauge_id and --ref_catchment_area."
+            )
+        logger.info(
+            f"Loaded {len(gauge_coords)} gauges from CSV '{csv_path}'. "
+            f"Area column {'found' if ref_catchment_area is not None else 'not provided'}."
+        )
+
+    if args.gauge_coords is not None and args.gauges_csv is None:
 
         def _parse_gauge_coords(raw_coords):
             if ";" in raw_coords:
@@ -253,13 +340,13 @@ def run(args):
         logger.info(
             f"using lonlatbox with extends: lat=({latmax}, {latmin}); lon=({lonmin}, {lonmax})"
         )
-    if args.gauge_id is not None:
+    if args.gauge_id is not None and args.gauges_csv is None:
         raw_ids = str(args.gauge_id)
         if "," in raw_ids:
             gauge_ids = [int(val.strip()) for val in raw_ids.split(",") if val.strip()]
         else:
             gauge_ids = int(raw_ids)
-    if args.ref_catchment_area is not None:
+    if args.ref_catchment_area is not None and args.gauges_csv is None:
         raw_areas = str(args.ref_catchment_area)
         if "," in raw_areas:
             ref_catchment_area = [
@@ -322,4 +409,6 @@ def run(args):
         ncpus=args.ncpus,
         output_vars=None if str(args.vars).strip().lower() == "all" else args.vars,
         gauge_opti_method=args.gauge_optimization_method,
+        gauge_info_csv=args.gauge_info_csv,
+        shape_folder=args.shape_folder,
     )
