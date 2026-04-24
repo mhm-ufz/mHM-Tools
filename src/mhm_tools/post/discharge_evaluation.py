@@ -9,7 +9,6 @@ Authors
 
 import itertools
 import logging
-from glob import glob
 from pathlib import Path
 
 import matplotlib.pyplot as plt

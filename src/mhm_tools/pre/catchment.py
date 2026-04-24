@@ -745,7 +745,6 @@ class Catchment:
         l0_shape_gdf,
         gauge_coords,
         max_distance_cells=5,
-        stream_order=4,
         ref_catchment_area=None,
         reference_upstream_area=None,
     ):
@@ -1456,7 +1455,7 @@ class Catchment:
         )
 
         if np.all(catchment_mask):
-            if stream_order > 1:
+            if stream_order > 1 and ref_catchment_area is None:
                 logger.info("Trying again with stream_order %d", stream_order - 1)
                 return self.delineate_basin(
                     gauge,
