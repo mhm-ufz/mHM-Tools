@@ -779,7 +779,6 @@ class Catchment:
             gauge_id=None,
             max_distance_cells=max_distance_cells,
             max_error=1.0,
-            stream_order=stream_order,
             reference_shape_gdf=l0_shape_gdf,
             lat_values=lat_coords,
             lon_values=lon_coords,
