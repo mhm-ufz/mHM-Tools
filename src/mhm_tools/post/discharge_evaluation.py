@@ -175,7 +175,7 @@ def _load_discharge_nc_collection(model_data_path, date_slice=None):
             return [Path(p) for p in path_like]
         path_str = str(path_like)
         if any(w in path_str for w in ("*", "?", "[", "]")):
-            matches = [Path(p) for p in glob(path_str)]
+            matches = list(Path().glob(path_str))
             if not matches:
                 msg = f"No paths match pattern {path_str}"
                 with ErrorLogger(logger):

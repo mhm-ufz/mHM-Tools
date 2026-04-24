@@ -218,7 +218,7 @@ def add_args(parser):
     )
 
 
-def run(args):
+def run(args):  # noqa: PLR0912,PLR0915
     """Create the catchment file.
 
     Parameters
@@ -273,7 +273,7 @@ def run(args):
                 except Exception as exc:
                     msg = f"Invalid id/lat/lon at row {row_no} in '{csv_path}': {exc}"
                     with ErrorLogger(logger):
-                        raise ValueError(msg)
+                        raise ValueError(msg) from exc
                 gauge_ids.append(gid)
                 gauge_coords.append((lat, lon))
                 if area_col is not None:

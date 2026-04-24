@@ -197,7 +197,9 @@ class TestCatchment(unittest.TestCase):
             }
         ]
         gauge = catchment.Gauge(gauge_id=101, lat=50.0, lon=10.0, area=1000.0)
-        gauge.update(lon=10.1, lat=50.1, distance_error=1.25, area=980.0,area_error=0.02)
+        gauge.update(
+            lon=10.1, lat=50.1, distance_error=1.25, area=980.0, area_error=0.02
+        )
         catchment.write_gauges_to_csv([gauge], out_dir, "gauges_info.csv")
 
         out_file = out_dir / "gauges_info.csv"
@@ -236,8 +238,6 @@ class TestCatchment(unittest.TestCase):
         with xr.open_dataset(path2, engine="netcdf4") as ds1:
             lat_key = get_coord_key(ds1, lat=True, raise_exception=False)
             lon_key = get_coord_key(ds1, lon=True, raise_exception=False)
-            # print(ds1[lat_key].shape)
-            # print(ds1[lon_key].shape)
         self.assertTrue(path2.is_file(), "hydro2.nc does not exist.")
 
         catchment.merge_catchment(path1, path2, out_path)
@@ -613,7 +613,10 @@ class TestCatchment(unittest.TestCase):
                 area=float(ref_area),
             )
             c.delineate_basin(
-                gauge, max_distance_cells=10, max_error=0.05, raise_on_sanity_check=False
+                gauge,
+                max_distance_cells=10,
+                max_error=0.05,
+                raise_on_sanity_check=False,
             )
 
             self.assertIsNotNone(c.basin)
@@ -811,7 +814,9 @@ class TestCatchment(unittest.TestCase):
 
         with get_xarray_ds_from_file(str(self.FDIR_PATH)) as ds:
             var_name = (
-                self.FDIR_VAR if self.FDIR_VAR in ds.data_vars else list(ds.data_vars)[0]
+                self.FDIR_VAR
+                if self.FDIR_VAR in ds.data_vars
+                else list(ds.data_vars)[0]
             )
             transform = catchment.get_transformation_matrix_nc(ds, var_name)
             c = catchment.Catchment(
@@ -868,7 +873,9 @@ class TestCatchment(unittest.TestCase):
 
         with get_xarray_ds_from_file(str(self.FDIR_PATH)) as ds:
             var_name = (
-                self.FDIR_VAR if self.FDIR_VAR in ds.data_vars else list(ds.data_vars)[0]
+                self.FDIR_VAR
+                if self.FDIR_VAR in ds.data_vars
+                else list(ds.data_vars)[0]
             )
             transform = catchment.get_transformation_matrix_nc(ds, var_name)
             lon_vals = ds.lon.data
