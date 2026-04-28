@@ -693,6 +693,7 @@ class TestCatchment(unittest.TestCase):
                     latlon=True,
                     frame=1,
                     resolutions=resolutions,
+                    raise_on_fallback=True,
                 )
             id_path = out_dir / "idgauges.nc"
             self.assertTrue(id_path.is_file())
@@ -721,6 +722,7 @@ class TestCatchment(unittest.TestCase):
             latlon=True,
             frame=1,
             resolutions=resolutions,
+            raise_on_fallback=True,
         )
         combined_path = combined_dir / "idgauges.nc"
         self.assertTrue(combined_path.is_file())
@@ -775,6 +777,7 @@ class TestCatchment(unittest.TestCase):
             frame=1,
             resolutions=resolutions,
             ncpus=1,
+            raise_on_fallback=True,
         )
         catchment.create_catchment(
             input_file=str(self.FDIR_PATH),
@@ -788,6 +791,7 @@ class TestCatchment(unittest.TestCase):
             frame=1,
             resolutions=resolutions,
             ncpus=2,
+            raise_on_fallback=True,
         )
 
         seq_path = seq_dir / "idgauges.nc"

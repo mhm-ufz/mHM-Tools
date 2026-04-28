@@ -10,6 +10,7 @@ Authors
 import itertools
 import logging
 from pathlib import Path
+from types import SimpleNamespace
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -25,6 +26,7 @@ from mhm_tools.common.file_handler import (
     write_xarray_to_file,
 )
 from mhm_tools.common.logger import ErrorLogger, log_arguments, log_errors
+from mhm_tools.common.utils import coord_to_index, find_best_gauge_location
 from mhm_tools.common.xarray_utils import (
     get_clim_from_ds,
     get_coord_key,
@@ -292,10 +294,8 @@ def get_sim_data_for_gauges_from_nodes(
         far_mask = distances > max_dist
         if np.any(far_mask):
             logger.warning(
-                "Some gauges are farther than %.6f from nearest node; "
-                "using nearest anyway (max %.6f).",
-                max_dist,
-                float(np.max(distances[far_mask])),
+                f"Some gauges are farther than {max_dist:.6f} from nearest node; "
+                f"using nearest anyway (max {float(np.max(distances[far_mask])):.6f})."
             )
 
     id_indexer = xr.DataArray(ids_arr, dims="id", coords={"id": ids_arr})
@@ -312,91 +312,176 @@ def get_sim_data_for_gauges_from_nodes(
     return sim_sel, matched_x, matched_y, ids_arr
 
 
-def get_gauge_coords(
+def get_gauge_coords(  # noqa: PLR0912
     ds,
-    facc,
+    ref_facc,
+    facc_variable="L11_fAcc",
     lonlat=None,
     xy=None,
-    cell_diff=1,
-    max_cell_diff=3,
-    diff_percent=10,
+    max_distance_cells=3,
+    max_error=0.1,
+    method="basinex",
     id=None,
 ):
-    """Find correct gauge location.
+    """Find gauge coordinates by matching reference and simulated catchment area.
 
-    Takes mrm_restart file, an approximate lat lon value and and then,
-    finds the cell with the value closest to a given flow accumulation.
-    Returns lon,lat, flow accumulation.
+    Uses :func:`mhm_tools.common.utils.find_best_gauge_location`.
     """
-    if lonlat is not None:
-        lon = lonlat[0]
-        lat = lonlat[1]
-        lon_col = int((lon - ds.xllcorner_L0) / ds.cellsize_L1)
-        lat_row = int(ds.nrows_L1 - (lat - (ds.yllcorner_L0)) / ds.cellsize_L1)
-    else:
-        lon_col = xy[0]
-        lat_row = xy[1]
-    if cell_diff > 0:
-        ds_cut = ds.sel(
-            nrows0=slice(lat_row - cell_diff, lat_row + cell_diff),
-            nrows1=slice(lat_row - cell_diff, lat_row + cell_diff),
-            nrows11=slice(lat_row - cell_diff, lat_row + cell_diff),
-            ncols0=slice(lon_col - cell_diff, lon_col + cell_diff),
-            ncols1=slice(lon_col - cell_diff, lon_col + cell_diff),
-            ncols11=slice(lon_col - cell_diff, lon_col + cell_diff),
+    method_norm = str(method).strip().lower().replace("-", "")
+    method_norm = {"basinex": "basinex", "burek": "burek"}.get(method_norm, method_norm)
+    if method_norm not in {"basinex", "burek"}:
+        msg = f"Unknown gauge optimization method '{method}'. Use 'basinex' or 'burek'."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+
+    max_error = float(max_error)
+    if max_error < 0:
+        max_error = 0.0
+    max_distance_cells = max(0, int(max_distance_cells))
+
+    if facc_variable not in ds:
+        logger.warning(
+            f"Variable '{facc_variable}' not found in flow-accumulation dataset for gauge {id}."
         )
-        abs_diff = np.abs(ds_cut.L11_fAcc - facc)
-        try:
-            min_index = np.unravel_index(
-                np.argmin(abs_diff.data), ds_cut.L11_fAcc.shape
+        return None, None, None
+    facc_da = ds[facc_variable].squeeze()
+    upstream_area = np.asarray(facc_da.data)
+    if upstream_area.ndim != 2:
+        logger.warning(
+            f"Expected 2D upstream area in '{facc_variable}', got shape {upstream_area.shape} for gauge {id}."
+        )
+        return None, None, None
+    if not np.isfinite(ref_facc):
+        logger.warning(f"Invalid reference catchment area for gauge {id}: {ref_facc}")
+        return None, None, None
+
+    search_upstream = upstream_area
+    latlon_search = False
+    l0_resolution = 1.0
+
+    # mRM restart structure fallback: L11_fAcc typically [lon, lat], coords in L1_domain_lon/lat.
+    if "L1_domain_lon" in ds and "L1_domain_lat" in ds:
+        lon_data = np.asarray(ds["L1_domain_lon"].data)
+        lat_data = np.asarray(ds["L1_domain_lat"].data)
+        if (
+            lon_data.ndim == 2
+            and lat_data.ndim == 2
+            and lon_data.shape == upstream_area.shape
+            and lat_data.shape == upstream_area.shape
+        ):
+            search_upstream = upstream_area.T
+            search_ds = xr.Dataset(
+                coords={
+                    "lat": np.asarray(lat_data[0, :], dtype=float),
+                    "lon": np.asarray(lon_data[:, 0], dtype=float),
+                }
             )
-        except ValueError as ve:
-            logger.error(str(ve))
-            logger.info(abs_diff)
-            logger.info(ds_cut.L11_fAcc)
-            logger.info(facc)
-            return None, None, None
-        if lonlat:
-            lon_x = ds_cut.L1_domain_lon.data[min_index[0], 0]
-            lat_y = ds_cut.L1_domain_lat.data[0, min_index[1]]
-        # else:
-        #     lon_x, lat_y = ds_cut.nrows0.values[1], ds_cut.nrows0.values[1] ## Not yet working
-        found_facc = ds_cut.L11_fAcc.data[min_index[0], min_index[1]]
-    else:
-        ds_cut = ds.sel(
-            nrows0=lat_row,
-            nrows1=lat_row,
-            nrows11=lat_row,
-            ncols0=lon_col,
-            ncols1=lon_col,
-            ncols11=lon_col,
-        )
-        if lonlat:
-            lon_x = ds_cut.L1_domain_lon.data
-            lat_y = ds_cut.L1_domain_lat.data
+            latlon_search = True
+            if search_ds["lon"].size > 1:
+                l0_resolution = float(
+                    abs(search_ds["lon"].values[1] - search_ds["lon"].values[0])
+                )
+            elif search_ds["lat"].size > 1:
+                l0_resolution = float(
+                    abs(search_ds["lat"].values[1] - search_ds["lat"].values[0])
+                )
+            elif hasattr(ds, "cellsize_L1"):
+                l0_resolution = float(ds.cellsize_L1)
         else:
-            lon_x = lon_col
-            lat_y = lat_row
-        found_facc = ds_cut.L11_fAcc.data
-    if abs(found_facc - facc) < diff_percent / 100 * facc:
-        logger.info(f"{lon_x}, {lat_y}, {found_facc}, {facc}, {cell_diff}")
-        return lon_x, lat_y, found_facc
-    if cell_diff < max_cell_diff:
-        logger.debug(
-            f"No similar flow acc found. Increasing search radius to {cell_diff + 1} cells in each direction."
+            search_ds = xr.Dataset(
+                coords={
+                    "lat": np.arange(search_upstream.shape[0], dtype=float),
+                    "lon": np.arange(search_upstream.shape[1], dtype=float),
+                }
+            )
+    else:
+        # Standard georeferenced facc file (lat/lon coords on facc variable)
+        lat_key = get_coord_key(facc_da, lat=True, raise_exception=False)
+        lon_key = get_coord_key(facc_da, lon=True, raise_exception=False)
+        if (
+            lat_key is not None
+            and lon_key is not None
+            and lat_key in facc_da.dims
+            and lon_key in facc_da.dims
+        ):
+            facc_std = facc_da.transpose(lat_key, lon_key)
+            search_upstream = np.asarray(facc_std.data)
+            search_ds = xr.Dataset(
+                coords={
+                    "lat": np.asarray(facc_std[lat_key].values, dtype=float),
+                    "lon": np.asarray(facc_std[lon_key].values, dtype=float),
+                }
+            )
+            latlon_search = True
+            if search_ds["lon"].size > 1:
+                l0_resolution = float(
+                    abs(search_ds["lon"].values[1] - search_ds["lon"].values[0])
+                )
+            elif search_ds["lat"].size > 1:
+                l0_resolution = float(
+                    abs(search_ds["lat"].values[1] - search_ds["lat"].values[0])
+                )
+        else:
+            search_ds = xr.Dataset(
+                coords={
+                    "lat": np.arange(search_upstream.shape[0], dtype=float),
+                    "lon": np.arange(search_upstream.shape[1], dtype=float),
+                }
+            )
+
+    if lonlat is not None:
+        lon, lat = float(lonlat[0]), float(lonlat[1])
+        try:
+            idx0_guess, idx1_guess = coord_to_index(search_ds, lat, lon)
+        except Exception:
+            idx0_guess = int(search_upstream.shape[0] / 2)
+            idx1_guess = int(search_upstream.shape[1] / 2)
+    else:
+        idx0_guess = int(xy[0])
+        idx1_guess = int(xy[1])
+
+    idx0_guess = int(np.clip(idx0_guess, 0, search_upstream.shape[0] - 1))
+    idx1_guess = int(np.clip(idx1_guess, 0, search_upstream.shape[1] - 1))
+
+    resolutions = SimpleNamespace(l0_resolution=l0_resolution)
+
+    try:
+        best_idx, area_error, distance_100m = find_best_gauge_location(
+            ds=search_ds,
+            upstream_area=search_upstream,
+            gauge_coords=(idx0_guess, idx1_guess),
+            ref_catchment_area=float(ref_facc),
+            resolutions=resolutions,
+            max_distance_cells=max_distance_cells,
+            max_error=max_error,
+            method=method_norm,
+            raise_on_fallback=True,
+            latlon=latlon_search,
         )
-        return get_gauge_coords(
-            ds,
-            facc,
-            lonlat=[lon, lat],
-            cell_diff=cell_diff + 1,
-            max_cell_diff=3,
-            diff_percent=10,
-            id=id,
+    except Exception:
+        logger.warning(
+            f"No suitable gauge match found for gauge {id} within {max_distance_cells} "
+            f"cells and {max_error * 100.0:.2f}% error."
         )
-    logger.warning(f"No similar flow accumulation found nearby for gauge {id}.")
-    logger.debug("None, None, None")
-    return None, None, None
+        return None, None, None
+
+    idx0, idx1 = int(best_idx[0]), int(best_idx[1])
+    found_facc = float(search_upstream[idx0, idx1])
+
+    if latlon_search:
+        lon_x = float(search_ds["lon"].values[idx1])
+        lat_y = float(search_ds["lat"].values[idx0])
+    elif lonlat is not None:
+        lon_x, lat_y = lonlat[0], lonlat[1]
+    else:
+        lon_x, lat_y = idx0, idx1
+
+    logger.info(
+        f"Gauge {id} matched at lon={lon_x} lat={lat_y} with facc={found_facc:.3f} "
+        f"(target={float(ref_facc):.3f}, error={float(area_error) * 100.0:.2f}%, "
+        f"distance={float(distance_100m):.2f} x100m)."
+    )
+    return lon_x, lat_y, found_facc
 
 
 def load_ds(file_path, file_name=None):
@@ -408,13 +493,44 @@ def load_ds(file_path, file_name=None):
     return get_dataset_from_path(file_path, file_name=file_name, use_mfdataset=True)
 
 
+def filter_ids_by_observed_years(valid_ids, obs_discharge_data, min_overlapping_years):
+    """Filter ids by minimum observed years while preserving input order."""
+    ids_arr = np.asarray(valid_ids)
+    if min_overlapping_years is None:
+        return ids_arr, []
+    if min_overlapping_years <= 0:
+        min_overlapping_years = 1
+    if ids_arr.size == 0:
+        return ids_arr, []
+
+    obs_sel = obs_discharge_data.sel(id=ids_arr)
+    obs_years = obs_sel["time"].dt.year
+    n_years = obs_sel.notnull().groupby(obs_years).any(dim="time").sum(dim="year")
+
+    enough_ids = np.asarray(
+        obs_sel["id"].where(n_years >= min_overlapping_years, drop=True).values
+    )
+    keep_mask = np.isin(ids_arr, enough_ids)
+    filtered_ids = ids_arr[keep_mask]
+
+    years_map = {
+        sid: int(years)
+        for sid, years in zip(
+            np.asarray(obs_sel["id"].values), np.asarray(n_years.values, dtype=int)
+        )
+    }
+    dropped = [(sid, years_map.get(sid, 0)) for sid in ids_arr[~keep_mask]]
+    return filtered_ids, dropped
+
+
 def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
     model_data_path,
     observed_data_path,
     sim_variable,
     observed_variable,
     model_keyword,
-    mrm_restart_file=None,
+    facc_file=None,
+    facc_variable="L11_fAcc",
     scc_gauges_file=None,
     evaluation_gauges=None,
     saving_path=None,
@@ -428,6 +544,11 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
     date_slice=None,
     overwrite=False,
     direct_comparison=False,
+    write_input_data_cache=False,
+    min_overlapping_years=1,
+    gauge_location_method="basinex",
+    gauge_max_distance_cells=3,
+    gauge_max_error=0.1,
 ):
     """Get observed and model Q data and save it as CSV files to be opened later.
 
@@ -452,23 +573,66 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
     sim_output_file = Path(f"{saving_path}/{model_keyword}_data.nc")
     obs_output_file = Path(f"{saving_path}/GRDC_data.nc")
 
-    # ignored if overwrite is True
-    if sim_output_file.is_file() and not overwrite:
-        logger.info("reading sim data from file...")
-        sim_data = load_ds(sim_output_file)
-        sim_data = sim_data.sel(time=date_slice)
-    if obs_output_file.is_file() and not overwrite:
-        logger.info("reading obs data from file...")
-        observed_data = load_ds(obs_output_file)
-        observed_data = observed_data.sel(time=date_slice)
-    if obs_output_file.is_file() and sim_output_file.is_file() and not overwrite:
-        return observed_data, sim_data
+    # if both sim and obs data cachefiles exist and overwrite is False, try to load and return them
+    sim_data = None
+    observed_data = None
+    if not overwrite:
+        if sim_output_file.is_file() and not overwrite:
+            logger.info("reading sim data from file...")
+            try:
+                sim_data = load_ds(sim_output_file)
+                sim_data = sim_data.sel(time=date_slice)
+            except Exception:
+                logger.warning(
+                    f"Failed reading cached simulation data from {sim_output_file}. Recomputing."
+                )
+        if obs_output_file.is_file() and not overwrite:
+            logger.info("reading obs data from file...")
+            try:
+                observed_data = load_ds(obs_output_file)
+                observed_data = observed_data.sel(time=date_slice)
+            except Exception:
+                logger.warning(
+                    f"Failed reading cached observation data from {obs_output_file}. Recomputing."
+                )
+        if sim_data is not None and observed_data is not None:
+            logger.info(
+                "Successfully loaded cached data. Selecting stations with sufficient overlap."
+            )
+            if min_overlapping_years is not None:
+                eligible_ids, dropped_ids = _filter_ids_by_overlapping_years(
+                    model_da=sim_data["discharge"],
+                    observed_da=observed_data["discharge"],
+                    min_overlapping_years=min_overlapping_years,
+                )
+                if dropped_ids:
+                    logger.info(
+                        f"Dropping {len(dropped_ids)} gauges with less than {min_overlapping_years} overlapping years."
+                    )
+                    logger.debug(
+                        f"Dropped gauges due to overlap threshold (id, years): {dropped_ids}"
+                    )
+                if eligible_ids.size == 0:
+                    msg = (
+                        "No gauges meet the minimum overlap requirement of "
+                        f"{min_overlapping_years} years."
+                    )
+                    with ErrorLogger(logger):
+                        raise ValueError(msg)
+                return observed_data.sel(id=eligible_ids), sim_data.sel(id=eligible_ids)
+            return observed_data, sim_data
+        overwrite = True  # if either data is not loaded, we need to overwrite
+        logger.info(
+            "Cached data not available or failed to load. Computing from source data."
+        )
 
     # creating saving path
     saving_path = Path(saving_path)
     if not saving_path.is_dir():
         saving_path.mkdir(parents=True)
 
+    # Load data and get gauge info for multiple different cases:
+    # 1. discharge.nc files with Qsim/Qobs_<id> variables available (e.g. mRM v5+ output)
     discharge_nc_files = model_file_name == "discharge.nc"
     if discharge_nc_files:
         sim_rs, obs_rs = _load_discharge_nc_collection(
@@ -510,13 +674,27 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
         facc = xr.DataArray(
             np.full(gauge_ids.size, np.nan), dims=["id"], coords={"id": gauge_ids}
         )
+    # 2. no discharge.nc files provided. In this case the observed data is read from a given path and the sim data is extracted based on gauge coordinates from either a provided scc gauges file or by matching flow accumulation and coordinates in a facc file.
     else:
-        # getting gauge infos
+        # Load observed data and gauge info
         with load_ds(observed_data_path) as observed_data_in:
-            gauge_ids = observed_data_in["id"]
-            x = observed_data_in["geo_x"]
-            y = observed_data_in["geo_y"]
-            facc = observed_data_in["area"]
+            logger.info("Loaded observed data and gauge info.")
+            # if only a subset of gauges should be evaluated discard the rest already at this stage to speed up the following processing steps
+            observed_data = observed_data_in
+            if evaluation_gauges is not None:
+                logger.info("Filtering gauges for evaluation.")
+                eval_gauge_ids = (
+                    pd.read_csv(evaluation_gauges, header=None).iloc[:, 0].values
+                )
+                valid_ids = np.intersect1d(observed_data["id"].data, eval_gauge_ids)
+                observed_data = observed_data.sel(id=valid_ids)
+                logger.info(
+                    f"Kept {len(valid_ids)} gauges for evaluation based on provided list {evaluation_gauges}."
+                )
+            gauge_ids = observed_data["id"]
+            x = observed_data["geo_x"]
+            y = observed_data["geo_y"]
+            facc = observed_data["area"]
             slicing_condition = None
             if (
                 lon_min is not None
@@ -533,17 +711,51 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
                 gauge_ids = gauge_ids.where(slicing_condition, drop=True)
             logger.info(f"There are {len(gauge_ids.data)} gauges in total.")
             observed_variable = (
-                get_single_data_var(observed_data_in)
+                get_single_data_var(observed_data)
                 if observed_variable is None
                 else observed_variable
             )
-            logger.info(observed_variable)
-            # prepare for later resampling
-            with load_ds(model_data_path, file_name=model_file_name) as sim_data_in:
-                logger.info("Resampling to coarser calendar if needed...")
-                sim_rs, obs_rs = resample_to_coarser_calendar(
-                    sim_data_in, observed_data_in
+            logger.debug(f"Using observed variable: {observed_variable}")
+            logger.debug(
+                f"Observed data variable info: {observed_data[observed_variable]}"
+            )
+            # reading sim data and resampling if needed
+            with load_ds(model_data_path, file_name=model_file_name) as ds_sim:
+                sim_data_in = ds_sim
+            logger.debug(f"Sim Data: {sim_data_in}")
+
+            # cropping data in space and time
+            logger.info("Cropping data...")
+            if date_slice is not None and date_slice != slice(None, None):
+                logger.info(
+                    f"Selecting data from {date_slice.start} to {date_slice.stop}"
                 )
+            obs_discharge_data = observed_data[observed_variable].sel(time=date_slice)
+            logger.debug(
+                f"Observed discharge data after time selection: {obs_discharge_data}"
+            )
+            if slicing_condition is not None:
+                logger.info("Applying spatial slicing to sim data...")
+                sim_data_cropped = sim_data_in.sel(
+                    {
+                        get_coord_key(sim_data_in, lat=True): slice(lat_max, lat_min),
+                        get_coord_key(sim_data_in, lon=True): slice(lon_min, lon_max),
+                    }
+                ).sel(time=date_slice)
+            else:
+                sim_data_cropped = sim_data_in.sel(time=date_slice)
+            logger.debug(
+                f"Sim data after cropping (time and space): {sim_data_cropped}"
+            )
+
+            logger.info("Resampling to coarser calendar if needed...")
+            # Harmonize temporal frequency between simulation and observations.
+            # The helper returns the possibly resampled simulation first.
+            resampled_sim_data, resampled_obs_data = resample_to_coarser_calendar(
+                sim_data_cropped, obs_discharge_data
+            )
+            logger.debug(f"Obs data.time after resampling: {resampled_obs_data.time}")
+            logger.debug(f"Sim data.time after resampling: {resampled_sim_data.time}")
 
             # Ensure unique gauge ids (xarray .sel requires unique index)
             id_index = pd.Index(gauge_ids.values)
@@ -558,44 +770,55 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
                 x = x.isel(id=unique_pos)
                 y = y.isel(id=unique_pos)
                 facc = facc.isel(id=unique_pos)
-                obs_rs = obs_rs.isel(id=unique_pos)
-
-            logger.info("Cropping data...")
-            if date_slice is not None and date_slice != slice(None, None):
-                logger.info(
-                    f"Selecting data from {date_slice.start} to {date_slice.stop}..."
-                )
-            obs_discharge_data = obs_rs[observed_variable].sel(time=date_slice)
-            if slicing_condition is not None:
-                logger.info("Applying spatial slicing to sim data...")
-                sim_data_cropped = sim_rs.sel(
-                    {
-                        get_coord_key(sim_rs, lat=True): slice(lat_max, lat_min),
-                        get_coord_key(sim_rs, lon=True): slice(lon_min, lon_max),
-                    }
-                ).sel(time=date_slice)
-            else:
-                sim_data_cropped = sim_rs.sel(time=date_slice)
+                resampled_obs_data = resampled_obs_data.isel(id=unique_pos)
 
             if direct_comparison:
                 logger.info(
                     "Selecting overlapping time period for direct comparison..."
                 )
-                overlapping_time_slice = get_overlapping_time_slice(sim_rs, obs_rs)
-                logger.info(
-                    f"Overlapping time is from {overlapping_time_slice.start} "
-                    f"to {overlapping_time_slice.stop}"
+                # Determine one common inclusive time window and apply it to both
+                # series to ensure metric computation compares the same period.
+                common_time_window = get_overlapping_time_slice(
+                    sim_data_cropped, obs_discharge_data
                 )
-                obs_discharge_data = obs_discharge_data.sel(time=overlapping_time_slice)
-                sim_data_cropped = sim_data_cropped.sel(time=overlapping_time_slice)
+                logger.info(
+                    f"Overlapping time is from {common_time_window.start} "
+                    f"to {common_time_window.stop}"
+                )
+                obs_discharge_data = obs_discharge_data.sel(time=common_time_window)
+                sim_data_cropped = sim_data_cropped.sel(time=common_time_window)
+                logger.debug(
+                    f"Observed data.time after overlapping slice: {obs_discharge_data.time}"
+                )
+                logger.debug(
+                    f"Sim data.time after overlapping slice: {sim_data_cropped.time}"
+                )
 
     # Drop gauges without any observed data in the selected period
+    logger.info("Filtering gauges without observed data in the provided time range...")
     obs_discharge_data = obs_discharge_data.sel(id=gauge_ids.data)
     valid_obs = obs_discharge_data.notnull().any(dim="time")
     valid_ids = obs_discharge_data["id"].where(valid_obs, drop=True).values
-    if evaluation_gauges is not None:
-        eval_gauge_ids = pd.read_csv(evaluation_gauges, header=None).iloc[:, 0].values
-        valid_ids = np.intersect1d(valid_ids, eval_gauge_ids)
+    # If min_overlapping_years is set, further drop gauges that do not have
+    # enough observed years in the already aligned comparison period.
+    if min_overlapping_years is not None:
+        ids_before = np.asarray(valid_ids)
+        logger.info(
+            f"Applying minimum observed-year filter in aligned period: >= {int(min_overlapping_years)} years."
+        )
+        valid_ids, dropped_year_filter = filter_ids_by_observed_years(
+            valid_ids=ids_before,
+            obs_discharge_data=obs_discharge_data,
+            min_overlapping_years=min_overlapping_years,
+        )
+        logger.info(
+            f"Gauge count after observed-year filter: {int(ids_before.size)} -> {int(np.asarray(valid_ids).size)}"
+        )
+        if dropped_year_filter:
+            logger.debug(
+                f"Dropped gauges by observed-year filter (id, observed_years): {dropped_year_filter}"
+            )
+
     if valid_ids.size == 0:
         msg = "No gauges with observed data in the selected time range."
         with ErrorLogger(logger):
@@ -608,189 +831,226 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
     logger.info(
         f"There are {len(gauge_ids.data)} gauges with observed data in the selected time range."
     )
-    if not obs_output_file.is_file() or overwrite:
-        logger.info("preparing obs data...")
-        # observed_data = observed_data.rename({observed_variable: "discharge"})
-        obs_discharge_data = obs_discharge_data.reindex(id=gauge_ids.data)
-        facc_da = xr.DataArray(
-            facc, name="facc", dims=["id"], coords={"id": gauge_ids.data}
-        )
-        observed_data = xr.Dataset({"facc": facc_da, "discharge": obs_discharge_data})
 
-        logger.info(f"Saving obs data to {obs_output_file}...")
+    # Preparing observed data
+    logger.info("preparing obs data...")
+    obs_discharge_data = obs_discharge_data.reindex(id=gauge_ids.data)
+    facc_da = xr.DataArray(
+        facc, name="facc", dims=["id"], coords={"id": gauge_ids.data}
+    )
+    observed_data = xr.Dataset({"facc": facc_da, "discharge": obs_discharge_data})
+    if write_input_data_cache:
+        logger.info(f"Saving obs data to {obs_output_file}")
         write_xarray_to_file(observed_data, obs_output_file)
+    else:
+        logger.info(
+            "Skipping saving obs data to file as write_input_data_cache is False."
+        )
+        observed_data.load()
 
-    if not sim_output_file.is_file() or overwrite:
-        logger.info("preparing sim data...")
-        if discharge_nc_files:
-            simulation_discharge = sim_data_cropped
-            gauge_ids_with_values = np.asarray(gauge_ids.values)
-            x_new = np.asarray(x.values)
-            y_new = np.asarray(y.values)
-            facc_new = (
-                np.asarray(facc.values)
-                if facc is not None
-                else np.full(len(gauge_ids_with_values), np.nan)
-            )
-        elif scc_gauges_file is not None:
-            x_new, y_new = [], []
-            with load_ds(scc_gauges_file) as ds:
-                logger.info("get the gauge coordinates from scc gauges file")
+    # Preaparing simulation data for gauges
+    logger.info("preparing sim data...")
+    # Case 1: discharge.nc files with Qsim/Qobs_<id> variables available (e.g. mRM v5+ output)
+    if discharge_nc_files:
+        simulation_discharge = sim_data_cropped
+        gauge_ids_with_values = np.asarray(gauge_ids.values)
+        x_new = np.asarray(x.values)
+        y_new = np.asarray(y.values)
+        facc_new = (
+            np.asarray(facc.values)
+            if facc is not None
+            else np.full(len(gauge_ids_with_values), np.nan)
+        )
+    # Case 2: scc gauges file provided. Input is node based (mRM v6+)
+    elif scc_gauges_file is not None:
+        # read gauge coordinates from scc gauges file and keep only those that have observed data based on gauge ids.
+        x_new, y_new = [], []
+        with load_ds(scc_gauges_file) as ds:
+            logger.info("get the gauge coordinates from scc gauges file")
+            try:
                 x_new = ds.lon.values
                 y_new = ds.lat.values
-                gauge_ids_with_values = ds.station.values
-            valid_id_set = set(np.asarray(gauge_ids.values))
-            keep_mask = np.isin(gauge_ids_with_values, list(valid_id_set))
-            if not np.any(keep_mask):
-                msg = "No gauges with observed data found in scc gauges file."
-                with ErrorLogger(logger):
-                    raise ValueError(msg)
-            x_new = np.asarray(x_new)[keep_mask]
-            y_new = np.asarray(y_new)[keep_mask]
-            gauge_ids_with_values = np.asarray(gauge_ids_with_values)[keep_mask]
-        elif mrm_restart_file is not None:
-            with load_ds(mrm_restart_file) as ds:
-                logger.info(
-                    "get the gauge coordinates by matching coordinates and flow accumulation"
-                )
-                out = Parallel(n_jobs=n_jobs, backend="loky")(
-                    delayed(get_gauge_coords)(
-                        ds,
-                        facc=facc_i,
-                        lonlat=[x_i, y_i],
-                        cell_diff=1,
-                        max_cell_diff=3,
-                        diff_percent=10,
-                        id=id_i,
-                    )
-                    for x_i, y_i, facc_i, id_i in zip(
-                        x.values, y.values, facc.values, gauge_ids.values
-                    )
-                )
-                x_new, y_new, facc_new, gauge_ids_with_values = [], [], [], []
-                for i, (xn, yn, fan) in enumerate(out):
-                    if xn is None or yn is None or fan is None:
-                        continue
-                    x_new.append(xn)
-                    y_new.append(yn)
-                    facc_new.append(fan)
-                    gauge_ids_with_values.append(gauge_ids.data[i])
-        else:
-            error_msg = "Neither mrm restart file or scc gauges file are provided. Gauge location can not be determined"
-            with ErrorLogger(logger):
-                raise ValueError(error_msg)
-
-        if len(x_new) == 0:
-            msg = "There are no gauges that could be found."
-            with ErrorLogger(logger):
-                raise ValueError(msg)
-        logger.info(f"There are {len(x_new)} gauges")
-        logger.info("creating sim dataset")
-        if discharge_nc_files:
-            # simulation_discharge already prepared
-            pass
-        elif scc_gauges_file is not None:
-            if sim_variable is None:
-                sim_variable = (
-                    "discharge"
-                    if "discharge" in sim_data_cropped.data_vars
-                    else get_single_data_var(sim_data_cropped)
-                )
-            if sim_variable is None:
-                msg = "Could not determine simulation discharge variable."
-                with ErrorLogger(logger):
-                    raise ValueError(msg)
-            logger.info(f"Extracting discharge variable '{sim_variable}' from nodes...")
-            sim, matched_x, matched_y, gauge_ids_with_values = (
-                get_sim_data_for_gauges_from_nodes(
-                    sim_data_cropped,
-                    sim_variable,
-                    x_new,
-                    y_new,
-                    gauge_ids_with_values,
-                    resolution=resolution,
-                )
-            )
-            x_new = matched_x
-            y_new = matched_y
-            try:
-                facc_new = facc.sel(id=gauge_ids_with_values).values
             except Exception:
-                facc_new = np.full(len(gauge_ids_with_values), np.nan)
-        elif mrm_restart_file is not None:
-            sim_variable = (
-                get_single_data_var(sim_data_cropped)
-                if sim_variable is None
-                else sim_variable
-            )
-            sim = Parallel(n_jobs=n_jobs, backend="loky")(
-                delayed(get_sim_data_for_one_gauge)(
-                    id=id,
-                    index=i,
-                    sim_data=sim_data_cropped[sim_variable],
-                    yarr=y_new,
-                    xarr=x_new,
-                    resolution=resolution,
-                    lat_key="lat",
-                    lon_key="lon",
-                )
-                for i, id in enumerate(gauge_ids_with_values)
-            )
-        if not discharge_nc_files:
-            if isinstance(sim, list):
-                simulation_discharge = xr.concat(sim, dim="id")
-            else:
-                simulation_discharge = sim
-        # Ensure sim ids align with observed valid_ids (node outputs may miss some)
-        sim_ids = np.asarray(simulation_discharge["id"].values)
-        valid_id_values = np.asarray(valid_ids)
-        common_ids = np.intersect1d(sim_ids, valid_id_values)
-        if common_ids.size == 0:
-            msg = "No overlapping gauge ids between simulation and observations."
+                x_new = ds.x.values
+                y_new = ds.y.values
+            gauge_ids_with_values = ds.station.values
+        valid_id_set = set(np.asarray(gauge_ids.values))
+        keep_mask = np.isin(gauge_ids_with_values, list(valid_id_set))
+        if not np.any(keep_mask):
+            msg = "No gauges with observed data found in scc gauges file."
             with ErrorLogger(logger):
                 raise ValueError(msg)
-        ids_arr = np.asarray(gauge_ids_with_values)
-        keep_mask = np.isin(ids_arr, common_ids)
-        if not np.all(keep_mask):
-            logger.info(
-                "Dropping %d gauges missing in simulation output.",
-                int((~keep_mask).sum()),
-            )
-        gauge_ids_with_values = ids_arr[keep_mask]
         x_new = np.asarray(x_new)[keep_mask]
         y_new = np.asarray(y_new)[keep_mask]
-        facc_new = np.asarray(facc_new)[keep_mask]
-        simulation_discharge = simulation_discharge.sel(id=gauge_ids_with_values)
-        if "lat" in simulation_discharge.dims or "lat" in simulation_discharge.coords:
-            simulation_discharge = simulation_discharge.drop_dims(["lat"])
-        if "lon" in simulation_discharge.dims or "lon" in simulation_discharge.coords:
-            simulation_discharge = simulation_discharge.drop_dims(["lon"])
-        # if "lat" in simulation_discharge.data_vars:
-        #     simulation_discharge = simulation_discharge.drop_vars(["lat"])
-        # if "lon" in simulation_discharge.data_vars:
-        #     simulation_discharge = simulation_discharge.drop_vars(["lon"])
-        facc_ids = xr.DataArray(
-            data=np.array(facc_new), dims=["id"], coords={"id": gauge_ids_with_values}
+        gauge_ids_with_values = np.asarray(gauge_ids_with_values)[keep_mask]
+        # Determine the simulation variable
+        if sim_variable is None:
+            sim_variable = (
+                "discharge"
+                if "discharge" in sim_data_cropped.data_vars
+                else get_single_data_var(sim_data_cropped)
+            )
+        if sim_variable is None:
+            msg = "Could not determine simulation discharge variable."
+            with ErrorLogger(logger):
+                raise ValueError(msg)
+        # Extract simulated discharge for gauges based on nearest node to gauge coordinates
+        logger.info(f"Extracting discharge variable '{sim_variable}' from nodes...")
+        sim, matched_x, matched_y, gauge_ids_with_values = (
+            get_sim_data_for_gauges_from_nodes(
+                sim_data_cropped,
+                sim_variable,
+                x_new,
+                y_new,
+                gauge_ids_with_values,
+                resolution=resolution,
+            )
         )
+        x_new = matched_x
+        y_new = matched_y
+        try:
+            facc_new = facc.sel(id=gauge_ids_with_values).values
+        except Exception:
+            facc_new = np.full(len(gauge_ids_with_values), np.nan)
+    # Case 3: flow-accumulation file provided. This enables matching based on coordinates and flow accumulation. (mRM v5 style)
+    elif facc_file is not None:
+        with load_ds(facc_file) as ds:
+            logger.info(
+                "get the gauge coordinates by matching coordinates and flow accumulation"
+            )
+            out = Parallel(n_jobs=n_jobs, backend="loky")(
+                delayed(get_gauge_coords)(
+                    ds,
+                    ref_facc=facc_i,
+                    facc_variable=facc_variable,
+                    lonlat=[x_i, y_i],
+                    method=gauge_location_method,
+                    max_distance_cells=gauge_max_distance_cells,
+                    max_error=gauge_max_error,
+                    id=id_i,
+                )
+                for x_i, y_i, facc_i, id_i in zip(
+                    x.values, y.values, facc.values, gauge_ids.values
+                )
+            )
+            x_new, y_new, facc_new, gauge_ids_with_values = [], [], [], []
+            for i, (xn, yn, fan) in enumerate(out):
+                if xn is None or yn is None or fan is None:
+                    continue
+                x_new.append(xn)
+                y_new.append(yn)
+                facc_new.append(fan)
+                gauge_ids_with_values.append(gauge_ids.data[i])
+        # get sim variable
+        sim_variable = (
+            get_single_data_var(sim_data_cropped)
+            if sim_variable is None
+            else sim_variable
+        )
+        # extract sim data for gauges based on nearest node to gauge coordinates
+        sim = Parallel(n_jobs=n_jobs, backend="loky")(
+            delayed(get_sim_data_for_one_gauge)(
+                id=id,
+                index=i,
+                sim_data=sim_data_cropped[sim_variable],
+                yarr=y_new,
+                xarr=x_new,
+                resolution=resolution,
+                lat_key="lat",
+                lon_key="lon",
+            )
+            for i, id in enumerate(gauge_ids_with_values)
+        )
+    else:
+        error_msg = (
+            "Neither facc_file or scc gauges file are provided. "
+            "Gauge location can not be determined"
+        )
+        with ErrorLogger(logger):
+            raise ValueError(error_msg)
 
-        x_ids = xr.DataArray(
-            data=np.array(x_new), dims=["id"], coords={"id": gauge_ids_with_values}
+    if len(x_new) == 0:
+        msg = "There are no gauges that could be found."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    logger.info(f"There are {len(x_new)} gauges")
+    logger.info("creating sim dataset")
+    if not discharge_nc_files:
+        if isinstance(sim, list):
+            # Drop per-gauge location coords before concat; they differ across ids and
+            # trigger expensive coord-merging logic without adding value here.
+            sim = [
+                da.drop_vars([coord for coord in ("lat", "lon") if coord in da.coords])
+                for da in sim
+            ]
+            simulation_discharge = xr.concat(
+                sim, dim="id", coords="minimal", compat="override"
+            )
+        else:
+            simulation_discharge = sim
+    # Ensure sim ids align with observed valid_ids (node outputs may miss some)
+    sim_ids = np.asarray(simulation_discharge["id"].values)
+    valid_id_values = np.asarray(valid_ids)
+    common_ids = np.intersect1d(sim_ids, valid_id_values)
+    if common_ids.size == 0:
+        msg = "No overlapping gauge ids between simulation and observations."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    ids_arr = np.asarray(gauge_ids_with_values)
+    keep_mask = np.isin(ids_arr, common_ids)
+    if not np.all(keep_mask):
+        logger.info(
+            f"Dropping {int((~keep_mask).sum())} gauges missing in simulation output."
         )
-        y_ids = xr.DataArray(
-            data=np.array(y_new), dims=["id"], coords={"id": gauge_ids_with_values}
-        )
+    gauge_ids_with_values = ids_arr[keep_mask]
+    x_new = np.asarray(x_new)[keep_mask]
+    y_new = np.asarray(y_new)[keep_mask]
+    facc_new = np.asarray(facc_new)[keep_mask]
+    simulation_discharge = simulation_discharge.sel(id=gauge_ids_with_values)
+    # DataArray has no drop_dims(); remove leftover singleton dims/coords safely.
+    for dim in ("lat", "lon"):
+        if dim in simulation_discharge.dims:
+            if simulation_discharge.sizes.get(dim, 0) == 1:
+                simulation_discharge = simulation_discharge.isel({dim: 0}, drop=True)
+            else:
+                logger.warning(
+                    f"Simulation discharge still has non-singleton '{dim}' dimension; keeping it."
+                )
+    simulation_discharge = simulation_discharge.drop_vars(
+        [coord for coord in ("lat", "lon") if coord in simulation_discharge.coords]
+    )
+    # if "lat" in simulation_discharge.data_vars:
+    #     simulation_discharge = simulation_discharge.drop_vars(["lat"])
+    # if "lon" in simulation_discharge.data_vars:
+    #     simulation_discharge = simulation_discharge.drop_vars(["lon"])
+    facc_ids = xr.DataArray(
+        data=np.array(facc_new), dims=["id"], coords={"id": gauge_ids_with_values}
+    )
 
-        # 4) Build a new Dataset from this 2D DataArray
-        sim_data = xr.Dataset(
-            {
-                "discharge": simulation_discharge,
-                "facc": facc_ids,
-                "x": x_ids,
-                "y": y_ids,
-            }
-        )
-        logger.info(f"Saving sim data to {sim_output_file}...")
+    x_ids = xr.DataArray(
+        data=np.array(x_new), dims=["id"], coords={"id": gauge_ids_with_values}
+    )
+    y_ids = xr.DataArray(
+        data=np.array(y_new), dims=["id"], coords={"id": gauge_ids_with_values}
+    )
+
+    # 4) Build a new Dataset from this 2D DataArray
+    sim_data = xr.Dataset(
+        {
+            "discharge": simulation_discharge,
+            "facc": facc_ids,
+            "x": x_ids,
+            "y": y_ids,
+        }
+    )
+    if write_input_data_cache:
+        logger.info(f"Saving sim data to {sim_output_file}")
         write_xarray_to_file(sim_data, sim_output_file)
+    else:
+        logger.info(
+            "Skipping saving sim data to file as write_input_data_cache is False."
+        )
+        sim_data.load()
     return observed_data, sim_data
 
 
@@ -853,11 +1113,55 @@ def boostap_statistics(
     }
 
 
+def _filter_ids_by_overlapping_years(model_da, observed_da, min_overlapping_years):
+    """Return ids with at least the requested overlap years plus dropped-id details."""
+    model_ids = set(np.asarray(model_da["id"].values).tolist())
+    """Return ids with enough obs/sim overlap years plus dropped-id details.
+
+    A year counts as overlapping for a station if at least one timestep in that
+    calendar year has non-NaN values in both observed and simulated series.
+    """
+    if min_overlapping_years <= 0:
+        min_overlapping_years = 1
+
+    obs_ids = pd.Index(np.asarray(observed_da["id"].values))
+    model_ids = pd.Index(np.asarray(model_da["id"].values))
+    common_ids = obs_ids.intersection(model_ids)
+
+    overlap_counts = pd.Series(dtype=int)
+    if len(common_ids) > 0:
+        sim_common = model_da.sel(id=common_ids.values)
+        obs_common = observed_da.sel(id=common_ids.values)
+        sim_aligned, obs_aligned = xr.align(sim_common, obs_common, join="inner")
+
+        has_time = "time" in sim_aligned.dims and sim_aligned.sizes.get("time", 0) > 0
+        if has_time:
+            overlap = sim_aligned.notnull() & obs_aligned.notnull()
+            overlap_yearly = overlap.groupby("time.year").any(dim="time")
+            yearly_counts = overlap_yearly.sum(dim="year").astype(int)
+            overlap_counts = pd.Series(
+                np.asarray(yearly_counts.values, dtype=int),
+                index=pd.Index(np.asarray(yearly_counts["id"].values)),
+            )
+
+    eligible_ids = []
+    dropped_ids = []
+    for gauge_id in obs_ids:
+        years = int(overlap_counts.get(gauge_id, 0))
+        if gauge_id in model_ids and years >= min_overlapping_years:
+            eligible_ids.append(gauge_id)
+        else:
+            dropped_ids.append((gauge_id, years))
+
+    return np.asarray(eligible_ids), dropped_ids
+
+
 @log_arguments()
 def evaludate_discharge_data(  # noqa: PLR0913
     model_data_path,
     observed_data_path,
-    mrm_restart_file=None,
+    facc_file=None,
+    facc_variable="L11_fAcc",
     scc_gauges_file=None,
     output_path=None,
     evaluation_gauges=None,
@@ -877,7 +1181,13 @@ def evaludate_discharge_data(  # noqa: PLR0913
     end_date=None,
     overwrite=False,
     only_plot=False,
-    save_hydrograph=True,
+    save_hydrograph=False,
+    min_overlapping_years=1,
+    write_input_data_cache=False,
+    gauge_location_method="basinex",
+    gauge_max_distance_cells=3,
+    gauge_max_error=0.1,
+    hydrograph_plots=None,
 ):
     """Compare simulated with observed discharge directly or via bootstrapping.
 
@@ -890,7 +1200,8 @@ def evaludate_discharge_data(  # noqa: PLR0913
         observed_ds, model_ds = Q_data_to_xarray(
             model_data_path=model_data_path,
             observed_data_path=observed_data_path,
-            mrm_restart_file=mrm_restart_file,
+            facc_file=facc_file,
+            facc_variable=facc_variable,
             scc_gauges_file=scc_gauges_file,
             observed_variable=observed_variable,
             sim_variable=sim_variable,
@@ -907,6 +1218,11 @@ def evaludate_discharge_data(  # noqa: PLR0913
             date_slice=slice(start_date, end_date),
             overwrite=overwrite,
             direct_comparison=direct_comparison,
+            write_input_data_cache=write_input_data_cache,
+            min_overlapping_years=min_overlapping_years,
+            gauge_location_method=gauge_location_method,
+            gauge_max_distance_cells=gauge_max_distance_cells,
+            gauge_max_error=gauge_max_error,
         )
         logger.info("Procured discharge data")
         model_da = model_ds["discharge"]
@@ -963,6 +1279,7 @@ def evaludate_discharge_data(  # noqa: PLR0913
                 x=model_ds["x"].sel(id=id).data,
                 y=model_ds["y"].sel(id=id).data,
                 save=save_hydrograph,
+                plot_code=hydrograph_plots,
             )
             for id in observed_ds.id.values
             if id in model_ds.id.values
@@ -1197,12 +1514,6 @@ def plot_cdf(df, output_path, boostrap_iterations=None):  # noqa: PLR0915
     The plots are generated for different subselections
     (by catchment, bootstrap-mean, or all results).
     """
-    # --- 1) Read your CSV ---
-    # Adjust 'mydata.csv' to your actual file path
-    # df = pd.read_csv('/work/kelbling/ecflow_work/gloria_hourly_t2k/output/gloria_0p05deg/discharge_validation/results.csv', index_col=0)
-    # output_path = Path('/work/luedke/tmp/test_discharge_plots')
-    # if not output_path.is_dir():
-    #     output_path.mkdir()
     # The variables to plot
     logger.info(f"In total there are {len(df['id'].unique())} catchments of which ")
     logger.info(
@@ -1239,7 +1550,6 @@ def plot_cdf(df, output_path, boostrap_iterations=None):  # noqa: PLR0915
         "#CC79A7",
     ]
 
-    # --- 2) Check number of unique IDs ---
     unique_ids = df["id"].unique()
     logger.info(f"Creating a cdf plot with {len(unique_ids)} stations")
 
@@ -1258,6 +1568,10 @@ def plot_cdf(df, output_path, boostrap_iterations=None):  # noqa: PLR0915
 
         # Compute the fraction => empirical CDF
         cdf = ranks / n
+        logger.info(n)
+        logger.info(da_sorted.values)
+        logger.info(cdf.values)
+        plt.plot(da_sorted, cdf, marker="+", linestyle="-")  # step or line is typical
         med = np.nanmedian(da_sorted.values)
         ax.plot(
             da_sorted,
@@ -1274,6 +1588,9 @@ def plot_cdf(df, output_path, boostrap_iterations=None):  # noqa: PLR0915
             linewidth=1,
             label=f"median = {med:.3f}",
         )
+        # Compute the empirical CDF
+        # cdfvals = np.arange(1, len(subdata) + 1) / float(len(subdata))
+        # Plot
         title = f"CDF of {var} for {len(unique_ids)} stations"
         if boostrap_iterations is not None and boostrap_iterations > 0:
             title += f" and {boostrap_iterations} bootstrap iterations"
@@ -1286,82 +1603,24 @@ def plot_cdf(df, output_path, boostrap_iterations=None):  # noqa: PLR0915
             ax.set_xlim(-0.5, 1.0)
             ax.set_ylim(0.0, 1.01)
         else:
-            ax.set_ylim(0, 1.05)
-        fig.tight_layout()
-        fig.savefig(output_path / f"cdf_{var}_all_stations.png", dpi=450)
+            plt.ylim(0, 1.05)
+            xmin = (
+                da_sorted.min().values
+                if da_sorted.min().values > -2
+                else np.quantile(da_sorted.values, 0.05)
+            )
+            xmax = (
+                da_sorted.max().values
+                if da_sorted.max().values < 3
+                else np.quantile(da_sorted.values, 0.95)
+            )
+            if xmax - xmin > 6:
+                xmin = max(xmin, da_sorted.median().values - 3)
+                xmax = min(xmax, da_sorted.median().values + 3)
+            plt.xlim(xmin, xmax)
+
+        plt.tight_layout()
+        plt.savefig(output_path / f"cdf_{var}_all_stations.png", dpi=450)
         plt.close()
 
-    # --- 3) CDF by WMO region (only if more than one region present) ---
-    def _wmo_region_from_id(val):
-        if pd.isna(val):
-            return np.nan
-        try:
-            s = str(int(val))
-        except Exception:
-            s = str(val)
-        s = s.lstrip("0")
-        if not s or not s[0].isdigit():
-            return np.nan
-        return int(s[0])
-
-    df_region = df.copy()
-    df_region["wmo_region"] = df_region["id"].apply(_wmo_region_from_id)
-    region_ids = np.sort(df_region["wmo_region"].dropna().unique())
-    if len(region_ids) < 2:
-        return
-    for var in variables:
-        fig, ax = plt.subplots(figsize=(6, 4))
-        df_var = df_region.dropna(subset=[var, "wmo_region"]).copy()
-        # Extract all values of `var` for the given ID
-        for i, region_id in enumerate(region_ids):
-            region_mask = df_var["wmo_region"] == region_id
-            region_values = df_var.loc[region_mask, var]
-            da = xr.DataArray(region_values, dims=["index"], name=var).dropna(
-                how="all", dim="index"
-            )
-            da_sorted = da.sortby(da)  # sort by the data values
-            n = da_sorted.sizes["index"]
-
-            # Create an array of ranks: [1, 2, ..., n]
-            ranks = xr.DataArray(np.arange(1, n + 1), dims=["index"])
-
-            # Compute the fraction => empirical CDF
-            cdf = ranks / n
-            med = np.nanmedian(da_sorted)
-            region_name = regions.get(int(region_id), f"Region {region_id}")
-            color = cb_colors[i % len(cb_colors)]
-            ax.plot(
-                da_sorted,
-                cdf,
-                marker=".",
-                linestyle="none",
-                color=color,
-                markersize=4,
-            )
-            ax.axvline(
-                med,
-                color=color,
-                linestyle="dotted",
-                linewidth=1,
-                label=f"{region_name} = {med:.3f}",
-            )
-
-        title = f"CDF of {var} for {len(unique_ids)} stations"
-        if boostrap_iterations is not None and boostrap_iterations > 0:
-            title += f" and {boostrap_iterations} bootstrap iterations"
-        ax.set_xlabel(var)
-        ax.set_ylabel("CDF")
-        ax.grid(True, alpha=0.3)
-        ax.legend(title="WMO Region median", ncols=1, fontsize=8)
-        ax.set_title(f"CDF of {var} by WMO region")
-        ax.set_xlim(
-            np.nanmin([df_var[var].min(), 0]), np.nanmax([df_var[var].max(), 1])
-        )
-        if var in ["kge", "nse"]:
-            ax.set_xlim(-0.5, 1.0)
-            ax.set_ylim(0.0, 1.01)
-        else:
-            ax.set_ylim(0, 1.05)
-        fig.tight_layout()
-        fig.savefig(output_path / f"cdf_{var}_by_wmo_region.png", dpi=450)
-        plt.close(fig)
+    logger.info("Done! Check the saved PNG files for your CDF plots.")

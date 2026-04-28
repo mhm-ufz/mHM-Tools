@@ -201,36 +201,92 @@ def timedelta_to_alias(ds: xr.DataArray) -> str:
 
 
 def get_overlapping_time_slice(input_ds, ref_ds):
-    """Crop data to overlapping time."""
-    t1 = input_ds.dropna(dim="time", how="all").time.data
-    t2 = ref_ds.dropna(dim="time", how="all").time.data
-    logger.debug(f"Non-nan time values in input: {t1}")
-    logger.debug(f"Non-nan time values in reference: {t2}")
-    # Find overlapping range
+    """Return the inclusive overlapping time window of two time-indexed objects.
+
+    The overlap is computed from the first/last non-all-NaN timesteps of each
+    input. Time-of-day components are dropped before creating the slice so
+    small sub-daily offsets (e.g. 00:00 vs 11:00 for daily data) still produce
+    a common calendar-day window.
+
+    Args:
+        input_ds: Simulation (or first) xarray object with a ``time`` dimension.
+        ref_ds: Reference (or second) xarray object with a ``time`` dimension.
+
+    Returns
+    -------
+        ``slice(start, end)`` with ``pandas.Timestamp`` endpoints.
+    """
+    input_non_nan_time = input_ds.dropna(dim="time", how="all").time.data
+    reference_non_nan_time = ref_ds.dropna(dim="time", how="all").time.data
+
+    logger.debug(f"input {input_non_nan_time[0]} till {input_non_nan_time[-1]}")
+    logger.debug(f"ref {reference_non_nan_time[0]} till {reference_non_nan_time[-1]}")
+
+    # Infer temporal buckets. We compare on calendar buckets (day/month/week)
+    # instead of exact timestamps so small offsets like 00:00 vs 11:00 do not
+    # break overlap detection for daily/monthly data.
+    _, input_alias = timedelta_to_alias(input_ds)
+    _, reference_alias = timedelta_to_alias(ref_ds)
+
+    def _alias_to_bucket(alias):
+        alias = str(alias).upper()
+        if alias in {"ME", "MS", "M"}:
+            return "M"
+        if alias.startswith("W"):
+            return "W"
+        if alias == "D":
+            return "D"
+        return None
+
+    input_bucket = _alias_to_bucket(input_alias)
+    reference_bucket = _alias_to_bucket(reference_alias)
+    bucket = (
+        "M"
+        if "M" in (input_bucket, reference_bucket)
+        else (
+            "W"
+            if "W" in (input_bucket, reference_bucket)
+            else "D" if "D" in (input_bucket, reference_bucket) else None
+        )
+    )
+
+    # Find overlapping range between both available periods.
     only_nan_msg = "No non nan value data."
-    if t1.size == 0 or t2.size == 0:
-        with ErrorLogger(logger):
-            raise ValueError(only_nan_msg)
-
-    logger.debug(f"input {t1[0]} till {t1[-1]}")
-    logger.debug(f"ref {t2[0]} till {t2[-1]}")
-
-    if t1.any() and t2.any():
-        start = str(max(t1[0], t2[0]))
-        end = str(min(t1[-1], t2[-1]))
-        start = start.split("T")[0] if "T" in start else start
-        end = end.split("T")[0] if "T" in end else end
-        if end <= start:
-            logger.warning(
-                f"The two datasets are not overlapping. Sim data hass non nan data from {t1[0]} to {t1[-1]} and obs from {t2[0]} to {t2[-1]}."
+    if input_non_nan_time.any() and reference_non_nan_time.any():
+        if bucket is None:
+            # Sub-daily case: use exact timestamps.
+            overlap_start = pd.to_datetime(
+                max(input_non_nan_time[0], reference_non_nan_time[0])
             )
-        logger.info(f"Cropping data to timeframe {start} to {end}")
+            overlap_end = pd.to_datetime(
+                min(input_non_nan_time[-1], reference_non_nan_time[-1])
+            )
+        else:
+            # Bucketed comparison (D/W/M): compare period overlap and expand to
+            # full bucket boundaries for robust `.sel(time=slice(...))`.
+            input_period = pd.DatetimeIndex(input_non_nan_time).to_period(bucket)
+            reference_period = pd.DatetimeIndex(reference_non_nan_time).to_period(
+                bucket
+            )
+            overlap_start_period = max(input_period.min(), reference_period.min())
+            overlap_end_period = min(input_period.max(), reference_period.max())
+            overlap_start = overlap_start_period.start_time
+            overlap_end = overlap_end_period.end_time
+
+        if overlap_end <= overlap_start:
+            logger.warning(
+                "The two datasets are not overlapping. "
+                f"Sim data has non nan data from {input_non_nan_time[0]} to {input_non_nan_time[-1]} "
+                f"and obs from {reference_non_nan_time[0]} to {reference_non_nan_time[-1]}."
+            )
+        logger.info(
+            f"Cropping data to timeframe {overlap_start} to {overlap_end}"
+            + (f" using {bucket} buckets." if bucket is not None else ".")
+        )
     else:
         with ErrorLogger(logger):
             raise ValueError(only_nan_msg)
-    start = pd.to_datetime(start)
-    end = pd.to_datetime(end)
-    return slice(start, end)
+    return slice(overlap_start, overlap_end)
 
 
 def crop_ds(

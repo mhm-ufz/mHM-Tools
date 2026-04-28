@@ -2,6 +2,7 @@ import numpy as np
 import xarray as xr
 
 from mhm_tools.post.gridded_data_evaluation import (
+    compare_input_with_ref,
     infer_time_resolution_hours_from_files,
     normalize_time_axis,
     regridd_to_higher_spatial_resolution,
@@ -90,3 +91,72 @@ def test_regridd_to_higher_spatial_resolution_uses_coarse_tolerance():
     assert np.isfinite(out2["v"].values).all()
     print(out2["v"].values)
     assert np.allclose(out2["v"].values, 2.0)
+
+
+def test_compare_input_with_ref_keeps_rel_fields_as_dataarrays(monkeypatch, tmp_path):
+    lat = np.array([51.0, 50.0])
+    lon = np.array([10.0, 11.0])
+    month = np.arange(1, 13)
+
+    input_stats = xr.Dataset(
+        {
+            "mean": (("lat", "lon"), np.array([[2.0, 4.0], [6.0, 8.0]])),
+            "std": (("lat", "lon"), np.array([[1.0, 2.0], [3.0, 4.0]])),
+            "clim": (("month", "lat", "lon"), np.ones((12, 2, 2))),
+        },
+        coords={"month": month, "lat": lat, "lon": lon},
+    )
+    ref_stats = xr.Dataset(
+        {
+            "mean": (("lat", "lon"), np.array([[1.0, 0.0], [3.0, 4.0]])),
+            "std": (("lat", "lon"), np.array([[2.0, 0.0], [1.5, 2.0]])),
+            "clim": (("month", "lat", "lon"), np.ones((12, 2, 2))),
+        },
+        coords={"month": month, "lat": lat, "lon": lon},
+    )
+
+    call_count = {"n": 0}
+
+    def fake_get_stats(**_kwargs):
+        call_count["n"] += 1
+        return input_stats if call_count["n"] == 1 else ref_stats
+
+    captured = {}
+
+    def fake_write_xarray_to_file(ds, file_path):
+        captured["ds"] = ds.copy(deep=True)
+        captured["file_path"] = file_path
+
+    monkeypatch.setattr(
+        "mhm_tools.post.gridded_data_evaluation.get_stats",
+        fake_get_stats,
+    )
+    monkeypatch.setattr(
+        "mhm_tools.post.gridded_data_evaluation.regridd_to_higher_spatial_resolution",
+        lambda ds_input, ds_ref: (ds_input, ds_ref),
+    )
+    monkeypatch.setattr(
+        "mhm_tools.post.gridded_data_evaluation.write_xarray_to_file",
+        fake_write_xarray_to_file,
+    )
+
+    compare_input_with_ref(
+        input_path=tmp_path / "input",
+        input_var="var",
+        output_path=tmp_path,
+        ref_path=tmp_path / "ref",
+        ref_var="var",
+        input_name="in",
+        ref_name="ref",
+        plot=False,
+        global_climate=True,
+    )
+
+    assert "ds" in captured
+    out = captured["ds"]
+    assert out["rel_mean"].dims == ("lat", "lon")
+    assert out["rel_std"].dims == ("lat", "lon")
+    assert np.isnan(out["rel_mean"].values[0, 1])
+    assert np.isnan(out["rel_std"].values[0, 1])
+    assert not np.isinf(out["rel_mean"].values).any()
+    assert not np.isinf(out["rel_std"].values).any()

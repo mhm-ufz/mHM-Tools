@@ -319,7 +319,7 @@ def get_xarray_ds_from_file(  # noqa: PLR0912
 ):
     """Read file and return xarray dataset."""
     file_path = Path(file_path)
-    logger.info(f"Reading {file_path} to xarray with chunking = {chunking}")
+    logger.debug(f"Reading {file_path} to xarray with chunking = {chunking}")
     ds_out = None
     if not file_path.is_file():
         msg = f"File path does not point to an existing file: {file_path}"
@@ -993,9 +993,17 @@ def get_dataset_from_path(
         return p.is_dir()
 
     if _is_dir_or_list(path):
+        file_list = []
         if not isinstance(path, list):
             path = Path(path)
             file_list = list(path.rglob(file_name))
+        else:
+            for p in path:
+                p = Path(p)
+                if p.is_file():
+                    file_list.append(p)
+                elif p.is_dir():
+                    file_list.extend(list(p.rglob(file_name)))
         if not file_list:
             with ErrorLogger(logger):
                 msg = f"No files found in {path}."

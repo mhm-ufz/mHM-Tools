@@ -492,6 +492,9 @@ class Hydrograph:
             self.logger.warning("No plots will be produced since none were specified.")
             return
         if not self.save and not self.show:
+            self.logger.info(
+                'No plots will be produced since both "save" and "show" are False.'
+            )
             return
         if "t" in code:
             self.plots[0] = 1
@@ -1296,8 +1299,18 @@ class Hydrograph:
                 horizontalalignment="center",
                 fontsize="x-large",
             )
+        suptitle_text = f"\n{self.title}\n"
+        # If seasonality is the only selected plot, show only alpha and beta in suptitle.
+        if self.calc_stats and self.plots[2] and sum(self.plots) == 1:
+            stats = (
+                f"alpha = {self.objectives.alpha:.2f}, "
+                f"beta = {self.objectives.beta:.2f}"
+            )
+            suptitle_text = (
+                f"\n{self.title}\n{stats}\n" if self.title else f"\n{stats}\n"
+            )
         fig.suptitle(
-            t=f"\n{self.title}\n",
+            t=suptitle_text,
             x=0.5,
             y=0.97,
             horizontalalignment="center",
@@ -1377,22 +1390,22 @@ def get_hydrograph_from_path(  # noqa: PLR0912, PLR0915
         sim_names = None
 
     hydro = Hydrograph(calc_stats=not named_multi)
+    hydro.show = show
+    hydro.save = save
     hydro.check_which_plots_to_create(plot_code)
     if multi_input:
         hydro.plots[4] = 0
     output_file = Path(output_file)
-    if output_file.suffix and output_file.parent.exists():
+    if output_file.is_dir():
+        hydro.output_file = output_file / "hydrograph.png"
+    elif output_file.suffix:
+        output_file.parent.mkdir(parents=True, exist_ok=True)
         hydro.output_file = output_file
-    else:
-        if output_file.suffix:
-            output_file = output_file.parent
-        if not output_file.is_dir():
-            output_file.mkdir(parents=True)
+    else:  # is non existing directory
+        output_file.mkdir(parents=True)
         hydro.output_file = output_file / "hydrograph.png"
 
     hydro.title = title
-    hydro.show = show
-    hydro.save = save
     if not multi_input and sim_names:
         hydro.sim_name = sim_names[0]
     prec_path = Path(prec_path)

@@ -107,6 +107,50 @@ class TestLowLevelHelpers(unittest.TestCase):
         out = gv.get_grdc_for_one_gauge(1, da)
         self.assertEqual(out.size, 2)
 
+    def test_filter_ids_by_observed_years_threshold(self):
+        ids = np.array([101, 202], dtype=int)
+        times = pd.date_range("2000-01-01", "2002-12-01", freq="MS")
+        vals = np.full((len(times), len(ids)), np.nan, dtype=float)
+        years = times.year
+        vals[np.isin(years, [2000, 2001]), 0] = 1.0
+        vals[years == 2001, 1] = 1.0
+        obs_da = xr.DataArray(
+            vals,
+            dims=("time", "id"),
+            coords={"time": times, "id": ids},
+            name="discharge",
+        )
+
+        filtered_ids, dropped = gv.filter_ids_by_observed_years(
+            valid_ids=ids,
+            obs_discharge_data=obs_da,
+            min_overlapping_years=2,
+        )
+        self.assertListEqual(filtered_ids.tolist(), [101])
+        self.assertIn((202, 1), dropped)
+
+    def test_filter_ids_by_observed_years_preserves_order(self):
+        ids = np.array([30, 10, 20], dtype=int)
+        times = pd.date_range("2000-01-01", "2001-12-01", freq="MS")
+        vals = np.full((len(times), len(ids)), np.nan, dtype=float)
+        years = times.year
+        vals[np.isin(years, [2000, 2001]), 0] = 1.0  # id 30 passes
+        vals[years == 2001, 1] = 1.0  # id 10 fails
+        vals[np.isin(years, [2000, 2001]), 2] = 1.0  # id 20 passes
+        obs_da = xr.DataArray(
+            vals,
+            dims=("time", "id"),
+            coords={"time": times, "id": ids},
+            name="discharge",
+        )
+
+        filtered_ids, _dropped = gv.filter_ids_by_observed_years(
+            valid_ids=ids,
+            obs_discharge_data=obs_da,
+            min_overlapping_years=2,
+        )
+        self.assertListEqual(filtered_ids.tolist(), [30, 20])
+
 
 # -----------------------------
 # Q_data_to_xarray integration (no plotting)
@@ -122,7 +166,6 @@ class TestQDataToXarray(unittest.TestCase):
         # observed hourly, sim 3-hourly (mismatched temporal resolution)
         self.obs_times = pd.date_range("2001-01-01", periods=6, freq="h")
         self.sim_times = pd.date_range("2001-01-01", periods=4, freq="3h")
-
         # datasets for mocked file reads
         self.obs_ds = make_observed_data(
             self.ids, self.obs_times, self.xs, self.ys, self.facc, var="runoff_mean_mm"
@@ -144,7 +187,7 @@ class TestQDataToXarray(unittest.TestCase):
             # Prepare a sequenced side_effect for get_xarray_ds_from_file:
             # call 1: observed_data_path again (observed data)
             # call 2: model_data_path (sim data)
-            # call 3: mrm_restart_file (we won't use; mock get_gauge_coords instead)
+            # call 3: facc_file (we won't use; mock get_gauge_coords instead)
             sequence = [
                 cm_enter(self.obs_ds),
                 cm_enter(self.sim_ds),
@@ -172,21 +215,21 @@ class TestQDataToXarray(unittest.TestCase):
                 def _sim_for_gauge(
                     id, index, sim_data, yarr, xarr, resolution, **kwargs
                 ):
+                    sim_times = pd.to_datetime(np.asarray(sim_data.time.values))
                     da = xr.DataArray(
-                        np.arange(self.sim_times.size) + index,
+                        np.arange(sim_times.size) + index,
                         dims=("time",),
-                        coords={"time": self.sim_times},
+                        coords={"time": sim_times},
                         name="discharge",
                     )
                     return da.expand_dims(dim={"id": [int(id)]})
 
-                print(self.sim_times)
                 mock_sim_for_gauge.side_effect = _sim_for_gauge
 
                 obs_out, sim_out = gv.Q_data_to_xarray(
                     model_data_path="sim.nc",
                     observed_data_path="obs.nc",
-                    mrm_restart_file="restart.nc",
+                    facc_file="restart.nc",
                     sim_variable="Qrouted",
                     observed_variable="runoff_mean_mm",
                     model_keyword="mrm",
@@ -200,6 +243,7 @@ class TestQDataToXarray(unittest.TestCase):
                     date_slice=None,
                     overwrite=True,  # force writing, skip file existence branch
                     direct_comparison=True,  # apply overlap slice
+                    write_input_data_cache=True,
                 )
 
                 # Observed output dataset shape and coords
@@ -222,10 +266,18 @@ class TestQDataToXarray(unittest.TestCase):
                 # Ensure temporal overlap was respected: times within intersection
                 tmin = max(self.obs_times.min(), self.sim_times.min())
                 tmax = min(self.obs_times.max(), self.sim_times.max())
-                # self.assertGreaterEqual(obs_out.time.min().item(), tmin)
-                # self.assertLessEqual(obs_out.time.max().item(), tmax)
-                # self.assertGreaterEqual(sim_out.time.min().item(), tmin)
-                # self.assertLessEqual(sim_out.time.max().item(), tmax)
+                self.assertGreaterEqual(
+                    pd.Timestamp(obs_out.time.min().values), pd.Timestamp(tmin)
+                )
+                self.assertLessEqual(
+                    pd.Timestamp(obs_out.time.max().values), pd.Timestamp(tmax)
+                )
+                self.assertGreaterEqual(
+                    pd.Timestamp(sim_out.time.min().values), pd.Timestamp(tmin)
+                )
+                self.assertLessEqual(
+                    pd.Timestamp(sim_out.time.max().values), pd.Timestamp(tmax)
+                )
 
 
 # -----------------------------
@@ -279,7 +331,7 @@ class TestEvaluateDirect(unittest.TestCase):
                 gv.evaludate_discharge_data(
                     model_data_path="sim.nc",
                     observed_data_path="obs.nc",
-                    mrm_restart_file="restart.nc",
+                    facc_file="restart.nc",
                     output_path=outdir,
                     n_jobs=1,
                     direct_comparison=True,  # direct path
@@ -350,7 +402,7 @@ class TestEvaluateBootstrap(unittest.TestCase):
                 gv.evaludate_discharge_data(
                     model_data_path="sim.nc",
                     observed_data_path="obs.nc",
-                    mrm_restart_file="restart.nc",
+                    facc_file="restart.nc",
                     output_path=outdir,
                     n_jobs=1,
                     direct_comparison=False,  # take bootstrap branch
@@ -401,8 +453,8 @@ def make_observed_data(ids, times, xs, ys, facc, var="runoff_mean_mm", values=No
 def make_scc_gauges(ids, xs, ys):
     return xr.Dataset(
         {
-            "x": (("station",), np.array(xs, dtype=float)),
-            "y": (("station",), np.array(ys, dtype=float)),
+            "lon": (("station",), np.array(xs, dtype=float)),
+            "lat": (("station",), np.array(ys, dtype=float)),
             "station": (("station",), np.array(ids, dtype=int)),
         }
     )
@@ -569,7 +621,7 @@ class TestGRDCValidation2Consistency(unittest.TestCase):
                 obs_g, sim_g = gv.Q_data_to_xarray(
                     model_data_path="sim.nc",
                     observed_data_path="obs.nc",
-                    mrm_restart_file="restart.nc",
+                    facc_file="restart.nc",
                     sim_variable="Qrouted",
                     observed_variable="runoff_mean_mm",
                     model_keyword="mrm",

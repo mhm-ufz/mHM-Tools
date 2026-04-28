@@ -208,14 +208,6 @@ def add_args(parser):
             "Number of cores used for parallelisation. Only needed if multiple gauges are created."
         ),
     )
-    optional_args.add_argument(
-        "--vars",
-        default="all",
-        help=(
-            "Comma-separated list of output variables to write. "
-            "Default is 'all'. Example: --vars basin,flwdir"
-        ),
-    )
 
 
 def run(args):  # noqa: PLR0912,PLR0915
@@ -409,6 +401,4 @@ def run(args):  # noqa: PLR0912,PLR0915
         ncpus=args.ncpus,
         output_vars=None if str(args.vars).strip().lower() == "all" else args.vars,
         gauge_opti_method=args.gauge_optimization_method,
-        gauge_info_csv=args.gauge_info_csv,
-        shape_folder=args.shape_folder,
     )
