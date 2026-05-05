@@ -7,7 +7,7 @@ import numpy as np
 import xarray as xr
 
 from mhm_tools.common.file_handler import get_xarray_ds_from_file
-from mhm_tools.common.utils import distance_100m_units
+from mhm_tools.common.utils import distance_100m_units, find_best_gauge_location_by_area
 from mhm_tools.common.xarray_utils import get_coord_key
 from mhm_tools.pre import catchment
 
@@ -289,24 +289,30 @@ class TestCatchment(unittest.TestCase):
         upstream_area[2, 1] = 100.0
         upstream_area[2, 3] = 105.0
         best_coord_basinex, error_basinex, distance_basinex = (
-            c.find_best_gauge_location(
-                upstream_area,
+            find_best_gauge_location_by_area(
+                ds=c.ds,
+                upstream_area=upstream_area,
                 gauge_coords=(2.0, 2.0),
                 ref_catchment_area=103.0,
+                resolutions=c.resolutions,
                 max_distance_cells=4,
                 max_error=0.05,
                 method="basinex",
                 raise_on_fallback=True,
             )
         )
-        best_coord_burek, error_burek, distance_burek = c.find_best_gauge_location(
-            upstream_area,
-            gauge_coords=(2.0, 2.0),
-            ref_catchment_area=103.0,
-            max_distance_cells=4,
-            max_error=0.05,
-            method="burek",
-            raise_on_fallback=True,
+        best_coord_burek, error_burek, distance_burek = (
+            find_best_gauge_location_by_area(
+                ds=c.ds,
+                upstream_area=upstream_area,
+                gauge_coords=(2.0, 2.0),
+                ref_catchment_area=103.0,
+                resolutions=c.resolutions,
+                max_distance_cells=4,
+                max_error=0.05,
+                method="burek",
+                raise_on_fallback=True,
+            )
         )
         self.assertEqual(best_coord_basinex, (2, 3))
         self.assertLessEqual(error_basinex, 0.05)
@@ -319,24 +325,30 @@ class TestCatchment(unittest.TestCase):
         upstream_area[0, 2] = 98.2
         upstream_area[3, 2] = 102.0
         best_coord_basinex, error_basinex, distance_basinex = (
-            c.find_best_gauge_location(
-                upstream_area,
+            find_best_gauge_location_by_area(
+                ds=c.ds,
+                upstream_area=upstream_area,
                 gauge_coords=(2.0, 2.0),
                 ref_catchment_area=100.0,
+                resolutions=c.resolutions,
                 max_distance_cells=4,
                 max_error=0.05,
                 method="basinex",
                 raise_on_fallback=True,
             )
         )
-        best_coord_burek, error_burek, distance_burek = c.find_best_gauge_location(
-            upstream_area,
-            gauge_coords=(2.0, 2.0),
-            ref_catchment_area=100.0,
-            max_distance_cells=4,
-            max_error=0.05,
-            method="burek",
-            raise_on_fallback=True,
+        best_coord_burek, error_burek, distance_burek = (
+            find_best_gauge_location_by_area(
+                ds=c.ds,
+                upstream_area=upstream_area,
+                gauge_coords=(2.0, 2.0),
+                ref_catchment_area=100.0,
+                resolutions=c.resolutions,
+                max_distance_cells=4,
+                max_error=0.05,
+                method="burek",
+                raise_on_fallback=True,
+            )
         )
         self.assertEqual(best_coord_basinex, best_coord_burek)
         self.assertAlmostEqual(error_basinex, error_burek)

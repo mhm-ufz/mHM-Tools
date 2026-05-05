@@ -26,7 +26,7 @@ from mhm_tools.common.file_handler import (
     write_xarray_to_file,
 )
 from mhm_tools.common.logger import ErrorLogger, log_arguments, log_errors
-from mhm_tools.common.utils import coord_to_index, find_best_gauge_location
+from mhm_tools.common.utils import coord_to_index, find_best_gauge_location_by_area
 from mhm_tools.common.xarray_utils import (
     get_clim_from_ds,
     get_coord_key,
@@ -446,7 +446,7 @@ def get_gauge_coords(  # noqa: PLR0912
     resolutions = SimpleNamespace(l0_resolution=l0_resolution)
 
     try:
-        best_idx, area_error, distance_100m = find_best_gauge_location(
+        best_idx, area_error, distance_100m = find_best_gauge_location_by_area(
             ds=search_ds,
             upstream_area=search_upstream,
             gauge_coords=(idx0_guess, idx1_guess),

@@ -163,7 +163,7 @@ def distance_100m_units(di, dj, l0_resolution, lat_deg=None, latlon=False):
     return np.sqrt((di * dy_m) ** 2 + (dj * dx_m) ** 2) / 100.0
 
 
-def find_best_gauge_location(  # noqa: PLR0915
+def find_best_gauge_location_by_area( # noqa: PLR0915
     ds: xr.Dataset,
     upstream_area,
     gauge_coords,
@@ -201,7 +201,7 @@ def find_best_gauge_location(  # noqa: PLR0915
     if j_min > j_max:
         j_min, j_max = j_max, j_min
 
-    # Extract subgrid of upstream_area
+    # Extract subgrid around the gauge
     sub = upstream_area[i_min : i_max + 1, j_min : j_max + 1]
 
     # If subgrid is empty fallback to whole domain
@@ -215,15 +215,19 @@ def find_best_gauge_location(  # noqa: PLR0915
         logger.info("Correcting gauge location using basinex method")
         # based on implementation in basinex https://git.ufz.de/schaefed/basin-extractor/-/blame/master/lib/gauges.py?ref_type=heads#L42
         size = float(ref_catchment_area)
-        error = 0.0
-        step = 0.01
-        candidates = None
-        while error <= max_error and (candidates is None or len(candidates[0]) == 0):
-            low = size * (1.0 - error)
-            high = size * (1.0 + error)
-            candidates = np.where((sub >= low) & (sub <= high))
-            if len(candidates[0]) == 0:
-                error += step
+        if size <= 0:
+            msg = f"Reference catchment area must be > 0 for basinex, got {size}."
+            with ErrorLogger(logger):
+                raise ValueError(msg)
+
+        sub_error = np.abs(sub - size) / size
+        finite_mask = np.isfinite(sub_error)
+        within_tol = finite_mask & (sub_error <= max_error)
+        if np.any(within_tol):
+            min_error = float(np.min(sub_error[within_tol]))
+            candidates = np.where(within_tol & np.isclose(sub_error, min_error))
+        else:
+            candidates = (np.array([], dtype=int), np.array([], dtype=int))
 
         best_coord = None
         if len(candidates[0]) > 0:
@@ -245,13 +249,14 @@ def find_best_gauge_location(  # noqa: PLR0915
                         "Multiple candidates with the same area error and same distance to gauge found. The selected candidate can not be uniquely identified."
                     )
             best_coord = (int(cand_i[k]), int(cand_j[k]))
+            error = sub_error[candidates[0][k], candidates[1][k]]
             logger.info(
                 f"Selected outlet candidate {best_coord} with upstream area {upstream_area[best_coord]} km2 (tolerance {error:.3f})"
             )
             distanance_100m = distance_100m_units(
                 cand_i[k] - gi,
                 cand_j[k] - gj,
-                l0_resolution=resolutions.l0_resolution,
+                l0_resolution=resolutions.l0,
                 lat_deg=lat_deg,
                 latlon=latlon,
             )
@@ -263,31 +268,25 @@ def find_best_gauge_location(  # noqa: PLR0915
     elif method == "burek":
         logger.info("Correcting gauge location using burek method")
         # based on Burek et. al. 2023 https://essd.copernicus.org/articles/15/5617/2023/
+        # based on Lehner 2012 Derivation of watershed boundaries for GRDC gauging stations based on the HydroSHEDS drainage network - Technical Report prepared for the GRDC
         # implemented https://github.com/iiasa/CWATM_grdc_calibration_stations/blob/78979cbac8f8685d8dbc5330dba6f40a929716f4/scripts/1_findMeritcoord.py#L335
         size = float(ref_catchment_area)
-        low = size * (1.0 - max_error)
-        high = size * (1.0 + max_error)
-        candidates_indices = np.where((sub >= low) & (sub <= high))
+        # error implementation closer to paper description
+        candidates_error = 1 - np.where(sub > size, size / sub, sub / size)
+        candidates_indices = np.where(candidates_error <= max_error)
         if len(candidates_indices[0]) > 0:
             cand_i = candidates_indices[0] + i_min
             cand_j = candidates_indices[1] + j_min
             di = cand_i - gi
             dj = cand_j - gj
             candidates_distance = distance_100m_units(
-                di,
-                dj,
-                l0_resolution=resolutions.l0_resolution,
-                lat_deg=lat_deg,
-                latlon=latlon,
+                di, dj, l0_resolution=resolutions.l0, lat_deg=lat_deg
             )
-            candidates_error = 100 * np.abs(
-                1 - sub[candidates_indices] / size
+            # change error to percent
+            candidates_error = (
+                100 * candidates_error[candidates_indices]
             )  # 100 * np.abs(1 - ups[y, x] / upsreal)
-            if not recursion:
-                burek_metric = candidates_error + 2 * candidates_distance
-            else:
-                # in recursive step we double the max distance burek proposes to use distance and error with equal weight
-                burek_metric = candidates_error + candidates_distance
+            burek_metric = candidates_error + 2 * candidates_distance
             k = int(np.argmin(burek_metric))
             if np.sum(burek_metric == burek_metric[k]) > 1:
                 logger.warning(
@@ -301,6 +300,23 @@ def find_best_gauge_location(  # noqa: PLR0915
         with ErrorLogger(logger):
             raise ValueError(msg)
 
+    if not recursion:
+        logger.warning(
+            f"No suitable outlet candidate found within {max_distance_cells} cells and {max_error*100:.2f}% area error. Retrying with doubled search radius."
+        )
+        return find_best_gauge_location_by_area(
+            ds,
+            upstream_area,
+            gauge_coords,
+            ref_catchment_area,
+            resolutions,
+            max_distance_cells=max_distance_cells * 2,
+            max_error=max_error,
+            recursion=True,
+            method=method,
+            raise_on_fallback=raise_on_fallback,
+            latlon=latlon,
+        )
     if raise_on_fallback:
         msg = (
             f"No suitable outlet candidate found within {max_distance_cells} cells and {max_error*100:.2f}% area error. "
@@ -308,42 +324,19 @@ def find_best_gauge_location(  # noqa: PLR0915
         )
         with ErrorLogger(logger):
             raise ValueError(msg)
-    if not recursion:
-        logger.warning(
-            "No candidate found within initial tolerance; trying again with doubled radius."
-        )
-        logger.warning(
-            f"Radius: {max_distance_cells*2} cells, error tolerance: {max_error*100:.2f}%."
-        )
-        return find_best_gauge_location(
-            ds,
-            upstream_area,
-            gauge_coords,
-            ref_catchment_area,
-            resolutions,
-            max_distance_cells * 2,
-            max_error,
-            recursion=True,
-            method=method,
-            raise_on_fallback=False,
-            latlon=latlon,
-        )
-    logger.warning(
-        "No candidate found within tolerance; doubling search radius again and doubling error tolerance."
+
+    # fallback: pick the cell in bbox with upstream area closest to target
+    flat = np.abs(sub - size)
+    idx = int(np.argmin(flat))
+    ri, rj = np.unravel_index(idx, sub.shape)
+    best_coord = (ri + i_min, rj + j_min)
+    logger.info(
+        f"The selected outlet candidate is {best_coord} with upstream area {upstream_area[best_coord]} km2 resulting in error {(ref_catchment_area - upstream_area[best_coord]) / ref_catchment_area:.3f}."
     )
-    logger.warning(
-        f"Radius: {max_distance_cells*2} cells, error tolerance: {max_error*200:.2f}%."
+    distance_100m = distance_100m_units(
+        best_coord[0] - gi,
+        best_coord[1] - gj,
+        l0_resolution=resolutions.l0,
+        lat_deg=lat_deg,
     )
-    return find_best_gauge_location(
-        ds,
-        upstream_area,
-        gauge_coords,
-        ref_catchment_area,
-        resolutions,
-        max_distance_cells * 2,
-        max_error * 2,
-        recursion=True,
-        method=method,
-        raise_on_fallback=True,
-        latlon=latlon,
-    )
+    return best_coord, abs(upstream_area[best_coord] - size) / size, distance_100m
