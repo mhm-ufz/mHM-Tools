@@ -193,6 +193,15 @@ def add_args(parser):
         ),
     )
     optional_args.add_argument(
+        "--output_vars",
+        default="all",
+        help=(
+            "Comma-separated list of variables to output in the catchment file. "
+            "Default is 'all', which outputs all variables. "
+            "Variables include: 'flwdir', 'basin', 'uparea_grid', 'upgrid', 'grdare', 'elevtn'"
+        ),
+    )
+    optional_args.add_argument(
         "--available_mem",
         required=False,
         type=str,
@@ -399,6 +408,6 @@ def run(args):  # noqa: PLR0912,PLR0915
         max_error=args.max_error,
         gauge_ids=gauge_ids,
         ncpus=args.ncpus,
-        output_vars=None if str(args.vars).strip().lower() == "all" else args.vars,
+        output_vars=None if str(args.output_vars).strip().lower() == "all" else args.output_vars,
         gauge_opti_method=args.gauge_optimization_method,
     )
