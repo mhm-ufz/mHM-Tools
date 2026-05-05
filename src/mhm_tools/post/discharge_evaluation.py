@@ -1508,7 +1508,7 @@ def plot_map(
 
 
 @log_errors()
-def plot_cdf(df, output_path, boostrap_iterations=None):  # noqa: PLR0915
+def plot_cdf(df, output_path, boostrap_iterations=None):
     """Create CDF plots for alpha, beta, and gamma.
 
     The plots are generated for different subselections
@@ -1554,73 +1554,125 @@ def plot_cdf(df, output_path, boostrap_iterations=None):  # noqa: PLR0915
     logger.info(f"Creating a cdf plot with {len(unique_ids)} stations")
 
     logger.info("All values")
-    for var in variables:
-        fig, ax = plt.subplots(figsize=(6, 4))
-        # Extract all values of `var` for the given ID
-        da = xr.DataArray(df[var], dims=["index"], name=var).dropna(
-            how="all", dim="index"
-        )
-        da_sorted = da.sortby(da)  # sort by the data values
-        n = da_sorted.sizes["index"]
+    plot_modes = ["global", "global_color_by_region", "regions"]
+    region_colors = {
+        region: cb_colors[i % len(cb_colors)]
+        for i, region in enumerate(regions.values())
+    }
 
-        # Create an array of ranks: [1, 2, ..., n]
-        ranks = xr.DataArray(np.arange(1, n + 1), dims=["index"])
+    def _region_from_id(gauge_id):
+        gauge_id_str = str(gauge_id)
+        for region_id, region_name in regions.items():
+            if gauge_id_str.startswith(str(region_id)):
+                return region_name
+        return "Unknown"
 
-        # Compute the fraction => empirical CDF
-        cdf = ranks / n
-        logger.info(n)
-        logger.info(da_sorted.values)
-        logger.info(cdf.values)
-        plt.plot(da_sorted, cdf, marker="+", linestyle="-")  # step or line is typical
-        med = np.nanmedian(da_sorted.values)
-        ax.plot(
-            da_sorted,
-            cdf,
-            marker=".",
-            linestyle="none",
-            color="darkblue",
-            markersize=4,
-        )
-        ax.axvline(
-            med,
-            color="red",
-            linestyle="dotted",
-            linewidth=1,
-            label=f"median = {med:.3f}",
-        )
-        # Compute the empirical CDF
-        # cdfvals = np.arange(1, len(subdata) + 1) / float(len(subdata))
-        # Plot
-        title = f"CDF of {var} for {len(unique_ids)} stations"
-        if boostrap_iterations is not None and boostrap_iterations > 0:
-            title += f" and {boostrap_iterations} bootstrap iterations"
-        ax.set_title(title)
-        ax.set_xlabel(var)
-        ax.set_ylabel("CDF")
-        ax.legend()
-        ax.set_xlim(np.nanmin([da_sorted.min(), 0]), np.nanmax([da_sorted.max(), 1]))
-        if var in ["kge", "nse"]:
-            ax.set_xlim(-0.5, 1.0)
-            ax.set_ylim(0.0, 1.01)
-        else:
-            plt.ylim(0, 1.05)
-            xmin = (
-                da_sorted.min().values
-                if da_sorted.min().values > -2
-                else np.quantile(da_sorted.values, 0.05)
+    for plot in plot_modes:
+        for var in variables:
+            var_df = df[["id", var]].dropna(subset=[var]).copy()
+            if var_df.empty:
+                logger.warning("No valid values for %s. Skipping %s plot.", var, plot)
+                continue
+
+            var_df["region"] = var_df["id"].apply(_region_from_id)
+            global_sorted = var_df.sort_values(by=var).reset_index(drop=True)
+            global_sorted["cdf"] = np.arange(1, len(global_sorted) + 1) / len(
+                global_sorted
             )
-            xmax = (
-                da_sorted.max().values
-                if da_sorted.max().values < 3
-                else np.quantile(da_sorted.values, 0.95)
-            )
-            if xmax - xmin > 6:
-                xmin = max(xmin, da_sorted.median().values - 3)
-                xmax = min(xmax, da_sorted.median().values + 3)
-            plt.xlim(xmin, xmax)
 
-        plt.tight_layout()
-        plt.savefig(output_path / f"cdf_{var}_all_stations.png", dpi=450)
-        plt.close()
+            fig, ax = plt.subplots(figsize=(6, 4))
+            med = float(np.nanmedian(global_sorted[var].values))
+
+            if plot == "global":
+                ax.plot(
+                    global_sorted[var].values,
+                    global_sorted["cdf"].values,
+                    color="lightgray",
+                    linewidth=1.0,
+                )
+                ax.scatter(
+                    global_sorted[var].values,
+                    global_sorted["cdf"].values,
+                    s=16,
+                    label=f"all stations (n={len(global_sorted)})",
+                )
+            elif plot == "global_color_by_region":
+                ax.plot(
+                    global_sorted[var].values,
+                    global_sorted["cdf"].values,
+                    color="lightgray",
+                    linewidth=1.0,
+                )
+                for region_name in regions.values():
+                    region_df = global_sorted[global_sorted["region"] == region_name]
+                    if region_df.empty:
+                        continue
+                    ax.scatter(
+                        region_df[var].values,
+                        region_df["cdf"].values,
+                        s=16,
+                        color=region_colors[region_name],
+                        label=f"{region_name} (n={len(region_df)})",
+                    )
+            elif plot == "regions":
+                for region_name in regions.values():
+                    region_df = var_df[var_df["region"] == region_name].sort_values(
+                        by=var
+                    )
+                    if region_df.empty:
+                        continue
+                    region_cdf = np.arange(1, len(region_df) + 1) / len(region_df)
+                    ax.plot(
+                        region_df[var].values,
+                        region_cdf,
+                        color=region_colors[region_name],
+                        linewidth=1.0,
+                    )
+                    ax.plot(
+                        region_df[var].values,
+                        region_cdf,
+                        s=16,
+                        color=region_colors[region_name],
+                        label=f"{region_name} (n={len(region_df)})",
+                    )
+
+            ax.axvline(
+                med,
+                color="red",
+                linestyle="dotted",
+                linewidth=1,
+                label=f"median = {med:.3f}",
+            )
+            title = f"CDF of {var} "
+            if plot == "global_color_by_region":
+                title += " (global, points colored by region)"
+            elif plot == "regions":
+                title += " (per-region CDFs)"
+            if boostrap_iterations is not None and boostrap_iterations > 0:
+                title += f" and {boostrap_iterations} bootstrap iterations"
+            ax.set_title(title)
+            ax.set_xlabel(var)
+            ax.set_ylabel("CDF")
+            ax.legend()
+            if var in ["kge", "nse"]:
+                ax.set_xlim(-0.5, 1.0)
+                ax.set_ylim(0.0, 1.01)
+            else:
+                ax.set_ylim(0.0, 1.01)
+                values = global_sorted[var].values
+                xmin = values.min() if values.min() > -2 else np.quantile(values, 0.05)
+                xmax = values.max() if values.max() < 3 else np.quantile(values, 0.95)
+                if xmax - xmin > 6:
+                    median_val = float(np.median(values))
+                    xmin = max(xmin, median_val - 3)
+                    xmax = min(xmax, median_val + 3)
+                ax.set_xlim(xmin, xmax)
+
+            plt.tight_layout()
+            plt.savefig(
+                output_path / f"cdf_{var}_{plot.strip().lower().replace(' ', '_')}.png",
+                dpi=450,
+            )
+            plt.close()
 
     logger.info("Done! Check the saved PNG files for your CDF plots.")

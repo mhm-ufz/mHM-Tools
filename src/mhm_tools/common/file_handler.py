@@ -998,8 +998,8 @@ def get_dataset_from_path(
             path = Path(path)
             file_list = list(path.rglob(file_name))
         else:
+            path = [Path(p) for p in path]
             for p in path:
-                p = Path(p)
                 if p.is_file():
                     file_list.append(p)
                 elif p.is_dir():
