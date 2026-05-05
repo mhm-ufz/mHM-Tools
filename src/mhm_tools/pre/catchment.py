@@ -694,7 +694,7 @@ class Catchment:
                 data=data, ftype=self.ftype, transform=self.transform, latlon=latlon
             )
         self.get_fdir()
-    
+
     def get_current_coordinates(self):
         """Build L1 coordinate arrays based on the dataset extent and L1 resolution."""
         lon_coords = self.ds.lon.data
@@ -703,7 +703,8 @@ class Catchment:
         if (
             self.resolutions.l1 is not None
             and input_resolution != self.resolutions.l1
-            and self.do_upscale and self.is_upscaled
+            and self.do_upscale
+            and self.is_upscaled
         ):
             # Rebuild coordinates for the coarser L1 grid
             lon_coords = np.arange(
@@ -720,8 +721,8 @@ class Catchment:
             "Computed L1 coords: lon=%d, lat=%d", len(lon_coords), len(lat_coords)
         )
         return lon_coords, lat_coords
-    
-    def compute_cell_area(self, lat_name="lat", lon_name="lon"):
+
+    def compute_cell_area(self):
         """Create a cell area data array in km2."""
         logger.info("Create cell area data array.")
         lon, lat = self.get_current_coordinates()
@@ -1682,7 +1683,9 @@ class Catchment:
         self._fdir = fdir_upscaled
         self.get_fdir()
         self.uparea_grid = uparea1  # replaces self.get_facc
-        self.cell_area = None  # reset cell area to be recalculated at new resolution when needed
+        self.cell_area = (
+            None  # reset cell area to be recalculated at new resolution when needed
+        )
         self.is_upscaled = True
 
         if var == "dem":

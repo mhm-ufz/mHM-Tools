@@ -408,6 +408,8 @@ def run(args):  # noqa: PLR0912,PLR0915
         max_error=args.max_error,
         gauge_ids=gauge_ids,
         ncpus=args.ncpus,
-        output_vars=None if str(args.output_vars).strip().lower() == "all" else args.output_vars,
+        output_vars=(
+            None if str(args.output_vars).strip().lower() == "all" else args.output_vars
+        ),
         gauge_opti_method=args.gauge_optimization_method,
     )

@@ -1441,10 +1441,9 @@ def plot_map(
     lon_pad = lon_range * 0.1 if lon_range > 0 else 0.1
     lat_pad = lat_range * 0.1 if lat_range > 0 else 0.1
 
-    n_points = len(df)
     size_scale = 1.0
-    if n_points > 200:
-        size_scale = (200 / n_points) ** 0.5
+    if len(df) > 200:
+        size_scale = (200 / len(df)) ** 0.5
     point_size = max(4, point_size * size_scale)
 
     for var in variables:

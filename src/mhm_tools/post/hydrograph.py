@@ -492,7 +492,9 @@ class Hydrograph:
             self.logger.warning("No plots will be produced since none were specified.")
             return
         if not self.save and not self.show:
-            self.logger.info('No plots will be produced since both "save" and "show" are False.')
+            self.logger.info(
+                'No plots will be produced since both "save" and "show" are False.'
+            )
             return
         if "t" in code:
             self.plots[0] = 1
@@ -1399,7 +1401,7 @@ def get_hydrograph_from_path(  # noqa: PLR0912, PLR0915
     elif output_file.suffix:
         output_file.parent.mkdir(parents=True, exist_ok=True)
         hydro.output_file = output_file
-    else: # is non existing directory
+    else:  # is non existing directory
         output_file.mkdir(parents=True)
         hydro.output_file = output_file / "hydrograph.png"
 
