@@ -163,7 +163,7 @@ def distance_100m_units(di, dj, l0_resolution, lat_deg=None, latlon=False):
     return np.sqrt((di * dy_m) ** 2 + (dj * dx_m) ** 2) / 100.0
 
 
-def find_best_gauge_location_by_area( # noqa: PLR0915
+def find_best_gauge_location_by_area(  # noqa: PLR0915
     ds: xr.Dataset,
     upstream_area,
     gauge_coords,

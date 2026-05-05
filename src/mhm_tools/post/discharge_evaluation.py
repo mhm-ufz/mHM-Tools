@@ -840,7 +840,7 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
     )
     observed_data = xr.Dataset({"facc": facc_da, "discharge": obs_discharge_data})
     if write_input_data_cache:
-        logger.info(f"Saving obs data to {obs_output_file}")
+        logger.info(f"Saving obs data to {obs_output_file}...")
         write_xarray_to_file(observed_data, obs_output_file)
     else:
         logger.info(
@@ -1044,7 +1044,7 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
         }
     )
     if write_input_data_cache:
-        logger.info(f"Saving sim data to {sim_output_file}")
+        logger.info(f"Saving sim data to {sim_output_file}...")
         write_xarray_to_file(sim_data, sim_output_file)
     else:
         logger.info(

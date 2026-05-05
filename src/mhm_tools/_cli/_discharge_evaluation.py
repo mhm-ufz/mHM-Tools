@@ -143,12 +143,6 @@ def add_args(parser):
         help=("Maximum allowed relative catchment-area error (fraction; 0.1 = 10%)."),
     )
     parser.add_argument(
-        "--save_hydrograph",
-        help="Set flag if the calculated hydrographs should be saved and not just the metrics calculated.",
-        action="store_true",
-        required=False,
-    )
-    parser.add_argument(
         "--hydrograph_plots",
         default="tysc",
         required=False,
