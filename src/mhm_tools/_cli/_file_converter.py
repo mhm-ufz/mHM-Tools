@@ -1,4 +1,4 @@
-"""Convert between ascii and netcdf by file suffix."""
+"""Convert between ASCII, GeoTIFF, and NetCDF by file suffix."""
 
 from pathlib import Path
 
@@ -16,10 +16,13 @@ def add_args(parser):
         "-i",
         "--input",
         required=True,
-        help="The path to input file.",
+        help="The path to input file. Can be ASCII, GeoTIFF, or NetCDF. The file type is determined by the file suffix.",
     )
     parser.add_argument(
-        "-o", "--output", required=True, help="The name of the output file."
+        "-o",
+        "--output",
+        required=True,
+        help="The name of the output file. Can be ASCII or NetCDF. The file type is determined by the file suffix.",
     )
     parser.add_argument(
         "-f",

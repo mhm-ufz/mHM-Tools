@@ -8,6 +8,7 @@ Authors
 - Simon Lüdke
 """
 
+import csv
 import logging
 from pathlib import Path
 from typing import Optional
@@ -26,6 +27,11 @@ from mhm_tools.common.file_handler import (
 )
 from mhm_tools.common.logger import ErrorLogger, log_arguments
 from mhm_tools.common.netcdf import generate_bounds
+from mhm_tools.common.utils import (
+    coord_to_index,
+    distance_100m_units,
+    find_best_gauge_location_by_area,
+)
 from mhm_tools.common.xarray_utils import get_dtype
 from mhm_tools.pre.create_id_gauges import write_gauge_id
 
@@ -37,10 +43,245 @@ FDIR_FILLVALUE = {"d8": 247, "ldd": 255}
 FDIR_SINKVALUE = {"d8": 0, "ldd": 5}
 FACC_FILLVALUE = 0
 FILLVALUE = -9999
+OUTPUT_VARIABLES = ("flwdir", "basin", "uparea_grid", "upgrid", "grdare", "elevtn")
+GAUGE_INFO_COLUMNS = (
+    "id",
+    "lon",
+    "lat",
+    "lon_old",
+    "lat_old",
+    "distance",
+    "area",
+    "old_area",
+    "area_error",
+)
 # use d8 for basinex, ldd for mRM version in Ulysses
 OUTPUT_FTYPE = "ldd"
 CUTOFF_THRESHOLD = 175
 # FUNCTIONS
+
+
+def get_upscaling_factor(resolutions, max_resolution=False, l1=False, l2=True):
+    """Compute integer upscaling factor from a Resolution-like object."""
+    input_res = resolutions.l0
+    if input_res is None:
+        msg = "L0 resolution is required to compute upscaling factor."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    if l1:
+        upscale_res = resolutions.l1
+    elif l2:
+        upscale_res = resolutions.l2
+    else:
+        msg = "Either l1 or l2 must be True."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    if max_resolution:
+        upscale_res = resolutions.get_max_resolution()
+    if upscale_res is None:
+        return 1
+    ratio = upscale_res / input_res
+    ratio_round = int(ratio + 0.5)
+    if abs(ratio_round - ratio) < 1e-6:
+        return ratio_round
+    msg = (
+        "Upscaling only works if target resolution is integer multiple of L0 "
+        f"but target/L0 = {ratio:.4f}"
+    )
+    with ErrorLogger(logger):
+        raise ValueError(msg)
+
+
+def _shape_crs(is_latlon):
+    """Return a CRS string for shapefile operations based on lat/lon usage."""
+    crs = "EPSG:4326" if is_latlon else None
+    logger.debug("Resolved shape CRS to %s", crs)
+    return crs
+
+
+def _find_shape_file(shape_folder, gauge_id):
+    """Find a shapefile in a folder that contains the gauge_id in its name."""
+    if not shape_folder or gauge_id is None:
+        return None
+    shape_dir = Path(shape_folder)
+    if not shape_dir.is_dir():
+        return None
+    matching_shapes = sorted(shape_dir.glob(f"*{gauge_id}*.shp"))
+    if not matching_shapes:
+        return None
+    if len(matching_shapes) > 1:
+        logger.warning(
+            "Multiple shapefiles matched gauge_id %s in %s. Using %s",
+            gauge_id,
+            shape_dir,
+            matching_shapes[0].name,
+        )
+    logger.debug("Using shapefile %s for gauge_id %s", matching_shapes[0], gauge_id)
+    return matching_shapes[0]
+
+
+def _vectorize_mask_to_gdf(basin_mask, affine_transform, crs, value_name="basin"):
+    """Vectorize a basin mask into a GeoDataFrame."""
+    try:
+        import geopandas as gpd
+        from rasterio import features
+        from rasterio.transform import Affine
+    except Exception as exc:
+        error_msg = (
+            "geopandas and rasterio are required for basin shapefile operations."
+        )
+        with ErrorLogger(logger):
+            raise ImportError(error_msg) from exc
+
+    if not isinstance(affine_transform, Affine):
+        try:
+            affine_transform = Affine(*affine_transform)
+        except Exception:
+            affine_transform = Affine.from_gdal(*affine_transform)
+
+    data = basin_mask.astype(np.uint8)
+    # Extract polygons for non-zero cells
+    feats_gen = features.shapes(
+        data,
+        mask=data.astype(bool),
+        transform=affine_transform,
+        connectivity=8,
+    )
+    features_list = [
+        {"geometry": geom, "properties": {value_name: 1}} for geom, _ in feats_gen
+    ]
+    if not features_list:
+        logger.debug("No vectorizable features found in basin mask.")
+        return gpd.GeoDataFrame(
+            columns=[value_name, "geometry"], geometry="geometry", crs=crs
+        )
+    gdf = gpd.GeoDataFrame.from_features(features_list, crs=crs)
+    gdf[value_name] = gdf[value_name].astype(np.uint8)
+    logger.debug("Vectorized basin mask into %d features.", len(gdf))
+    return gdf
+
+
+def _shape_iou(reference_gdf, candidate_gdf):
+    """Compute intersection-over-union for two GeoDataFrames."""
+    if (
+        reference_gdf is None
+        or candidate_gdf is None
+        or reference_gdf.empty
+        or candidate_gdf.empty
+    ):
+        return 0.0
+    reference_geom = reference_gdf.geometry.unary_union
+    candidate_geom = candidate_gdf.geometry.unary_union
+    if reference_geom.is_empty or candidate_geom.is_empty:
+        return 0.0
+    union_area = reference_geom.union(candidate_geom).area
+    if union_area == 0:
+        return 0.0
+    intersection_area = reference_geom.intersection(candidate_geom).area
+    iou = float(intersection_area / union_area)
+    logger.debug("Computed shape IoU: %.4f", iou)
+    return iou
+
+
+def _coords_from_transform(affine_transform, grid_shape):
+    """Derive coordinate arrays from an affine transform and grid shape."""
+    try:
+        from rasterio.transform import Affine, xy
+    except Exception as exc:
+        error_msg = "rasterio is required to derive coordinates from transform."
+        with ErrorLogger(logger):
+            raise ImportError(error_msg) from exc
+
+    if not isinstance(affine_transform, Affine):
+        try:
+            affine_transform = Affine(*affine_transform)
+        except Exception:
+            affine_transform = Affine.from_gdal(*affine_transform)
+    n_rows, n_cols = grid_shape
+    col_indices = np.arange(n_cols)
+    row_indices = np.arange(n_rows)
+    x_coords = np.array(
+        [xy(affine_transform, 0, col, offset="center")[0] for col in col_indices]
+    )
+    y_coords = np.array(
+        [xy(affine_transform, row, 0, offset="center")[1] for row in row_indices]
+    )
+    logger.debug(
+        "Derived coordinate arrays from transform with lengths %d (x) and %d (y).",
+        len(x_coords),
+        len(y_coords),
+    )
+    return x_coords, y_coords
+
+
+def _combine_shape_bounds(bounds_list):
+    """Combine multiple (minx, miny, maxx, maxy) tuples into a single bounding box."""
+    if not bounds_list:
+        return None
+    min_x = min(b[0] for b in bounds_list)
+    min_y = min(b[1] for b in bounds_list)
+    max_x = max(b[2] for b in bounds_list)
+    max_y = max(b[3] for b in bounds_list)
+    return min_x, min_y, max_x, max_y
+
+
+def _buffer_bounds(bounds, latlon):
+    """Apply a buffer to bounds (degrees if latlon, otherwise meters)."""
+    if bounds is None:
+        return None
+    buffer_value = 1.0 if latlon else 100_000.0
+    min_x, min_y, max_x, max_y = bounds
+    return (
+        min_x - buffer_value,
+        min_y - buffer_value,
+        max_x + buffer_value,
+        max_y + buffer_value,
+    )
+
+
+def _slices_from_bounds(bounds, lat_values):
+    """Create lon/lat slices from bounds, respecting latitude ordering."""
+    if bounds is None:
+        return None
+    min_x, min_y, max_x, max_y = bounds
+    if lat_values[0] > lat_values[-1]:
+        lat_slice = slice(max_y, min_y)
+    else:
+        lat_slice = slice(min_y, max_y)
+    lon_slice = slice(min_x, max_x)
+    return {"lat": lat_slice, "lon": lon_slice}
+
+
+def _shape_bounds_from_folder(shape_folder, gauge_ids, latlon):
+    """Compute a buffered bounding box from available gauge shapefiles."""
+    if not shape_folder or gauge_ids is None:
+        return None
+    try:
+        import geopandas as gpd
+    except Exception as exc:
+        logger.warning("geopandas missing; cannot use shapefile bounds: %s", exc)
+        return None
+
+    gauge_id_list = [gauge_ids] if not isinstance(gauge_ids, list) else gauge_ids
+
+    bounds_list = []
+    for gauge_id in gauge_id_list:
+        shape_path = _find_shape_file(shape_folder, gauge_id)
+        if shape_path is None:
+            continue
+        try:
+            gdf = gpd.read_file(shape_path)
+        except Exception as exc:
+            logger.warning("Failed to read shapefile %s: %s", shape_path, exc)
+            continue
+        bounds_list.append(tuple(gdf.total_bounds))
+
+    combined_bounds = _combine_shape_bounds(bounds_list)
+    if combined_bounds is None:
+        return None
+    buffered_bounds = _buffer_bounds(combined_bounds, latlon)
+    logger.info("Using shapefile bounds with buffer for slicing: %s", buffered_bounds)
+    return buffered_bounds
 
 
 def create_cell_area(ds, lat_name="lat", lon_name="lon"):
@@ -73,24 +314,147 @@ def create_cell_area(ds, lat_name="lat", lon_name="lon"):
     )
 
 
+def _normalize_output_vars(output_vars):
+    if output_vars is None:
+        return set(OUTPUT_VARIABLES)
+    if isinstance(output_vars, str):
+        output_vars = [val.strip() for val in output_vars.split(",") if val.strip()]
+    selected = {val.strip() for val in output_vars if str(val).strip()}
+    if not selected:
+        msg = "output_vars must contain at least one variable name."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    unknown = selected - set(OUTPUT_VARIABLES)
+    if unknown:
+        msg = (
+            "Unknown output vars: "
+            f"{sorted(unknown)}. Valid options: {', '.join(OUTPUT_VARIABLES)}."
+        )
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    return selected
+
+
+def write_gauges_to_csv(gauges, output_target, filename="gauges_info.csv"):
+    """Write gauge information to a CSV file.
+
+    Parameters
+    ----------
+    gauges : Gauge | list[Gauge] | dict | list[dict]
+        Gauge objects or dict rows.
+    output_target : str | Path
+        Either a target file path or a target directory.
+    filename : str
+        Filename used when output_target is a directory.
+    """
+    if not gauges:
+        logger.warning("No gauges to write to CSV.")
+        return
+    if isinstance(gauges, (Gauge, dict)):
+        gauges = [gauges]
+
+    output_target = Path(output_target)
+    output_path = (
+        output_target if output_target.suffix else output_target / str(filename)
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    rows = []
+    for gauge in gauges:
+        if isinstance(gauge, dict):
+            row = {
+                "id": gauge.get("id", gauge.get("gauge_id")),
+                "lon": gauge.get("lon"),
+                "lat": gauge.get("lat"),
+                "lon_old": gauge.get("lon_old"),
+                "lat_old": gauge.get("lat_old"),
+                "distance": gauge.get("distance", gauge.get("distance_error", np.nan)),
+                "area": gauge.get("area"),
+                "old_area": gauge.get("old_area", gauge.get("area_old")),
+                "area_error": gauge.get("area_error", gauge.get("error")),
+            }
+        else:
+            row = {
+                "id": gauge.gauge_id,
+                "lon": gauge.lon,
+                "lat": gauge.lat,
+                "lon_old": gauge.lon_old,
+                "lat_old": gauge.lat_old,
+                "distance": gauge.distance_error,
+                "area": gauge.area,
+                "old_area": gauge.area_old,
+                "area_error": gauge.area_error,
+            }
+        rows.append(row)
+
+    with output_path.open("w", newline="", encoding="utf-8") as fp:
+        writer = csv.DictWriter(fp, fieldnames=GAUGE_INFO_COLUMNS)
+        writer.writeheader()
+        writer.writerows(rows)
+    logger.info("Wrote gauge information for %d gauges to %s", len(rows), output_path)
+
+
 # CLASSES
+
+
+class Gauge:
+    """Class to hold gauge information."""
+
+    def __init__(self, gauge_id=None, lat=None, lon=None, area=None, id=None):
+        if gauge_id is None:
+            gauge_id = id
+        self.gauge_id = gauge_id
+        # Backward-compatible alias for older call sites using `gauge.id`.
+        self.id = gauge_id
+        self.lat = lat
+        self.lon = lon
+        self.area = area
+        self.area_old = None
+        self.lat_old = None
+        self.lon_old = None
+        self.distance_error = None
+        self.area_error = None
+
+    def update(
+        self, area=None, lat=None, lon=None, distance_error=None, area_error=None
+    ):
+        """Update gauge information, preserving old values."""
+        if area is not None:
+            self.area_old = self.area
+            self.area = area
+        if lat is not None:
+            self.lat_old = self.lat
+            self.lat = lat
+        if lon is not None:
+            self.lon_old = self.lon
+            self.lon = lon
+        if distance_error is not None:
+            self.distance_error = distance_error
+        if area_error is not None:
+            self.area_error = area_error
+
+
 class Resolution:
     """Class to hold resolution information."""
 
     def __init__(
         self,
+        l1=None,
+        l11=None,
+        l2=None,
+        l2_file=None,
+        l0=None,
+        l0_resolution=None,
         l1_resolution=None,
         l11_resolution=None,
         l2_resolution=None,
-        l2_file=None,
-        l0_resolution=None,
         raise_on_missmatch=True,
     ):
         """Initialize the Resolution class."""
-        self.l0_resolution = l0_resolution
-        self.l1_resolution = l1_resolution
-        self.l11_resolution = l11_resolution
-        self.l2_resolution = l2_resolution
+        self.l0 = l0 if l0 is not None else l0_resolution
+        self.l1 = l1 if l1 is not None else l1_resolution
+        self.l11 = l11 if l11 is not None else l11_resolution
+        self.l2 = l2 if l2 is not None else l2_resolution
         self.l2_file = l2_file
         if self.l2_file is not None:
             self.l2_file = Path(self.l2_file)
@@ -110,44 +474,71 @@ class Resolution:
                 with get_xarray_ds_from_file(self.l2_file) as ds:
                     lon = get_coord_values(ds, lon=True)
                     file_res = round(abs(lon[1] - lon[0]), 9)
-                    if (
-                        self.l2_resolution is not None
-                        and abs(file_res - self.l2_resolution) > 1e-6
-                    ):
-                        msg = f"Provided l2_resolution {self.l2_resolution} differs from resolution derived from file {file_res}. Either provide the correct l2_resolution or remove it to use the resolution derived from the file."
+                    if self.l2 is not None and abs(file_res - self.l2) > 1e-6:
+                        msg = f"Provided l2_resolution {self.l2} differs from resolution derived from file {file_res}. Either provide the correct l2_resolution or remove it to use the resolution derived from the file."
                         if raise_on_missmatch:
                             with ErrorLogger(logger):
                                 raise ValueError(msg)
                         logger.warning(msg)
-                        self.l2_resolution = file_res
-                    elif self.l2_resolution is None:
+                        self.l2 = file_res
+                    elif self.l2 is None:
                         logger.info(
                             f"Derived l2_resolution {file_res} from {self.l2_file}"
                         )
-                        self.l2_resolution = file_res
+                        self.l2 = file_res
             else:
                 logger.error(
                     f"Unsupported file format for l2_file: {self.l2_file.suffix}"
                 )
                 self.l2_file = None
 
-        self.l11_resolution = (
-            self.l11_resolution
-            if self.l11_resolution is not None
-            else self.l1_resolution
-        )
-        self.l2_resolution = (
-            self.l2_resolution if self.l2_resolution is not None else self.l1_resolution
-        )
+        self.l11 = self.l11 if self.l11 is not None else self.l1
+        self.l2 = self.l2 if self.l2 is not None else self.l1
+
+    @property
+    def l0_resolution(self):
+        """Backward-compatible alias for l0."""
+        return self.l0
+
+    @l0_resolution.setter
+    def l0_resolution(self, value):
+        self.l0 = value
+
+    @property
+    def l1_resolution(self):
+        """Backward-compatible alias for l1."""
+        return self.l1
+
+    @l1_resolution.setter
+    def l1_resolution(self, value):
+        self.l1 = value
+
+    @property
+    def l11_resolution(self):
+        """Backward-compatible alias for l11."""
+        return self.l11
+
+    @l11_resolution.setter
+    def l11_resolution(self, value):
+        self.l11 = value
+
+    @property
+    def l2_resolution(self):
+        """Backward-compatible alias for l2."""
+        return self.l2
+
+    @l2_resolution.setter
+    def l2_resolution(self, value):
+        self.l2 = value
 
     def get_max_resolution(self):
         """Get the maximum resolution."""
         return max(
             r
             for r in [
-                self.l1_resolution,
-                self.l11_resolution,
-                self.l2_resolution,
+                self.l1,
+                self.l11,
+                self.l2,
             ]
             if r is not None
         )
@@ -184,10 +575,9 @@ class Catchment:
         self.ftype = ftype
         self.catchment_mask = None
         self.resolutions = resolutions if resolutions is not None else Resolution()
-        self.resolutions.l0_resolution = round(
-            abs(ds.lon.data[1] - ds.lon.data[0]), l0_presision
-        )
+        self.resolutions.l0 = round(abs(ds.lon.data[1] - ds.lon.data[0]), l0_presision)
         self.do_upscale = upscale
+        self.is_upscaled = False
         self.out_var_name = (
             out_var_name if out_var_name is not None else f"{var_name}.nc"
         )
@@ -226,6 +616,7 @@ class Catchment:
         if not isinstance(self.out_var_name, str):
             self.out_var_name = f"{var_name}.nc"
         self.do_shift = do_shift
+        self.latlon = latlon
         self.latlon = latlon
         self.ds = ds
         logger.debug(f"self.ds: {self.ds}")
@@ -304,23 +695,74 @@ class Catchment:
             )
         self.get_fdir()
 
+    def get_current_coordinates(self):
+        """Build L1 coordinate arrays based on the dataset extent and L1 resolution."""
+        lon_coords = self.ds.lon.data
+        lat_coords = self.ds.lat.data
+        input_resolution = self.resolutions.l0
+        if (
+            self.resolutions.l1 is not None
+            and input_resolution != self.resolutions.l1
+            and self.do_upscale
+            and self.is_upscaled
+        ):
+            # Rebuild coordinates for the coarser L1 grid
+            lon_coords = np.arange(
+                lon_coords.min() - input_resolution / 2 + self.resolutions.l1 / 2,
+                lon_coords.max() + self.resolutions.l1 / 2,
+                self.resolutions.l1,
+            )
+            lat_coords = np.arange(
+                lat_coords.max() + input_resolution / 2 - self.resolutions.l1 / 2,
+                lat_coords.min() - self.resolutions.l1 / 2,
+                -self.resolutions.l1,
+            )
+        logger.debug(
+            "Computed L1 coords: lon=%d, lat=%d", len(lon_coords), len(lat_coords)
+        )
+        return lon_coords, lat_coords
+
+    def compute_cell_area(self):
+        """Create a cell area data array in km2."""
+        logger.info("Create cell area data array.")
+        lon, lat = self.get_current_coordinates()
+        # calculate cellsize in kilometers
+        R = 6371  # radius of the earth in kilometers
+        lat_rad = np.deg2rad(lat)
+        lon_rad = np.deg2rad(lon)
+        dlat = np.abs(np.gradient(lat_rad))
+        dlon = np.abs(np.gradient(lon_rad))
+        # create 2D arrays for lat and lon
+        dlat_2d, dlon_2d = np.meshgrid(dlat, dlon, indexing="ij")
+        lat_2d = np.tile(lat_rad[:, np.newaxis], (1, len(lon)))
+        # calculate area
+        cell_areas = R**2 * dlat_2d * dlon_2d * np.cos(lat_2d)
+        self.cell_area = cell_areas
+
     def calc_upstream_area(self):
         """Use pyflwdir to calculate the upstream area from flow direction by providing cell areas."""
         if self._fdir is None:
             logger.error("Flow direction is not initialized.")
             return None
         if self.cell_area is None:
-            self.cell_area = create_cell_area(self.ds).data
+            self.compute_cell_area()
+        if self.cell_area.shape != self._fdir.shape:
+            msg = (
+                f"cell_area shape {self.cell_area.shape} does not match "
+                f"flow-direction shape {self._fdir.shape}."
+            )
+            with ErrorLogger(logger):
+                raise ValueError(msg)
         return self._fdir.accuflux(self.cell_area, nodata=-9999)
 
-    def _coord_to_index(self, lat, lon):
+    def _coord_to_index(self, lat, lon, lat_vals=None, lon_vals=None):
         """Map latitude/longitude or indices to integer grid indices."""
         if "lat" not in self.ds.coords or "lon" not in self.ds.coords:
             msg = "Dataset is missing latitude/longitude coordinates."
             with ErrorLogger(logger):
                 raise ValueError(msg)
-        lat_vals = self.ds.lat.data
-        lon_vals = self.ds.lon.data
+        lat_vals = self.ds.lat.data if lat_vals is None else lat_vals
+        lon_vals = self.ds.lon.data if lon_vals is None else lon_vals
 
         if isinstance(lat, (int, np.integer)):
             i = int(lat)
@@ -365,195 +807,477 @@ class Catchment:
 
         return i, j
 
-    def _distance_100m_units(self, di, dj, lat_deg=None):
-        """Convert index deltas to distance in ~100 m units using l0_resolution."""
-        res = float(abs(self.resolutions.l0_resolution))
-        if self.latlon:
-            if lat_deg is None:
-                lat_deg = 0.0
-            # approximate meters per degree
-            meters_per_deg_lat = 111_132.92
-            dy_m = meters_per_deg_lat * res
-            # Not used since burek assumes square cell sizes:
-            # lat_rad = np.deg2rad(lat_deg)
-            # meters_per_deg_lon = 111_320.0 * np.cos(lat_rad)
-            # dx_m = meters_per_deg_lon * res
-            dx_m = dy_m
-        else:
-            # assume resolution already in meters for projected grids
-            dy_m = res
-            dx_m = res
-        return np.sqrt((di * dy_m) ** 2 + (dj * dx_m) ** 2) / 100.0
+    def _coords_l1(self):
+        """Build L1 coordinate arrays based on the dataset extent and L1 resolution."""
+        lon_coords = self.ds.lon.data
+        lat_coords = self.ds.lat.data
+        input_resolution = self.resolutions.l0
+        if (
+            self.resolutions.l1 is not None
+            and input_resolution != self.resolutions.l1
+            and self.do_upscale
+        ):
+            # Rebuild coordinates for the coarser L1 grid
+            lon_coords = np.arange(
+                lon_coords.min() - input_resolution / 2 + self.resolutions.l1 / 2,
+                lon_coords.max() + self.resolutions.l1 / 2,
+                self.resolutions.l1,
+            )
+            lat_coords = np.arange(
+                lat_coords.max() + input_resolution / 2 - self.resolutions.l1 / 2,
+                lat_coords.min() - self.resolutions.l1 / 2,
+                -self.resolutions.l1,
+            )
+        logger.debug(
+            "Computed L1 coords: lon=%d, lat=%d", len(lon_coords), len(lat_coords)
+        )
+        return lon_coords, lat_coords
 
-    def find_best_gauge_location(  # noqa: PLR0915
+    def update_gauge_coords(self, gauge_id, gauge_lat, gauge_lon):
+        """Update stored gauge coordinates for a gauge_id or add it if missing."""
+        if gauge_id is None:
+            return
+        if gauge_id in self.gauge_ids:
+            gauge_index = self.gauge_ids.index(gauge_id)
+            self.gauge_lats[gauge_index] = gauge_lat
+            self.gauge_lons[gauge_index] = gauge_lon
+            logger.debug("Updated gauge %s to %s/%s", gauge_id, gauge_lat, gauge_lon)
+        else:
+            self.gauge_ids.append(gauge_id)
+            self.gauge_lats.append(gauge_lat)
+            self.gauge_lons.append(gauge_lon)
+            logger.debug("Added gauge %s at %s/%s", gauge_id, gauge_lat, gauge_lon)
+
+    def correct_gauge_location_l1_from_shape(
+        self,
+        l0_shape_gdf,
+        gauge_coords,
+        max_distance_cells=5,
+        ref_catchment_area=None,
+        reference_upstream_area=None,
+    ):
+        """Correct gauge coordinates at L1 using L0 shape similarity and upstream area."""
+        if ref_catchment_area is None and reference_upstream_area is not None:
+            ref_catchment_area = reference_upstream_area
+        if l0_shape_gdf is None or l0_shape_gdf.empty:
+            return None
+        if self._fdir is None:
+            return None
+        lon_coords, lat_coords = self._coords_l1()
+        if (
+            len(lat_coords) != self._fdir.shape[0]
+            or len(lon_coords) != self._fdir.shape[1]
+        ):
+            lon_coords, lat_coords = _coords_from_transform(
+                getattr(self._fdir, "transform", self.transform), self._fdir.shape
+            )
+
+        l1_upstream_area = self.uparea_grid
+        if l1_upstream_area is None:
+            logger.warning(
+                "L1 upstream area grid missing; cannot apply shape correction."
+            )
+            return None
+        l1_result = self.find_best_gauge_location_shape(
+            upstream_area=l1_upstream_area,
+            gauge_coords=gauge_coords,
+            ref_catchment_area=ref_catchment_area,
+            shape_folder=None,
+            gauge_id=None,
+            max_distance_cells=max_distance_cells,
+            max_error=1.0,
+            reference_shape_gdf=l0_shape_gdf,
+            lat_values=lat_coords,
+            lon_values=lon_coords,
+        )
+        if l1_result is None:
+            logger.warning("No L1 candidate basins matched the L0 shape.")
+            return None
+
+        def _iou_for_index(row_idx, col_idx):
+            try:
+                linear_idx = np.ravel_multi_index((row_idx, col_idx), self._fdir.shape)
+                basin = self._fdir.basins(idxs=np.array([linear_idx], dtype=np.int64))
+                candidate_mask = basin > 0
+                gdf = _vectorize_mask_to_gdf(
+                    candidate_mask,
+                    getattr(self._fdir, "transform", self.transform),
+                    _shape_crs(self.latlon),
+                )
+                return _shape_iou(l0_shape_gdf, gdf)
+            except Exception as exc:
+                logger.debug(
+                    "Could not compute L1 shape IoU for outlet candidate: %s", exc
+                )
+                return np.nan
+
+        best_candidate_index, _, _ = l1_result
+        candidate_iou = _iou_for_index(
+            int(best_candidate_index[0]), int(best_candidate_index[1])
+        )
+
+        gauge_row = int(np.abs(lat_coords - float(gauge_coords[0])).argmin())
+        gauge_col = int(np.abs(lon_coords - float(gauge_coords[1])).argmin())
+        naive_iou = _iou_for_index(gauge_row, gauge_col)
+
+        if (
+            np.isfinite(candidate_iou)
+            and np.isfinite(naive_iou)
+            and candidate_iou < naive_iou
+        ):
+            logger.info(
+                "L1 shape candidate IoU %.4f is worse than naive IoU %.4f; keeping naive L1 gauge location.",
+                candidate_iou,
+                naive_iou,
+            )
+            return float(lat_coords[gauge_row]), float(lon_coords[gauge_col])
+
+        new_lat = float(lat_coords[int(best_candidate_index[0])])
+        new_lon = float(lon_coords[int(best_candidate_index[1])])
+        logger.info(
+            "L1 shape-based correction selected %.4f/%.4f using L0 shape reference.",
+            new_lat,
+            new_lon,
+        )
+        return new_lat, new_lon
+
+    def find_best_gauge_location_shape(  # noqa: PLR0915
         self,
         upstream_area,
         gauge_coords,
         ref_catchment_area,
-        max_distance_cells=5,
+        shape_folder,
+        gauge_id,
+        max_distance_cells=2,
         max_error=0.25,
-        recursion=False,
-        method="basinex",
-        raise_on_fallback=True,
+        reference_shape_gdf=None,
+        lat_values=None,
+        lon_values=None,
+        limit_by_error=False,
     ):
-        """Find best gauge location given reference gauge location, refernce cathcment area and allowed area and value deviation."""
-        # Determine whether gauge_coords are lat/lon floats or array indices
-        lat_vals = self.ds.lat.data
-        lon_vals = self.ds.lon.data
-        gi, gj = self._coord_to_index(gauge_coords[0], gauge_coords[1])
-
-        logger.debug(f"Gauge index (row, col): {(gi, gj)}")
-
-        # We will search for candidate outlet cells within a bbox around the gauge
-        # (in degrees). These parameters are conservative defaults and can be
-        # tuned later or exposed as args.
-        max_cells = int(max(0, round(max_distance_cells)))
-
-        # find index window (clamp to domain)
-        i_min = max(0, gi - max_cells)
-        i_max = min(len(lat_vals) - 1, gi + max_cells)
-        j_min = max(0, gj - max_cells)
-        j_max = min(len(lon_vals) - 1, gj + max_cells)
-
-        # Ensure min <= max
-        if i_min > i_max:
-            i_min, i_max = i_max, i_min
-        if j_min > j_max:
-            j_min, j_max = j_max, j_min
-
-        # Extract subgrid of upstream_area
-        sub = upstream_area[i_min : i_max + 1, j_min : j_max + 1]
-
-        # If subgrid is empty fallback to whole domain
-        if sub.size == 0:
-            logger.warning("Search bbox empty, falling back to full-domain search")
-            sub = upstream_area
-            i_min, j_min = 0, 0
-        lat_deg = float(self.ds.lat.data[gi]) if self.latlon else None
-        # Search for candidate cells whose upstream area matches ref_catchment_area
-        if method == "basinex":
-            logger.info("Correcting gauge location using basinex method")
-            # based on implementation in basinex https://git.ufz.de/schaefed/basin-extractor/-/blame/master/lib/gauges.py?ref_type=heads#L42
-            size = float(ref_catchment_area)
-            error = 0.0
-            step = 0.01
-            candidates = None
-            while error <= max_error and (
-                candidates is None or len(candidates[0]) == 0
-            ):
-                low = size * (1.0 - error)
-                high = size * (1.0 + error)
-                candidates = np.where((sub >= low) & (sub <= high))
-                if len(candidates[0]) == 0:
-                    error += step
-
-            best_coord = None
-            if len(candidates[0]) > 0:
-                # convert sub indices to global indices
-                cand_i = candidates[0] + i_min
-                cand_j = candidates[1] + j_min
-                # choose the candidate nearest to the gauge index
-                d2 = (cand_i - gi) ** 2 + (cand_j - gj) ** 2
-                k = int(np.argmin(d2))
-                # if there is more than one candidate with the same distance, choose the one with the smallest area error
-                if np.sum(d2 == d2[k]) > 1:
-                    logger.warning(
-                        "Multiple candidates with the same distance to gauge found. Choosing the one with smallest area error."
-                    )
-                    error_cand = np.abs(sub[candidates] - size)
-                    k = int(np.argmin(error_cand))
-                    if np.sum(error_cand == error_cand[k]) > 1:
-                        logger.warning(
-                            "Multiple candidates with the same area error and same distance to gauge found. The selected candidate can not be uniquely identified."
-                        )
-                best_coord = (int(cand_i[k]), int(cand_j[k]))
-                logger.info(
-                    f"Selected outlet candidate {best_coord} with upstream area {upstream_area[best_coord]} km2 (tolerance {error:.3f})"
-                )
-                distanance_100m = self._distance_100m_units(
-                    cand_i[k] - gi, cand_j[k] - gj, lat_deg=lat_deg
-                )
-                return (
-                    best_coord,
-                    np.abs(1 - sub[candidates[0][k], candidates[1][k]] / size),
-                    distanance_100m,
-                )
-        elif method == "burek":
-            logger.info("Correcting gauge location using burek method")
-            # based on Burek et. al. 2023 https://essd.copernicus.org/articles/15/5617/2023/
-            # implemented https://github.com/iiasa/CWATM_grdc_calibration_stations/blob/78979cbac8f8685d8dbc5330dba6f40a929716f4/scripts/1_findMeritcoord.py#L335
-            size = float(ref_catchment_area)
-            low = size * (1.0 - max_error)
-            high = size * (1.0 + max_error)
-            candidates_indices = np.where((sub >= low) & (sub <= high))
-            if len(candidates_indices[0]) > 0:
-                cand_i = candidates_indices[0] + i_min
-                cand_j = candidates_indices[1] + j_min
-                di = cand_i - gi
-                dj = cand_j - gj
-                candidates_distance = self._distance_100m_units(di, dj, lat_deg=lat_deg)
-                # candidates_distance = np.sqrt(di**2+dj**2)*0.92
-                candidates_error = 100 * np.abs(
-                    1 - sub[candidates_indices] / size
-                )  # 100 * np.abs(1 - ups[y, x] / upsreal)
-                if not recursion:
-                    burek_metric = candidates_error + 2 * candidates_distance
-                else:
-                    # in recursive step we double the max distance burek proposes to use distance and error with equal weight
-                    burek_metric = candidates_error + candidates_distance
-                k = int(np.argmin(burek_metric))
-                if np.sum(burek_metric == burek_metric[k]) > 1:
-                    logger.warning(
-                        "Multiple candidates with the same Burek metric found. The selected candidate can not be uniquely identified."
-                    )
-                best_coord = (int(cand_i[k]), int(cand_j[k]))
-                error = candidates_error[k]
-                return best_coord, error / 100, candidates_distance[k]
+        """Find best gauge location using shape similarity."""
+        if upstream_area is None:
+            logger.warning("Upstream area grid missing for shape-based correction.")
+            return None
+        if reference_shape_gdf is None:
+            shape_path = _find_shape_file(shape_folder, gauge_id)
+            if shape_path is None:
+                logger.debug("No reference shapefile found for gauge_id %s", gauge_id)
+                return None
+            try:
+                import geopandas as gpd
+            except Exception as exc:
+                error_msg = "geopandas is required for shape-based gauge correction."
+                with ErrorLogger(logger):
+                    raise ImportError(error_msg) from exc
+            reference_shape = gpd.read_file(shape_path)
+            crs = _shape_crs(self.latlon)
+            if crs is not None:
+                if reference_shape.crs is None:
+                    reference_shape = reference_shape.set_crs(crs)
+                elif str(reference_shape.crs) != str(crs):
+                    reference_shape = reference_shape.to_crs(crs)
+            logger.debug("Loaded reference shape %s", shape_path)
+            shape_label = shape_path.name
         else:
-            msg = f"Unknown method: {method}. Valid options are 'basinex' and 'burek'."
-            with ErrorLogger(logger):
-                raise ValueError(msg)
+            reference_shape = reference_shape_gdf
+            shape_label = "reference shape"
+            crs = reference_shape.crs if hasattr(reference_shape, "crs") else None
 
-        if raise_on_fallback:
-            msg = (
-                f"No suitable outlet candidate found within {max_distance_cells} cells and {max_error*100:.2f}% area error. "
-                "Consider increasing max_distance_cells or max_error."
-            )
-            with ErrorLogger(logger):
-                raise ValueError(msg)
-        if not recursion:
-            logger.warning(
-                "No candidate found within initial tolerance; trying again with doubled radius."
-            )
-            logger.warning(
-                f"Radius: {max_distance_cells*2} cells, error tolerance: {max_error*100:.2f}%."
-            )
-            return self.find_best_gauge_location(
-                upstream_area,
-                gauge_coords,
-                ref_catchment_area,
-                max_distance_cells * 2,
-                max_error,
-                recursion=True,
-                method=method,
-                raise_on_fallback=False,
-            )
-        logger.warning(
-            "No candidate found within tolerance; doubling search radius again and doubling error tolerance."
+        if lat_values is None or lon_values is None:
+            lat_values = self.ds.lat.data
+            lon_values = self.ds.lon.data
+
+        gauge_row, gauge_col = self._coord_to_index(
+            gauge_coords[0],
+            gauge_coords[1],
+            lat_vals=lat_values,
+            lon_vals=lon_values,
         )
-        logger.warning(
-            f"Radius: {max_distance_cells*2} cells, error tolerance: {max_error*200:.2f}%."
+        max_cells = (
+            int(max(0, round(max_distance_cells)))
+            if max_distance_cells is not None
+            else 0
         )
-        return self.find_best_gauge_location(
-            upstream_area,
-            gauge_coords,
-            ref_catchment_area,
-            max_distance_cells * 2,
-            max_error * 2,
-            recursion=True,
-            method=method,
-            raise_on_fallback=True,
+        row_min = max(0, gauge_row - max_cells)
+        row_max = min(len(lat_values) - 1, gauge_row + max_cells)
+        col_min = max(0, gauge_col - max_cells)
+        col_max = min(len(lon_values) - 1, gauge_col + max_cells)
+        if row_min > row_max:
+            row_min, row_max = row_max, row_min
+        if col_min > col_max:
+            col_min, col_max = col_max, col_min
+
+        # Limit candidate search to a local neighborhood around the gauge
+        sub = upstream_area[row_min : row_max + 1, col_min : col_max + 1]
+        if ref_catchment_area is not None and limit_by_error:
+            candidate_indices = np.where(
+                (sub >= ref_catchment_area * (1 - max_error))
+                & (sub <= ref_catchment_area * (1 + max_error))
+            )
+            if candidate_indices[0].size == 0:
+                logger.warning(
+                    "No candidates within area error bounds; expanding search to all finite upstream area values."
+                )
+                candidate_indices = np.where(np.isfinite(sub))
+        else:
+            candidate_indices = np.where(np.isfinite(sub))
+
+        logger.debug(
+            "Shape-based candidate count: %d",
+            len(candidate_indices[0]),
         )
+
+        best_candidate_index = None
+        best_candidate_score = np.inf
+        best_candidate_shape_iou = 0.0
+        best_candidate_upstream_area = None
+        best_candidate_distance_100m = None
+        lat_deg = float(lat_values[gauge_row]) if self.latlon else None
+        for cand_row, cand_col in zip(candidate_indices[0], candidate_indices[1]):
+            row_idx = int(cand_row + row_min)
+            col_idx = int(cand_col + col_min)
+            linear = np.ravel_multi_index((row_idx, col_idx), self._fdir.shape)
+            basin = self._fdir.basins(
+                idxs=np.array([linear], dtype=np.int64),
+                # streams=streams_mask,
+            )
+            basin_mask = basin > 0
+            if not np.any(basin_mask):
+                continue
+            gdf = _vectorize_mask_to_gdf(
+                basin_mask, self.transform, crs, value_name="basin"
+            )
+            shape_overlap_ratio = _shape_iou(reference_shape, gdf)
+            upstream_value = upstream_area[row_idx, col_idx]
+            distance_100m = distance_100m_units(
+                row_idx - gauge_row,
+                col_idx - gauge_col,
+                l0_resolution=self.resolutions.l0,
+                lat_deg=lat_deg,
+            )
+            if ref_catchment_area:
+                upstream_area_ratio = (
+                    min(upstream_value, ref_catchment_area)
+                    / max(upstream_value, ref_catchment_area)
+                    if upstream_value and ref_catchment_area
+                    else 0.0
+                )
+                score = np.hypot(
+                    1 - upstream_area_ratio, 1 - shape_overlap_ratio
+                )  # sqrt(x1**2 + x2**2)
+            else:
+                score = 1 - shape_overlap_ratio
+            if (
+                best_candidate_index is None
+                or score < best_candidate_score
+                or (
+                    np.isclose(score, best_candidate_score)
+                    and best_candidate_distance_100m is not None
+                    and distance_100m < best_candidate_distance_100m
+                )
+            ):
+                best_candidate_index = (row_idx, col_idx)
+                best_candidate_score = score
+                best_candidate_shape_iou = shape_overlap_ratio
+                best_candidate_upstream_area = upstream_value
+                best_candidate_distance_100m = distance_100m
+
+        if best_candidate_index is None:
+            logger.warning("No suitable candidate found for shape-based correction.")
+            return None
+        distance = distance_100m_units(
+            best_candidate_index[0] - gauge_row,
+            best_candidate_index[1] - gauge_col,
+            l0_resolution=self.resolutions.l0,
+            lat_deg=lat_deg,
+        )
+        area_error = (
+            abs(1 - best_candidate_upstream_area / ref_catchment_area)
+            if ref_catchment_area and best_candidate_upstream_area
+            else 0.0
+        )
+        logger.info(
+            "Shape-based gauge correction used %s with IoU %.3f and area error %.3f.",
+            shape_label,
+            best_candidate_shape_iou,
+            area_error,
+        )
+        return best_candidate_index, area_error, distance
+
+    # def find_best_gauge_location(
+    #     self,
+    #     upstream_area,
+    #     gauge_coords,
+    #     ref_catchment_area,
+    #     max_distance_cells=5,
+    #     max_error=0.25,
+    #     recursion=False,
+    #     method="basinex",
+    #     raise_on_fallback=True,
+    # ):
+    #     """Find best gauge location given reference gauge location, refernce cathcment area and allowed area and value deviation."""
+    #     if not recursion and method == "basinex":
+    #         max_distance_cells = max_distance_cells // 2
+
+    #     # Determine whether gauge_coords are lat/lon floats or array indices
+    #     lat_vals = self.ds.lat.data
+    #     lon_vals = self.ds.lon.data
+    #     gi, gj = self._coord_to_index(gauge_coords[0], gauge_coords[1])
+
+    #     logger.debug(f"Gauge index (row, col): {(gi, gj)}")
+
+    #     # We will search for candidate outlet cells within a bbox around the gauge
+    #     # (in degrees). These parameters are conservative defaults and can be
+    #     # tuned later or exposed as args.
+    #     max_cells = int(max(0, round(max_distance_cells)))
+
+    #     # find index window (clamp to domain)
+    #     i_min = max(0, gi - max_cells)
+    #     i_max = min(len(lat_vals) - 1, gi + max_cells)
+    #     j_min = max(0, gj - max_cells)
+    #     j_max = min(len(lon_vals) - 1, gj + max_cells)
+
+    #     # Ensure min <= max
+    #     if i_min > i_max:
+    #         i_min, i_max = i_max, i_min
+    #     if j_min > j_max:
+    #         j_min, j_max = j_max, j_min
+
+    #     # Extract subgrid of upstream_area
+    #     sub = upstream_area[i_min : i_max + 1, j_min : j_max + 1]
+
+    #     # If subgrid is empty fallback to whole domain
+    #     if sub.size == 0:
+    #         logger.warning("Search bbox empty, falling back to full-domain search")
+    #         sub = upstream_area
+    #         i_min, j_min = 0, 0
+    #     lat_deg = float(self.ds.lat.data[gi]) if self.latlon else None
+    #     # Search for candidate cells whose upstream area matches ref_catchment_area
+    #     if method == "basinex":
+    #         logger.info("Correcting gauge location using basinex method")
+    #         # based on implementation in basinex https://git.ufz.de/schaefed/basin-extractor/-/blame/master/lib/gauges.py?ref_type=heads#L42
+    #         size = float(ref_catchment_area)
+    #         error = 0.0
+    #         step = 0.01
+    #         candidates = None
+    #         while error <= max_error and (
+    #             candidates is None or len(candidates[0]) == 0
+    #         ):
+    #             low = size * (1.0 - error)
+    #             high = size * (1.0 + error)
+    #             candidates = np.where((sub >= low) & (sub <= high))
+    #             if len(candidates[0]) == 0:
+    #                 error += step
+
+    #         best_coord = None
+    #         if len(candidates[0]) > 0:
+    #             # convert sub indices to global indices
+    #             cand_i = candidates[0] + i_min
+    #             cand_j = candidates[1] + j_min
+    #             # choose the candidate nearest to the gauge index
+    #             d2 = (cand_i - gi) ** 2 + (cand_j - gj) ** 2
+    #             k = int(np.argmin(d2))
+    #             # if there is more than one candidate with the same distance, choose the one with the smallest area error
+    #             if np.sum(d2 == d2[k]) > 1:
+    #                 logger.warning(
+    #                     "Multiple candidates with the same distance to gauge found. Choosing the one with smallest area error."
+    #                 )
+    #                 error_cand = np.abs(sub[candidates] - size)
+    #                 k = int(np.argmin(error_cand))
+    #                 if np.sum(error_cand == error_cand[k]) > 1:
+    #                     logger.warning(
+    #                         "Multiple candidates with the same area error and same distance to gauge found. The selected candidate can not be uniquely identified."
+    #                     )
+    #             best_coord = (int(cand_i[k]), int(cand_j[k]))
+    #             logger.info(
+    #                 f"Selected outlet candidate {best_coord} with upstream area {upstream_area[best_coord]} km2 (tolerance {error:.3f})"
+    #             )
+    #             distanance_100m = distance_100m_units(
+    #                 cand_i[k] - gi,
+    #                 cand_j[k] - gj,
+    #                 l0_resolution=self.resolutions.l0,
+    #                 lat_deg=lat_deg,
+    #             )
+    #             return (
+    #                 best_coord,
+    #                 np.abs(1 - sub[candidates[0][k], candidates[1][k]] / size),
+    #                 distanance_100m,
+    #             )
+    #         logger.warning(
+    #             "No candidate found within tolerance; falling back to nearest stream cell by upstream area magnitude."
+    #         )
+    #         if not recursion:
+    #             return self.find_best_gauge_location(
+    #                 upstream_area,
+    #                 gauge_coords,
+    #                 ref_catchment_area,
+    #                 max_distance_cells,
+    #                 max_error,
+    #                 recursion=True,
+    #                 method=method,
+    #                 raise_on_fallback=raise_on_fallback,
+    #             )
+    #     elif method == "burek":
+    #         logger.info("Correcting gauge location using burek method")
+    #         # based on Burek et. al. 2023 https://essd.copernicus.org/articles/15/5617/2023/
+    #         # based on Lehner 2012 Derivation of watershed boundaries for GRDC gauging stations based on the HydroSHEDS drainage network - Technical Report prepared for the GRDC
+    #         # implemented https://github.com/iiasa/CWATM_grdc_calibration_stations/blob/78979cbac8f8685d8dbc5330dba6f40a929716f4/scripts/1_findMeritcoord.py#L335
+    #         size = float(ref_catchment_area)
+    #         # error implementation closer to paper description
+    #         candidates_error = 1 - np.where(sub > size, size / sub, sub / size)
+    #         candidates_indices = np.where(candidates_error <= max_error)
+    #         if len(candidates_indices[0]) > 0:
+    #             cand_i = candidates_indices[0] + i_min
+    #             cand_j = candidates_indices[1] + j_min
+    #             di = cand_i - gi
+    #             dj = cand_j - gj
+    #             candidates_distance = distance_100m_units(
+    #                 di, dj, l0_resolution=self.resolutions.l0, lat_deg=lat_deg
+    #             )
+    #             # change error to percent
+    #             candidates_error = (
+    #                 100 * candidates_error[candidates_indices]
+    #             )  # 100 * np.abs(1 - ups[y, x] / upsreal)
+    #             burek_metric = candidates_error + 2 * candidates_distance
+    #             k = int(np.argmin(burek_metric))
+    #             if np.sum(burek_metric == burek_metric[k]) > 1:
+    #                 logger.warning(
+    #                     "Multiple candidates with the same Burek metric found. The selected candidate can not be uniquely identified."
+    #                 )
+    #             best_coord = (int(cand_i[k]), int(cand_j[k]))
+    #             error = candidates_error[k]
+    #             return best_coord, error / 100, candidates_distance[k]
+    #         logger.warning(
+    #             "No candidates found within error bounds. Consider increasing max_error or max_distance_cells."
+    #         )
+    #     else:
+    #         msg = f"Unknown method: {method}. Valid options are 'basinex' and 'burek'."
+    #         with ErrorLogger(logger):
+    #             raise ValueError(msg)
+
+    #     if raise_on_fallback:
+    #         msg = (
+    #             f"No suitable outlet candidate found within {max_distance_cells} cells and {max_error*100:.2f}% area error. "
+    #             "Consider increasing max_distance_cells or max_error."
+    #         )
+    #         with ErrorLogger(logger):
+    #             raise ValueError(msg)
+    #     # fallback: pick the cell in bbox with upstream area closest to target
+    #     flat = np.abs(sub - size)
+    #     idx = int(np.argmin(flat))
+    #     ri, rj = np.unravel_index(idx, sub.shape)
+    #     best_coord = (ri + i_min, rj + j_min)
+    #     logger.info(
+    #         f"The selected outlet candidate is {best_coord} with upstream area {upstream_area[best_coord]} km2 resulting in error {(ref_catchment_area - upstream_area[best_coord]) / ref_catchment_area:.3f}."
+    #     )
+    #     distance_100m = distance_100m_units(
+    #         best_coord[0] - gi,
+    #         best_coord[1] - gj,
+    #         l0_resolution=self.resolutions.l0,
+    #         lat_deg=lat_deg,
+    #     )
+    #     return best_coord, abs(upstream_area[best_coord] - size) / size, distance_100m
 
     def get_best_gauge_coordinate(
         self,
@@ -563,69 +1287,84 @@ class Catchment:
         max_distance_cells,
         max_error,
         method,
+        shape_folder=None,
+        gauge_id=None,
         raise_on_fallback=True,
     ):
         """Get best gauge coordinates given target catchment area."""
-        if ref_catchment_area is not None:
-            if method != "all":
-                outlet_idx, error, distance_error = self.find_best_gauge_location(
+        shape_result = None
+        if shape_folder and gauge_id is not None:
+            try:
+                shape_result = self.find_best_gauge_location_shape(
                     upstream_area,
                     gauge_coords,
                     ref_catchment_area,
-                    max_distance_cells,
-                    max_error,
+                    shape_folder,
+                    gauge_id,
+                    max_distance_cells=max_distance_cells,
+                    max_error=max_error,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Shape-based gauge correction failed for %s: %s",
+                    gauge_id,
+                    exc,
+                )
+                shape_result = None
+
+        if shape_result is not None:
+            outlet_idx, error, distance_error = shape_result
+            new_lat = float(self.ds.lat.data[outlet_idx[0]])
+            new_lon = float(self.ds.lon.data[outlet_idx[1]])
+            gauge_lat = new_lat
+            gauge_lon = new_lon
+            logger.info(
+                "Moved outlet to %s/%s using shape similarity (distance %.2fkm).",
+                new_lat,
+                new_lon,
+                distance_error / 10,
+            )
+        elif ref_catchment_area is not None:
+            if method != "all":
+                outlet_idx, error, distance_error = find_best_gauge_location_by_area(
+                    ds=self.ds,
+                    upstream_area=upstream_area,
+                    gauge_coords=gauge_coords,
+                    ref_catchment_area=ref_catchment_area,
+                    resolutions=self.resolutions,
+                    max_distance_cells=max_distance_cells,
+                    max_error=max_error,
                     method=method,
                     raise_on_fallback=raise_on_fallback,
                 )
             else:
-                try:
-                    outlet_idx_bx, error_bx, distance_error_bx = (
-                        self.find_best_gauge_location(
-                            upstream_area,
-                            gauge_coords,
-                            ref_catchment_area,
-                            max_distance_cells,
-                            max_error,
-                            method="basinex",
-                            raise_on_fallback=False,
-                        )
+                outlet_idx_bx, error_bx, distance_error_bx = (
+                    find_best_gauge_location_by_area(
+                        ds=self.ds,
+                        upstream_area=upstream_area,
+                        gauge_coords=gauge_coords,
+                        ref_catchment_area=ref_catchment_area,
+                        resolutions=self.resolutions,
+                        max_distance_cells=max_distance_cells,
+                        max_error=max_error,
+                        method="basinex",
+                        raise_on_fallback=False,
                     )
-                except ValueError as e:
-                    logger.warning(
-                        f"Error occurred while finding BasinEx candidate: {e}"
+                )
+                outlet_idx_bu, error_bu, distance_error_bu = (
+                    find_best_gauge_location_by_area(
+                        ds=self.ds,
+                        upstream_area=upstream_area,
+                        gauge_coords=gauge_coords,
+                        ref_catchment_area=ref_catchment_area,
+                        resolultion=self.resolutions,
+                        max_distance_cells=max_distance_cells,
+                        max_error=max_error,
+                        method="burek",
+                        raise_on_fallback=False,
                     )
-                    outlet_idx_bx, error_bx, distance_error_bx = (None, None, None)
-                try:
-                    outlet_idx_bu, error_bu, distance_error_bu = (
-                        self.find_best_gauge_location(
-                            upstream_area,
-                            gauge_coords,
-                            ref_catchment_area,
-                            max_distance_cells,
-                            max_error,
-                            method="burek",
-                            raise_on_fallback=False,
-                        )
-                    )
-                except ValueError as e:
-                    logger.warning(f"Error occurred while finding Burek candidate: {e}")
-                    if outlet_idx_bx is not None:
-                        logger.info(
-                            "Using BasinEx candidate since Burek candidate failed."
-                        )
-                        return outlet_idx_bx, error_bx, distance_error_bx
-                    logger.warning(
-                        "Both BasinEx and Burek candidates failed; falling back to original gauge coordinates."
-                    )
-                    msg = "No suitable outlet candidate found using either BasinEx or Burek method."
-                    with ErrorLogger(logger):
-                        raise ValueError(msg) from None
-            logger.info("Results of basin correction:")
-            if method in ("all", "burek"):
-                if method == "burek":
-                    outlet_idx_bu = outlet_idx
-                    error_bu = error
-                    distance_error_bu = distance_error
+                )
+                logger.info("Results of basin correction:")
                 logger.info(f"Burek: lat: {float(self.ds.lat.data[outlet_idx_bu[0]])}")
                 logger.info(f"Burek: lon: {float(self.ds.lon.data[outlet_idx_bu[1]])}")
                 logger.info(f"Burek: error {error_bu}")
@@ -661,23 +1400,22 @@ class Catchment:
             logger.info(
                 f"Moved outlet {distance_error/10:.2}km shifting latitude {float(gauge_coords[0])} to {new_lat} and longitude {float(gauge_coords[1])} to {new_lon}."
             )
-
         else:
             logger.warning(
                 "No catchment area provided; falling back to original gauge coordinates."
             )
-            outlet_idx = self._coord_to_index(gauge_coords[0], gauge_coords[1])
+            outlet_idx = coord_to_index(self.ds, gauge_coords[0], gauge_coords[1])
             gauge_lat = float(gauge_coords[0])
             gauge_lon = float(gauge_coords[1])
             error = None
-        return outlet_idx, error, gauge_lat, gauge_lon
+            distance_error = 0.0
+        return outlet_idx, error, gauge_lat, gauge_lon, distance_error / 10
 
     def delineation_sanity_check(
         self,
         catchment_mask,
         basin,
-        upstream_area,
-        outlet_idx,
+        uparea_at_outlet,
         ref_catchment_area,
         max_error,
         raise_on_sanity_check,
@@ -704,9 +1442,7 @@ class Catchment:
                 cell_count,
                 mean_cell_area,
             )
-            uparea_at_outlet = (
-                upstream_area[outlet_idx] if upstream_area is not None else np.nan
-            )
+
             logger.info(
                 "Upstream area reported at selected outlet cell = %.2f km2. "
                 "Difference (sum_cells - upstream_at_outlet) = %.2f km2 (%.2f%%).",
@@ -758,26 +1494,26 @@ class Catchment:
 
     def delineate_basin(
         self,
-        gauge_coords,
+        gauge,
         stream_order=4,
-        ref_catchment_area=None,
         max_distance_cells=5,
         max_error=0.25,
         raise_on_sanity_check=True,
         upstream_area=None,
-        gauge_id: Optional[int] = None,
         mask_catchment: Optional[bool] = True,
         save_coords: Optional[bool] = True,
         gauge_opti_method: Optional[str] = "basinex",
+        shape_folder: Optional[str] = None,
         raise_on_fallback: Optional[bool] = True,
     ):
         """Delineate the basin for a given lat and lon."""
         # Target area in km2 we want to match (can be adjusted/replaced by caller later)
-
+        ref_catchment_area = gauge.area
+        gauge_coords = (gauge.lat, gauge.lon)
+        gauge_id = getattr(gauge, "gauge_id", getattr(gauge, "id", None))
         # Compute upstream area (in km2) using accuflux and cell areas
-        upstream_area = None
         if self.cell_area is None:
-            self.cell_area = create_cell_area(self.ds).data
+            self.compute_cell_area()
         if upstream_area is None:
             try:
                 upstream_area = self.calc_upstream_area()
@@ -787,103 +1523,105 @@ class Catchment:
                 msg = "Could not calculate upstream area. Flow direction may be uninitialized."
                 with ErrorLogger(logger):
                     raise ValueError(msg)
+
         gauge_str = f" (ID: {gauge_id})" if gauge_id is not None else ""
         logger.info(
             f"Delineating basin {gauge_str} for gauge coordinates {gauge_coords} and reference catchment area {ref_catchment_area} km2."
         )
-        outlet_idx, error, gauge_lat, gauge_lon = self.get_best_gauge_coordinate(
-            upstream_area,
-            gauge_coords,
-            ref_catchment_area,
-            max_distance_cells,
-            max_error,
-            gauge_opti_method,
-            raise_on_fallback=raise_on_fallback,
+        outlet_idx, error, gauge_lat, gauge_lon, distance_error = (
+            self.get_best_gauge_coordinate(
+                upstream_area=upstream_area,
+                gauge_coords=gauge_coords,
+                ref_catchment_area=ref_catchment_area,
+                max_distance_cells=max_distance_cells,
+                max_error=max_error,
+                method=gauge_opti_method,
+                shape_folder=shape_folder,
+                gauge_id=gauge_id,
+                raise_on_fallback=raise_on_fallback,
+            )
         )
         outlet_linear_idx = np.ravel_multi_index(outlet_idx, self._fdir.shape)
 
-        # Now delineate basin using pyflwdir basins()
-        streams_mask = None
-        # if ref_catchment_area is not None:
-        #     low = ref_catchment_area * (1 - error - 1e-6)
-        #     high = ref_catchment_area * (1 + error + 1e-6)
-        #     streams_mask = np.asarray(
-        #         (upstream_area > low) & (upstream_area < high), dtype=bool
-        #     )
-        # else:
-        #     streams_mask = np.asarray(
-        #         self._fdir.stream_order() >= stream_order, dtype=bool
-        #     )
+        if ref_catchment_area is not None and error is not None:
+            streams_mask = (upstream_area > ref_catchment_area * (1 - error - 1e-6)) & (
+                upstream_area < ref_catchment_area * (1 + error + 1e-6)
+            ).astype(bool)
+        else:
+            streams_mask = self._fdir.stream_order() >= stream_order
         try:
             basin = self._fdir.basins(
                 idxs=np.array([outlet_linear_idx], dtype=np.int64),
                 streams=streams_mask,
             )
         except Exception as e:
-            # try computing all basins and pick id at outlet
-            logger.warning(
-                f"basins() with idxs failed: {e}. Trying fallback method to compute all basins and select the one at the outlet."
-            )
+            logger.exception(f"pyflwdir.basins(idxs=...) failed for {outlet_idx}: {e}")
             try:
                 all_basins = self._fdir.basins()
                 basin_id = int(all_basins[outlet_idx])
                 basin = np.where(all_basins == basin_id, basin_id, 0)
             except Exception as e2:
                 logger.exception(f"Fallback basins() also failed: {e2}")
-                return None
+                return gauge
 
         catchment_mask = basin > 0
         logger.debug(
             f"mask statistics: min={basin.min()}, max={basin.max()}, all true? {np.all(catchment_mask)}"
         )
-        # logging and sanity checks
+
+        uparea_at_outlet = (
+            upstream_area[outlet_idx] if upstream_area is not None else np.nan
+        )
         failed_sanity_check = self.delineation_sanity_check(
             catchment_mask,
             basin,
-            upstream_area,
-            outlet_idx,
+            uparea_at_outlet,
             ref_catchment_area,
             max_error,
             raise_on_sanity_check,
             gauge_id,
         )
 
-        # finalize mask and basin fill values
-
         if np.all(catchment_mask):
-            if stream_order > 1:
-                # try again with a lower stream_order (legacy behavior)
+            if stream_order > 1 and ref_catchment_area is None:
                 logger.info("Trying again with stream_order %d", stream_order - 1)
                 return self.delineate_basin(
-                    gauge_coords,
+                    gauge,
                     stream_order=stream_order - 1,
-                    ref_catchment_area=ref_catchment_area,
                     max_distance_cells=max_distance_cells,
                     max_error=max_error,
                     raise_on_sanity_check=raise_on_sanity_check,
                     upstream_area=upstream_area,
-                    gauge_id=gauge_id,
                     mask_catchment=mask_catchment,
+                    save_coords=save_coords,
                     gauge_opti_method=gauge_opti_method,
+                    shape_folder=shape_folder,
+                    raise_on_fallback=raise_on_fallback,
                 )
             logger.error("No catchment found for the given coordinates")
-            return None
+            return gauge
 
         if mask_catchment:
             self.catchment_mask = catchment_mask
             self.basin = basin
-            # set fillvalue for non-basin cells
             try:
                 fillv = self.VARIABLES["basin"]["_FillValue"]
                 self.basin = np.where(self.catchment_mask, self.basin, fillv)
             except Exception:
-                # best-effort: leave basin as-is
                 logger.debug("Could not set basin fill values")
+
         if not failed_sanity_check:
             if save_coords:
                 self.save_coords(gauge_id, gauge_lat, gauge_lon)
-            return gauge_lat, gauge_lon
-        return None
+
+            gauge.update(
+                lat=gauge_lat,
+                lon=gauge_lon,
+                area=uparea_at_outlet,
+                distance_error=distance_error,
+                area_error=error,
+            )
+        return gauge
 
     def save_coords(self, gauge_id, gauge_lat, gauge_lon):
         """Save gauge coordinates."""
@@ -892,30 +1630,38 @@ class Catchment:
         self.gauge_lats.append(gauge_lat)
         self.gauge_lons.append(gauge_lon)
 
+    def write_basin_shape(self, out_dir, gauge_id=None, basin_mask=None):
+        """Write a basin shapefile from a basin mask."""
+        if basin_mask is None:
+            basin_mask = self.catchment_mask
+        if basin_mask is None or not np.any(basin_mask):
+            return
+        try:
+            gdf = _vectorize_mask_to_gdf(
+                basin_mask, self.transform, _shape_crs(self.latlon), value_name="basin"
+            )
+        except Exception as exc:
+            logger.warning("Could not write basin shapefile: %s", exc)
+            return
+        output_dir = Path(out_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        suffix = f"_{gauge_id}" if gauge_id is not None else ""
+        out_path = output_dir / f"basin{suffix}.shp"
+        try:
+            gdf.to_file(out_path)
+            logger.info("Wrote basin shapefile to %s", out_path)
+        except Exception as exc:
+            logger.warning("Failed to write basin shapefile %s: %s", out_path, exc)
+
     def get_upscaling_factor(self, max_resolution=False, l1=False, l2=True):
         """Create upscaling factor."""
-        input_res = self.resolutions.l0_resolution
-        if l1:
-            upscale_res = self.resolutions.l1_resolution
-        elif l2:
-            upscale_res = self.resolutions.l2_resolution
-        else:
-            error_msg = "Either l1 or l2 must be True"
-            with ErrorLogger(logger):
-                raise ValueError(error_msg)
-        upscale_res = self.resolutions.l2_resolution
-        if max_resolution:
-            upscale_res = self.resolutions.get_max_resolution()
-        if upscale_res is None:
-            return 1
-        if int(upscale_res / input_res + 0.5) - (upscale_res / input_res) < 1e6:
-            return int(upscale_res / input_res + 0.5)
-        not_int_multiple_msg = f"Upscaling only works if L1 resolution is integer muplipe of L0 resolution but L1 = {self.resolutions.l1_resolution / input_res:.4f} * L0"
-        raise ValueError(not_int_multiple_msg)
+        return get_upscaling_factor(
+            self.resolutions, max_resolution=max_resolution, l1=l1, l2=l2
+        )
 
     def upscale(self, var):
         """Upscale flow direction to l1_resolution if that is int multipe of data resolution."""
-        factor = self.get_upscaling_factor(l1=True)
+        factor = get_upscaling_factor(self.resolutions, l1=True)
 
         if factor == 1:
             self.get_facc()
@@ -923,7 +1669,7 @@ class Catchment:
         # if we upscale the do_upscale flag should be true
         self.do_upscale = True
         logger.info(
-            f"Upscaling flow direction to {self.resolutions.l1_resolution} with the fator {factor}."
+            f"Upscaling flow direction to {self.resolutions.l1} with the fator {factor}."
         )
         fdir_upscaled, upscaling_indices = self._fdir.upscale(factor, method="ihu")
 
@@ -940,6 +1686,7 @@ class Catchment:
         self.cell_area = (
             None  # reset cell area to be recalculated at new resolution when needed
         )
+        self.is_upscaled = True
 
         if var == "dem":
             lat_size, lon_size = self.input_da.shape
@@ -1037,20 +1784,27 @@ class Catchment:
         mask_file=None,
         frame=1,
         buffer=0,
+        variables=None,
     ):
         """Write the produced data to one or multiple files."""
         data_vars = {}
         out_path = Path(out_path)
         if not out_path.is_dir():
             out_path.mkdir(parents=True, exist_ok=True)
+        selected_vars = _normalize_output_vars(variables)
         lat_slice_idx, lon_slice_idx = None, None
         lat_slice, lon_slice = None, None
         if cut_by_basin:
-            lat_slice_idx, lon_slice_idx = self.cut_to_filled_area(buffer)
+            lat_slice_idx, lon_slice_idx = cut_to_filled_area(
+                ds=self.ds,
+                resolutions=self.resolutions,
+                catchment_mask=self.catchment_mask,
+                buffer=buffer,
+            )
         else:
             lat_slice, lon_slice = slice(84, -56), slice(None)
 
-        for var_name in self.VARIABLES:
+        for var_name in (v for v in self.VARIABLES if v in selected_vars):
             data_var = self.processing_data_variable(
                 var_name,
                 cut_by_basin,
@@ -1068,29 +1822,36 @@ class Catchment:
                     data_var, var_name, out_path, cellsize, format
                 )
         if single_file:
+            if not data_vars:
+                msg = "No data variables available to write."
+                with ErrorLogger(logger):
+                    raise ValueError(msg)
             ds = self.write_basin_id_file(data_vars, frame, out_path)
             # use basin_id to create a mask file
-            self.write_mask_file(ds, mask_file)
-            if self.gauge_ids:
-                logger.info("Writing gauges file.")
-                # create empty ds with mask l0 extend and fill the data_var called data with -9999 values
-                id_da = xr.DataArray(
-                    np.full(ds.basin.shape, -9999, dtype=int),
-                    coords={"lat": ds.lat, "lon": ds.lon},
-                    dims=["lat", "lon"],
-                )
-                id_ds = id_da.to_dataset(name="idgauges")
-                id_ds = write_gauge_id(
-                    ds=id_ds,
-                    id=self.gauge_ids,
-                    lat=self.gauge_lats,
-                    lon=self.gauge_lons,
-                    data_var="idgauges",
-                )
-                write_xarray_to_file(id_ds, out_path / "idgauges.nc", "idgauges")
-                write_xarray_to_file(id_ds, out_path / "idgauges.asc", "idgauges")
+            if "basin" in ds.data_vars:
+                self.write_mask_file(ds, mask_file)
+                if self.gauge_ids:
+                    logger.info("Writing gauges file.")
+                    # create empty ds with mask l0 extend and fill the data_var called data with -9999 values
+                    id_da = xr.DataArray(
+                        np.full(ds.basin.shape, -9999, dtype=int),
+                        coords={"lat": ds.lat, "lon": ds.lon},
+                        dims=["lat", "lon"],
+                    )
+                    id_ds = id_da.to_dataset(name="idgauges")
+                    id_ds = write_gauge_id(
+                        ds=id_ds,
+                        id=self.gauge_ids,
+                        lat=self.gauge_lats,
+                        lon=self.gauge_lons,
+                        data_var="idgauges",
+                    )
+                    write_xarray_to_file(id_ds, out_path / "idgauges.nc", "idgauges")
+                    write_xarray_to_file(id_ds, out_path / "idgauges.asc", "idgauges")
+                else:
+                    logger.info("No gauges to write, skipping gauges file.")
             else:
-                logger.info("No gauges to write, skipping gauges file.")
+                logger.info("No basin variable written; skipping mask/gauge files.")
 
     def write_single_variable_file(
         self, data_var, var_name, out_path, cellsize, format
@@ -1167,7 +1928,7 @@ class Catchment:
 
         lon = self.ds.lon.values
         lat = self.ds.lat.values
-        tol = self.resolutions.l0_resolution / 2 + 1e-9
+        tol = self.resolutions.l0 / 2 + 1e-9
 
         # get lower and upper edges of mask lon/lat
         lon_bounds = generate_bounds(
@@ -1208,7 +1969,7 @@ class Catchment:
 
         def _idx_for(coordinate_values, target_values, name):
             asc_factor = 1 if coordinate_values[1] > coordinate_values[0] else -1
-            target = target_values + self.resolutions.l0_resolution / 2 * asc_factor
+            target = target_values + self.resolutions.l0 / 2 * asc_factor
             idx = int(np.argmin(np.abs(coordinate_values - target)))
             logger.debug(
                 f"_idx_for: {name} target: {target}, L0 coord: {coordinate_values[idx]}, idx: {idx}"
@@ -1250,29 +2011,9 @@ class Catchment:
         if data is None:
             logger.warning(f"No data for {var_name}")
             return None
-        lon = self.ds.lon.data
-        lat = self.ds.lat.data
-        input_res = self.resolutions.l0_resolution
-        if (
-            self.resolutions.l1_resolution is not None
-            and input_res != self.resolutions.l1_resolution
-            and self.do_upscale
-        ):
-            logger.info(
-                f"Creating lon and lat arrays from l1_resolution {self.resolutions.l1_resolution}"
-            )
-            lon = np.arange(
-                lon.min() - input_res / 2 + self.resolutions.l1_resolution / 2,
-                lon.max() + self.resolutions.l1_resolution / 2,
-                self.resolutions.l1_resolution,
-            )
-            lat = np.arange(
-                lat.max() + input_res / 2 - self.resolutions.l1_resolution / 2,
-                lat.min() - self.resolutions.l1_resolution / 2,
-                -self.resolutions.l1_resolution,
-            )
+        lon, lat = self._coords_l1()
         logger.debug(
-            f"lon_min {np.min(lon):.3f}, lon_max {np.max(lon):.3f}, resulution: {self.resolutions.l1_resolution}"
+            f"lon_min {np.min(lon):.3f}, lon_max {np.max(lon):.3f}, resulution: {self.resolutions.l1}"
         )
         logger.debug(f"{var_name} - mean {np.nanmean(data)}, max {np.nanmax(data)}")
         logger.debug(f"Shape {data.shape},  lon {len(lon)}, lat {len(lat)}")
@@ -1375,7 +2116,7 @@ class Catchment:
         so that coarse *edges* equal fine *edges* of the cropped window.
         """
         if factor is None:
-            factor = self.get_upscaling_factor(l2=True)
+            factor = get_upscaling_factor(self.resolutions, l2=True)
         if factor < 1:
             msg = "factor must be >= 1"
             with ErrorLogger(logger):
@@ -1495,7 +2236,7 @@ class Catchment:
             mask_upscaled = None
             if self.do_upscale:
                 mask_upscaled = mask_da
-            elif self.resolutions.l2_resolution is not None:
+            elif self.resolutions.l2 is not None:
                 mask_upscaled = self.upscale_mask_with_correct_coords(mask_da)
 
             if mask_upscaled is not None:
@@ -1524,103 +2265,108 @@ class Catchment:
         self, buffer=0, repeat=False, raise_on_l2_alignment_mismatch=False
     ):
         """Create lat and lon slices to cut the data to the filled area."""
-        logger.info("Cutting to filled area.")
-        # Find the non-zero elements
-        cols = np.any(
-            self.catchment_mask, axis=0
-        )  # Boolean array for columns with any filled cells
-        rows = np.any(
-            self.catchment_mask, axis=1
-        )  # Boolean array for rows with any filled cells
-
-        logger.info(
-            f"shape {np.shape(self.catchment_mask)}  cols: {len(cols)}, rows: {len(rows)}"
-        )
-        logger.info(f"lon {len(self.ds.lon.values)}  lat: {len(self.ds.lat.values)}")
-
-        # Get the indices of the non-zero rows and columns
-        min_row, max_row = np.where(rows)[0][[0, -1]]
-        min_col, max_col = np.where(cols)[0][[0, -1]]
-
-        if buffer > 0:
-            # Add a buffer of buffer cells
-            logger.info(f"Using a min buffer of {buffer}")
-            min_row = max(0, min_row - buffer)
-            min_col = max(0, min_col - buffer)
-            max_row = min(self.catchment_mask.shape[0] - 1, max_row + buffer)
-            max_col = min(self.catchment_mask.shape[1] - 1, max_col + buffer)
-        logger.info(
-            f"L0 initial window (rows, cols): [{min_row}:{max_row}], [{min_col}:{max_col}]"
+        return cut_to_filled_area(
+            ds=self.ds,
+            resolutions=self.resolutions,
+            catchment_mask=self.catchment_mask,
+            buffer=buffer,
+            repeat=repeat,
+            raise_on_l2_alignment_mismatch=raise_on_l2_alignment_mismatch,
         )
 
-        factor = self.get_upscaling_factor(l2=True)
-        if factor > 1:
-            logger.info(
-                f"Regridding to fit coarse grid with res {max([r for r in [self.resolutions.l1_resolution, self.resolutions.l11_resolution, self.resolutions.l2_resolution] if r is not None ])} (factor {factor})"
-            )
 
-            if self.resolutions.l2_file is not None and not repeat:
-                logger.debug(
-                    f"Aligning to L2 grid from file {self.resolutions.l2_file}"
-                )
-                min_row, max_row, min_col, max_col = self.align_bounds_to_l2(
-                    min_row, max_row, min_col, max_col
-                )
-            else:
-                # Calculating min_row/col it needs:
-                #  integer division to get the coarse grid cell containing the min_row/col
-                #  multiply back to get the min_row/col of that coarse grid cell
-                min_row = min_row // factor * factor
-                min_col = min_col // factor * factor
-                #  Calculating max_row/col it needs:
-                #  +1 to include the whole last coarse grid cell
-                max_row = (max_row // factor + 1) * factor
-                max_col = (max_col // factor + 1) * factor
-            # clamp
-            min_row = max(min_row, 0)
-            min_col = max(min_col, 0)
-            max_row = min(max_row, self.catchment_mask.shape[0] - 1)
-            max_col = min(max_col, self.catchment_mask.shape[1] - 1)
-            logger.info(
-                f"After shifting to L2 grid (rows, cols): [{min_row}:{max_row}], [{min_col}:{max_col}]"
-            )
-        # build index slice
-        lat_slice_idx = slice(min_row, max_row)
-        lon_slice_idx = slice(min_col, max_col)
+def cut_to_filled_area(
+    ds,
+    resolutions: Resolution,
+    catchment_mask,
+    buffer=0,
+    repeat=False,
+    raise_on_l2_alignment_mismatch=False,
+):
+    """Create index slices that crop to filled mask cells, with optional coarse alignment."""
+    logger.info("Cutting to filled area.")
+    if catchment_mask is None:
+        msg = "catchment_mask is None."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    if not np.any(catchment_mask):
+        msg = "catchment_mask has no filled cells."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
 
-        # Sanity: cropped shape divisible by factor ---
-        n_lat = lat_slice_idx.stop - lat_slice_idx.start
-        n_lon = lon_slice_idx.stop - lon_slice_idx.start
-        if factor > 1 and ((n_lat % factor) != 0 or (n_lon % factor) != 0):
-            msg = (
-                "Cropped L0 shape "
-                f"({n_lat}, {n_lon}) not divisible by factor={factor}"
-            )
-            if (
-                not repeat
-                and self.resolutions.l2_file is not None
-                and not raise_on_l2_alignment_mismatch
-            ):
-                logger.warning(
-                    f"{msg} after aligning to L2 grid; check l2 file and alignment calculations."
-                )
-                return self.cut_to_filled_area(buffer=buffer, repeat=True)
-            with ErrorLogger(logger):
-                raise AssertionError(msg)
+    cols = np.any(catchment_mask, axis=0)
+    rows = np.any(catchment_mask, axis=1)
+    logger.info(
+        f"shape {np.shape(catchment_mask)}  cols: {len(cols)}, rows: {len(rows)}"
+    )
+    logger.info(f"lon {len(ds.lon.values)}  lat: {len(ds.lat.values)}")
 
-        # # Slice the array to extract the filled part
-        # lon_min, lon_max = (
-        #     np.round(self.ds.lon.values[min_col], 8),
-        #     np.round(self.ds.lon.values[max_col], 8),
-        # )
-        # lat_min, lat_max = (
-        #     np.round(self.ds.lat.values[max_row], 8),
-        #     np.round(self.ds.lat.values[min_row], 8),
-        # )
-        # lat_slice = slice(lat_max, lat_min)
-        # lon_slice = slice(lon_min, lon_max)
-        logger.info(f"lat_slice: {lat_slice_idx}, lon_slice: {lon_slice_idx}")
-        return lat_slice_idx, lon_slice_idx
+    min_row, max_row = np.where(rows)[0][[0, -1]]
+    min_col, max_col = np.where(cols)[0][[0, -1]]
+
+    if buffer > 0:
+        logger.info(f"Using a min buffer of {buffer}")
+        min_row = max(0, min_row - buffer)
+        min_col = max(0, min_col - buffer)
+        max_row = min(catchment_mask.shape[0] - 1, max_row + buffer)
+        max_col = min(catchment_mask.shape[1] - 1, max_col + buffer)
+    logger.info(
+        f"L0 initial window (rows, cols): [{min_row}:{max_row}], [{min_col}:{max_col}]"
+    )
+
+    factor = get_upscaling_factor(resolutions, l2=True)
+    if factor > 1:
+        logger.info(
+            f"Regridding to fit coarse grid with res {max([r for r in [resolutions.l1, resolutions.l11, resolutions.l2] if r is not None])} (factor {factor})"
+        )
+        if resolutions.l2_file is not None and not repeat:
+            logger.debug(f"Aligning to L2 grid from file {resolutions.l2_file}")
+            align_proxy = type("CatchmentAlignProxy", (), {})()
+            align_proxy.ds = ds
+            align_proxy.resolutions = resolutions
+            min_row, max_row, min_col, max_col = Catchment.align_bounds_to_l2(
+                align_proxy, min_row, max_row, min_col, max_col
+            )
+        else:
+            min_row = min_row // factor * factor
+            min_col = min_col // factor * factor
+            max_row = (max_row // factor + 1) * factor
+            max_col = (max_col // factor + 1) * factor
+        min_row = max(min_row, 0)
+        min_col = max(min_col, 0)
+        max_row = min(max_row, catchment_mask.shape[0] - 1)
+        max_col = min(max_col, catchment_mask.shape[1] - 1)
+        logger.info(
+            f"After shifting to L2 grid (rows, cols): [{min_row}:{max_row}], [{min_col}:{max_col}]"
+        )
+
+    lat_slice_idx = slice(min_row, max_row)
+    lon_slice_idx = slice(min_col, max_col)
+    n_lat = lat_slice_idx.stop - lat_slice_idx.start
+    n_lon = lon_slice_idx.stop - lon_slice_idx.start
+    if factor > 1 and ((n_lat % factor) != 0 or (n_lon % factor) != 0):
+        msg = f"Cropped L0 shape ({n_lat}, {n_lon}) not divisible by factor={factor}"
+        if (
+            not repeat
+            and resolutions.l2_file is not None
+            and not raise_on_l2_alignment_mismatch
+        ):
+            logger.warning(
+                f"{msg} after aligning to L2 grid; check l2 file and alignment calculations."
+            )
+            return cut_to_filled_area(
+                ds=ds,
+                resolutions=resolutions,
+                catchment_mask=catchment_mask,
+                buffer=buffer,
+                repeat=True,
+                raise_on_l2_alignment_mismatch=raise_on_l2_alignment_mismatch,
+            )
+        with ErrorLogger(logger):
+            raise AssertionError(msg)
+
+    logger.info(f"lat_slice: {lat_slice_idx}, lon_slice: {lon_slice_idx}")
+    return lat_slice_idx, lon_slice_idx
 
 
 def merge_catchment(path1, path2, out_path):
@@ -1717,13 +2463,18 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
     max_error=0.1,
     gauge_ids=None,
     ncpus=1,
+    output_vars=None,
     gauge_opti_method="basinex",
+    shape_folder=None,
+    gauge_info_csv="gauges_info.csv",
     raise_on_fallback=True,
 ):
     """Create file containing catchment ids, flowdirection and upstream area from dem or flow direction."""
     logger.info(
         f"Creating catchment file for {var_name} using {var} and {ftype} from {input_file}"
     )
+    output_path = Path(output_path)
+    gauge_info_csv = Path(gauge_info_csv)
     if coordinate_slices is None:
         coordinate_slices = {"lat": slice(None, None), "lon": slice(None, None)}
     if _is_list_of_float_tuples(gauge_coords) and len(gauge_coords) == 1:
@@ -1741,6 +2492,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
         with ErrorLogger(logger):
             msg = f"Unexpected value for var={var}, must be 'fdir' or 'dem'"
             raise ValueError(msg)
+    output_vars = _normalize_output_vars(output_vars)
     chunking = available_mem is not None
     with get_xarray_ds_from_file(
         input_file,
@@ -1750,63 +2502,113 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
         available_mem_gib=available_mem,
         chunking=chunking,
     ) as input_ds:
+        coord_slices_default = coordinate_slices.get("lat") == slice(
+            None, None
+        ) and coordinate_slices.get("lon") == slice(None, None)
+        if coord_slices_default and shape_folder:
+            bounds = _shape_bounds_from_folder(shape_folder, gauge_ids, latlon=latlon)
+            if bounds is not None:
+                slices = _slices_from_bounds(bounds, input_ds.lat.data)
+                if slices is not None:
+                    coordinate_slices = slices
         # transform
         transform = get_transformation_matrix_nc(input_ds, var_name)
 
         logger.info(transform)
 
+        def _compute_requested_outputs(catchment):
+            needs_uparea_grid = "uparea_grid" in output_vars
+            needs_upgrid = "upgrid" in output_vars
+            needs_grdare = "grdare" in output_vars
+            needs_basin = "basin" in output_vars
+
+            if resolutions.l1 is not None and upscale:
+                catchment.upscale(var)
+            elif needs_uparea_grid:
+                catchment.get_facc()
+
+            if needs_basin and catchment.basin is None:
+                catchment.get_basins()
+
+            if needs_grdare:
+                catchment.get_grid_area()
+            elif needs_upgrid:
+                catchment.get_upstream_area()
+
         if gauge_coords is None and is_data_global(input_ds, coordinate_slices):
             logger.info("Creating global basin id file...")
-            temp_file1 = "hydro1.nc"
-            global_catchments = Catchment(
-                ds=input_ds,
-                var_name=var_name,
-                var=var,
-                ftype=ftype,
-                transform=transform,
-                latlon=latlon,
-                out_var_name=temp_file1,
-                do_shift=False,
-                resolutions=resolutions,
-                upscale=upscale,
-            )
-            # create a shifted version of the catchment to avoid border effects
-            temp_file2 = "hydro2.nc"
-            global_catchments_shifted = Catchment(
-                ds=input_ds,
-                var_name=var_name,
-                var=var,
-                ftype=ftype,
-                transform=transform,
-                latlon=latlon,
-                out_var_name=temp_file2,
-                do_shift=True,
-                resolutions=resolutions,
-                upscale=upscale,
-            )
-            catchments = [global_catchments, global_catchments_shifted]
+            if "basin" in output_vars:
+                temp_file1 = "hydro1.nc"
+                global_catchments = Catchment(
+                    ds=input_ds,
+                    var_name=var_name,
+                    var=var,
+                    ftype=ftype,
+                    transform=transform,
+                    latlon=latlon,
+                    out_var_name=temp_file1,
+                    do_shift=False,
+                    resolutions=resolutions,
+                    upscale=upscale,
+                )
+                # create a shifted version of the catchment to avoid border effects
+                temp_file2 = "hydro2.nc"
+                global_catchments_shifted = Catchment(
+                    ds=input_ds,
+                    var_name=var_name,
+                    var=var,
+                    ftype=ftype,
+                    transform=transform,
+                    latlon=latlon,
+                    out_var_name=temp_file2,
+                    do_shift=True,
+                    resolutions=resolutions,
+                    upscale=upscale,
+                )
+                catchments = [global_catchments, global_catchments_shifted]
 
-            for c in catchments:
-                if resolutions.l1_resolution is not None and upscale:
-                    c.upscale(var)
-                else:
-                    c.get_facc()
-                c.get_basins()
-                c.get_grid_area()
-                c.get_upstream_area()
-                c.write(output_path, single_file=True, frame=frame, mask_file=mask_file)
-            # add paths to the temp files
-            temp_file1 = Path(output_path, "hydro1.nc")
-            temp_file2 = Path(output_path, "hydro2.nc")
-            logger.info("Merging catchment files")
-            merge_catchment(
-                temp_file1,
-                temp_file2,
-                Path(output_path, "basin_ids.nc"),
-            )
-            # remove the temporary files
-            temp_file1.unlink()
-            temp_file2.unlink()
+                for c in catchments:
+                    _compute_requested_outputs(c)
+                    c.write(
+                        output_path,
+                        single_file=True,
+                        frame=frame,
+                        mask_file=mask_file,
+                        variables=output_vars,
+                    )
+                # add paths to the temp files
+                temp_file1 = Path(output_path, "hydro1.nc")
+                temp_file2 = Path(output_path, "hydro2.nc")
+                logger.info("Merging catchment files")
+                merge_catchment(
+                    temp_file1,
+                    temp_file2,
+                    Path(output_path, "basin_ids.nc"),
+                )
+                # remove the temporary files
+                temp_file1.unlink()
+                temp_file2.unlink()
+            else:
+                global_catchments = Catchment(
+                    ds=input_ds,
+                    var_name=var_name,
+                    var=var,
+                    ftype=ftype,
+                    transform=transform,
+                    latlon=latlon,
+                    out_var_name="basin_ids.nc",
+                    do_shift=False,
+                    resolutions=resolutions,
+                    upscale=upscale,
+                )
+                _compute_requested_outputs(global_catchments)
+                global_catchments.write(
+                    output_path,
+                    single_file=True,
+                    frame=frame,
+                    mask_file=mask_file,
+                    variables=output_vars,
+                )
             return
         input_ds_sliced = input_ds.sel(
             lat=coordinate_slices["lat"], lon=coordinate_slices["lon"]
@@ -1832,21 +2634,65 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                 resolutions=resolutions,
                 upscale=upscale,
             )
-            c.delineate_basin(
-                gauge_coords,
-                ref_catchment_area=ref_catchment_area,
+            single_ref_area = (
+                ref_catchment_area[0]
+                if isinstance(ref_catchment_area, list) and ref_catchment_area
+                else ref_catchment_area
+            )
+            gauge = Gauge(
+                gauge_id=gauge_ids if not isinstance(gauge_ids, list) else gauge_ids[0],
+                lat=gauge_coords[0],
+                lon=gauge_coords[1],
+                area=single_ref_area,
+            )
+            gauge = c.delineate_basin(
+                gauge,
                 max_distance_cells=max_distance_cells,
                 max_error=max_error,
-                gauge_id=gauge_ids if not isinstance(gauge_ids, list) else gauge_ids[0],
                 gauge_opti_method=gauge_opti_method,
+                shape_folder=shape_folder,
                 raise_on_fallback=raise_on_fallback,
             )
-            if resolutions.l1_resolution is not None and upscale:
-                c.upscale(var)
+            l0_shape_gdf = None
+            if upscale and c.catchment_mask is not None:
+                write_gauges_to_csv(
+                    gauge, output_path / f"{gauge_info_csv.stem}_{resolutions.l0}.csv"
+                )
+                try:
+                    l0_shape_gdf = _vectorize_mask_to_gdf(
+                        c.catchment_mask,
+                        c.transform,
+                        _shape_crs(c.latlon),
+                        value_name="basin",
+                    )
+                except Exception as exc:
+                    logger.warning("Could not build L0 basin shape: %s", exc)
             else:
-                c.get_facc()
-            c.get_grid_area()
-            c.get_upstream_area()
+                write_gauges_to_csv(gauge, output_path / gauge_info_csv)
+            c.write_basin_shape(
+                output_path / "shapes",
+                gauge_id=gauge_ids if not isinstance(gauge_ids, list) else gauge_ids[0],
+            )
+
+            _compute_requested_outputs(c)
+            if upscale and l0_shape_gdf is not None and c.gauge_lats:
+                logger.info("Applying L1 correction using L0 basin shape.")
+                new_coords = c.correct_gauge_location_l1_from_shape(
+                    l0_shape_gdf,
+                    (c.gauge_lats[-1], c.gauge_lons[-1]),
+                    max_distance_cells=max_distance_cells,
+                    ref_catchment_area=ref_catchment_area,
+                )
+                if new_coords is not None:
+                    c.update_gauge_coords(
+                        gauge_ids if not isinstance(gauge_ids, list) else gauge_ids[0],
+                        new_coords[0],
+                        new_coords[1],
+                    )
+                    gauge.update(lat=new_coords[0], lon=new_coords[1])
+                write_gauges_to_csv(
+                    gauge, output_path / f"{gauge_info_csv.stem}_{resolutions.l1}.csv"
+                )
             c.write(
                 output_path,
                 single_file=True,
@@ -1854,6 +2700,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                 mask_file=mask_file,
                 frame=frame,
                 buffer=frame,
+                variables=output_vars,
             )
             return
         logger.info("Creating basin id file for region.")
@@ -1870,6 +2717,8 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
             resolutions=resolutions,
             upscale=upscale,
         )
+        gauge_infos = None
+        gauges = []
         if (
             _is_list_of_float_tuples(gauge_coords)
             and isinstance(gauge_ids, list)
@@ -1877,8 +2726,6 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
         ):
             logger.info(f"Creating catchments for gauge coordinates {gauge_coords}")
             upstream_area = c.calc_upstream_area()
-            if c.cell_area is None:
-                c.cell_area = create_cell_area(c.ds).data
 
             lon = get_coord_values(input_ds_sliced, lon=True)
             lat = get_coord_values(input_ds_sliced, lat=True)
@@ -1897,21 +2744,29 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                     )
                     return None
 
-                outlet_idx, error, gauge_lat, gauge_lon = c.get_best_gauge_coordinate(
-                    upstream_area,
-                    gc,
-                    ref_area,
-                    max_distance_cells,
-                    max_error,
-                    method=gauge_opti_method,
-                    raise_on_fallback=raise_on_fallback,
+                outlet_idx, error, gauge_lat, gauge_lon, distance_error = (
+                    c.get_best_gauge_coordinate(
+                        upstream_area=upstream_area,
+                        gauge_coords=gc,
+                        ref_catchment_area=ref_area,
+                        max_distance_cells=max_distance_cells,
+                        max_error=max_error,
+                        method=gauge_opti_method,
+                        shape_folder=shape_folder,
+                        gauge_id=gauge_ids[i],
+                        raise_on_fallback=raise_on_fallback,
+                    )
                 )
                 return {
                     "gauge_id": gauge_ids[i],
                     "gauge_lat": gauge_lat,
                     "gauge_lon": gauge_lon,
+                    "lat_old": gc[0],
+                    "lon_old": gc[1],
+                    "area_old": ref_area,
                     "outlet_idx": outlet_idx,
                     "error": error,
+                    "distance_error": distance_error,
                     "ref_area": ref_area,
                 }
 
@@ -1927,6 +2782,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                 logger.info(
                     f"Found {len(gauge_infos)} valid gauge coordinates inside domain."
                 )
+                shape_dir = Path(output_path) / "shapes"
                 outlet_idxs = [gi["outlet_idx"] for gi in gauge_infos]
                 outlet_linear = np.array(
                     [np.ravel_multi_index(idx, c._fdir.shape) for idx in outlet_idxs],
@@ -1964,6 +2820,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                     with ErrorLogger(logger):
                         raise exc
                 logger.info("Performing sanity checks for all delineated basins.")
+                gauges = []
                 for gi in gauge_infos:
                     outlet_idx = gi["outlet_idx"]
                     basin_id = int(basins[outlet_idx])
@@ -1975,11 +2832,15 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                         )
                         continue
                     catchment_mask = basins == basin_id
+                    uparea_at_outlet = (
+                        upstream_area[outlet_idx]
+                        if upstream_area is not None
+                        else np.nan
+                    )
                     failed = c.delineation_sanity_check(
                         catchment_mask,
                         basins,
-                        upstream_area,
-                        outlet_idx,
+                        uparea_at_outlet,
                         gi["ref_area"],
                         max_error,
                         False,
@@ -1987,13 +2848,86 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                     )
                     if failed:
                         continue
+                    if upscale:
+                        try:
+                            gi["l0_shape_gdf"] = _vectorize_mask_to_gdf(
+                                catchment_mask,
+                                c.transform,
+                                _shape_crs(c.latlon),
+                                value_name="basin",
+                            )
+                        except Exception as exc:
+                            logger.warning(
+                                "Could not build L0 basin shape for gauge %s: %s",
+                                gi["gauge_id"],
+                                exc,
+                            )
+                            gi["l0_shape_gdf"] = None
                     c.save_coords(gi["gauge_id"], gi["gauge_lat"], gi["gauge_lon"])
+                    gauge = Gauge(
+                        gauge_id=gi["gauge_id"],
+                        lat=gi["lat_old"],
+                        lon=gi["lon_old"],
+                        area=gi["area_old"],
+                    )
+                    gauge.update(
+                        lat=gi["gauge_lat"],
+                        lon=gi["gauge_lon"],
+                        area=uparea_at_outlet,
+                        distance_error=gi["distance_error"],
+                        area_error=gi["error"],
+                    )
+                    gauges.append(gauge)
+                    c.write_basin_shape(
+                        shape_dir,
+                        gauge_id=gi["gauge_id"],
+                        basin_mask=catchment_mask,
+                    )
+                if upscale:
+                    write_gauges_to_csv(
+                        gauges,
+                        output_path / f"{gauge_info_csv.stem}_{resolutions.l0}.csv",
+                    )
+                else:
+                    write_gauges_to_csv(gauges, output_path / gauge_info_csv)
 
-        if resolutions.l1_resolution is not None and upscale:
-            c.upscale(var)
-        else:
-            c.get_facc()
-        c.get_basins()
-        c.get_grid_area()
-        c.get_upstream_area()
-        c.write(output_path, single_file=True, mask_file=mask_file, frame=frame)
+        _compute_requested_outputs(c)
+        if upscale and gauges:
+            logger.info("Applying L1 correction for %d gauges.", len(gauge_infos))
+            for gauge in gauges:
+                gi = next(
+                    (
+                        item
+                        for item in gauge_infos
+                        if item["gauge_id"] == gauge.gauge_id
+                    ),
+                    None,
+                )
+                if gi is None:
+                    continue
+                l0_shape_gdf = gi.get("l0_shape_gdf")
+                if l0_shape_gdf is None:
+                    continue
+                new_coords = c.correct_gauge_location_l1_from_shape(
+                    l0_shape_gdf,
+                    (gauge.lat, gauge.lon),
+                    max_distance_cells=max_distance_cells,
+                    ref_catchment_area=gi.get("ref_area"),
+                )
+                if new_coords is not None:
+                    c.update_gauge_coords(
+                        gi["gauge_id"],
+                        new_coords[0],
+                        new_coords[1],
+                    )
+                    gauge.update(lat=new_coords[0], lon=new_coords[1])
+            write_gauges_to_csv(
+                gauges, output_path / f"{gauge_info_csv.stem}_{resolutions.l1}.csv"
+            )
+        c.write(
+            output_path,
+            single_file=True,
+            mask_file=mask_file,
+            frame=frame,
+            variables=output_vars,
+        )

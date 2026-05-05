@@ -1,3 +1,4 @@
+import csv
 import tempfile
 import unittest
 from pathlib import Path
@@ -6,6 +7,7 @@ import numpy as np
 import xarray as xr
 
 from mhm_tools.common.file_handler import get_xarray_ds_from_file
+from mhm_tools.common.utils import distance_100m_units, find_best_gauge_location_by_area
 from mhm_tools.common.xarray_utils import get_coord_key
 from mhm_tools.pre import catchment
 
@@ -13,6 +15,30 @@ HERE = Path(__file__).parent
 
 
 class TestCatchment(unittest.TestCase):
+    def _require_geospatial(self):
+        try:
+            import geopandas  # noqa: F401
+            import rasterio  # noqa: F401
+        except Exception as exc:
+            self.skipTest(f"Geospatial dependencies missing: {exc}")
+
+    def _make_small_catchment(self):
+        lon = np.array([0, 1, 2, 3, 4], dtype=float)
+        lat = np.array([4, 3, 2, 1, 0], dtype=float)
+        data = np.zeros((len(lat), len(lon)), dtype=float)
+        ds = xr.Dataset(
+            {"dem": (["lat", "lon"], data)},
+            coords={"lon": lon, "lat": lat},
+        )
+        return catchment.Catchment(
+            ds,
+            "dem",
+            var="dem",
+            ftype="ldd",
+            transform=(1.0, 0.0, 0.0, 0.0, 1.0, 0.0),
+            latlon=True,
+        )
+
     def _make_small_catchment(self):
         lon = np.array([0, 1, 2, 3, 4], dtype=float)
         lat = np.array([4, 3, 2, 1, 0], dtype=float)
@@ -155,6 +181,53 @@ class TestCatchment(unittest.TestCase):
             output_file = self.output_path / out_var_name
             self.assertTrue(output_file.exists(), f"Failed to create {out_var_name}")
 
+    def test_write_gauge_info_csv(self):
+        out_dir = self.tmp_path / "gauge_csv"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        rows = [
+            {
+                "id": 101,
+                "lon": 10.0,
+                "lat": 50.0,
+                "lon_old": 10.1,
+                "lat_old": 50.1,
+                "distance": 1.25,
+                "area": 1000.0,
+                "old_area": 980.0,
+                "area_error": 0.02,
+            }
+        ]
+        gauge = catchment.Gauge(gauge_id=101, lat=50.0, lon=10.0, area=1000.0)
+        gauge.update(
+            lon=10.1, lat=50.1, distance_error=1.25, area=980.0, area_error=0.02
+        )
+        catchment.write_gauges_to_csv([gauge], out_dir, "gauges_info.csv")
+
+        out_file = out_dir / "gauges_info.csv"
+        self.assertTrue(out_file.exists())
+        with out_file.open("r", encoding="utf-8", newline="") as csv_file:
+            reader = csv.DictReader(csv_file)
+            written_rows = list(reader)
+            self.assertEqual(reader.fieldnames, list(catchment.GAUGE_INFO_COLUMNS))
+        self.assertEqual(len(written_rows), 1)
+        self.assertEqual(written_rows[0]["id"], "101")
+        self.assertAlmostEqual(float(written_rows[0]["distance"]), 1.25)
+
+    def test_write_gauge_info_csv_no_rows(self):
+        out_dir = self.tmp_path / "gauge_csv_empty"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        catchment.write_gauges_to_csv([], out_dir, "gauges_info.csv")
+        self.assertFalse((out_dir / "gauges_info.csv").exists())
+
+    def test_write_basin_shape_outputs_files(self):
+        self._require_geospatial()
+        c = self._make_small_catchment()
+        c.catchment_mask = np.zeros((5, 5), dtype=bool)
+        c.catchment_mask[2:4, 2:4] = True
+        shapes_dir = self.tmp_path / "shapes"
+        c.write_basin_shape(shapes_dir, gauge_id=123)
+        self.assertTrue((shapes_dir / "basin_123.shp").exists())
+
     def test_merge_catchment(self):
         self.test_write()  # Ensure files are written first
 
@@ -166,8 +239,6 @@ class TestCatchment(unittest.TestCase):
         with xr.open_dataset(path2, engine="netcdf4") as ds1:
             lat_key = get_coord_key(ds1, lat=True, raise_exception=False)
             lon_key = get_coord_key(ds1, lon=True, raise_exception=False)
-            # print(ds1[lat_key].shape)
-            # print(ds1[lon_key].shape)
         self.assertTrue(path2.is_file(), "hydro2.nc does not exist.")
 
         catchment.merge_catchment(path1, path2, out_path)
@@ -183,8 +254,8 @@ class TestCatchment(unittest.TestCase):
         l2_path = self.tmp_path / "l2_res_match.nc"
         ds.to_netcdf(l2_path)
 
-        res = catchment.Resolution(l2_resolution=0.5, l2_file=l2_path)
-        self.assertAlmostEqual(res.l2_resolution, 0.5, places=9)
+        res = catchment.Resolution(l2=0.5, l2_file=l2_path)
+        self.assertAlmostEqual(res.l2, 0.5, places=9)
 
     def test_resolution_l2_file_resolution_within_tolerance(self):
         lon = np.array([0.0, 0.5, 1.0])
@@ -196,8 +267,8 @@ class TestCatchment(unittest.TestCase):
         l2_path = self.tmp_path / "l2_res_within_tol.nc"
         ds.to_netcdf(l2_path)
 
-        res = catchment.Resolution(l2_resolution=0.5000005, l2_file=l2_path)
-        self.assertAlmostEqual(res.l2_resolution, 0.5, places=6)
+        res = catchment.Resolution(l2=0.5000005, l2_file=l2_path)
+        self.assertAlmostEqual(res.l2, 0.5, places=6)
 
     def test_resolution_l2_file_resolution_mismatch_raises(self):
         lon = np.array([0.0, 0.5, 1.0])
@@ -210,7 +281,7 @@ class TestCatchment(unittest.TestCase):
         ds.to_netcdf(l2_path)
 
         with self.assertRaises(ValueError):
-            catchment.Resolution(l2_resolution=0.500002, l2_file=l2_path)
+            catchment.Resolution(l2=0.500002, l2_file=l2_path)
 
     def test_find_best_gauge_location_best_candidate(self):
         c = self._make_small_catchment()
@@ -218,24 +289,30 @@ class TestCatchment(unittest.TestCase):
         upstream_area[2, 1] = 100.0
         upstream_area[2, 3] = 105.0
         best_coord_basinex, error_basinex, distance_basinex = (
-            c.find_best_gauge_location(
-                upstream_area,
+            find_best_gauge_location_by_area(
+                ds=c.ds,
+                upstream_area=upstream_area,
                 gauge_coords=(2.0, 2.0),
                 ref_catchment_area=103.0,
+                resolutions=c.resolutions,
                 max_distance_cells=4,
                 max_error=0.05,
                 method="basinex",
                 raise_on_fallback=True,
             )
         )
-        best_coord_burek, error_burek, distance_burek = c.find_best_gauge_location(
-            upstream_area,
-            gauge_coords=(2.0, 2.0),
-            ref_catchment_area=103.0,
-            max_distance_cells=4,
-            max_error=0.05,
-            method="burek",
-            raise_on_fallback=True,
+        best_coord_burek, error_burek, distance_burek = (
+            find_best_gauge_location_by_area(
+                ds=c.ds,
+                upstream_area=upstream_area,
+                gauge_coords=(2.0, 2.0),
+                ref_catchment_area=103.0,
+                resolutions=c.resolutions,
+                max_distance_cells=4,
+                max_error=0.05,
+                method="burek",
+                raise_on_fallback=True,
+            )
         )
         self.assertEqual(best_coord_basinex, (2, 3))
         self.assertLessEqual(error_basinex, 0.05)
@@ -248,24 +325,30 @@ class TestCatchment(unittest.TestCase):
         upstream_area[0, 2] = 98.2
         upstream_area[3, 2] = 102.0
         best_coord_basinex, error_basinex, distance_basinex = (
-            c.find_best_gauge_location(
-                upstream_area,
+            find_best_gauge_location_by_area(
+                ds=c.ds,
+                upstream_area=upstream_area,
                 gauge_coords=(2.0, 2.0),
                 ref_catchment_area=100.0,
+                resolutions=c.resolutions,
                 max_distance_cells=4,
                 max_error=0.05,
                 method="basinex",
                 raise_on_fallback=True,
             )
         )
-        best_coord_burek, error_burek, distance_burek = c.find_best_gauge_location(
-            upstream_area,
-            gauge_coords=(2.0, 2.0),
-            ref_catchment_area=100.0,
-            max_distance_cells=4,
-            max_error=0.05,
-            method="burek",
-            raise_on_fallback=True,
+        best_coord_burek, error_burek, distance_burek = (
+            find_best_gauge_location_by_area(
+                ds=c.ds,
+                upstream_area=upstream_area,
+                gauge_coords=(2.0, 2.0),
+                ref_catchment_area=100.0,
+                resolutions=c.resolutions,
+                max_distance_cells=4,
+                max_error=0.05,
+                method="burek",
+                raise_on_fallback=True,
+            )
         )
         self.assertEqual(best_coord_basinex, best_coord_burek)
         self.assertAlmostEqual(error_basinex, error_burek)
@@ -290,7 +373,7 @@ class TestCatchment(unittest.TestCase):
             transform=(res, 0.0, 0.0, 0.0, res, 0.0),
             latlon=True,
         )
-        d = c._distance_100m_units(1, 0, lat_deg=0.0)
+        d = distance_100m_units(1, 0, l0_resolution=c.resolutions.l0, lat_deg=0.0)
         self.assertGreater(d, 0.90)
         self.assertLess(d, 0.95)
 
@@ -328,8 +411,12 @@ class TestCatchment(unittest.TestCase):
             latlon=True,
         )
 
-        d_small = c_small._distance_100m_units(1, 0, lat_deg=0.0)
-        d_large = c_large._distance_100m_units(1, 0, lat_deg=0.0)
+        d_small = distance_100m_units(
+            1, 0, l0_resolution=c_small.resolutions.l0, lat_deg=0.0
+        )
+        d_large = distance_100m_units(
+            1, 0, l0_resolution=c_large.resolutions.l0, lat_deg=0.0
+        )
         self.assertAlmostEqual(d_large / d_small, 2.0, places=2)
 
     def test_cut_to_filled_area_l2_alignment_mismatch_raises(self):
@@ -357,9 +444,9 @@ class TestCatchment(unittest.TestCase):
         l2_ds.to_netcdf(l2_path)
 
         resolutions = catchment.Resolution(
-            l1_resolution=32,
-            l11_resolution=32,
-            l2_resolution=32,
+            l1=32,
+            l11=32,
+            l2=32,
         )
         transform = catchment.get_transformation_matrix_nc(ds, "dem")
         c = catchment.Catchment(
@@ -407,9 +494,9 @@ class TestCatchment(unittest.TestCase):
         l2_ds.to_netcdf(l2_path)
 
         resolutions = catchment.Resolution(
-            l1_resolution=32,
-            l11_resolution=32,
-            l2_resolution=32,
+            l1=32,
+            l11=32,
+            l2=32,
             l2_file=l2_path,
         )
         transform = catchment.get_transformation_matrix_nc(ds, "dem")
@@ -449,7 +536,7 @@ class TestCatchment(unittest.TestCase):
     REF_AREA = [113.33, 1123.61]  # optional reference area in km2, e.g. 25400
 
     def test_delineate_basin_without_ref(self):
-        """Integration-style test: delineate a basin using gauge coords without providing a ref area."""
+        """Integration-style test: delineate a basin using a Gauge object without a reference area."""
         if (
             not self.FDIR_PATH.exists()
             or self.GAUGE_LAT is None
@@ -477,9 +564,13 @@ class TestCatchment(unittest.TestCase):
             transform=self.transform,
             latlon=True,
         )
-        c.delineate_basin(
-            (self.GAUGE_LAT[1], self.GAUGE_LON[1]), raise_on_sanity_check=False
+        gauge = catchment.Gauge(
+            gauge_id=202,
+            lat=float(self.GAUGE_LAT[1]),
+            lon=float(self.GAUGE_LON[1]),
+            area=None,
         )
+        c.delineate_basin(gauge, raise_on_sanity_check=False)
 
         self.assertIsNotNone(c.basin)
         self.assertTrue(
@@ -488,9 +579,8 @@ class TestCatchment(unittest.TestCase):
         )
 
         # compute area of resulting catchment using create_cell_area
-        cell_area = catchment.create_cell_area(
-            ds, lat_name=lat_key, lon_name=lon_key
-        ).data
+        c.compute_cell_area()
+        cell_area = c.cell_area
         area_km2 = float(np.sum(cell_area[c.catchment_mask]))
         self.assertGreater(area_km2, 0.0)
         rel_diff = abs(area_km2 - float(self.REF_AREA[1])) / float(self.REF_AREA[1])
@@ -504,7 +594,7 @@ class TestCatchment(unittest.TestCase):
         )
 
     def test_delineate_basin_with_ref(self):
-        """Integration-style test: delineate a basin with an explicit reference area and check closeness."""
+        """Integration-style test: delineate a basin with Gauge-provided reference area."""
         if (
             not self.FDIR_PATH.exists()
             or self.GAUGE_LAT is None
@@ -532,12 +622,17 @@ class TestCatchment(unittest.TestCase):
                 transform=self.transform,
                 latlon=True,
             )
+            gauge = catchment.Gauge(
+                gauge_id=101,
+                lat=float(lat),
+                lon=float(lon),
+                area=float(ref_area),
+            )
             c.delineate_basin(
-                (lat, lon),
-                ref_catchment_area=float(ref_area),
+                gauge=gauge,
                 max_distance_cells=10,
                 max_error=0.05,
-                raise_on_sanity_check=False,
+                raise_on_sanity_check=True,
             )
 
             self.assertIsNotNone(c.basin)
@@ -546,9 +641,8 @@ class TestCatchment(unittest.TestCase):
                 "No catchment cells found for provided gauge coordinates and ref area",
             )
 
-            cell_area = catchment.create_cell_area(
-                ds, lat_name=lat_key, lon_name=lon_key
-            ).data
+            c.compute_cell_area()
+            cell_area = c.cell_area
             area_km2 = float(np.sum(cell_area[c.catchment_mask]))
 
             # check that computed area is reasonably close to the reference (5% tolerance)
@@ -568,9 +662,10 @@ class TestCatchment(unittest.TestCase):
             not self.FDIR_PATH.exists()
             or self.GAUGE_LAT is None
             or self.GAUGE_LON is None
+            or self.REF_AREA is None
         ):
             self.skipTest(
-                "Set FDIR_PATH, GAUGE_LAT and GAUGE_LON in this test file to run this integration test."
+                "Set FDIR_PATH, GAUGE_LAT, GAUGE_LON and REF_AREA in this test file to run this integration test."
             )
 
         gauge_ids = [101, 202]
@@ -578,6 +673,7 @@ class TestCatchment(unittest.TestCase):
             (float(self.GAUGE_LAT[0]), float(self.GAUGE_LON[0])),
             (float(self.GAUGE_LAT[1]), float(self.GAUGE_LON[1])),
         ]
+        gauge_areas = [float(self.REF_AREA[0]), float(self.REF_AREA[1])]
 
         with get_xarray_ds_from_file(str(self.FDIR_PATH)) as ds:
             var_name = (
@@ -587,9 +683,7 @@ class TestCatchment(unittest.TestCase):
             )
 
         snapped = []
-        resolutions = catchment.Resolution(
-            l0_resolution=0.001953125, l1_resolution=1 / 32
-        )
+        resolutions = catchment.Resolution(l0=0.001953125, l1=1 / 32)
         for idx, (lat, lon) in enumerate(gauge_coords):
             out_dir = self.tmp_path / f"single_{idx}"
             out_dir.mkdir(parents=True, exist_ok=True)
@@ -608,6 +702,9 @@ class TestCatchment(unittest.TestCase):
                     ftype="d8",
                     gauge_coords=(lat, lon),
                     gauge_ids=[gauge_ids[idx]],
+                    ref_catchment_area=gauge_areas[idx],
+                    max_distance_cells=10,
+                    max_error=0.25,
                     latlon=True,
                     frame=1,
                     resolutions=resolutions,
@@ -634,6 +731,9 @@ class TestCatchment(unittest.TestCase):
             ftype="d8",
             gauge_coords=gauge_coords,
             gauge_ids=gauge_ids,
+            ref_catchment_area=gauge_areas,
+            max_distance_cells=10,
+            max_error=0.25,
             latlon=True,
             frame=1,
             resolutions=resolutions,
@@ -673,9 +773,7 @@ class TestCatchment(unittest.TestCase):
                 else list(ds.data_vars)[0]
             )
 
-        resolutions = catchment.Resolution(
-            l0_resolution=0.001953125, l1_resolution=1 / 32
-        )
+        resolutions = catchment.Resolution(l0=0.001953125, l1=1 / 32)
 
         seq_dir = self.tmp_path / "seq"
         par_dir = self.tmp_path / "par"
@@ -719,4 +817,143 @@ class TestCatchment(unittest.TestCase):
         with xr.open_dataset(seq_path) as seq_ds, xr.open_dataset(par_path) as par_ds:
             np.testing.assert_array_equal(
                 seq_ds["idgauges"].values, par_ds["idgauges"].values
+            )
+
+    def test_shape_comparison_l0(self):
+        self._require_geospatial()
+        if (
+            not self.FDIR_PATH.exists()
+            or self.GAUGE_LAT is None
+            or self.GAUGE_LON is None
+            or self.REF_AREA is None
+        ):
+            self.skipTest(
+                "Set FDIR_PATH, GAUGE_LAT, GAUGE_LON and REF_AREA in this test file to run this integration test."
+            )
+
+        with get_xarray_ds_from_file(str(self.FDIR_PATH)) as ds:
+            var_name = (
+                self.FDIR_VAR
+                if self.FDIR_VAR in ds.data_vars
+                else list(ds.data_vars)[0]
+            )
+            transform = catchment.get_transformation_matrix_nc(ds, var_name)
+            c = catchment.Catchment(
+                ds,
+                var_name,
+                var="fdir",
+                ftype="d8",
+                transform=transform,
+                latlon=True,
+            )
+            gauge = catchment.Gauge(
+                gauge_id=101,
+                lat=float(self.GAUGE_LAT[0]),
+                lon=float(self.GAUGE_LON[0]),
+                area=float(self.REF_AREA[0]),
+            )
+            c.delineate_basin(
+                gauge, raise_on_sanity_check=True, max_distance_cells=10, max_error=0.25
+            )
+            self.assertIsNotNone(c.catchment_mask)
+            l0_shape = catchment._vectorize_mask_to_gdf(
+                c.catchment_mask, c.transform, catchment._shape_crs(c.latlon)
+            )
+            upstream_area = c.calc_upstream_area()
+            result = c.find_best_gauge_location_shape(
+                upstream_area=upstream_area,
+                gauge_coords=(self.GAUGE_LAT[0], self.GAUGE_LON[0]),
+                ref_catchment_area=self.REF_AREA[0],
+                shape_folder=None,
+                gauge_id=None,
+                reference_shape_gdf=l0_shape,
+                max_distance_cells=10,
+            )
+            self.assertIsNotNone(result)
+
+            candidate_idx, _, _ = result
+            linear = np.ravel_multi_index(candidate_idx, c._fdir.shape)
+            basin = c._fdir.basins(idxs=np.array([linear], dtype=np.int64))
+            candidate_mask = basin > 0
+            candidate_gdf = catchment._vectorize_mask_to_gdf(
+                candidate_mask, c.transform, catchment._shape_crs(c.latlon)
+            )
+            iou = catchment._shape_iou(l0_shape, candidate_gdf)
+            self.assertGreaterEqual(iou, 0.7)
+
+    def test_shape_correction_after_upscale(self):
+        self._require_geospatial()
+        if (
+            not self.FDIR_PATH.exists()
+            or self.GAUGE_LAT is None
+            or self.GAUGE_LON is None
+            or self.REF_AREA is None
+        ):
+            self.skipTest(
+                "Set FDIR_PATH, GAUGE_LAT, GAUGE_LON and REF_AREA in this test file to run this integration test."
+            )
+
+        with get_xarray_ds_from_file(str(self.FDIR_PATH)) as ds:
+            var_name = (
+                self.FDIR_VAR
+                if self.FDIR_VAR in ds.data_vars
+                else list(ds.data_vars)[0]
+            )
+            transform = catchment.get_transformation_matrix_nc(ds, var_name)
+            lon_vals = ds.lon.data
+            l0_res = abs(lon_vals[1] - lon_vals[0])
+            resolutions = catchment.Resolution(l1=l0_res * 2)
+            c = catchment.Catchment(
+                ds,
+                var_name,
+                var="fdir",
+                ftype="d8",
+                transform=transform,
+                latlon=True,
+                resolutions=resolutions,
+                upscale=True,
+            )
+            gauge = catchment.Gauge(
+                gauge_id=101,
+                lat=float(self.GAUGE_LAT[0]),
+                lon=float(self.GAUGE_LON[0]),
+                area=float(self.REF_AREA[0]),
+            )
+            c.delineate_basin(
+                gauge, max_distance_cells=10, max_error=0.25, raise_on_sanity_check=True
+            )
+            l0_shape = catchment._vectorize_mask_to_gdf(
+                c.catchment_mask, c.transform, catchment._shape_crs(c.latlon)
+            )
+            c.upscale("fdir")
+            corrected_coords = c.correct_gauge_location_l1_from_shape(
+                l0_shape,
+                (self.GAUGE_LAT[0], self.GAUGE_LON[0]),
+                reference_upstream_area=self.REF_AREA[0],
+            )
+            self.assertIsNotNone(corrected_coords)
+
+            lon_l1, lat_l1 = c._coords_l1()
+            gauge_row = int(np.abs(lat_l1 - float(self.GAUGE_LAT[0])).argmin())
+            gauge_col = int(np.abs(lon_l1 - float(self.GAUGE_LON[0])).argmin())
+            naive_linear = np.ravel_multi_index((gauge_row, gauge_col), c._fdir.shape)
+            naive_basin = c._fdir.basins(idxs=np.array([naive_linear], dtype=np.int64))
+            naive_gdf = catchment._vectorize_mask_to_gdf(
+                naive_basin > 0, c._fdir.transform, catchment._shape_crs(c.latlon)
+            )
+            naive_iou = catchment._shape_iou(l0_shape, naive_gdf)
+
+            corr_row = int(np.abs(lat_l1 - float(corrected_coords[0])).argmin())
+            corr_col = int(np.abs(lon_l1 - float(corrected_coords[1])).argmin())
+            corr_linear = np.ravel_multi_index((corr_row, corr_col), c._fdir.shape)
+            corr_basin = c._fdir.basins(idxs=np.array([corr_linear], dtype=np.int64))
+            corr_gdf = catchment._vectorize_mask_to_gdf(
+                corr_basin > 0, c._fdir.transform, catchment._shape_crs(c.latlon)
+            )
+            corr_iou = catchment._shape_iou(l0_shape, corr_gdf)
+
+            self.assertGreaterEqual(
+                corr_iou,
+                naive_iou,
+                "L1 shape correction did not improve shape agreement.",
             )

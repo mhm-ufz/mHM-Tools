@@ -1,5 +1,6 @@
 """File handling utils."""
 
+import contextlib
 import logging
 from dataclasses import dataclass
 from enum import Enum
@@ -302,7 +303,7 @@ def chunk_dataset(ds, chunk_type, available_mem_gib):
             raise e
 
 
-def get_xarray_ds_from_file(
+def get_xarray_ds_from_file(  # noqa: PLR0912
     file_path,
     var_name=None,
     chunking=False,
@@ -318,13 +319,14 @@ def get_xarray_ds_from_file(
 ):
     """Read file and return xarray dataset."""
     file_path = Path(file_path)
-    logger.info(f"Reading {file_path} to xarray with chunking = {chunking}")
+    logger.debug(f"Reading {file_path} to xarray with chunking = {chunking}")
     ds_out = None
     if not file_path.is_file():
         msg = f"File path does not point to an existing file: {file_path}"
         with ErrorLogger(logger):
             raise ValueError(msg)
-    if file_path.suffix == ".asc":
+    suffix = file_path.suffix.lower()
+    if suffix == ".asc":
         if landcover:
             logger.info("Reading ascii landcover file.")
             ds_out = read_ascii_to_xarray(
@@ -339,14 +341,40 @@ def get_xarray_ds_from_file(
                 var_name=var_name,
             )
         chunk_type = ChunkType.SPACE
-    elif file_path.suffix == ".nc":
+    elif suffix == ".nc":
         ds_out = read_dataset(
             file_path=file_path,
             use_mfdataset=use_mfdataset,
             engine=engine,
         )
+    elif suffix in {".tif", ".tiff"}:
+        import rioxarray as rxr
+
+        da = rxr.open_rasterio(file_path)
+        if var_name is not None:
+            da = da.rename(var_name)
+        else:
+            da.name = "data"
+        if "band" in da.dims and da.sizes.get("band", 0) == 1:
+            da = da.squeeze("band", drop=True)
+        nodata = None
+        with contextlib.suppress(Exception):
+            nodata = da.rio.nodata
+        if nodata is not None:
+            da.attrs.setdefault("nodata_value", nodata)
+            da.attrs.setdefault("_FillValue", nodata)
+        if "x" in da.coords:
+            da["x"].attrs.setdefault("axis", "X")
+        if "y" in da.coords:
+            da["y"].attrs.setdefault("axis", "Y")
+        ds_out = da.to_dataset()
+        if "spatial_ref" in ds_out.coords:
+            ds_out = ds_out.drop_vars("spatial_ref")
     else:
-        msg = f"Reading file types other than asci and netcdf is not implemented. The suffix of the file was: {file_path.suffix}"
+        msg = (
+            "Reading file types other than asci, netcdf, and geotiff is not "
+            f"implemented. The suffix of the file was: {file_path.suffix}"
+        )
         with ErrorLogger(logger):
             raise NotImplementedError(msg)
     lat_key = get_coord_key(ds_out, lat=True, raise_exception=False)
@@ -965,9 +993,17 @@ def get_dataset_from_path(
         return p.is_dir()
 
     if _is_dir_or_list(path):
+        file_list = []
         if not isinstance(path, list):
             path = Path(path)
             file_list = list(path.rglob(file_name))
+        else:
+            path = [Path(p) for p in path]
+            for p in path:
+                if p.is_file():
+                    file_list.append(p)
+                elif p.is_dir():
+                    file_list.extend(list(p.rglob(file_name)))
         if not file_list:
             with ErrorLogger(logger):
                 msg = f"No files found in {path}."

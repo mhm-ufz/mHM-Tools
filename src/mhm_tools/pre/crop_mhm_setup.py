@@ -247,7 +247,9 @@ def crop_file_with_header(ds_in, file_path, output_path, lonslice, latslice):
     logger.debug(f"x: {index_x_min}, {index_x_max}")
     logger.debug(f"y: {index_y_min}, {index_y_max}")
     # write header file
-    header_out_path = output_path / header.name
+    header_out_dir = output_path if output_path.is_dir() else output_path.parent
+    header_out_dir.mkdir(parents=True, exist_ok=True)
+    header_out_path = header_out_dir / header.name
     xll = header_information["xllcorner"] + header_information["cellsize"] * index_x_min
     yll = header_information["yllcorner"] + header_information["cellsize"] * (
         header_information["nrows"] - index_y_max

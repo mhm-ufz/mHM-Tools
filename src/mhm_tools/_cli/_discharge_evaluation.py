@@ -36,10 +36,16 @@ def add_args(parser):
         help=("Variable name of the simulation data."),
     )
     parser.add_argument(
-        "--mrm_restart",
+        "--facc_file",
         required=False,
         default=None,
-        help=("Path to the mrm restart file."),
+        help=("Path to flow-accumulation file used for gauge matching."),
+    )
+    parser.add_argument(
+        "--facc_variable",
+        required=False,
+        default="L11_fAcc",
+        help=("Variable name in --facc_file containing flow accumulation."),
     )
     parser.add_argument(
         "--scc_gauges_file",
@@ -113,19 +119,51 @@ def add_args(parser):
         help=("Minimum number of overlapping years for evaluation."),
     )
     parser.add_argument(
+        "--gauge_location_method",
+        "--gauge-location-method",
+        required=False,
+        default="basinex",
+        choices=["basinex", "burek"],
+        help=("Method used to optimize gauge location for mRM restart matching."),
+    )
+    parser.add_argument(
+        "--gauge_max_distance_cells",
+        "--gauge-max-distance-cells",
+        required=False,
+        default=3,
+        type=int,
+        help=("Maximum number of grid cells gauge location may be shifted."),
+    )
+    parser.add_argument(
+        "--gauge_max_error",
+        "--gauge-max-error",
+        required=False,
+        default=0.1,
+        type=float,
+        help=("Maximum allowed relative catchment-area error (fraction; 0.1 = 10%)."),
+    )
+    parser.add_argument(
+        "--hydrograph_plots",
+        default="tysc",
+        required=False,
+        help="specifies which graphics are generated."
+        "t model timestep, y yearly, s seasonality, p flow duration, c scatter e.g. "
+        "all with out seasonality (advised for performance) = typc",
+    )
+    parser.add_argument(
+        "--use_cached_input_data",
+        action="store_true",
+        dest="use_cached_input_data",
+        required=False,
+        help=(
+            "Use cached input data if available. Otherwise, process the input data from scratch."
+        ),
+    )
+    parser.add_argument(
         "--save_hydrograph",
         help="Set flag if the calculated hydrographs should be saved and not just the metrics calculated.",
         action="store_true",
         required=False,
-    )
-    parser.add_argument(
-        "--overwrite",
-        action="store_true",
-        dest="overwrite",
-        required=False,
-        help=(
-            "Overwrite existing files. Otherwise input data changes might not result in output changes."
-        ),
     )
     parser.add_argument(
         "--only_plot",
@@ -161,7 +199,8 @@ def run(args):
         args.model_data_path,
         args.observed_data_path,
         model_file_name=args.model_file_name,
-        mrm_restart_file=args.mrm_restart,
+        facc_file=args.facc_file,
+        facc_variable=args.facc_variable,
         scc_gauges_file=args.scc_gauges_file,
         output_path=args.output_dir,
         evaluation_gauges=args.evaluation_gauges,
@@ -178,9 +217,13 @@ def run(args):
         or args.n_boostrap_years is None,
         start_date=args.start_date,
         end_date=args.end_date,
-        overwrite=args.overwrite,
+        overwrite=not args.use_cached_input_data,
         only_plot=args.only_plot,
         save_hydrograph=args.save_hydrograph,
         min_overlapping_years=args.min_overlapping_years,
         write_input_data_cache=not args.no_input_data_cache,
+        gauge_location_method=args.gauge_location_method,
+        gauge_max_distance_cells=args.gauge_max_distance_cells,
+        gauge_max_error=args.gauge_max_error,
+        hydrograph_plots=args.hydrograph_plots,
     )

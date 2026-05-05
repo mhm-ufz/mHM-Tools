@@ -8,7 +8,6 @@ import numpy as np
 import xarray as xr
 
 from mhm_tools.common.logger import ErrorLogger
-from mhm_tools.common.xarray_utils import get_dtype
 
 from .constants import NC_ENCODE_DEFAULTS, NO_DATA, WILDCARDS
 
@@ -253,13 +252,14 @@ def _ensure_bounds_exist(ds: xr.Dataset, bounds_dim: str = "bnds") -> None:
         )
 
 
-def sanitize_nc_encoding(ds: "xr.Dataset", encoding: dict) -> dict:
+def sanitize_nc_encoding(ds: "xr.Dataset", encoding: dict) -> dict:  # noqa: PLR0912
     """Return a safe encoding dict and clean ds attrs so netCDF4 won't error."""
     enc_out = {}
     for name in ds.data_vars:
         if name not in encoding:
             continue
         da = ds[name]
+        dtype = np.dtype(da.dtype)
         e = dict(encoding[name])  # shallow copy
 
         # Always keep compression settings
@@ -278,45 +278,68 @@ def sanitize_nc_encoding(ds: "xr.Dataset", encoding: dict) -> dict:
         fv = da.attrs.pop("_FillValue", None)
         # If encoding does not already specify _FillValue, prefer the
         # attribute value (if available) and cast it to the variable dtype.
-        if fv is not None and "_FillValue" not in e and get_dtype(da) != np.bool_:
+        if (
+            fv is not None
+            and "_FillValue" not in e
+            and not np.issubdtype(dtype, np.bool_)
+        ):
             try:
-                e["_FillValue"] = np.array(fv).astype(get_dtype(da)).item()
+                if (
+                    np.issubdtype(dtype, np.unsignedinteger)
+                    and np.asarray(fv).astype(float) < 0
+                ):
+                    e["_FillValue"] = np.iinfo(dtype).max
+                else:
+                    e["_FillValue"] = np.array(fv).astype(dtype).item()
             except Exception:
-                # if casting fails, drop the fill value
-                e.pop("_FillValue", None)
+                if np.issubdtype(dtype, np.unsignedinteger):
+                    e["_FillValue"] = np.iinfo(dtype).max
+                else:
+                    # if casting fails, drop the fill value
+                    e.pop("_FillValue", None)
         # If mv (missing_value) exists and encoding doesn't include it,
         # move it to attrs (ensuring dtype match) — this keeps netCDF CF legacy
         # but avoids placing it into encoding where it can conflict.
         if mv is not None and "missing_value" not in e:
             try:
-                da.attrs["missing_value"] = np.array(mv).astype(get_dtype(da)).item()
+                da.attrs["missing_value"] = np.array(mv).astype(dtype).item()
             except Exception:
                 # drop if cannot cast
                 da.attrs.pop("missing_value", None)
 
-        if get_dtype(da) == np.bool_:
+        if np.issubdtype(dtype, np.bool_):
             # Booleans: do NOT set fill attributes at all
             e.pop("_FillValue", None)
         # Cast _FillValue to the variable dtype if present
         elif "_FillValue" in e:
             try:
-                e["_FillValue"] = np.array(e["_FillValue"]).astype(get_dtype(da)).item()
+                if (
+                    np.issubdtype(dtype, np.unsignedinteger)
+                    and np.asarray(e["_FillValue"]).astype(float) < 0
+                ):
+                    e["_FillValue"] = np.iinfo(dtype).max
+                else:
+                    e["_FillValue"] = np.array(e["_FillValue"]).astype(dtype).item()
             except Exception:
-                # If casting fails, drop it rather than erroring out
-                e.pop("_FillValue", None)
+                if np.issubdtype(dtype, np.unsignedinteger):
+                    e["_FillValue"] = np.iinfo(dtype).max
+                else:
+                    # If casting fails, drop it rather than erroring out
+                    e.pop("_FillValue", None)
             else:
                 if isinstance(e.get("_FillValue"), float) and np.isnan(
                     e.get("_FillValue")
                 ):
                     e.pop("_FillValue", None)
-                if np.issubdtype(get_dtype(da), np.integer):
-                    info = np.iinfo(get_dtype(da))
+                if np.issubdtype(dtype, np.integer):
+                    info = np.iinfo(dtype)
                     if e["_FillValue"] < info.min or e["_FillValue"] > info.max:
-                        if info.min < NO_DATA and info.max > NO_DATA:
-                            e["_FillValue"] = (
-                                np.array(NO_DATA).astype(get_dtype(da)).item()
-                            )
-                        e.pop("_FillValue", None)
+                        if np.issubdtype(dtype, np.unsignedinteger):
+                            e["_FillValue"] = info.max
+                        elif info.min < NO_DATA and info.max > NO_DATA:
+                            e["_FillValue"] = np.array(NO_DATA).astype(dtype).item()
+                        else:
+                            e.pop("_FillValue", None)
 
             # If you *must* also expose 'missing_value' (CF legacy), put it in attrs
             # with matching dtype (commented out by default):
