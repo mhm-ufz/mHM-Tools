@@ -309,7 +309,10 @@ def run(args):
         n_cpus=args.ncpus,
         n_bootstrap_years=args.n_boostrap_years,
         n_bootstrap_selections=args.n_bootstrap_selections,
-        direct_comp=(args.n_bootstrap_selections is None and args.n_boostrap_years is None ) and not (args.global_climate or args.no_direct_comparison),
+        direct_comp=(
+            args.n_bootstrap_selections is None and args.n_boostrap_years is None
+        )
+        and not (args.global_climate or args.no_direct_comparison),
         year_slice=year_slice,
         avaiable_mem=available_mem,
         bias_only=args.bias_only,

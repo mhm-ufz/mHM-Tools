@@ -7,6 +7,7 @@ import numpy as np
 import xarray as xr
 
 from mhm_tools.common.file_handler import get_xarray_ds_from_file
+from mhm_tools.common.utils import distance_100m_units
 from mhm_tools.common.xarray_utils import get_coord_key
 from mhm_tools.pre import catchment
 
@@ -360,7 +361,7 @@ class TestCatchment(unittest.TestCase):
             transform=(res, 0.0, 0.0, 0.0, res, 0.0),
             latlon=True,
         )
-        d = c._distance_100m_units(1, 0, lat_deg=0.0)
+        d = distance_100m_units(1, 0, l0_resolution=c.resolutions.l0, lat_deg=0.0)
         self.assertGreater(d, 0.90)
         self.assertLess(d, 0.95)
 
@@ -398,8 +399,12 @@ class TestCatchment(unittest.TestCase):
             latlon=True,
         )
 
-        d_small = c_small._distance_100m_units(1, 0, lat_deg=0.0)
-        d_large = c_large._distance_100m_units(1, 0, lat_deg=0.0)
+        d_small = distance_100m_units(
+            1, 0, l0_resolution=c_small.resolutions.l0, lat_deg=0.0
+        )
+        d_large = distance_100m_units(
+            1, 0, l0_resolution=c_large.resolutions.l0, lat_deg=0.0
+        )
         self.assertAlmostEqual(d_large / d_small, 2.0, places=2)
 
     def test_cut_to_filled_area_l2_alignment_mismatch_raises(self):
@@ -613,10 +618,10 @@ class TestCatchment(unittest.TestCase):
                 area=float(ref_area),
             )
             c.delineate_basin(
-                gauge,
+                gauge=gauge,
                 max_distance_cells=10,
                 max_error=0.05,
-                raise_on_sanity_check=False,
+                raise_on_sanity_check=True,
             )
 
             self.assertIsNotNone(c.basin)
@@ -837,7 +842,9 @@ class TestCatchment(unittest.TestCase):
                 lon=float(self.GAUGE_LON[0]),
                 area=float(self.REF_AREA[0]),
             )
-            c.delineate_basin(gauge, raise_on_sanity_check=False)
+            c.delineate_basin(
+                gauge, raise_on_sanity_check=True, max_distance_cells=10, max_error=0.25
+            )
             self.assertIsNotNone(c.catchment_mask)
             l0_shape = catchment._vectorize_mask_to_gdf(
                 c.catchment_mask, c.transform, catchment._shape_crs(c.latlon)
@@ -850,6 +857,7 @@ class TestCatchment(unittest.TestCase):
                 shape_folder=None,
                 gauge_id=None,
                 reference_shape_gdf=l0_shape,
+                max_distance_cells=10,
             )
             self.assertIsNotNone(result)
 
@@ -901,7 +909,9 @@ class TestCatchment(unittest.TestCase):
                 lon=float(self.GAUGE_LON[0]),
                 area=float(self.REF_AREA[0]),
             )
-            c.delineate_basin(gauge, raise_on_sanity_check=False)
+            c.delineate_basin(
+                gauge, max_distance_cells=10, max_error=0.25, raise_on_sanity_check=True
+            )
             l0_shape = catchment._vectorize_mask_to_gdf(
                 c.catchment_mask, c.transform, catchment._shape_crs(c.latlon)
             )

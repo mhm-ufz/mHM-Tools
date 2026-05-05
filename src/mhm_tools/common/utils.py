@@ -133,9 +133,7 @@ def coord_to_index(ds, lat, lon):
             f"Mapped longitude {float(lon)} to index {j} with lon_value {lon_vals[j]}"
         )
     if i is None or j is None:
-        msg = (
-            "Could not map given coordinates to valid indices within dataset bounds."
-        )
+        msg = "Could not map given coordinates to valid indices within dataset bounds."
         with ErrorLogger(logger):
             raise ValueError(msg)
     i = int(np.clip(i, 0, len(lat_vals) - 1))
@@ -147,7 +145,7 @@ def coord_to_index(ds, lat, lon):
 def distance_100m_units(di, dj, l0_resolution, lat_deg=None, latlon=False):
     """Convert index deltas to distance in ~100 m units using l0_resolution."""
     res = float(abs(l0_resolution))
-    if latlon:
+    if latlon or lat_deg is not None:
         if lat_deg is None:
             lat_deg = 0.0
         # approximate meters per degree

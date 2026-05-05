@@ -30,7 +30,6 @@ from mhm_tools.common.netcdf import generate_bounds
 from mhm_tools.common.utils import (
     coord_to_index,
     distance_100m_units,
-    find_best_gauge_location,
 )
 from mhm_tools.common.xarray_utils import get_dtype
 from mhm_tools.pre.create_id_gauges import write_gauge_id
@@ -59,6 +58,37 @@ GAUGE_INFO_COLUMNS = (
 OUTPUT_FTYPE = "ldd"
 CUTOFF_THRESHOLD = 175
 # FUNCTIONS
+
+
+def get_upscaling_factor(resolutions, max_resolution=False, l1=False, l2=True):
+    """Compute integer upscaling factor from a Resolution-like object."""
+    input_res = resolutions.l0
+    if input_res is None:
+        msg = "L0 resolution is required to compute upscaling factor."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    if l1:
+        upscale_res = resolutions.l1
+    elif l2:
+        upscale_res = resolutions.l2
+    else:
+        msg = "Either l1 or l2 must be True."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    if max_resolution:
+        upscale_res = resolutions.get_max_resolution()
+    if upscale_res is None:
+        return 1
+    ratio = upscale_res / input_res
+    ratio_round = int(ratio + 0.5)
+    if abs(ratio_round - ratio) < 1e-6:
+        return ratio_round
+    msg = (
+        "Upscaling only works if target resolution is integer multiple of L0 "
+        f"but target/L0 = {ratio:.4f}"
+    )
+    with ErrorLogger(logger):
+        raise ValueError(msg)
 
 
 def _shape_crs(is_latlon):
@@ -413,13 +443,17 @@ class Resolution:
         l2=None,
         l2_file=None,
         l0=None,
+        l0_resolution=None,
+        l1_resolution=None,
+        l11_resolution=None,
+        l2_resolution=None,
         raise_on_missmatch=True,
     ):
         """Initialize the Resolution class."""
-        self.l0 = l0
-        self.l1 = l1
-        self.l11 = l11
-        self.l2 = l2
+        self.l0 = l0 if l0 is not None else l0_resolution
+        self.l1 = l1 if l1 is not None else l1_resolution
+        self.l11 = l11 if l11 is not None else l11_resolution
+        self.l2 = l2 if l2 is not None else l2_resolution
         self.l2_file = l2_file
         if self.l2_file is not None:
             self.l2_file = Path(self.l2_file)
@@ -459,6 +493,42 @@ class Resolution:
 
         self.l11 = self.l11 if self.l11 is not None else self.l1
         self.l2 = self.l2 if self.l2 is not None else self.l1
+
+    @property
+    def l0_resolution(self):
+        """Backward-compatible alias for l0."""
+        return self.l0
+
+    @l0_resolution.setter
+    def l0_resolution(self, value):
+        self.l0 = value
+
+    @property
+    def l1_resolution(self):
+        """Backward-compatible alias for l1."""
+        return self.l1
+
+    @l1_resolution.setter
+    def l1_resolution(self, value):
+        self.l1 = value
+
+    @property
+    def l11_resolution(self):
+        """Backward-compatible alias for l11."""
+        return self.l11
+
+    @l11_resolution.setter
+    def l11_resolution(self, value):
+        self.l11 = value
+
+    @property
+    def l2_resolution(self):
+        """Backward-compatible alias for l2."""
+        return self.l2
+
+    @l2_resolution.setter
+    def l2_resolution(self, value):
+        self.l2 = value
 
     def get_max_resolution(self):
         """Get the maximum resolution."""
@@ -684,26 +754,6 @@ class Catchment:
 
         return i, j
 
-    def _distance_100m_units(self, di, dj, lat_deg=None):
-        """Convert index deltas to distance in ~100 m units using l0_resolution."""
-        res = float(abs(self.resolutions.l0))
-        if self.latlon:
-            if lat_deg is None:
-                lat_deg = 0.0
-            # approximate meters per degree
-            meters_per_deg_lat = 111_132.92
-            dy_m = meters_per_deg_lat * res
-            # Not used since burek assumes square cell sizes:
-            # lat_rad = np.deg2rad(lat_deg)
-            # meters_per_deg_lon = 111_320.0 * np.cos(lat_rad)
-            # dx_m = meters_per_deg_lon * res
-            dx_m = dy_m
-        else:
-            # assume resolution already in meters for projected grids
-            dy_m = res
-            dx_m = res
-        return np.sqrt((di * dy_m) ** 2 + (dj * dx_m) ** 2) / 100.0
-
     def _coords_l1(self):
         """Build L1 coordinate arrays based on the dataset extent and L1 resolution."""
         lon_coords = self.ds.lon.data
@@ -850,6 +900,7 @@ class Catchment:
         reference_shape_gdf=None,
         lat_values=None,
         lon_values=None,
+        limit_by_error=False,
     ):
         """Find best gauge location using shape similarity."""
         if upstream_area is None:
@@ -890,7 +941,11 @@ class Catchment:
             lat_vals=lat_values,
             lon_vals=lon_values,
         )
-        max_cells = int(max(0, round(max_distance_cells)))
+        max_cells = (
+            int(max(0, round(max_distance_cells)))
+            if max_distance_cells is not None
+            else 0
+        )
         row_min = max(0, gauge_row - max_cells)
         row_max = min(len(lat_values) - 1, gauge_row + max_cells)
         col_min = max(0, gauge_col - max_cells)
@@ -902,7 +957,7 @@ class Catchment:
 
         # Limit candidate search to a local neighborhood around the gauge
         sub = upstream_area[row_min : row_max + 1, col_min : col_max + 1]
-        if ref_catchment_area is not None:
+        if ref_catchment_area is not None and limit_by_error:
             candidate_indices = np.where(
                 (sub >= ref_catchment_area * (1 - max_error))
                 & (sub <= ref_catchment_area * (1 + max_error))
@@ -914,15 +969,6 @@ class Catchment:
                 candidate_indices = np.where(np.isfinite(sub))
         else:
             candidate_indices = np.where(np.isfinite(sub))
-
-        # if ref_catchment_area is not None:
-        #     streams_mask = (
-        #         upstream_area > ref_catchment_area * (1 - max_error - 1e-6)
-        #     ) & (
-        #         upstream_area < ref_catchment_area * (1 + max_error + 1e-6)
-        #     ).astype(bool)
-        # else:
-        #     streams_mask = self._fdir.stream_order() >= stream_order
 
         logger.debug(
             "Shape-based candidate count: %d",
@@ -951,8 +997,11 @@ class Catchment:
             )
             shape_overlap_ratio = _shape_iou(reference_shape, gdf)
             upstream_value = upstream_area[row_idx, col_idx]
-            distance_100m = self._distance_100m_units(
-                row_idx - gauge_row, col_idx - gauge_col, lat_deg
+            distance_100m = distance_100m_units(
+                row_idx - gauge_row,
+                col_idx - gauge_col,
+                l0_resolution=self.resolutions.l0,
+                lat_deg=lat_deg,
             )
             if ref_catchment_area:
                 upstream_area_ratio = (
@@ -984,10 +1033,11 @@ class Catchment:
         if best_candidate_index is None:
             logger.warning("No suitable candidate found for shape-based correction.")
             return None
-        distance = self._distance_100m_units(
+        distance = distance_100m_units(
             best_candidate_index[0] - gauge_row,
             best_candidate_index[1] - gauge_col,
-            lat_deg,
+            l0_resolution=self.resolutions.l0,
+            lat_deg=lat_deg,
         )
         area_error = (
             abs(1 - best_candidate_upstream_area / ref_catchment_area)
@@ -1090,8 +1140,11 @@ class Catchment:
                 logger.info(
                     f"Selected outlet candidate {best_coord} with upstream area {upstream_area[best_coord]} km2 (tolerance {error:.3f})"
                 )
-                distanance_100m = self._distance_100m_units(
-                    cand_i[k] - gi, cand_j[k] - gj, lat_deg=lat_deg
+                distanance_100m = distance_100m_units(
+                    cand_i[k] - gi,
+                    cand_j[k] - gj,
+                    l0_resolution=self.resolutions.l0,
+                    lat_deg=lat_deg,
                 )
                 return (
                     best_coord,
@@ -1126,7 +1179,9 @@ class Catchment:
                 cand_j = candidates_indices[1] + j_min
                 di = cand_i - gi
                 dj = cand_j - gj
-                candidates_distance = self._distance_100m_units(di, dj, lat_deg=lat_deg)
+                candidates_distance = distance_100m_units(
+                    di, dj, l0_resolution=self.resolutions.l0, lat_deg=lat_deg
+                )
                 # change error to percent
                 candidates_error = (
                     100 * candidates_error[candidates_indices]
@@ -1163,8 +1218,11 @@ class Catchment:
         logger.info(
             f"The selected outlet candidate is {best_coord} with upstream area {upstream_area[best_coord]} km2 resulting in error {(ref_catchment_area - upstream_area[best_coord]) / ref_catchment_area:.3f}."
         )
-        distance_100m = self._distance_100m_units(
-            best_coord[0] - gi, best_coord[1] - gj, lat_deg=lat_deg
+        distance_100m = distance_100m_units(
+            best_coord[0] - gi,
+            best_coord[1] - gj,
+            l0_resolution=self.resolutions.l0,
+            lat_deg=lat_deg,
         )
         return best_coord, abs(upstream_area[best_coord] - size) / size, distance_100m
 
@@ -1178,6 +1236,7 @@ class Catchment:
         method,
         shape_folder=None,
         gauge_id=None,
+        raise_on_fallback=True,
     ):
         """Get best gauge coordinates given target catchment area."""
         shape_result = None
@@ -1200,19 +1259,28 @@ class Catchment:
                 )
                 shape_result = None
 
-        if ref_catchment_area is not None:
-            if shape_result is not None:
-                outlet_idx, error, distance_error = shape_result
-            elif method != "all":
+        if shape_result is not None:
+            outlet_idx, error, distance_error = shape_result
+            new_lat = float(self.ds.lat.data[outlet_idx[0]])
+            new_lon = float(self.ds.lon.data[outlet_idx[1]])
+            gauge_lat = new_lat
+            gauge_lon = new_lon
+            logger.info(
+                "Moved outlet to %s/%s using shape similarity (distance %.2fkm).",
+                new_lat,
+                new_lon,
+                distance_error / 10,
+            )
+        elif ref_catchment_area is not None:
+            if method != "all":
                 outlet_idx, error, distance_error = self.find_best_gauge_location(
-                    upstream_area,
-                    gauge_coords,
-                    ref_catchment_area,
-                    self.resolutions,
-                    max_distance_cells,
-                    max_error,
+                    upstream_area=upstream_area,
+                    gauge_coords=gauge_coords,
+                    ref_catchment_area=ref_catchment_area,
+                    max_distance_cells=max_distance_cells,
+                    max_error=max_error,
                     method=method,
-                    raise_on_fallback=False,
+                    raise_on_fallback=raise_on_fallback,
                 )
             else:
                 outlet_idx_bx, error_bx, distance_error_bx = (
@@ -1272,19 +1340,6 @@ class Catchment:
             gauge_lon = new_lon
             logger.info(
                 f"Moved outlet {distance_error/10:.2}km shifting latitude {float(gauge_coords[0])} to {new_lat} and longitude {float(gauge_coords[1])} to {new_lon}."
-            )
-
-        elif shape_result is not None:
-            outlet_idx, error, distance_error = shape_result
-            new_lat = float(self.ds.lat.data[outlet_idx[0]])
-            new_lon = float(self.ds.lon.data[outlet_idx[1]])
-            gauge_lat = new_lat
-            gauge_lon = new_lon
-            logger.info(
-                "Moved outlet to %s/%s using shape similarity (distance %.2fkm).",
-                new_lat,
-                new_lon,
-                distance_error / 10,
             )
         else:
             logger.warning(
@@ -1390,6 +1445,7 @@ class Catchment:
         save_coords: Optional[bool] = True,
         gauge_opti_method: Optional[str] = "basinex",
         shape_folder: Optional[str] = None,
+        raise_on_fallback: Optional[bool] = True,
     ):
         """Delineate the basin for a given lat and lon."""
         # Target area in km2 we want to match (can be adjusted/replaced by caller later)
@@ -1415,14 +1471,15 @@ class Catchment:
         )
         outlet_idx, error, gauge_lat, gauge_lon, distance_error = (
             self.get_best_gauge_coordinate(
-                upstream_area,
-                gauge_coords,
-                ref_catchment_area,
-                max_distance_cells,
-                max_error,
-                gauge_opti_method,
+                upstream_area=upstream_area,
+                gauge_coords=gauge_coords,
+                ref_catchment_area=ref_catchment_area,
+                max_distance_cells=max_distance_cells,
+                max_error=max_error,
+                method=gauge_opti_method,
                 shape_folder=shape_folder,
                 gauge_id=gauge_id,
+                raise_on_fallback=raise_on_fallback,
             )
         )
         outlet_linear_idx = np.ravel_multi_index(outlet_idx, self._fdir.shape)
@@ -1480,6 +1537,7 @@ class Catchment:
                     save_coords=save_coords,
                     gauge_opti_method=gauge_opti_method,
                     shape_folder=shape_folder,
+                    raise_on_fallback=raise_on_fallback,
                 )
             logger.error("No catchment found for the given coordinates")
             return gauge
@@ -1538,24 +1596,9 @@ class Catchment:
 
     def get_upscaling_factor(self, max_resolution=False, l1=False, l2=True):
         """Create upscaling factor."""
-        input_res = self.resolutions.l0
-        if l1:
-            upscale_res = self.resolutions.l1
-        elif l2:
-            upscale_res = self.resolutions.l2
-        else:
-            error_msg = "Either l1 or l2 must be True"
-            with ErrorLogger(logger):
-                raise ValueError(error_msg)
-        upscale_res = self.resolutions.l2
-        if max_resolution:
-            upscale_res = self.resolutions.get_max_resolution()
-        if upscale_res is None:
-            return 1
-        if int(upscale_res / input_res + 0.5) - (upscale_res / input_res) < 1e6:
-            return int(upscale_res / input_res + 0.5)
-        not_int_multiple_msg = f"Upscaling only works if L1 resolution is integer muplipe of L0 resolution but L1 = {self.resolutions.l1 / input_res:.4f} * L0"
-        raise ValueError(not_int_multiple_msg)
+        return get_upscaling_factor(
+            self.resolutions, max_resolution=max_resolution, l1=l1, l2=l2
+        )
 
     def upscale(self, var):
         """Upscale flow direction to l1_resolution if that is int multipe of data resolution."""
@@ -1692,7 +1735,12 @@ class Catchment:
         lat_slice_idx, lon_slice_idx = None, None
         lat_slice, lon_slice = None, None
         if cut_by_basin:
-            lat_slice_idx, lon_slice_idx = cut_to_filled_area(ds=self.ds, resolutions=self.resolutions, catchment_mask=self.catchment_mask, buffer=buffer)
+            lat_slice_idx, lon_slice_idx = cut_to_filled_area(
+                ds=self.ds,
+                resolutions=self.resolutions,
+                catchment_mask=self.catchment_mask,
+                buffer=buffer,
+            )
         else:
             lat_slice, lon_slice = slice(84, -56), slice(None)
 
@@ -2157,103 +2205,108 @@ class Catchment:
         self, buffer=0, repeat=False, raise_on_l2_alignment_mismatch=False
     ):
         """Create lat and lon slices to cut the data to the filled area."""
-        logger.info("Cutting to filled area.")
-        # Find the non-zero elements
-        cols = np.any(
-            self.catchment_mask, axis=0
-        )  # Boolean array for columns with any filled cells
-        rows = np.any(
-            self.catchment_mask, axis=1
-        )  # Boolean array for rows with any filled cells
-
-        logger.info(
-            f"shape {np.shape(self.catchment_mask)}  cols: {len(cols)}, rows: {len(rows)}"
-        )
-        logger.info(f"lon {len(self.ds.lon.values)}  lat: {len(self.ds.lat.values)}")
-
-        # Get the indices of the non-zero rows and columns
-        min_row, max_row = np.where(rows)[0][[0, -1]]
-        min_col, max_col = np.where(cols)[0][[0, -1]]
-
-        if buffer > 0:
-            # Add a buffer of buffer cells
-            logger.info(f"Using a min buffer of {buffer}")
-            min_row = max(0, min_row - buffer)
-            min_col = max(0, min_col - buffer)
-            max_row = min(self.catchment_mask.shape[0] - 1, max_row + buffer)
-            max_col = min(self.catchment_mask.shape[1] - 1, max_col + buffer)
-        logger.info(
-            f"L0 initial window (rows, cols): [{min_row}:{max_row}], [{min_col}:{max_col}]"
+        return cut_to_filled_area(
+            ds=self.ds,
+            resolutions=self.resolutions,
+            catchment_mask=self.catchment_mask,
+            buffer=buffer,
+            repeat=repeat,
+            raise_on_l2_alignment_mismatch=raise_on_l2_alignment_mismatch,
         )
 
-        factor = self.get_upscaling_factor(l2=True)
-        if factor > 1:
-            logger.info(
-                f"Regridding to fit coarse grid with res {max([r for r in [self.resolutions.l1, self.resolutions.l11, self.resolutions.l2] if r is not None ])} (factor {factor})"
-            )
 
-            if self.resolutions.l2_file is not None and not repeat:
-                logger.debug(
-                    f"Aligning to L2 grid from file {self.resolutions.l2_file}"
-                )
-                min_row, max_row, min_col, max_col = self.align_bounds_to_l2(
-                    min_row, max_row, min_col, max_col
-                )
-            else:
-                # Calculating min_row/col it needs:
-                #  integer division to get the coarse grid cell containing the min_row/col
-                #  multiply back to get the min_row/col of that coarse grid cell
-                min_row = min_row // factor * factor
-                min_col = min_col // factor * factor
-                #  Calculating max_row/col it needs:
-                #  +1 to include the whole last coarse grid cell
-                max_row = (max_row // factor + 1) * factor
-                max_col = (max_col // factor + 1) * factor
-            # clamp
-            min_row = max(min_row, 0)
-            min_col = max(min_col, 0)
-            max_row = min(max_row, self.catchment_mask.shape[0] - 1)
-            max_col = min(max_col, self.catchment_mask.shape[1] - 1)
-            logger.info(
-                f"After shifting to L2 grid (rows, cols): [{min_row}:{max_row}], [{min_col}:{max_col}]"
-            )
-        # build index slice
-        lat_slice_idx = slice(min_row, max_row)
-        lon_slice_idx = slice(min_col, max_col)
+def cut_to_filled_area(
+    ds,
+    resolutions: Resolution,
+    catchment_mask,
+    buffer=0,
+    repeat=False,
+    raise_on_l2_alignment_mismatch=False,
+):
+    """Create index slices that crop to filled mask cells, with optional coarse alignment."""
+    logger.info("Cutting to filled area.")
+    if catchment_mask is None:
+        msg = "catchment_mask is None."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    if not np.any(catchment_mask):
+        msg = "catchment_mask has no filled cells."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
 
-        # Sanity: cropped shape divisible by factor ---
-        n_lat = lat_slice_idx.stop - lat_slice_idx.start
-        n_lon = lon_slice_idx.stop - lon_slice_idx.start
-        if factor > 1 and ((n_lat % factor) != 0 or (n_lon % factor) != 0):
-            msg = (
-                "Cropped L0 shape "
-                f"({n_lat}, {n_lon}) not divisible by factor={factor}"
-            )
-            if (
-                not repeat
-                and self.resolutions.l2_file is not None
-                and not raise_on_l2_alignment_mismatch
-            ):
-                logger.warning(
-                    f"{msg} after aligning to L2 grid; check l2 file and alignment calculations."
-                )
-                return self.cut_to_filled_area(buffer=buffer, repeat=True)
-            with ErrorLogger(logger):
-                raise AssertionError(msg)
+    cols = np.any(catchment_mask, axis=0)
+    rows = np.any(catchment_mask, axis=1)
+    logger.info(
+        f"shape {np.shape(catchment_mask)}  cols: {len(cols)}, rows: {len(rows)}"
+    )
+    logger.info(f"lon {len(ds.lon.values)}  lat: {len(ds.lat.values)}")
 
-        # # Slice the array to extract the filled part
-        # lon_min, lon_max = (
-        #     np.round(self.ds.lon.values[min_col], 8),
-        #     np.round(self.ds.lon.values[max_col], 8),
-        # )
-        # lat_min, lat_max = (
-        #     np.round(self.ds.lat.values[max_row], 8),
-        #     np.round(self.ds.lat.values[min_row], 8),
-        # )
-        # lat_slice = slice(lat_max, lat_min)
-        # lon_slice = slice(lon_min, lon_max)
-        logger.info(f"lat_slice: {lat_slice_idx}, lon_slice: {lon_slice_idx}")
-        return lat_slice_idx, lon_slice_idx
+    min_row, max_row = np.where(rows)[0][[0, -1]]
+    min_col, max_col = np.where(cols)[0][[0, -1]]
+
+    if buffer > 0:
+        logger.info(f"Using a min buffer of {buffer}")
+        min_row = max(0, min_row - buffer)
+        min_col = max(0, min_col - buffer)
+        max_row = min(catchment_mask.shape[0] - 1, max_row + buffer)
+        max_col = min(catchment_mask.shape[1] - 1, max_col + buffer)
+    logger.info(
+        f"L0 initial window (rows, cols): [{min_row}:{max_row}], [{min_col}:{max_col}]"
+    )
+
+    factor = get_upscaling_factor(resolutions, l2=True)
+    if factor > 1:
+        logger.info(
+            f"Regridding to fit coarse grid with res {max([r for r in [resolutions.l1, resolutions.l11, resolutions.l2] if r is not None])} (factor {factor})"
+        )
+        if resolutions.l2_file is not None and not repeat:
+            logger.debug(f"Aligning to L2 grid from file {resolutions.l2_file}")
+            align_proxy = type("CatchmentAlignProxy", (), {})()
+            align_proxy.ds = ds
+            align_proxy.resolutions = resolutions
+            min_row, max_row, min_col, max_col = Catchment.align_bounds_to_l2(
+                align_proxy, min_row, max_row, min_col, max_col
+            )
+        else:
+            min_row = min_row // factor * factor
+            min_col = min_col // factor * factor
+            max_row = (max_row // factor + 1) * factor
+            max_col = (max_col // factor + 1) * factor
+        min_row = max(min_row, 0)
+        min_col = max(min_col, 0)
+        max_row = min(max_row, catchment_mask.shape[0] - 1)
+        max_col = min(max_col, catchment_mask.shape[1] - 1)
+        logger.info(
+            f"After shifting to L2 grid (rows, cols): [{min_row}:{max_row}], [{min_col}:{max_col}]"
+        )
+
+    lat_slice_idx = slice(min_row, max_row)
+    lon_slice_idx = slice(min_col, max_col)
+    n_lat = lat_slice_idx.stop - lat_slice_idx.start
+    n_lon = lon_slice_idx.stop - lon_slice_idx.start
+    if factor > 1 and ((n_lat % factor) != 0 or (n_lon % factor) != 0):
+        msg = f"Cropped L0 shape ({n_lat}, {n_lon}) not divisible by factor={factor}"
+        if (
+            not repeat
+            and resolutions.l2_file is not None
+            and not raise_on_l2_alignment_mismatch
+        ):
+            logger.warning(
+                f"{msg} after aligning to L2 grid; check l2 file and alignment calculations."
+            )
+            return cut_to_filled_area(
+                ds=ds,
+                resolutions=resolutions,
+                catchment_mask=catchment_mask,
+                buffer=buffer,
+                repeat=True,
+                raise_on_l2_alignment_mismatch=raise_on_l2_alignment_mismatch,
+            )
+        with ErrorLogger(logger):
+            raise AssertionError(msg)
+
+    logger.info(f"lat_slice: {lat_slice_idx}, lon_slice: {lon_slice_idx}")
+    return lat_slice_idx, lon_slice_idx
 
 
 def merge_catchment(path1, path2, out_path):
@@ -2354,6 +2407,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
     gauge_opti_method="basinex",
     shape_folder=None,
     gauge_info_csv="gauges_info.csv",
+    raise_on_fallback=True,
 ):
     """Create file containing catchment ids, flowdirection and upstream area from dem or flow direction."""
     logger.info(
@@ -2537,6 +2591,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                 max_error=max_error,
                 gauge_opti_method=gauge_opti_method,
                 shape_folder=shape_folder,
+                raise_on_fallback=raise_on_fallback,
             )
             l0_shape_gdf = None
             if upscale and c.catchment_mask is not None:
@@ -2633,14 +2688,15 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
 
                 outlet_idx, error, gauge_lat, gauge_lon, distance_error = (
                     c.get_best_gauge_coordinate(
-                        upstream_area,
-                        gc,
-                        ref_area,
-                        max_distance_cells,
-                        max_error,
+                        upstream_area=upstream_area,
+                        gauge_coords=gc,
+                        ref_catchment_area=ref_area,
+                        max_distance_cells=max_distance_cells,
+                        max_error=max_error,
                         method=gauge_opti_method,
                         shape_folder=shape_folder,
                         gauge_id=gauge_ids[i],
+                        raise_on_fallback=raise_on_fallback,
                     )
                 )
                 return {

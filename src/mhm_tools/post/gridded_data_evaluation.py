@@ -226,7 +226,10 @@ def apply_spatial_mask(ds, mask_da):
         mask_2d = mask_2d.isel({dim: 0}, drop=True)
 
     target_coords = {lat_key_mask: ds[lat_key_ds], lon_key_mask: ds[lon_key_ds]}
-    if mask_2d.sizes.get(lat_key_mask, 0) == 0 or mask_2d.sizes.get(lon_key_mask, 0) == 0:
+    if (
+        mask_2d.sizes.get(lat_key_mask, 0) == 0
+        or mask_2d.sizes.get(lon_key_mask, 0) == 0
+    ):
         return ds
     mask_on_ds = mask_2d.interp(target_coords, method="nearest")
     mask_on_ds = mask_on_ds.rename({lat_key_mask: lat_key_ds, lon_key_mask: lon_key_ds})
@@ -389,7 +392,11 @@ def split_file_list(file_list, n_processes):
     """Split a list into sublists."""
     file_list = list(file_list)
     if n_processes > 1:
-        return [subset for subset in (file_list[i::n_processes] for i in range(n_processes)) if subset]
+        return [
+            subset
+            for subset in (file_list[i::n_processes] for i in range(n_processes))
+            if subset
+        ]
     return file_list
 
 
@@ -555,7 +562,9 @@ def plot_single_map(
         if finite_values.size == 0:
             vmin, vmax = 0.0, 1.0
         else:
-            vmin, vmax = float(np.nanmin(finite_values)), float(np.nanmax(finite_values))
+            vmin, vmax = float(np.nanmin(finite_values)), float(
+                np.nanmax(finite_values)
+            )
     if np.isclose(vmax, vmin):
         delta = max(abs(vmax), 1.0) * 0.5
         vmin, vmax = vmin - delta, vmax + delta
@@ -865,7 +874,7 @@ def plot_map_bias_only(
     ref_name,
     output_path,
     overlapping_years=None,
-    total_rel_mean=None
+    total_rel_mean=None,
 ):
     """Create a 3-panel plot with relative mean, mean difference, and climatology."""
     rel_mean = np.where(rel_mean == np.inf, np.nan, rel_mean)
@@ -890,7 +899,9 @@ def plot_map_bias_only(
     im0, bounds0, extend0, ticks0 = plot_single_map(
         ax_rel_mean, rel_mean, mean_diff_1, bounds_type="fixed"
     )
-    ax_rel_mean.set_title(f"a) Relative Mean (median={np.nanmedian(rel_mean):.2f}, mean={total_rel_mean:.2f})")
+    ax_rel_mean.set_title(
+        f"a) Relative Mean (median={np.nanmedian(rel_mean):.2f}, mean={total_rel_mean:.2f})"
+    )
 
     # diff_abs_max = int(round(np.nanmax(np.abs(diff_mean)) + 0.5))
     # if not np.isfinite(diff_abs_max) or diff_abs_max == 0:
@@ -1063,6 +1074,7 @@ def plot_map_global_climate(
     plt.savefig(output_path / file_name, dpi=800)
     logger.info(f"created et_map {output_path / file_name}")
 
+
 @log_errors(raise_exceptions=True)
 def plot_map_global_climate2(
     rel_mean,
@@ -1071,7 +1083,7 @@ def plot_map_global_climate2(
     ref_name,
     output_path,
     overlapping_years=None,
-    total_rel_mean=None
+    total_rel_mean=None,
 ):
     """Create a plot showing relative mean and monthly climatology difference."""
     rel_mean = np.where(rel_mean == np.inf, np.nan, rel_mean)
@@ -1090,7 +1102,9 @@ def plot_map_global_climate2(
     im0, bounds0, extend0, ticks0 = plot_single_map(
         ax_rel_mean, rel_mean, mean_diff_1, bounds_type="fixed"
     )
-    ax_rel_mean.set_title(f"a) Relative Mean (median={np.nanmedian(rel_mean):.2f}, mean={total_rel_mean:.2f})")
+    ax_rel_mean.set_title(
+        f"a) Relative Mean (median={np.nanmedian(rel_mean):.2f}, mean={total_rel_mean:.2f})"
+    )
 
     vmin = np.nanquantile(diff_mean, 0.01)
     vmax = np.nanquantile(diff_mean, 0.99)
@@ -1139,23 +1153,35 @@ def plot_map_global_climate2(
     plt.savefig(output_path / file_name, dpi=800)
     logger.info(f"created et_map {output_path / file_name}")
 
-def create_map_from_output(output_path, input_name, ref_name, bias_only=False, global_climate=False):
+
+def create_map_from_output(
+    output_path, input_name, ref_name, bias_only=False, global_climate=False
+):
     """Read in statistics netcdf and create a map plots from it."""
     file = get_rel_stat_file(output_path, input_name, ref_name)
     logger.info(f"Plotting data from {file}")
     with get_xarray_ds_from_file(file, force_decending_y=True) as ds:
         rel_mean = ds["rel_mean"]
         rel_mean = np.where(rel_mean == np.inf, np.nan, rel_mean)
-        rel_std = ds["rel_std"] if "rel_std" in ds else None
-        rel_std = np.where(rel_std == np.inf, np.nan, rel_std) if rel_std is not None else None
-        spearman = ds["spearman"] if "spearman" in ds else None
+        rel_std = ds.get("rel_std", None)
+        rel_std = (
+            np.where(rel_std == np.inf, np.nan, rel_std)
+            if rel_std is not None
+            else None
+        )
+        spearman = ds.get("spearman", None)
         input_clim = (
             ds[f"{input_name}_clim"] if f"{input_name}_clim" in ds else ds["input_clim"]
         )
         ref_clim = (
             ds[f"{ref_name}_clim"] if f"{ref_name}_clim" in ds else ds["ref_clim"]
         )
-    if rel_std is not None and spearman is not None and not bias_only and not global_climate:
+    if (
+        rel_std is not None
+        and spearman is not None
+        and not bias_only
+        and not global_climate
+    ):
         plot_map(
             rel_std=rel_std,
             rel_mean=rel_mean,
@@ -1173,7 +1199,7 @@ def create_map_from_output(output_path, input_name, ref_name, bias_only=False, g
             input_name=input_name,
             ref_name=ref_name,
             output_path=output_path,
-            total_rel_mean=np.nanmean(input_clim)/np.nanmean(ref_clim)
+            total_rel_mean=np.nanmean(input_clim) / np.nanmean(ref_clim),
         )
     else:
         plot_map_bias_only(
@@ -1183,7 +1209,7 @@ def create_map_from_output(output_path, input_name, ref_name, bias_only=False, g
             input_name=input_name,
             ref_name=ref_name,
             output_path=output_path,
-            total_rel_mean=np.nanmean(input_clim)/np.nanmean(ref_clim),
+            total_rel_mean=np.nanmean(input_clim) / np.nanmean(ref_clim),
         )
 
 
@@ -1608,7 +1634,9 @@ def evaluate_boostraping_stat_files(stat_files, input_name, ref_name):
 
     # Convert the arrays into xarray DataArrays
     mean_da = xr.DataArray(mean, dims=["bootstrap", "lat", "lon"])
-    std_da = xr.DataArray(std, dims=["bootstrap", "lat", "lon"]) if std is not None else None
+    std_da = (
+        xr.DataArray(std, dims=["bootstrap", "lat", "lon"]) if std is not None else None
+    )
     spearman_da = (
         xr.DataArray(spearman, dims=["bootstrap", "lat", "lon"])
         if spearman is not None
@@ -1859,7 +1887,11 @@ def gridded_data_evaluation(
 
     if only_plot and get_rel_stat_file(output_path, input.name, ref.name).is_file():
         create_map_from_output(
-            output_path=output_path, input_name=input.name, ref_name=ref.name, bias_only=bias_only, global_climate=global_climate
+            output_path=output_path,
+            input_name=input.name,
+            ref_name=ref.name,
+            bias_only=bias_only,
+            global_climate=global_climate,
         )
         return
 
@@ -1973,7 +2005,12 @@ def gridded_data_evaluation(
             results = evaluate_boostraping_stat_files(
                 stat_files, input_name=input.name, ref_name=ref.name
             )
-            if "spearman" in results and "rel_std" in results and not bias_only and not global_climate:
+            if (
+                "spearman" in results
+                and "rel_std" in results
+                and not bias_only
+                and not global_climate
+            ):
                 plot_map(
                     **results,
                     output_path=output_path,
@@ -1983,7 +2020,8 @@ def gridded_data_evaluation(
             elif global_climate:
                 plot_map_global_climate2(
                     rel_mean=results["rel_mean"],
-                    diff_mean=np.nanmean(results["input_clim"], axis=0) - np.nanmean(results["ref_clim"], axis=0),
+                    diff_mean=np.nanmean(results["input_clim"], axis=0)
+                    - np.nanmean(results["ref_clim"], axis=0),
                     output_path=output_path,
                     input_name=input.name,
                     ref_name=ref.name,
