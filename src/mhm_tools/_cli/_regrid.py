@@ -13,7 +13,6 @@ def add_args(parser):
 
     """
     optional = parser.add_argument_group("optional arguments")
-    flags = parser.add_argument_group("flags")
     optional.add_argument("--input", required=True, help="Input NetCDF")
     optional.add_argument(
         "--mask",

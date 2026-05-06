@@ -51,13 +51,12 @@ def add_args(parser):
         ),
     )
     optional.add_argument(
-        "--land-mask-variable", "--land_mask_var",
+        "--land-mask-variable",
+        "--land_mask_var",
         dest="land_mask_variable",
         default="land_mask",
         required=False,
-        help=(
-            "variable name in the land mask file containing the land surface mask; "
-        ),
+        help=("variable name in the land mask file containing the land surface mask; "),
     )
     optional.add_argument(
         "-f",

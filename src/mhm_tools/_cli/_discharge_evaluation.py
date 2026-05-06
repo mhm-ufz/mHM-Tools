@@ -38,7 +38,8 @@ def add_args(parser):
         help=("Variable name of the simulation data."),
     )
     optional.add_argument(
-        "--facc-file", "--mrm-restart",
+        "--facc-file",
+        "--mrm-restart",
         dest="facc_file",
         required=False,
         default=None,

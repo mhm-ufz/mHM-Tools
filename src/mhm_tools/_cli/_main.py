@@ -182,7 +182,8 @@ def _get_parser():
     # add logging
     # option 1 explicit log levels by name
     parent_parser.add_argument(
-        "--log-level", "--log_level",
+        "--log-level",
+        "--log_level",
         type=str,
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         default=None,
@@ -204,14 +205,18 @@ def _get_parser():
         "--log-file", "--log_file", type=str, default=None, help="Generate a log file."
     )
     parent_parser.add_argument(
-        "--log-file-level", "--log_file_level",
+        "--log-file-level",
+        "--log_file_level",
         type=str,
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         default=None,
         help="Set log level for the log file. Defaults to console log level.",
     )
     parent_parser.add_argument(
-        "--no-console-output", "--no_console_output", action="store_true", help="Prohibit console output."
+        "--no-console-output",
+        "--no_console_output",
+        action="store_true",
+        help="Prohibit console output.",
     )
 
     # return the parser

@@ -156,9 +156,9 @@ class CreateSubdomainMasks:
                 raise ValueError(msg)
         new_ids = self.read_var(fname=self.ref_file, var_name="basin")
         orig_ids = self.read_var(fname=self.pgb_file, var_name="mask")
-        land_mask = self.read_var(fname=self.land_file, var_name=self.land_mask_variable).astype(
-            bool
-        )
+        land_mask = self.read_var(
+            fname=self.land_file, var_name=self.land_mask_variable
+        ).astype(bool)
         ds_ref_file = get_xarray_ds_from_file(self.ref_file).sel(
             lat=land_mask.lat, lon=land_mask.lon, method="nearest"
         )
@@ -301,7 +301,12 @@ class CreateSubdomainMasks:
 
 @log_arguments()
 def create_subdomain_masks(
-    output_dir, output_file_name, basin_id_file, basin_clusters, land_mask, land_mask_variable
+    output_dir,
+    output_file_name,
+    basin_id_file,
+    basin_clusters,
+    land_mask,
+    land_mask_variable,
 ):
     """Create subdomain masks based on the provided input parameters.
 
