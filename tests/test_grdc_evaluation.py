@@ -184,20 +184,15 @@ class TestQDataToXarray(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             td = Path(td)
 
-            # Prepare a sequenced side_effect for get_xarray_ds_from_file:
-            # call 1: observed_data_path again (observed data)
-            # call 2: model_data_path (sim data)
-            # call 3: facc_file (we won't use; mock get_gauge_coords instead)
-            sequence = [
-                cm_enter(self.obs_ds),
-                cm_enter(self.sim_ds),
-                cm_enter(xr.Dataset()),  # dummy restart
-            ]
-            gi = iter(sequence)
-
             def gxarr_side_effect(path, **kwargs):
-                # Return the next prepared context manager
-                return next(gi)
+                path = Path(path)
+                if path.name == "obs.nc":
+                    return cm_enter(self.obs_ds)
+                if path.name == "sim.nc":
+                    return cm_enter(self.sim_ds)
+                if path.name == "restart.nc":
+                    return cm_enter(xr.Dataset())  # dummy restart
+                raise FileNotFoundError(path)
 
             # Patch pieces that hit filesystem or heavy logic
             with patch.object(
