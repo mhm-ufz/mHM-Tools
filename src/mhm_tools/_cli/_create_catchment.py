@@ -15,15 +15,16 @@ def add_args(parser):
         the main argument parser
     """
     required_args = parser.add_argument_group("required arguments")
+    flags = parser.add_argument_group("flags")
     required_args.add_argument(
         "-i",
-        "--input_file",
+        "--input-file",
         required=True,
         help=("Path to the input file"),
     )
     required_args.add_argument(
         "-o",
-        "--output_path",
+        "--output-path",
         required=True,
         help=(
             "Path to the output file. If a single file is written "
@@ -52,7 +53,7 @@ def add_args(parser):
         help=("ftype of input variable, use 'nextxy', 'ldd' or 'd8'"),
     )
     optional_args.add_argument(
-        "--gauge_coords",
+        "--gauge-coords",
         default=None,
         help=(
             "Gauge coordinates in the form 'lat,lon' or multiple pairs like "
@@ -60,7 +61,7 @@ def add_args(parser):
         ),
     )
     optional_args.add_argument(
-        "--gauges_csv",
+        "--gauges-csv",
         default=None,
         help=(
             "Path to CSV with gauge definitions. Required columns: id, lat, lon. "
@@ -76,14 +77,14 @@ def add_args(parser):
         ),
     )
     optional_args.add_argument(
-        "--l1_resolution",
+        "--l1-resolution",
         required=False,
         type=float,
         default=None,
         help=("""Resolution of the mHM target grid."""),
     )
     optional_args.add_argument(
-        "--l11_resolution",
+        "--l11-resolution",
         required=False,
         type=float,
         default=None,
@@ -92,7 +93,7 @@ def add_args(parser):
         ),
     )
     optional_args.add_argument(
-        "--l2_resolution",
+        "--l2-resolution",
         required=False,
         type=float,
         default=None,
@@ -101,7 +102,7 @@ def add_args(parser):
         ),
     )
     optional_args.add_argument(
-        "--meteo_file",
+        "--meteo-file",
         required=False,
         type=str,
         default=None,
@@ -109,20 +110,20 @@ def add_args(parser):
             """Path to a meteo file to extract the l2 resolution from. Overwrites the l2_resolution argument."""
         ),
     )
-    optional_args.add_argument(
+    flags.add_argument(
         "--upscale",
         action="store_true",
         default=False,
         help=("""Upscale to l1_resolution."""),
     )
     optional_args.add_argument(
-        "--coords_are_not_latlon",
+        "--coords-are-not-latlon",
         action="store_false",
         default=True,
         help=("""Set this flag if the coordinates are in m not degree."""),
     )
     optional_args.add_argument(
-        "--mask_file",
+        "--mask-file",
         default="mask.nc",
         help=(
             "Path where to save the mask file. Default saving to output_path/mask.nc"
@@ -147,7 +148,7 @@ def add_args(parser):
         ),
     )
     optional_args.add_argument(
-        "--ref_catchment_area",
+        "--ref-catchment-area",
         default=None,
         help=(
             "Reference catchment area in km^2 used to identify the outlet cell near the gauge coordinates. "
@@ -155,19 +156,19 @@ def add_args(parser):
         ),
     )
     optional_args.add_argument(
-        "--max_distance_cells",
+        "--max-distance-cells",
         default=5,
         type=int,
         help=("""Maximum distance in cells to search for the outlet cell."""),
     )
     optional_args.add_argument(
-        "--max_error",
+        "--max-error",
         default=0.05,
         type=float,
         help=("""Maximum error allowed when searching for the outlet cell."""),
     )
     optional_args.add_argument(
-        "--shape_folder",
+        "--shape-folder",
         default=None,
         help=(
             "Folder with gauge shapefiles used for shape-based outlet matching. "
@@ -175,7 +176,7 @@ def add_args(parser):
         ),
     )
     optional_args.add_argument(
-        "--gauge_id",
+        "--gauge-id",
         required=False,
         default=None,
         help=(
@@ -184,7 +185,7 @@ def add_args(parser):
         ),
     )
     optional_args.add_argument(
-        "--gauge_info_csv",
+        "--gauge-info-csv",
         required=False,
         default="gauges_info.csv",
         help=(
@@ -193,7 +194,7 @@ def add_args(parser):
         ),
     )
     optional_args.add_argument(
-        "--output_vars",
+        "--output-vars",
         default="all",
         help=(
             "Comma-separated list of variables to output in the catchment file. "
@@ -202,7 +203,7 @@ def add_args(parser):
         ),
     )
     optional_args.add_argument(
-        "--available_mem",
+        "--available-mem",
         required=False,
         type=str,
         default=None,

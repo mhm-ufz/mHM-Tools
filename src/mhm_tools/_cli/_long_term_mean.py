@@ -12,6 +12,7 @@ def add_args(parser):
     parser.epilog = "See mhm-tools documentation for detailed examples and usage."
 
     required = parser.add_argument_group("required arguments")
+    flags = parser.add_argument_group("flags")
     required.add_argument(
         "-i",
         "--in-dir",
@@ -50,13 +51,13 @@ def add_args(parser):
             "Aggregation type: 'intensive' (mean) or 'extensive' (sum). Default is 'intensive'."
         ),
     )
-    optional.add_argument(
+    flags.add_argument(
         "--aggregation",
         dest="aggregate",
         action="store_true",
         help="Perform temporal aggregation before merging.",
     )
-    optional.add_argument(
+    flags.add_argument(
         "--keep-temporal-files",
         action="store_true",
         help="Keep intermediate temporal files generated during processing.",
@@ -66,7 +67,7 @@ def add_args(parser):
         default="long_term_mean.nc",
         help="Name of the output NetCDF file.",
     )
-    optional.add_argument(
+    flags.add_argument(
         "--crop",
         action="store_true",
         help="Crop the data to the specified geographic bounds.",

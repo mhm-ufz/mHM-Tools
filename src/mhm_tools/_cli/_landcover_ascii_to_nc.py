@@ -15,40 +15,42 @@ def add_args(parser: ArgumentParser) -> None:
     parser : argparse.ArgumentParser
         The subparser for this command.
     """
-    parser.add_argument(
+    optional = parser.add_argument_group("optional arguments")
+    flags = parser.add_argument_group("flags")
+    optional.add_argument(
         "-i",
-        "--input_nml",
+        "--input-nml",
         required=True,
         help=(
             "Path to the mHM .nml file that lists landcover scenes "
             "(the namelist containing LCoverfName, LCoverYearStart, etc.)."
         ),
     )
-    parser.add_argument(
+    optional.add_argument(
         "-o",
         "--output",
         required=True,
         help="Output NetCDF file path.",
     )
-    parser.add_argument(
+    flags.add_argument(
         "-f",
-        "--varname_eq_in_filename",
+        "--varname-eq-in-filename",
         action="store_true",
         help=(
             "Set the output variable name to the stem of the FIRST input "
             "ASCII file (i.e. derived from the namelist entry)."
         ),
     )
-    parser.add_argument(
+    flags.add_argument(
         "-F",
-        "--varname_eq_out_filename",
+        "--varname-eq-out-filename",
         action="store_true",
         help=(
             "Set the output variable name to the stem of the output file "
             "path provided via --output."
         ),
     )
-    parser.add_argument(
+    optional.add_argument(
         "-v",
         "--varname",
         default=None,
@@ -58,8 +60,8 @@ def add_args(parser: ArgumentParser) -> None:
             "-F/--varname_eq_out_filename is given."
         ),
     )
-    parser.add_argument(
-        "--normalize_latlon",
+    flags.add_argument(
+        "--normalize-latlon",
         action="store_true",
         help="Normalize coordinate names/ordering to lat/lon.",
     )

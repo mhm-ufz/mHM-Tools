@@ -52,56 +52,57 @@ def add_args(parser):
     required = parser.add_argument_group("required arguments")
     optional = parser.add_argument_group("optional arguments")
 
+    flags = parser.add_argument_group("flags")
     required.add_argument(
-        "--input_path",
+        "--input-path",
         help="Path to the input file. Or the dictionary containing all folders with input files.",
         required=True,
     )
     required.add_argument(
-        "--output_dir", help="Path for the output dir.", required=True
+        "--output-dir", help="Path for the output dir.", required=True
     )
 
     optional.add_argument(
-        "--input_variable", help="Variable name in the input file.", required=False
+        "--input-variable", help="Variable name in the input file.", required=False
     )
     optional.add_argument(
-        "--input_name",
+        "--input-name",
         help="Name of the input dataset.",
         default="input",
         required=False,
     )
     optional.add_argument(
-        "--input_factor",
+        "--input-factor",
         help="Unit Conversion factor. e.g. MJ/kg/day:  1 / 2.47 = 0.4",
         default=1,
         required=False,
     )
     optional.add_argument(
-        "--ref_path",
+        "--ref-path",
         help="Path to the first reference file. Or the dictionary containing all folders with ref files.",
         default=None,
         required=False,
     )
     optional.add_argument(
-        "--ref_name",
+        "--ref-name",
         help="Name of the reference dataset.",
         default="ref",
         required=False,
     )
     optional.add_argument(
-        "--ref_factor",
+        "--ref-factor",
         help="Unit Conversion factor. e.g. MJ/kg/day:  1 / 2.47 = 0.4",
         default=1,
         required=False,
     )
     optional.add_argument(
-        "--ref_variable",
+        "--ref-variable",
         help="Variable name in the first reference file.",
         default=None,
         required=False,
     )
-    optional.add_argument(
-        "--only_plot",
+    flags.add_argument(
+        "--only-plot",
         help="Set Flag if existing output file should be used to create plot",
         action="store_true",
         required=False,
@@ -113,7 +114,7 @@ def add_args(parser):
         help=("""coordinates in the form of 'lon_min,lon_max,lat_min,lat_max'"""),
     )
     optional.add_argument(
-        "--mask_file",
+        "--mask-file",
         required=False,
         default=None,
         help=(
@@ -128,59 +129,59 @@ def add_args(parser):
         help=("Number of CPUs to use"),
     )
     optional.add_argument(
-        "--n_boostrap_years",
+        "--n-boostrap-years",
         required=False,
         default=None,
         type=int,
         help=("""Number of years to draw for each boostrap experiment"""),
     )
     optional.add_argument(
-        "--n_bootstrap_selections",
+        "--n-bootstrap-selections",
         required=False,
         default=None,
         type=int,
         help=("Number of boostrap experiments"),
     )
-    optional.add_argument(
-        "--no_direct_comparison",
+    flags.add_argument(
+        "--no-direct-comparison",
         action="store_true",
         required=False,
         help=("Use statistics and do not compare timeseries directly. Needs ref_path."),
     )
     optional.add_argument(
-        "--start_year",
+        "--start-year",
         required=False,
         default=None,
         type=int,
         help=("""First year allowed in the analysis."""),
     )
     optional.add_argument(
-        "--end_year",
+        "--end-year",
         required=False,
         default=None,
         type=int,
         help=("Lates year that is allowed in the analysis."),
     )
     optional.add_argument(
-        "--available_mem",
+        "--available-mem",
         required=False,
         default=None,
         help=("""Available memory per cpu in Gb or Mb (default Gb)"""),
     )
     optional.add_argument(
-        "--input_file_name",
+        "--input-file-name",
         required=False,
         default="*.*",
         help="Input file name. E.g. '*.nc' to copy only nc files or 'pre*' to copy only precipitation files. If the file has a header in it's folder the header is reproduced regardless of wether nor not it fits the filename.",
     )
     optional.add_argument(
-        "--ref_file_name",
+        "--ref-file-name",
         required=False,
         default="*.*",
         help="Ref file name. E.g. '*.nc' to copy only nc files or 'pre*' to copy only precipitation files. If the file has a header in it's folder the header is reproduced regardless of wether nor not it fits the filename.",
     )
     optional.add_argument(
-        "--lon_min",
+        "--lon-min",
         required=False,
         default=None,
         type=float,
@@ -189,7 +190,7 @@ def add_args(parser):
     )
 
     optional.add_argument(
-        "--lon_max",
+        "--lon-max",
         required=False,
         default=None,
         type=float,
@@ -198,7 +199,7 @@ def add_args(parser):
     )
 
     optional.add_argument(
-        "--lat_min",
+        "--lat-min",
         required=False,
         default=None,
         type=float,
@@ -207,28 +208,28 @@ def add_args(parser):
     )
 
     optional.add_argument(
-        "--lat_max",
+        "--lat-max",
         required=False,
         default=None,
         type=float,
         help=("""maximum latitude of the target grid
             required unless --mask_file is provided"""),
     )
-    optional.add_argument(
-        "--bias_only",
+    flags.add_argument(
+        "--bias-only",
         action="store_true",
         required=False,
         help=("Only compare bias spatially and for the seasonality."),
     )
-    optional.add_argument(
-        "--global_climate",
+    flags.add_argument(
+        "--global-climate",
         action="store_true",
         required=False,
         help=("Only compare bias and temporal standard deviation (no Spearman)."),
     )
 
     optional.add_argument(
-        "--resample_time_to",
+        "--resample-time-to",
         required=False,
         default=None,
         type=normalize_target_frequency,

@@ -16,21 +16,17 @@ def add_args(parser):
         the main argument parser
     """
     required_args = parser.add_argument_group("required arguments")
+    optional = parser.add_argument_group("optional arguments")
     required_args.add_argument(
         "-o",
-        "--output_dir",
+        "--output-dir",
+        required=True,
         help=("specify an output directory path"),
     )
     required_args.add_argument(
-        "-f",
-        "--output_file_name",
-        help=(
-            "stem for the output filename, which is then numbered for the different basin clusters"
-        ),
-    )
-    required_args.add_argument(
         "-b",
-        "--basin_ids",
+        "--basin-ids",
+        required=True,
         help=(
             "file containing unique basin ids for all river basins; "
             "variable 'basin' must exist in file"
@@ -38,8 +34,9 @@ def add_args(parser):
     )
     required_args.add_argument(
         "-c",
-        "--basin_clusters",
+        "--basin-clusters",
         default=None,
+        required=True,
         help=(
             "file containing clustered basin ids (e.g., PGB reference); "
             "variable 'mask' must exist"
@@ -47,10 +44,27 @@ def add_args(parser):
     )
     required_args.add_argument(
         "-l",
-        "--land_mask",
+        "--land-mask",
+        required=True,
         help=(
-            "file containing land surface mask at target resolution; "
-            "variable 'land_mask' must exist"
+            "file containing land surface mask at target resolution default variable name is 'land_mask'"
+        ),
+    )
+    optional.add_argument(
+        "--land-mask-variable",
+        "--land_mask_var",
+        dest="land_mask_variable",
+        default="land_mask",
+        required=False,
+        help=("variable name in the land mask file containing the land surface mask; "),
+    )
+    optional.add_argument(
+        "-f",
+        "--output-file-name",
+        default="subdomain_masks",
+        required=False,
+        help=(
+            "stem for the output filename, which is then numbered for the different basin clusters"
         ),
     )
 
@@ -71,4 +85,5 @@ def run(args):
         basin_id_file=args.basin_ids,
         basin_clusters=args.basin_clusters,
         land_mask=args.land_mask,
+        land_mask_variable=args.land_mask_variable,
     )
