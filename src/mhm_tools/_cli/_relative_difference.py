@@ -83,50 +83,52 @@ def add_args(parser):
     )
 
     # optional arguments
-    parser.add_argument(
+    optional = parser.add_argument_group("optional arguments")
+    flags = parser.add_argument_group("flags")
+    flags.add_argument(
         "--save-ncfile",
         action="store_true",
         help="if set to True, stores a NetCDF file in --output_dir",
     )
-    parser.add_argument(
+    optional.add_argument(
         "--output-file-nc",
         default="relative_difference.nc",
         help="If --save_ncfile, gives the name of the file to be saved in --output_dir",
     )
-    parser.add_argument(
+    optional.add_argument(
         "--colorbar-label",
         default="Difference (model - reference)",
         help="Label for the plot colorbar",
     )
-    parser.add_argument(
+    optional.add_argument(
         "--title",
         default="Mean Difference (model - reference)",
         help="Title for the plot",
     )
-    parser.add_argument(
+    optional.add_argument(
         "--x-min", type=str2float, default=None, help="Minimum longitude to display"
     )
-    parser.add_argument(
+    optional.add_argument(
         "--x-max", type=str2float, default=None, help="Maximum longitude to display"
     )
-    parser.add_argument(
+    optional.add_argument(
         "--y-min", type=str2float, default=None, help="Minimum latitude to display"
     )
-    parser.add_argument(
+    optional.add_argument(
         "--y-max", type=str2float, default=None, help="Maximum latitude to display"
     )
-    parser.add_argument(
+    optional.add_argument(
         "--cmap",
         default="coolwarm",
         help="Matplotlib colormap name to use for the difference plot",
     )
-    parser.add_argument(
+    optional.add_argument(
         "--vmin",
         type=str2float,
         default=None,
         help="Minimum data value for colormap (optional)",
     )
-    parser.add_argument(
+    optional.add_argument(
         "--vmax",
         type=str2float,
         default=None,

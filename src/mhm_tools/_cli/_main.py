@@ -152,32 +152,32 @@ def _get_parser():
 
     add_command_from_module(subparsers, "hydrograph", _hydrograph)
     add_command_from_module(
-        subparsers, "gridded_data_evaluation", _gridded_data_evaluation
+        subparsers, "gridded-data-evaluation", _gridded_data_evaluation
     )
-    add_command_from_module(subparsers, "discharge_evaluation", _discharge_evaluation)
+    add_command_from_module(subparsers, "discharge-evaluation", _discharge_evaluation)
     add_command_from_module(subparsers, "latlon", _latlon)
-    add_command_from_module(subparsers, "converter_nc_ascii", _file_converter)
-    add_command_from_module(subparsers, "landcover_ascii_to_nc", _landcover_ascii_to_nc)
-    add_command_from_module(subparsers, "merge_files", _merge)
-    add_command_from_module(subparsers, "regrid_file", _regrid)
-    add_command_from_module(subparsers, "create_catchment", _create_catchment)
-    add_command_from_module(subparsers, "crop_mhm_setup", _crop_mhm_setup)
-    add_command_from_module(subparsers, "prepare_mhm_forcings", _prepare_mhm_forcings)
-    add_command_from_module(subparsers, "calculate_pet", _calculate_pet)
-    add_command_from_module(subparsers, "create_id_gauges", _create_idgauges)
+    add_command_from_module(subparsers, "converter-nc-ascii", _file_converter)
+    add_command_from_module(subparsers, "landcover-ascii-to-nc", _landcover_ascii_to_nc)
+    add_command_from_module(subparsers, "merge-files", _merge)
+    add_command_from_module(subparsers, "regrid-file", _regrid)
+    add_command_from_module(subparsers, "create-catchment", _create_catchment)
+    add_command_from_module(subparsers, "crop-mhm-setup", _crop_mhm_setup)
+    add_command_from_module(subparsers, "prepare-mhm-forcings", _prepare_mhm_forcings)
+    add_command_from_module(subparsers, "calculate-pet", _calculate_pet)
+    add_command_from_module(subparsers, "create-id-gauges", _create_idgauges)
     add_command_from_module(
-        subparsers, "create_subdomain_masks", _create_subdomain_masks
+        subparsers, "create-subdomain-masks", _create_subdomain_masks
     )
     add_command_from_module(
-        subparsers, "create_mhm_restart_file", _create_mhm_restart_file
+        subparsers, "create-mhm-restart-file", _create_mhm_restart_file
     )
-    add_command_from_module(subparsers, "long_term_mean", _long_term_mean)
+    add_command_from_module(subparsers, "long-term-mean", _long_term_mean)
     add_command_from_module(subparsers, "difference", _difference)
-    add_command_from_module(subparsers, "relative_difference", _relative_difference)
+    add_command_from_module(subparsers, "relative-difference", _relative_difference)
     add_command_from_module(subparsers, "ratio", _ratio)
-    add_command_from_module(subparsers, "taylor_diagram", _taylor_diagram)
-    add_command_from_module(subparsers, "2d_map", _2d_map)
-    add_command_from_module(subparsers, "link_folder_tree", _link_folder_tree)
+    add_command_from_module(subparsers, "taylor-diagram", _taylor_diagram)
+    add_command_from_module(subparsers, "2d-map", _2d_map)
+    add_command_from_module(subparsers, "link-folder-tree", _link_folder_tree)
 
     # add logging
     # option 1 explicit log levels by name

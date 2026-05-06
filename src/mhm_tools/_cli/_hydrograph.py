@@ -9,7 +9,9 @@ def add_args(parser):
     parser : argparse.ArgumentParser
         the main argument parser
     """
-    parser.add_argument(
+    optional = parser.add_argument_group("optional arguments")
+    flags = parser.add_argument_group("flags")
+    optional.add_argument(
         "-i",
         "--input",
         dest="in_dir",
@@ -17,7 +19,7 @@ def add_args(parser):
         nargs="+",
         help="One or more input paths (mhm output directories)",
     )
-    parser.add_argument(
+    optional.add_argument(
         "-o",
         "--output",
         dest="out_file",
@@ -26,7 +28,7 @@ def add_args(parser):
         help="The name of the output file. By default `hydrograph.png` If it contains no '/' the file is written to "
         "the input path.",
     )
-    parser.add_argument(
+    optional.add_argument(
         "-t",
         "--title",
         dest="title",
@@ -34,7 +36,7 @@ def add_args(parser):
         default="",
         help="The title for the hydrograph",
     )
-    parser.add_argument(
+    flags.add_argument(
         "-s",
         "--show",
         dest="show",
@@ -53,7 +55,7 @@ def add_args(parser):
     #     "all with out seasonality (advised for performance) = 11 "
     #     "default is all",
     # )
-    parser.add_argument(
+    optional.add_argument(
         "-p",
         "--plots",
         default="tyspc",
@@ -63,14 +65,14 @@ def add_args(parser):
         "t model timestep, y yearly, s seasonality, p flow duration, c scatter e.g. "
         "all with out seasonality (advised for performance) = typc",
     )
-    parser.add_argument(
+    optional.add_argument(
         "--prec",
         dest="prec",
         required=False,
         default="",
         help="path of the precipiation file",
     )
-    parser.add_argument(
+    optional.add_argument(
         "--name",
         dest="sim_names",
         required=False,

@@ -27,29 +27,31 @@ def add_args(parser):
         required=True,
         help="Path of the directory where the new domain setup should be saved.",
     )
-    parser.add_argument(
+    optional = parser.add_argument_group("optional arguments")
+    flags = parser.add_argument_group("flags")
+    optional.add_argument(
         "-f",
         "--file-name",
         required=False,
         default="*.*",
         help="Input file name. E.g. '*.nc' to copy only nc files or 'pre*' to copy only precipitation files. If the file has a header in it's folder the header is reproduced regardless of wether nor not it fits the filename.",
     )
-    parser.add_argument(
+    optional.add_argument(
         "-m",
         "--mask-file",
         required=False,
         help="The path the the mask file. Mask files can be created using the catchment command with the --mask flag.",
     )
-    parser.add_argument(
+    optional.add_argument(
         "--l1-resolution",
         required=False,
         help=("Hydrological resolution. Without it no latlon file can be produced."),
     )
-    parser.add_argument(
+    optional.add_argument(
         "--l11-resolution",
         required=False,
     )
-    parser.add_argument(
+    optional.add_argument(
         "--crs",
         default=None,
         help=(
@@ -57,21 +59,21 @@ def add_args(parser):
             "If not given, headers will be interpreted as given in lat-lon ('epsg:4326')."
         ),
     )
-    parser.add_argument(
+    optional.add_argument(
         "--ncpus",
         required=False,
         default=1,
         type=int,
         help=("Number of cores used for parallelisation."),
     )
-    parser.add_argument(
+    optional.add_argument(
         "--folder-recursion-depth",
         required=False,
         default=5,
         type=int,
         help=("How deep in the folder structure should the file be searched?"),
     )
-    parser.add_argument(
+    optional.add_argument(
         "--lonlatbox",
         required=False,
         default=None,
@@ -80,18 +82,18 @@ def add_args(parser):
             required unless --mask_file is provided"""
         ),
     )
-    parser.add_argument(
+    optional.add_argument(
         "--available-mem",
         required=False,
         default="5",
         help=("""Available memory per cpu in Gb or Mb (default Gb)"""),
     )
-    parser.add_argument(
+    flags.add_argument(
         "--chunking",
         action="store_true",
         help=("""Set if each dataset should be read as a chunked dask array."""),
     )
-    parser.add_argument(
+    optional.add_argument(
         "--lon-min",
         required=False,
         default=None,
@@ -99,7 +101,7 @@ def add_args(parser):
             required unless --mask_file is provided"""),
     )
 
-    parser.add_argument(
+    optional.add_argument(
         "--lon-max",
         required=False,
         default=None,
@@ -107,7 +109,7 @@ def add_args(parser):
             required unless --mask_file is provided"""),
     )
 
-    parser.add_argument(
+    optional.add_argument(
         "--lat-min",
         required=False,
         default=None,
@@ -115,21 +117,21 @@ def add_args(parser):
             required unless --mask_file is provided"""),
     )
 
-    parser.add_argument(
+    optional.add_argument(
         "--lat-max",
         required=False,
         default=None,
         help=("""maximum latitude of the target grid
             required unless --mask_file is provided"""),
     )
-    parser.add_argument(
+    flags.add_argument(
         "--create-header",
         required=False,
         default=False,
         action="store_true",
         help=("""Force creation of header file for all files."""),
     )
-    parser.add_argument(
+    flags.add_argument(
         "--no-cropping",
         required=False,
         default=False,
@@ -138,16 +140,16 @@ def add_args(parser):
             """Do not crop the file but only writes a header. This activate the forced header creation and only header functions."""
         ),
     )
-    parser.add_argument(
+    optional.add_argument(
         "--output-var",
         required=False,
         default=None,
         help=("""Output variable name for single data var"""),
     )
-    parser.add_argument(
+    optional.add_argument(
         "--mask-var", required=False, default="mask", help=("""Mask variable name.""")
     )
-    parser.add_argument(
+    optional.add_argument(
         "--lat-order",
         required=False,
         default="decreasing",
@@ -155,7 +157,7 @@ def add_args(parser):
             """Direction of the latitude coordinate. Will be forced if input has coordinates."""
         ),
     )
-    parser.add_argument(
+    optional.add_argument(
         "--output-suffix",
         required=False,
         default=None,

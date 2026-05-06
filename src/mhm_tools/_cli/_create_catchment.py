@@ -15,6 +15,7 @@ def add_args(parser):
         the main argument parser
     """
     required_args = parser.add_argument_group("required arguments")
+    flags = parser.add_argument_group("flags")
     required_args.add_argument(
         "-i",
         "--input-file",
@@ -109,7 +110,7 @@ def add_args(parser):
             """Path to a meteo file to extract the l2 resolution from. Overwrites the l2_resolution argument."""
         ),
     )
-    optional_args.add_argument(
+    flags.add_argument(
         "--upscale",
         action="store_true",
         default=False,

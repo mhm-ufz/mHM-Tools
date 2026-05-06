@@ -62,16 +62,18 @@ def add_args(parser):
     )
 
     # Optional arguments
-    parser.add_argument(
+    optional = parser.add_argument_group("optional arguments")
+    flags = parser.add_argument_group("flags")
+    optional.add_argument(
         "--title", default="Taylor Diagram", help="Title for the Taylor diagram."
     )
-    parser.add_argument(
+    optional.add_argument(
         "--ref-label", default="Ref", help="Label to use for the reference data."
     )
-    parser.add_argument(
+    optional.add_argument(
         "--mod-labels", nargs="+", help="List of labels to use for the model data."
     )
-    parser.add_argument(
+    flags.add_argument(
         "--normalize",
         action="store_true",
         help="If set, normalize standard deviations by the reference std.",

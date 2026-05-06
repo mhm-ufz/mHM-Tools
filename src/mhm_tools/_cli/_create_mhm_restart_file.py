@@ -30,7 +30,9 @@ def add_args(parser):
         required=True,
         help=("output directory as path"),
     )
-    parser.add_argument(
+    optional = parser.add_argument_group("optional arguments")
+    flags = parser.add_argument_group("flags")
+    optional.add_argument(
         "-w",
         "--work-dir",
         required=False,
@@ -53,7 +55,7 @@ def add_args(parser):
         help=("""resolution of the mHM target grid in degrees"""),
     )
 
-    parser.add_argument(
+    optional.add_argument(
         "--lonlatbox",
         required=False,
         default=None,
@@ -62,7 +64,7 @@ def add_args(parser):
             required unless --mask_file is provided"""
         ),
     )
-    parser.add_argument(
+    optional.add_argument(
         "--lon-min",
         required=False,
         default=None,
@@ -70,7 +72,7 @@ def add_args(parser):
             required unless --mask_file is provided"""),
     )
 
-    parser.add_argument(
+    optional.add_argument(
         "--lon-max",
         required=False,
         default=None,
@@ -78,7 +80,7 @@ def add_args(parser):
             required unless --mask_file is provided"""),
     )
 
-    parser.add_argument(
+    optional.add_argument(
         "--lat-min",
         required=False,
         default=None,
@@ -86,7 +88,7 @@ def add_args(parser):
             required unless --mask_file is provided"""),
     )
 
-    parser.add_argument(
+    optional.add_argument(
         "--lat-max",
         required=False,
         default=None,
@@ -94,7 +96,7 @@ def add_args(parser):
             required unless --mask_file is provided"""),
     )
 
-    parser.add_argument(
+    optional.add_argument(
         "--l0-resolution",
         required=False,
         default=None,
@@ -102,7 +104,7 @@ def add_args(parser):
             required unless --mask_file is provided"""),
     )
 
-    parser.add_argument(
+    optional.add_argument(
         "--mask-file",
         required=False,
         default=None,
@@ -112,7 +114,7 @@ def add_args(parser):
         ),
     )
 
-    parser.add_argument(
+    optional.add_argument(
         "-p",
         "--mpr-params",
         required=False,
@@ -120,7 +122,7 @@ def add_args(parser):
         help=("path to the mPR parameters file"),
     )
 
-    parser.add_argument(
+    optional.add_argument(
         "--l1-increment",
         required=True,
         default=20,
@@ -128,7 +130,7 @@ def add_args(parser):
         help=("integer increment for l1 resolution in number of cells"),
     )
 
-    parser.add_argument(
+    flags.add_argument(
         "--process-domain-as-one",
         dest="run_on_whole_domain",
         action="store_true",
@@ -137,7 +139,7 @@ def add_args(parser):
             "do not split the grid into subgrids based on the provided basin clusters. Make sure your is not to large to run in one piece"
         ),
     )
-    parser.add_argument(
+    flags.add_argument(
         "--use-split-grids",
         dest="use_split_grids",
         action="store_true",
@@ -146,7 +148,7 @@ def add_args(parser):
             "ommit the split files step and run MPR on existing split grids. Make sure the files cover the correct domain area"
         ),
     )
-    parser.add_argument(
+    flags.add_argument(
         "--no-merge",
         dest="no_merge",
         action="store_true",
@@ -154,7 +156,7 @@ def add_args(parser):
         help=("do not merge the restart files after splitting the grid"),
     )
 
-    parser.add_argument(
+    flags.add_argument(
         "--merge-only",
         dest="merge_only",
         action="store_true",
@@ -163,7 +165,7 @@ def add_args(parser):
             "only merge the allready exisiting restart files, do not create new ones; opposite of --no_merge"
         ),
     )
-    parser.add_argument(
+    flags.add_argument(
         "-c",
         "--clean-up",
         dest="clean_up",
@@ -171,18 +173,18 @@ def add_args(parser):
         required=False,
         help=("delete the temporary files created during the process"),
     )
-    parser.add_argument(
+    optional.add_argument(
         "--ncpus",
         default=1,
         type=int,
         help=("Number of CPUs to use"),
     )
-    parser.add_argument(
+    optional.add_argument(
         "--mpr-packages",
         default=None,
         help=("Packages to load using module load before running mPR"),
     )
-    parser.add_argument(
+    optional.add_argument(
         "--land-mask-file",
         default=None,
         help=("Land mask file to use for l1 resolution"),

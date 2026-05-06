@@ -46,7 +46,9 @@ def add_args(parser):
         ),
     )
     # optional
-    parser.add_argument(
+    optional = parser.add_argument_group("optional arguments")
+    flags = parser.add_argument_group("flags")
+    optional.add_argument(
         "-R",
         "--level11",
         default=None,
@@ -56,7 +58,7 @@ def add_args(parser):
             "or a cell-size to determine information from level-0."
         ),
     )
-    parser.add_argument(
+    optional.add_argument(
         "-M",
         "--level2",
         default=None,
@@ -67,7 +69,7 @@ def add_args(parser):
             "Level-2 information wont be written to the latlon file."
         ),
     )
-    parser.add_argument(
+    optional.add_argument(
         "-c",
         "--crs",
         default=None,
@@ -76,13 +78,13 @@ def add_args(parser):
             "If not given, headers will be interpreted as given in lat-lon ('epsg:4326')."
         ),
     )
-    parser.add_argument(
+    optional.add_argument(
         "-d",
         "--dtype",
         default="f4",
         help="Data type for the latlon file and headers.",
     )
-    parser.add_argument(
+    optional.add_argument(
         "-x",
         "--compression",
         type=int,
@@ -90,38 +92,38 @@ def add_args(parser):
         default=9,
         help="Compression level for the NetCDF file.",
     )
-    parser.add_argument(
+    flags.add_argument(
         "-b",
         "--add-bounds",
         action="store_true",
         default=False,
         help="Add bounds to the NetCDF axis.",
     )
-    parser.add_argument(
+    optional.add_argument(
         "--h0",
         "--write-header-l0",
         default=None,
         help="Write the level-0 header to a given file path.",
     )
-    parser.add_argument(
+    optional.add_argument(
         "--h1",
         "--write-header-l1",
         default=None,
         help="Write the level-1 header to a given file path.",
     )
-    parser.add_argument(
+    optional.add_argument(
         "--h11",
         "--write-header-l11",
         default=None,
         help="Write the level-11 header to a given file path.",
     )
-    parser.add_argument(
+    optional.add_argument(
         "--h2",
         "--write-header-l2",
         default=None,
         help="Write the level-2 header to a given file path.",
     )
-    parser.add_argument(
+    optional.add_argument(
         "-o",
         "--out-file",
         default="latlon.nc",

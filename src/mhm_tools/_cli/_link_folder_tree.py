@@ -15,22 +15,24 @@ def add_args(parser):
         the main argument parser
 
     """
-    parser.add_argument(
+    optional = parser.add_argument_group("optional arguments")
+    flags = parser.add_argument_group("flags")
+    optional.add_argument(
         "-i",
         "--input-dir",
         required=True,
         help="The path to input directory.",
     )
-    parser.add_argument(
+    optional.add_argument(
         "-o", "--output-dir", required=True, help="The name of the output directory."
     )
-    parser.add_argument(
+    flags.add_argument(
         "--overwrite",
         action="store_true",
         required=False,
         help=("overwrite existing symlinks"),
     )
-    parser.add_argument(
+    optional.add_argument(
         "--file-name",
         type=str,
         default="*.*",

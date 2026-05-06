@@ -20,21 +20,23 @@ def add_args(parser):
     parser : argparse.ArgumentParser
         the main argument parser
     """
-    parser.add_argument(
+    optional = parser.add_argument_group("optional arguments")
+    flags = parser.add_argument_group("flags")
+    optional.add_argument(
         "-r",
         "--return-period",
         type=float,
         default=1.5,
         help="The return period of the flood in years.",
     )
-    parser.add_argument(
+    flags.add_argument(
         "-w",
         "--wetted-perimeter",
         action="store_true",
         default=False,
         help="Additionally estimate the wetted perimeter.",
     )
-    parser.add_argument(
+    optional.add_argument(
         "-v",
         "--var",
         default="Qrouted",

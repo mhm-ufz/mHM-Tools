@@ -52,6 +52,7 @@ def add_args(parser):
     required = parser.add_argument_group("required arguments")
     optional = parser.add_argument_group("optional arguments")
 
+    flags = parser.add_argument_group("flags")
     required.add_argument(
         "--input-path",
         help="Path to the input file. Or the dictionary containing all folders with input files.",
@@ -100,7 +101,7 @@ def add_args(parser):
         default=None,
         required=False,
     )
-    optional.add_argument(
+    flags.add_argument(
         "--only-plot",
         help="Set Flag if existing output file should be used to create plot",
         action="store_true",
@@ -141,7 +142,7 @@ def add_args(parser):
         type=int,
         help=("Number of boostrap experiments"),
     )
-    optional.add_argument(
+    flags.add_argument(
         "--no-direct-comparison",
         action="store_true",
         required=False,
@@ -214,13 +215,13 @@ def add_args(parser):
         help=("""maximum latitude of the target grid
             required unless --mask_file is provided"""),
     )
-    optional.add_argument(
+    flags.add_argument(
         "--bias-only",
         action="store_true",
         required=False,
         help=("Only compare bias spatially and for the seasonality."),
     )
-    optional.add_argument(
+    flags.add_argument(
         "--global-climate",
         action="store_true",
         required=False,
