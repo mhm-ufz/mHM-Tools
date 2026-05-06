@@ -26,39 +26,39 @@ def add_args(parser):
     # Required arguments
     req = parser.add_argument_group("required arguments")
     req.add_argument(
-        "--ref_input_dir", required=True, help="Directory with reference NetCDF file"
+        "--ref-input-dir", required=True, help="Directory with reference NetCDF file"
     )
     req.add_argument(
-        "--reference_pattern",
+        "--reference-pattern",
         required=True,
         help="Filename pattern for reference NetCDF file",
     )
     req.add_argument(
-        "--ref_var", required=True, help="Variable name in reference dataset"
+        "--ref-var", required=True, help="Variable name in reference dataset"
     )
     req.add_argument(
-        "--mod_input_dirs",
+        "--mod-input-dirs",
         nargs="+",
         required=True,
         help="List of directories containing model NetCDF files (one per model)",
     )
     req.add_argument(
-        "--model_patterns",
+        "--model-patterns",
         nargs="+",
         required=True,
         help="List of filename patterns for model NetCDF files (one per model)",
     )
     req.add_argument(
-        "--mod_vars",
+        "--mod-vars",
         nargs="+",
         required=True,
         help="List of variable names in model datasets (one per model)",
     )
     req.add_argument(
-        "-o", "--output_dir", required=True, help="Directory to save the output PNG."
+        "-o", "--output-dir", required=True, help="Directory to save the output PNG."
     )
     req.add_argument(
-        "--output_file", required=True, help="Filename for the output PNG."
+        "--output-file", required=True, help="Filename for the output PNG."
     )
 
     # Optional arguments
@@ -66,10 +66,10 @@ def add_args(parser):
         "--title", default="Taylor Diagram", help="Title for the Taylor diagram."
     )
     parser.add_argument(
-        "--ref_label", default="Ref", help="Label to use for the reference data."
+        "--ref-label", default="Ref", help="Label to use for the reference data."
     )
     parser.add_argument(
-        "--mod_labels", nargs="+", help="List of labels to use for the model data."
+        "--mod-labels", nargs="+", help="List of labels to use for the model data."
     )
     parser.add_argument(
         "--normalize",

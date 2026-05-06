@@ -26,14 +26,14 @@ def add_args(parser):
     )
     parser.add_argument(
         "-f",
-        "--varname_eq_in_filename",
+        "--varname-eq-in-filename",
         required=False,
         action="store_true",
         help="The name of the variable is set to the input file name.",
     )
     parser.add_argument(
         "-F",
-        "--varname_eq_out_filename",
+        "--varname-eq-out-filename",
         required=False,
         action="store_true",
         help="The name of the variable is set to the output file name.",
@@ -52,7 +52,7 @@ def add_args(parser):
         help=("use latlon variables"),
     )
     parser.add_argument(
-        "--only_header",
+        "--only-header",
         action="store_true",
         required=False,
         help=("Only write header output."),

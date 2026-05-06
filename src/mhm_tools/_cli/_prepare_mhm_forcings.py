@@ -92,7 +92,7 @@ def add_args(parser):
         help="Use xarray.open_mfdataset for multi-file datasets",
     )
     parser.add_argument(
-        "--target_frequency",
+        "--target-frequency",
         type=str,
         default=None,
         help="Resample the dataset to this target frequency (hourly, daily).",

@@ -18,19 +18,19 @@ def add_args(parser):
     required_args = parser.add_argument_group("required arguments")
     required_args.add_argument(
         "-o",
-        "--output_dir",
+        "--output-dir",
         help=("specify an output directory path"),
     )
     required_args.add_argument(
         "-f",
-        "--output_file_name",
+        "--output-file-name",
         help=(
             "stem for the output filename, which is then numbered for the different basin clusters"
         ),
     )
     required_args.add_argument(
         "-b",
-        "--basin_ids",
+        "--basin-ids",
         help=(
             "file containing unique basin ids for all river basins; "
             "variable 'basin' must exist in file"
@@ -38,7 +38,7 @@ def add_args(parser):
     )
     required_args.add_argument(
         "-c",
-        "--basin_clusters",
+        "--basin-clusters",
         default=None,
         help=(
             "file containing clustered basin ids (e.g., PGB reference); "
@@ -47,7 +47,7 @@ def add_args(parser):
     )
     required_args.add_argument(
         "-l",
-        "--land_mask",
+        "--land-mask",
         help=(
             "file containing land surface mask at target resolution; "
             "variable 'land_mask' must exist"

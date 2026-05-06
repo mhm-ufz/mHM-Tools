@@ -5,56 +5,57 @@ def add_args(parser):
     """Add CLI arguments for the grdc_validation subcommand."""
     required_args = parser.add_argument_group("required arguments")
     required_args.add_argument(
-        "--output_dir", help="Path for the output dir.", required=True
+        "--output-dir", help="Path for the output dir.", required=True
     )
     parser.add_argument(
-        "--observed_data_path",
+        "--observed-data-path",
         required=False,
         help=("Path to the observation data file."),
     )
     parser.add_argument(
-        "--model_data_path",
+        "--model-data-path",
         required=False,
         help=("Path to the model data."),
     )
     parser.add_argument(
-        "--model_file_name",
+        "--model-file-name",
         required=False,
         default="mrm_node_output.nc",
         help=("File name pattern for model data files."),
     )
     parser.add_argument(
-        "--observed_variable",
+        "--observed-variable",
         required=False,
         default="runoff_mean",
         help=(""),
     )
     parser.add_argument(
-        "--model_variable",
+        "--model-variable",
         required=False,
         default=None,
         help=("Variable name of the simulation data."),
     )
     parser.add_argument(
-        "--facc_file",
+        "--facc-file", "--mrm-restart",
+        dest="facc_file",
         required=False,
         default=None,
         help=("Path to flow-accumulation file used for gauge matching."),
     )
     parser.add_argument(
-        "--facc_variable",
+        "--facc-variable",
         required=False,
         default="L11_fAcc",
         help=("Variable name in --facc_file containing flow accumulation."),
     )
     parser.add_argument(
-        "--scc_gauges_file",
+        "--scc-gauges-file",
         required=False,
         default=None,
         help=("Path to the scc gauges file."),
     )
     parser.add_argument(
-        "--evaluation_gauges",
+        "--evaluation-gauges",
         required=False,
         default=None,
         help=(
@@ -74,7 +75,7 @@ def add_args(parser):
         help=("""coordinates in the form of 'lon_min,lon_max,lat_min,lat_max'"""),
     )
     parser.add_argument(
-        "--mask_file",
+        "--mask-file",
         required=False,
         default=None,
         help=(
@@ -83,35 +84,34 @@ def add_args(parser):
         ),
     )
     parser.add_argument(
-        "--n_boostrap_years",
+        "--n-boostrap-years",
         required=False,
         default=None,
         type=int,
         help=("""Number of years to draw for each boostrap experiment"""),
     )
     parser.add_argument(
-        "--n_bootstrap_selections",
+        "--n-bootstrap-selections",
         required=False,
         default=None,
         type=int,
         help=("Number of boostrap experiments"),
     )
     parser.add_argument(
-        "--start_date",
+        "--start-date",
         required=False,
         default=None,
         type=str,
         help=("""First year allowed in the analysis."""),
     )
     parser.add_argument(
-        "--end_date",
+        "--end-date",
         required=False,
         default=None,
         type=str,
         help=("Lates year that is allowed in the analysis."),
     )
     parser.add_argument(
-        "--min_overlapping_years",
         "--min-overlapping-years",
         required=False,
         default=None,
@@ -119,7 +119,6 @@ def add_args(parser):
         help=("Minimum number of overlapping years for evaluation."),
     )
     parser.add_argument(
-        "--gauge_location_method",
         "--gauge-location-method",
         required=False,
         default="basinex",
@@ -127,7 +126,6 @@ def add_args(parser):
         help=("Method used to optimize gauge location for mRM restart matching."),
     )
     parser.add_argument(
-        "--gauge_max_distance_cells",
         "--gauge-max-distance-cells",
         required=False,
         default=3,
@@ -135,7 +133,6 @@ def add_args(parser):
         help=("Maximum number of grid cells gauge location may be shifted."),
     )
     parser.add_argument(
-        "--gauge_max_error",
         "--gauge-max-error",
         required=False,
         default=0.1,
@@ -143,7 +140,7 @@ def add_args(parser):
         help=("Maximum allowed relative catchment-area error (fraction; 0.1 = 10%)."),
     )
     parser.add_argument(
-        "--hydrograph_plots",
+        "--hydrograph-plots",
         default="tysc",
         required=False,
         help="specifies which graphics are generated."
@@ -151,7 +148,7 @@ def add_args(parser):
         "all with out seasonality (advised for performance) = typc",
     )
     parser.add_argument(
-        "--use_cached_input_data",
+        "--use-cached-input-data",
         action="store_true",
         dest="use_cached_input_data",
         required=False,
@@ -160,19 +157,19 @@ def add_args(parser):
         ),
     )
     parser.add_argument(
-        "--save_hydrograph",
+        "--save-hydrograph",
         help="Set flag if the calculated hydrographs should be saved and not just the metrics calculated.",
         action="store_true",
         required=False,
     )
     parser.add_argument(
-        "--only_plot",
+        "--only-plot",
         help="Set Flag if existing output file should be used to create plot",
         action="store_true",
         required=False,
     )
     parser.add_argument(
-        "--no_input_data_cache",
+        "--no-input-data-cache",
         help=(
             "Set flag to not write the processed input data to file. This avoids unnecessary file I/O but may slow down subsequent runs with the same input data. If file is written overwriting is controlled by the --overwrite flag."
         ),

@@ -17,7 +17,7 @@ def add_args(parser: ArgumentParser) -> None:
     """
     parser.add_argument(
         "-i",
-        "--input_nml",
+        "--input-nml",
         required=True,
         help=(
             "Path to the mHM .nml file that lists landcover scenes "
@@ -32,7 +32,7 @@ def add_args(parser: ArgumentParser) -> None:
     )
     parser.add_argument(
         "-f",
-        "--varname_eq_in_filename",
+        "--varname-eq-in-filename",
         action="store_true",
         help=(
             "Set the output variable name to the stem of the FIRST input "
@@ -41,7 +41,7 @@ def add_args(parser: ArgumentParser) -> None:
     )
     parser.add_argument(
         "-F",
-        "--varname_eq_out_filename",
+        "--varname-eq-out-filename",
         action="store_true",
         help=(
             "Set the output variable name to the stem of the output file "
@@ -59,7 +59,7 @@ def add_args(parser: ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
-        "--normalize_latlon",
+        "--normalize-latlon",
         action="store_true",
         help="Normalize coordinate names/ordering to lat/lon.",
     )

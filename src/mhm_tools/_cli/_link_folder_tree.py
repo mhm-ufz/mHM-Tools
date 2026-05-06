@@ -17,12 +17,12 @@ def add_args(parser):
     """
     parser.add_argument(
         "-i",
-        "--input_dir",
+        "--input-dir",
         required=True,
         help="The path to input directory.",
     )
     parser.add_argument(
-        "-o", "--output_dir", required=True, help="The name of the output directory."
+        "-o", "--output-dir", required=True, help="The name of the output directory."
     )
     parser.add_argument(
         "--overwrite",
@@ -31,7 +31,7 @@ def add_args(parser):
         help=("overwrite existing symlinks"),
     )
     parser.add_argument(
-        "--file_name",
+        "--file-name",
         type=str,
         default="*.*",
         required=False,

@@ -22,14 +22,14 @@ def add_args(parser):
     """
     parser.add_argument(
         "-r",
-        "--return_period",
+        "--return-period",
         type=float,
         default=1.5,
         help="The return period of the flood in years.",
     )
     parser.add_argument(
         "-w",
-        "--wetted_perimeter",
+        "--wetted-perimeter",
         action="store_true",
         default=False,
         help="Additionally estimate the wetted perimeter.",

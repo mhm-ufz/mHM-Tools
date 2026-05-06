@@ -14,27 +14,27 @@ def add_args(parser):
     """
     parser.add_argument(
         "-i",
-        "--input_path",
+        "--input-path",
         required=True,
         help="The path to input files.",
     )
     parser.add_argument(
-        "--input_name",
+        "--input-name",
         required=False,
         default="*.*",
         help="Input file name. E.g. '*.nc' to merge only nc files or 'pre*' to merge only precipitation files.",
     )
     parser.add_argument(
-        "-o", "--output_file", required=True, help="The name of the output file."
+        "-o", "--output-file", required=True, help="The name of the output file."
     )
     parser.add_argument(
         "-p",
-        "--preserve_folders",
+        "--preserve-folders",
         required=False,
         action="store_true",
         help="Preserve the top level folder structure. Recusive merge inside.",
     )
-    parser.add_argument("--n_cpus", required=False, default=1, help="Number of CPUs.")
+    parser.add_argument("--n-cpus", required=False, default=1, help="Number of CPUs.")
 
 
 def run(args):

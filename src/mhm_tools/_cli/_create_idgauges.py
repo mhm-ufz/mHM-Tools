@@ -15,13 +15,13 @@ def add_args(parser):
     """
     parser.add_argument(
         "-f",
-        "--input_file",
+        "--input-file",
         required=True,
         help="The path to input file in L0 resolution.",
     )
     parser.add_argument(
         "-i",
-        "--gauge_id",
+        "--gauge-id",
         required=True,
         type=int,
         help="Gauge id",
@@ -36,13 +36,13 @@ def add_args(parser):
     )
     parser.add_argument(
         "-u",
-        "--facc_file",
+        "--facc-file",
         required=False,
         default=None,
         help="The name of the facc file used to adjust get coordinates.",
     )
     parser.add_argument(
-        "--gauge_coords",
+        "--gauge-coords",
         default=None,
         help=(
             "Gauge coordinates in the form of 'lat,lon' take care to write --gauge_coords='lat,lon'"
@@ -65,7 +65,7 @@ def add_args(parser):
         ),
     )
     parser.add_argument(
-        "--is_id_gauges",
+        "--is-id-gauges",
         dest="is_id_gauges",
         action="store_true",
         required=False,

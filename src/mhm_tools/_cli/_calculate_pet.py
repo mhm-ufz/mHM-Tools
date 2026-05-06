@@ -37,7 +37,7 @@ def add_args(parser):
     )
     required.add_argument(
         "-o",
-        "--output_file",
+        "--output-file",
         required=True,
         help="Output directory for processed files",
     )

@@ -38,6 +38,60 @@ class Formatter(
     """Custom formatter for argparse with help and raw text."""
 
 
+def _expand_long_option_aliases(option_strings):
+    """Add dash/underscore aliases for long options."""
+    expanded = []
+    seen = set()
+    for option in option_strings:
+        if option not in seen:
+            expanded.append(option)
+            seen.add(option)
+        if not option.startswith("--"):
+            continue
+        if "-" in option[2:]:
+            alias = "--" + option[2:].replace("-", "_")
+            if alias not in seen:
+                expanded.append(alias)
+                seen.add(alias)
+        if "_" in option[2:]:
+            alias = "--" + option[2:].replace("_", "-")
+            if alias not in seen:
+                expanded.append(alias)
+                seen.add(alias)
+    return tuple(expanded)
+
+
+def _patch_actions_container(container):
+    """Patch group containers to auto-add dash/underscore aliases."""
+    original_add_argument = container.add_argument
+
+    def add_argument_with_aliases(*name_or_flags, **kwargs):
+        return original_add_argument(
+            *_expand_long_option_aliases(name_or_flags), **kwargs
+        )
+
+    container.add_argument = add_argument_with_aliases
+
+
+class AliasArgumentParser(argparse.ArgumentParser):
+    """ArgumentParser that accepts both dash and underscore long options."""
+
+    def add_argument(self, *name_or_flags, **kwargs):
+        return super().add_argument(
+            *_expand_long_option_aliases(name_or_flags), **kwargs
+        )
+
+    def add_argument_group(self, *args, **kwargs):
+        group = super().add_argument_group(*args, **kwargs)
+        _patch_actions_container(group)
+        return group
+
+    def add_mutually_exclusive_group(self, **kwargs):
+        group = super().add_mutually_exclusive_group(**kwargs)
+        _patch_actions_container(group)
+        return group
+
+
 def add_command_from_module(subparsers, name, module):
     """Add a subcommand from a given module.
 
@@ -54,13 +108,17 @@ def add_command_from_module(subparsers, name, module):
     kwargs = {"description": desc}
     if desc:
         kwargs["help"] = desc.splitlines()[0]
-    parser = subparsers.add_parser(name, formatter_class=Formatter, **kwargs)
+    primary = name.replace("_", "-") if "_" in name else name
+    aliases = [primary.replace("-", "_")] if "-" in primary else []
+    parser = subparsers.add_parser(
+        primary, aliases=aliases, formatter_class=Formatter, **kwargs
+    )
     module.add_args(parser)
     parser.set_defaults(func=module.run)
 
 
 def _get_parser():
-    parent_parser = argparse.ArgumentParser(
+    parent_parser = AliasArgumentParser(
         prog="mhm-tools",
         description=__doc__,
         formatter_class=Formatter,
@@ -79,7 +137,11 @@ def _get_parser():
         "Please refer to the respective help texts."
     )
     subparsers = parent_parser.add_subparsers(
-        title="Available Tools", dest="command", required=True, description=sub_help
+        title="Available Tools",
+        dest="command",
+        required=True,
+        description=sub_help,
+        parser_class=AliasArgumentParser,
     )
 
     # all sub-parsers should be added here
@@ -120,7 +182,7 @@ def _get_parser():
     # add logging
     # option 1 explicit log levels by name
     parent_parser.add_argument(
-        "--log_level",
+        "--log-level", "--log_level",
         type=str,
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         default=None,
@@ -139,17 +201,17 @@ def _get_parser():
     )
     # handle file and terminal output
     parent_parser.add_argument(
-        "--log_file", type=str, default=None, help="Generate a log file."
+        "--log-file", "--log_file", type=str, default=None, help="Generate a log file."
     )
     parent_parser.add_argument(
-        "--log_file_level",
+        "--log-file-level", "--log_file_level",
         type=str,
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         default=None,
         help="Set log level for the log file. Defaults to console log level.",
     )
     parent_parser.add_argument(
-        "--no_console_output", action="store_true", help="Prohibit console output."
+        "--no-console-output", "--no_console_output", action="store_true", help="Prohibit console output."
     )
 
     # return the parser

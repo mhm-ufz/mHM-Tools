@@ -20,25 +20,25 @@ def add_args(parser):
     required_args = parser.add_argument_group("required arguments")
     required_args.add_argument(
         "-i",
-        "--input_dir",
+        "--input-dir",
         required=True,
         help=("Path to the input files"),
     )
     required_args.add_argument(
         "-o",
-        "--output_dir",
+        "--output-dir",
         required=True,
         help=("output directory as path"),
     )
     parser.add_argument(
         "-w",
-        "--work_dir",
+        "--work-dir",
         required=False,
         default=None,
         help=("work directory as path"),
     )
     required_args.add_argument(
-        "-n", "--nml_template", required=True, help=("nml_template file for mPR")
+        "-n", "--nml-template", required=True, help=("nml_template file for mPR")
     )
 
     required_args.add_argument(
@@ -48,7 +48,7 @@ def add_args(parser):
     )
 
     required_args.add_argument(
-        "--l1_resolution",
+        "--l1-resolution",
         required=True,
         help=("""resolution of the mHM target grid in degrees"""),
     )
@@ -63,7 +63,7 @@ def add_args(parser):
         ),
     )
     parser.add_argument(
-        "--lon_min",
+        "--lon-min",
         required=False,
         default=None,
         help=("""minimum longitude of the target grid
@@ -71,7 +71,7 @@ def add_args(parser):
     )
 
     parser.add_argument(
-        "--lon_max",
+        "--lon-max",
         required=False,
         default=None,
         help=("""maximum longitude of the target grid
@@ -79,7 +79,7 @@ def add_args(parser):
     )
 
     parser.add_argument(
-        "--lat_min",
+        "--lat-min",
         required=False,
         default=None,
         help=("""minimum latitude of the target grid
@@ -87,7 +87,7 @@ def add_args(parser):
     )
 
     parser.add_argument(
-        "--lat_max",
+        "--lat-max",
         required=False,
         default=None,
         help=("""maximum latitude of the target grid
@@ -95,7 +95,7 @@ def add_args(parser):
     )
 
     parser.add_argument(
-        "--l0_resolution",
+        "--l0-resolution",
         required=False,
         default=None,
         help=("""resolution of the morphological input data grid in degrees
@@ -103,7 +103,7 @@ def add_args(parser):
     )
 
     parser.add_argument(
-        "--mask_file",
+        "--mask-file",
         required=False,
         default=None,
         help=(
@@ -114,14 +114,14 @@ def add_args(parser):
 
     parser.add_argument(
         "-p",
-        "--mpr_params",
+        "--mpr-params",
         required=False,
         default=None,
         help=("path to the mPR parameters file"),
     )
 
     parser.add_argument(
-        "--l1_increment",
+        "--l1-increment",
         required=True,
         default=20,
         type=int,
@@ -129,7 +129,7 @@ def add_args(parser):
     )
 
     parser.add_argument(
-        "--process_domain_as_one",
+        "--process-domain-as-one",
         dest="run_on_whole_domain",
         action="store_true",
         required=False,
@@ -138,7 +138,7 @@ def add_args(parser):
         ),
     )
     parser.add_argument(
-        "--use_split_grids",
+        "--use-split-grids",
         dest="use_split_grids",
         action="store_true",
         required=False,
@@ -147,7 +147,7 @@ def add_args(parser):
         ),
     )
     parser.add_argument(
-        "--no_merge",
+        "--no-merge",
         dest="no_merge",
         action="store_true",
         required=False,
@@ -155,7 +155,7 @@ def add_args(parser):
     )
 
     parser.add_argument(
-        "--merge_only",
+        "--merge-only",
         dest="merge_only",
         action="store_true",
         required=False,
@@ -178,12 +178,12 @@ def add_args(parser):
         help=("Number of CPUs to use"),
     )
     parser.add_argument(
-        "--mpr_packages",
+        "--mpr-packages",
         default=None,
         help=("Packages to load using module load before running mPR"),
     )
     parser.add_argument(
-        "--land_mask_file",
+        "--land-mask-file",
         default=None,
         help=("Land mask file to use for l1 resolution"),
     )

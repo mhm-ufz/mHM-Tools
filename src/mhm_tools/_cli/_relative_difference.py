@@ -62,39 +62,39 @@ def add_args(parser):
     # required arguments
     req = parser.add_argument_group("required arguments")
     req.add_argument(
-        "--ref_input_dir", required=True, help="Directory with reference NetCDF files"
+        "--ref-input-dir", required=True, help="Directory with reference NetCDF files"
     )
     req.add_argument(
-        "--mod_input_dir", required=True, help="Directory with model NetCDF files"
+        "--mod-input-dir", required=True, help="Directory with model NetCDF files"
     )
     req.add_argument(
-        "--reference_pattern", required=True, help="Wildcard for reference file"
+        "--reference-pattern", required=True, help="Wildcard for reference file"
     )
-    req.add_argument("--model_pattern", required=True, help="Wildcard for model file")
+    req.add_argument("--model-pattern", required=True, help="Wildcard for model file")
     req.add_argument(
-        "--ref_var", required=True, help="Variable name in reference dataset"
+        "--ref-var", required=True, help="Variable name in reference dataset"
     )
-    req.add_argument("--mod_var", required=True, help="Variable name in model dataset")
+    req.add_argument("--mod-var", required=True, help="Variable name in model dataset")
     req.add_argument(
-        "-o", "--output_dir", required=True, help="Directory to save the output PNG"
+        "-o", "--output-dir", required=True, help="Directory to save the output PNG"
     )
     req.add_argument(
-        "--output_file_png", required=True, help="Filename for the output PNG"
+        "--output-file-png", required=True, help="Filename for the output PNG"
     )
 
     # optional arguments
     parser.add_argument(
-        "--save_ncfile",
+        "--save-ncfile",
         action="store_true",
         help="if set to True, stores a NetCDF file in --output_dir",
     )
     parser.add_argument(
-        "--output_file_nc",
+        "--output-file-nc",
         default="relative_difference.nc",
         help="If --save_ncfile, gives the name of the file to be saved in --output_dir",
     )
     parser.add_argument(
-        "--colorbar_label",
+        "--colorbar-label",
         default="Difference (model - reference)",
         help="Label for the plot colorbar",
     )
@@ -104,16 +104,16 @@ def add_args(parser):
         help="Title for the plot",
     )
     parser.add_argument(
-        "--x_min", type=str2float, default=None, help="Minimum longitude to display"
+        "--x-min", type=str2float, default=None, help="Minimum longitude to display"
     )
     parser.add_argument(
-        "--x_max", type=str2float, default=None, help="Maximum longitude to display"
+        "--x-max", type=str2float, default=None, help="Maximum longitude to display"
     )
     parser.add_argument(
-        "--y_min", type=str2float, default=None, help="Minimum latitude to display"
+        "--y-min", type=str2float, default=None, help="Minimum latitude to display"
     )
     parser.add_argument(
-        "--y_max", type=str2float, default=None, help="Maximum latitude to display"
+        "--y-max", type=str2float, default=None, help="Maximum latitude to display"
     )
     parser.add_argument(
         "--cmap",
