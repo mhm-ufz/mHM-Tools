@@ -168,6 +168,23 @@ def _reduce_node_coord(da):
     return da
 
 
+def _as_scalar_or_nan(value):
+    """Return a scalar from array-like inputs, else NaN for unsupported shapes."""
+    if value is None:
+        return np.nan
+    if isinstance(value, (str, bytes)):
+        return value
+    try:
+        arr = np.asarray(value)
+    except Exception:
+        return np.nan
+    if arr.ndim == 0:
+        return arr.item()
+    if arr.size == 1:
+        return arr.reshape(-1)[0]
+    return np.nan
+
+
 def _load_discharge_nc_collection(model_data_path, date_slice=None):
     """Load discharge.nc files containing Qsim/Qobs_<id> and return sim/obs datasets."""
 
@@ -1829,7 +1846,7 @@ def plot_kde(results_df, output_path):
     plt.close()
 
 
-def plot_map(
+def plot_map(  # noqa: PLR0915
     results_df,
     output_path,
     variables=None,
@@ -1861,10 +1878,11 @@ def plot_map(
 
     df = results_df.copy()
 
-    # Coerce lon/lat to numeric (handles object values like array(nan))
+    # Coerce lon/lat to numeric (handles object values like array(nan)/0-d arrays)
     df = df.dropna(subset=[lon_col, lat_col])
     for col in (lon_col, lat_col):
         if col in df.columns:
+            df[col] = df[col].map(_as_scalar_or_nan)
             df[col] = pd.to_numeric(df[col], errors="coerce")
     df = df.replace([np.inf, -np.inf], np.nan)
     if df.empty:

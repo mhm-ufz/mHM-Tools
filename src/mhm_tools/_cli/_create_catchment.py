@@ -232,7 +232,7 @@ def run(args):  # noqa: PLR0912,PLR0915
 
     from mhm_tools.common.cli_utils import get_available_mem_in_unit
     from mhm_tools.common.logger import ErrorLogger
-    from mhm_tools.pre.catchment import Resolution
+    from mhm_tools.common.utils import Resolution
 
     from ..pre import create_catchment
 

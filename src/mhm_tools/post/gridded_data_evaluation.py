@@ -23,6 +23,7 @@ from mhm_tools.common.file_handler import (
 )
 from mhm_tools.common.logger import ErrorLogger, log_arguments, log_errors
 from mhm_tools.common.spatial_metrics import create_results_csv
+from mhm_tools.common.utils import Resolution, cut_to_filled_area
 from mhm_tools.common.xarray_utils import (
     get_clim_from_ds,
     get_coord_key,
@@ -30,7 +31,6 @@ from mhm_tools.common.xarray_utils import (
     spearman_correlation,
     timedelta_to_alias,
 )
-from mhm_tools.pre.catchment import Resolution, cut_to_filled_area
 
 logger = logging.getLogger(__name__)
 

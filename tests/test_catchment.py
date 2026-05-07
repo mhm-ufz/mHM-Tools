@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 
+import mhm_tools.common.utils
 from mhm_tools.common.file_handler import get_xarray_ds_from_file
 from mhm_tools.common.utils import distance_100m_units, find_best_gauge_location_by_area
 from mhm_tools.common.xarray_utils import get_coord_key
@@ -254,7 +255,7 @@ class TestCatchment(unittest.TestCase):
         l2_path = self.tmp_path / "l2_res_match.nc"
         ds.to_netcdf(l2_path)
 
-        res = catchment.Resolution(l2=0.5, l2_file=l2_path)
+        res = mhm_tools.common.utils.Resolution(l2=0.5, l2_file=l2_path)
         self.assertAlmostEqual(res.l2, 0.5, places=9)
 
     def test_resolution_l2_file_resolution_within_tolerance(self):
@@ -267,7 +268,7 @@ class TestCatchment(unittest.TestCase):
         l2_path = self.tmp_path / "l2_res_within_tol.nc"
         ds.to_netcdf(l2_path)
 
-        res = catchment.Resolution(l2=0.5000005, l2_file=l2_path)
+        res = mhm_tools.common.utils.Resolution(l2=0.5000005, l2_file=l2_path)
         self.assertAlmostEqual(res.l2, 0.5, places=6)
 
     def test_resolution_l2_file_resolution_mismatch_raises(self):
@@ -281,7 +282,7 @@ class TestCatchment(unittest.TestCase):
         ds.to_netcdf(l2_path)
 
         with self.assertRaises(ValueError):
-            catchment.Resolution(l2=0.500002, l2_file=l2_path)
+            mhm_tools.common.utils.Resolution(l2=0.500002, l2_file=l2_path)
 
     def test_find_best_gauge_location_best_candidate(self):
         c = self._make_small_catchment()
@@ -443,7 +444,7 @@ class TestCatchment(unittest.TestCase):
         l2_path = self.tmp_path / "l2_alignment.nc"
         l2_ds.to_netcdf(l2_path)
 
-        resolutions = catchment.Resolution(
+        resolutions = mhm_tools.common.utils.Resolution(
             l1=32,
             l11=32,
             l2=32,
@@ -493,7 +494,7 @@ class TestCatchment(unittest.TestCase):
         l2_path = self.tmp_path / "l2_alignment_ok.nc"
         l2_ds.to_netcdf(l2_path)
 
-        resolutions = catchment.Resolution(
+        resolutions = mhm_tools.common.utils.Resolution(
             l1=32,
             l11=32,
             l2=32,
@@ -683,7 +684,7 @@ class TestCatchment(unittest.TestCase):
             )
 
         snapped = []
-        resolutions = catchment.Resolution(l0=0.001953125, l1=1 / 32)
+        resolutions = mhm_tools.common.utils.Resolution(l0=0.001953125, l1=1 / 32)
         for idx, (lat, lon) in enumerate(gauge_coords):
             out_dir = self.tmp_path / f"single_{idx}"
             out_dir.mkdir(parents=True, exist_ok=True)
@@ -773,7 +774,7 @@ class TestCatchment(unittest.TestCase):
                 else list(ds.data_vars)[0]
             )
 
-        resolutions = catchment.Resolution(l0=0.001953125, l1=1 / 32)
+        resolutions = mhm_tools.common.utils.Resolution(l0=0.001953125, l1=1 / 32)
 
         seq_dir = self.tmp_path / "seq"
         par_dir = self.tmp_path / "par"
@@ -902,7 +903,7 @@ class TestCatchment(unittest.TestCase):
             transform = catchment.get_transformation_matrix_nc(ds, var_name)
             lon_vals = ds.lon.data
             l0_res = abs(lon_vals[1] - lon_vals[0])
-            resolutions = catchment.Resolution(l1=l0_res * 2)
+            resolutions = mhm_tools.common.utils.Resolution(l1=l0_res * 2)
             c = catchment.Catchment(
                 ds,
                 var_name,
