@@ -2088,7 +2088,7 @@ def plot_cdf(df, output_path, boostrap_iterations=None):
                         color=region_colors[region_name],
                         linewidth=1.0,
                     )
-                    ax.plot(
+                    ax.scatter(
                         region_df[var].values,
                         region_cdf,
                         s=16,
