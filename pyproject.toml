@@ -54,7 +54,7 @@ dependencies = [
   "cdo",
   "h5netcdf",
   "h5py",
-  "trogon"
+  "trogon>=0.6.0"
 ]
 
 [project.urls]
