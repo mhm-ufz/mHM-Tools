@@ -108,7 +108,8 @@ def _validate_log_level_option(ctx, param, value):  # noqa: ARG001
     normalized = str(value).upper()
     if normalized not in _LOG_LEVEL_CHOICES:
         choices = ", ".join(_LOG_LEVEL_CHOICES)
-        raise click.BadParameter(f"must be one of: {choices}")
+        msg = f"must be one of: {choices}"
+        raise click.BadParameter(msg)
     return normalized
 
 
@@ -138,19 +139,20 @@ def _expand_long_option_aliases(option_strings):
 def _normalize_default(action: argparse.Action):
     """Normalize parser defaults for Click option declarations."""
     default = action.default
+    normalized_default = default
     if default is argparse.SUPPRESS:
-        return None
-    if isinstance(action, argparse._CountAction) and default is None:
-        return 0
-    if isinstance(action, argparse._StoreTrueAction) and default is None:
-        return False
-    if isinstance(action, argparse._StoreFalseAction) and default is None:
-        return True
-    if isinstance(action, argparse._AppendAction) and default is None:
-        return ()
-    if action.nargs in ("+", "*") and default is None:
-        return ()
-    return default
+        normalized_default = None
+    elif isinstance(action, argparse._CountAction) and default is None:
+        normalized_default = 0
+    elif isinstance(action, argparse._StoreTrueAction) and default is None:
+        normalized_default = False
+    elif isinstance(action, argparse._StoreFalseAction) and default is None:
+        normalized_default = True
+    elif (isinstance(action, argparse._AppendAction) and default is None) or (
+        action.nargs in ("+", "*") and default is None
+    ):
+        normalized_default = ()
+    return normalized_default
 
 
 def _convert_scalar(value, action: argparse.Action):
@@ -225,7 +227,7 @@ def _action_to_click_option(action: argparse.Action):
             kwargs["type"] = click.Choice([str(choice) for choice in action.choices])
         kwargs["callback"] = _convert_callback(action)
 
-    param_decls = list(option_strings) + [action.dest]
+    param_decls = [*list(option_strings), action.dest]
     return click.Option(param_decls=param_decls, **kwargs)
 
 
@@ -325,9 +327,8 @@ else:
 
     @cli.command("tui", help="Open Textual TUI (requires 'trogon').")
     def _missing_tui():
-        raise click.ClickException(
-            "trogon is not installed. Install with: pip install trogon"
-        )
+        msg = "trogon is not installed. Install with: pip install trogon"
+        raise click.ClickException(msg)
 
 
 for _command_name, _module in _COMMAND_MODULES:
