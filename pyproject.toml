@@ -35,6 +35,7 @@ classifiers = [
   "Topic :: Utilities",
 ]
 dependencies = [
+  "click>=8.1",
   "numpy>=1.17.3,<2.4",
   "xarray",
   "rioxarray",
@@ -53,6 +54,7 @@ dependencies = [
   "cdo",
   "h5netcdf",
   "h5py",
+  "trogon"
 ]
 
 [project.urls]
@@ -80,6 +82,9 @@ check = [
 ]
 plot = [
   "cartopy",
+]
+tui = [
+  "trogon>=0.6.0",
 ]
 
 [project.scripts]

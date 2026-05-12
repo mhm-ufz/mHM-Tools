@@ -1,6 +1,10 @@
-"""Command line interface for mhm-tools."""
+"""Click-based command line interface for mhm-tools."""
 
 import argparse
+from types import SimpleNamespace
+from typing import Callable, List, Tuple
+
+import click
 
 from mhm_tools.common.logger import configure_mhm_tools_logger
 
@@ -32,11 +36,80 @@ from . import (
     _taylor_diagram,
 )
 
+try:
+    from trogon import tui as trogon_tui
+except Exception:  # pragma: no cover - optional dependency
+    trogon_tui = None
 
-class Formatter(
-    argparse.ArgumentDefaultsHelpFormatter, argparse.RawDescriptionHelpFormatter
-):
-    """Custom formatter for argparse with help and raw text."""
+_COMMAND_MODULES: List[Tuple[str, object]] = [
+    ("bankfull", _bankfull),
+    ("hydrograph", _hydrograph),
+    ("gridded-data-evaluation", _gridded_data_evaluation),
+    ("discharge-evaluation", _discharge_evaluation),
+    ("latlon", _latlon),
+    ("converter-nc-ascii", _file_converter),
+    ("landcover-ascii-to-nc", _landcover_ascii_to_nc),
+    ("merge-files", _merge),
+    ("regrid-file", _regrid),
+    ("create-catchment", _create_catchment),
+    ("crop-mhm-setup", _crop_mhm_setup),
+    ("prepare-mhm-forcings", _prepare_mhm_forcings),
+    ("calculate-pet", _calculate_pet),
+    ("create-id-gauges", _create_idgauges),
+    ("create-subdomain-masks", _create_subdomain_masks),
+    ("create-mhm-restart-file", _create_mhm_restart_file),
+    ("long-term-mean", _long_term_mean),
+    ("difference", _difference),
+    ("relative-difference", _relative_difference),
+    ("ratio", _ratio),
+    ("taylor-diagram", _taylor_diagram),
+    ("2d-map", _2d_map),
+    ("link-folder-tree", _link_folder_tree),
+    ("run-overview", _mhm_run_overview),
+]
+_LOG_LEVEL_CHOICES = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+
+
+class AliasGroup(click.Group):
+    """Click group that supports hidden command aliases."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._aliases = {}
+
+    def add_alias(self, alias: str, target: str) -> None:
+        """Register an alias that resolves to an existing command."""
+        if alias in self.commands:
+            msg = f"Alias '{alias}' collides with an existing command."
+            raise click.ClickException(msg)
+        if target not in self.commands:
+            msg = f"Cannot alias unknown command '{target}'."
+            raise click.ClickException(msg)
+        self._aliases[alias] = target
+
+    def get_command(self, ctx, cmd_name):
+        command = super().get_command(ctx, cmd_name)
+        if command is not None:
+            return command
+        target = self._aliases.get(cmd_name)
+        if target is None:
+            return None
+        return super().get_command(ctx, target)
+
+
+def _validate_log_level_option(ctx, param, value):  # noqa: ARG001
+    """Validate log-level style options without using click.Choice.
+
+    Using plain strings avoids a Trogon `NoSelection` crash path for optional
+    choice widgets with no explicit default selection.
+    """
+    if value is None:
+        return None
+    normalized = str(value).upper()
+    if normalized not in _LOG_LEVEL_CHOICES:
+        choices = ", ".join(_LOG_LEVEL_CHOICES)
+        raise click.BadParameter(f"must be one of: {choices}")
+    return normalized
 
 
 def _expand_long_option_aliases(option_strings):
@@ -62,188 +135,215 @@ def _expand_long_option_aliases(option_strings):
     return tuple(expanded)
 
 
-def _patch_actions_container(container):
-    """Patch group containers to auto-add dash/underscore aliases."""
-    original_add_argument = container.add_argument
-
-    def add_argument_with_aliases(*name_or_flags, **kwargs):
-        return original_add_argument(
-            *_expand_long_option_aliases(name_or_flags), **kwargs
-        )
-
-    container.add_argument = add_argument_with_aliases
-
-
-class AliasArgumentParser(argparse.ArgumentParser):
-    """ArgumentParser that accepts both dash and underscore long options."""
-
-    def add_argument(self, *name_or_flags, **kwargs):
-        return super().add_argument(
-            *_expand_long_option_aliases(name_or_flags), **kwargs
-        )
-
-    def add_argument_group(self, *args, **kwargs):
-        group = super().add_argument_group(*args, **kwargs)
-        _patch_actions_container(group)
-        return group
-
-    def add_mutually_exclusive_group(self, **kwargs):
-        group = super().add_mutually_exclusive_group(**kwargs)
-        _patch_actions_container(group)
-        return group
+def _normalize_default(action: argparse.Action):
+    """Normalize parser defaults for Click option declarations."""
+    default = action.default
+    if default is argparse.SUPPRESS:
+        return None
+    if isinstance(action, argparse._CountAction) and default is None:
+        return 0
+    if isinstance(action, argparse._StoreTrueAction) and default is None:
+        return False
+    if isinstance(action, argparse._StoreFalseAction) and default is None:
+        return True
+    if isinstance(action, argparse._AppendAction) and default is None:
+        return ()
+    if action.nargs in ("+", "*") and default is None:
+        return ()
+    return default
 
 
-def add_command_from_module(subparsers, name, module):
-    """Add a subcommand from a given module.
+def _convert_scalar(value, action: argparse.Action):
+    """Apply parser conversion semantics for a single option value."""
+    converted = value
+    if action.type is not None:
+        try:
+            converted = action.type(value)
+        except Exception as exc:
+            raise click.BadParameter(str(exc)) from exc
+    if action.choices is not None and converted not in action.choices:
+        msg = f"must be one of {list(action.choices)}"
+        raise click.BadParameter(msg)
+    return converted
 
-    Parameters
-    ----------
-    subparsers : subparsers
-        Subparser to add the command to.
-    name : str
-        Name of the command to add.
-    module : module
-        Module containing the `add_args` and `run` functions defining the command.
-    """
-    desc = module.__doc__
-    kwargs = {"description": desc}
-    if desc:
-        kwargs["help"] = desc.splitlines()[0]
-    primary = name.replace("_", "-") if "_" in name else name
-    aliases = [primary.replace("-", "_")] if "-" in primary else []
-    parser = subparsers.add_parser(
-        primary, aliases=aliases, formatter_class=Formatter, **kwargs
+
+def _convert_callback(action: argparse.Action) -> Callable:
+    """Create a Click callback that mirrors parser value conversion."""
+
+    def _callback(ctx, param, value):  # noqa: ARG001
+        if value is None:
+            return None
+        if isinstance(action, argparse._AppendAction):
+            if value is None:
+                return []
+            return [_convert_scalar(item, action) for item in value]
+        if action.nargs in ("+", "*"):
+            return [_convert_scalar(item, action) for item in value]
+        if isinstance(action.nargs, int) and action.nargs > 1:
+            return [_convert_scalar(item, action) for item in value]
+        return _convert_scalar(value, action)
+
+    return _callback
+
+
+def _action_to_click_option(action: argparse.Action):
+    """Convert one parser action to a Click option."""
+    option_strings = tuple(_expand_long_option_aliases(action.option_strings))
+    if not option_strings:
+        return None
+
+    kwargs = {
+        "required": action.required,
+        "help": None if action.help == argparse.SUPPRESS else action.help,
+        "show_default": True,
+    }
+    if not action.required:
+        kwargs["default"] = _normalize_default(action)
+
+    if isinstance(action, argparse._CountAction):
+        kwargs["count"] = True
+    elif isinstance(action, argparse._StoreTrueAction):
+        kwargs["is_flag"] = True
+        kwargs["flag_value"] = True
+    elif isinstance(action, argparse._StoreFalseAction):
+        kwargs["is_flag"] = True
+        kwargs["flag_value"] = False
+    else:
+        if action.nargs in ("+", "*"):
+            kwargs["multiple"] = True
+            if kwargs.get("default") is None and not action.required:
+                kwargs["default"] = ()
+        elif isinstance(action.nargs, int) and action.nargs > 1:
+            kwargs["nargs"] = action.nargs
+        if action.type in (int, float, str, bool):
+            kwargs["type"] = action.type
+        elif action.type is None:
+            kwargs["type"] = str
+        else:
+            kwargs["type"] = str
+        if action.choices is not None:
+            kwargs["type"] = click.Choice([str(choice) for choice in action.choices])
+        kwargs["callback"] = _convert_callback(action)
+
+    param_decls = list(option_strings) + [action.dest]
+    return click.Option(param_decls=param_decls, **kwargs)
+
+
+def _build_click_command(command_name: str, module):
+    """Build one Click command from a parser-based command module."""
+    parser = argparse.ArgumentParser(
+        prog=f"mhm-tools {command_name}",
+        add_help=False,
     )
     module.add_args(parser)
-    parser.set_defaults(func=module.run)
+
+    params = []
+    for action in parser._actions:
+        if isinstance(action, argparse._HelpAction):
+            continue
+        option = _action_to_click_option(action)
+        if option is not None:
+            params.append(option)
+
+    def _callback(**kwargs):
+        args = SimpleNamespace(**kwargs)
+        return module.run(args)
+
+    return click.Command(
+        name=command_name,
+        callback=_callback,
+        params=params,
+        help=module.__doc__,
+        context_settings={"help_option_names": ["-h", "--help"]},
+    )
 
 
-def _get_parser():
-    parent_parser = AliasArgumentParser(
-        prog="mhm-tools",
-        description=__doc__,
-        formatter_class=Formatter,
+@click.group(
+    cls=AliasGroup,
+    context_settings={"help_option_names": ["-h", "--help"]},
+)
+@click.version_option(__version__, "-V", "--version", prog_name="mhm-tools")
+@click.option(
+    "--log-level",
+    "--log_level",
+    type=str,
+    callback=_validate_log_level_option,
+    default=None,
+    help="Set the log level explicitly.",
+)
+@click.option("--verbose", "-v", count=True, help="Increase verbosity")
+@click.option(
+    "--quiet",
+    "-q",
+    count=True,
+    help="Reduce verbosity can be repeated e.g. -qq",
+)
+@click.option(
+    "--log-file",
+    "--log_file",
+    type=str,
+    default=None,
+    help="Generate a log file.",
+)
+@click.option(
+    "--log-file-level",
+    "--log_file_level",
+    type=str,
+    callback=_validate_log_level_option,
+    default=None,
+    help="Set log level for the log file. Defaults to console log level.",
+)
+@click.option(
+    "--no-console-output",
+    "--no_console_output",
+    is_flag=True,
+    default=False,
+    help="Prohibit console output.",
+)
+def cli(
+    log_level,
+    verbose,
+    quiet,
+    log_file,
+    log_file_level,
+    no_console_output,
+):
+    """All tools are provided as sub-commands."""
+    configure_mhm_tools_logger(
+        log_level=log_level,
+        count_verbose=verbose,
+        count_quiet=quiet,
+        log_file=log_file,
+        log_file_level=log_file_level,
+        no_colsole_logging=no_console_output,
     )
 
-    parent_parser.add_argument(
-        "-V",
-        "--version",
-        action="version",
-        version=__version__,
-        help="Display version information.",
-    )
 
-    sub_help = (
-        "All tools are provided as sub-commands. "
-        "Please refer to the respective help texts."
-    )
-    subparsers = parent_parser.add_subparsers(
-        title="Available Tools",
-        dest="command",
-        required=True,
-        description=sub_help,
-        parser_class=AliasArgumentParser,
-    )
+if trogon_tui is not None:
+    cli = trogon_tui()(cli)
+else:
 
-    # all sub-parsers should be added here
-    # documentation taken from docstring of respective cli module (first line summary)
-    # module needs two functions: add_args and run
+    @cli.command("tui", help="Open Textual TUI (requires 'trogon').")
+    def _missing_tui():
+        raise click.ClickException(
+            "trogon is not installed. Install with: pip install trogon"
+        )
 
-    add_command_from_module(subparsers, "bankfull", _bankfull)
 
-    add_command_from_module(subparsers, "hydrograph", _hydrograph)
-    add_command_from_module(
-        subparsers, "gridded-data-evaluation", _gridded_data_evaluation
-    )
-    add_command_from_module(subparsers, "discharge-evaluation", _discharge_evaluation)
-    add_command_from_module(subparsers, "latlon", _latlon)
-    add_command_from_module(subparsers, "converter-nc-ascii", _file_converter)
-    add_command_from_module(subparsers, "landcover-ascii-to-nc", _landcover_ascii_to_nc)
-    add_command_from_module(subparsers, "merge-files", _merge)
-    add_command_from_module(subparsers, "regrid-file", _regrid)
-    add_command_from_module(subparsers, "create-catchment", _create_catchment)
-    add_command_from_module(subparsers, "crop-mhm-setup", _crop_mhm_setup)
-    add_command_from_module(subparsers, "prepare-mhm-forcings", _prepare_mhm_forcings)
-    add_command_from_module(subparsers, "calculate-pet", _calculate_pet)
-    add_command_from_module(subparsers, "create-id-gauges", _create_idgauges)
-    add_command_from_module(
-        subparsers, "create-subdomain-masks", _create_subdomain_masks
-    )
-    add_command_from_module(
-        subparsers, "create-mhm-restart-file", _create_mhm_restart_file
-    )
-    add_command_from_module(subparsers, "long-term-mean", _long_term_mean)
-    add_command_from_module(subparsers, "difference", _difference)
-    add_command_from_module(subparsers, "relative-difference", _relative_difference)
-    add_command_from_module(subparsers, "ratio", _ratio)
-    add_command_from_module(subparsers, "taylor-diagram", _taylor_diagram)
-    add_command_from_module(subparsers, "2d-map", _2d_map)
-    add_command_from_module(subparsers, "link-folder-tree", _link_folder_tree)
-    add_command_from_module(subparsers, "run-overview", _mhm_run_overview)
-
-    # add logging
-    # option 1 explicit log levels by name
-    parent_parser.add_argument(
-        "--log-level",
-        "--log_level",
-        type=str,
-        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
-        default=None,
-        help="Set the log level explicitly.",
-    )
-    # option 2 regulation verbosity by -v and -q flags default is INFO
-    parent_parser.add_argument(
-        "--verbose", "-v", action="count", default=0, help="Increase verbosity"
-    )
-    parent_parser.add_argument(
-        "--quiet",
-        "-q",
-        action="count",
-        default=0,
-        help="Reduce verbosity can be repeted e.g. -qq",
-    )
-    # handle file and terminal output
-    parent_parser.add_argument(
-        "--log-file", "--log_file", type=str, default=None, help="Generate a log file."
-    )
-    parent_parser.add_argument(
-        "--log-file-level",
-        "--log_file_level",
-        type=str,
-        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
-        default=None,
-        help="Set log level for the log file. Defaults to console log level.",
-    )
-    parent_parser.add_argument(
-        "--no-console-output",
-        "--no_console_output",
-        action="store_true",
-        help="Prohibit console output.",
-    )
-
-    # return the parser
-    return parent_parser
+for _command_name, _module in _COMMAND_MODULES:
+    _cmd = _build_click_command(_command_name, _module)
+    cli.add_command(_cmd, name=_command_name)
+    if "-" in _command_name:
+        cli.add_alias(_command_name.replace("-", "_"), _command_name)
 
 
 def main(argv=None):
-    """Execute main CLI routine.
-
-    Parameters
-    ----------
-    argv : list of str
-        command line arguments, default is None
-
-    Returns
-    -------
-        result of the called sub-argument routine
-    """
-    args = _get_parser().parse_args(argv)
-    configure_mhm_tools_logger(
-        log_level=args.log_level,
-        count_verbose=args.verbose,
-        count_quiet=args.quiet,
-        log_file=args.log_file,
-        log_file_level=args.log_file_level,
-        no_colsole_logging=args.no_console_output,
-    )
-    return args.func(args)
+    """Execute the main click CLI."""
+    try:
+        return cli.main(args=argv, prog_name="mhm-tools", standalone_mode=False)
+    except click.ClickException as exc:
+        exc.show()
+        return exc.exit_code
+    except click.Abort:
+        click.echo("Aborted!", err=True)
+        return 1
