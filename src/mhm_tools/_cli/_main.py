@@ -24,6 +24,7 @@ from . import (
     _link_folder_tree,
     _long_term_mean,
     _merge,
+    _mhm_run_overview,
     _prepare_mhm_forcings,
     _ratio,
     _regrid,
@@ -178,6 +179,7 @@ def _get_parser():
     add_command_from_module(subparsers, "taylor-diagram", _taylor_diagram)
     add_command_from_module(subparsers, "2d-map", _2d_map)
     add_command_from_module(subparsers, "link-folder-tree", _link_folder_tree)
+    add_command_from_module(subparsers, "run-overview", _mhm_run_overview)
 
     # add logging
     # option 1 explicit log levels by name
