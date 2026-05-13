@@ -11,6 +11,7 @@ The written table has columns:
 - `min_value`
 - `mean_value`
 - `max_value`
+- `unit`
 - `file_path`
 
 Rows are ordered with all input variables first, then output variables.
@@ -47,6 +48,17 @@ _EXCLUDED_INPUT_DIR_KEYS = {
     "dir_out",
     "dir_total_runoff",
 }
+_TIME_REFERENCE_DIR_KEYS = {
+    "dir_precipitation",
+    "dir_temperature",
+    "dir_referenceet",
+    "dir_mintemperature",
+    "dir_maxtemperature",
+    "dir_netradiation",
+    "dir_absvappressure",
+    "dir_windspeed",
+    "dir_radiation",
+}
 _TABLE_COLUMNS = [
     "file_name",
     "variable",
@@ -54,9 +66,17 @@ _TABLE_COLUMNS = [
     "min_value",
     "mean_value",
     "max_value",
+    "unit",
     "file_path",
 ]
 _VARTYPE_ORDER = {"input": 0, "output": 1}
+_SECONDS_PER_TIME_UNIT = {
+    "s": 1.0,
+    "d": 86400.0,
+    "month": 30.4 * 86400.0,
+    "y": 12.0 * 30.4 * 86400.0,
+    "year": 12.0 * 30.4 * 86400.0,
+}
 
 
 @dataclass(frozen=True)
@@ -244,6 +264,34 @@ def collect_output_flux_files(
     return _unique_paths(output_files)
 
 
+def collect_input_time_reference_files(
+    assignments: Sequence[NmlStringAssignment],
+    nml_path: Path,
+    base_path: Optional[Path],
+    recursive: bool,
+    domain_idx: Optional[int] = None,
+) -> List[Path]:
+    """Collect forcing files used to infer input temporal resolution.
+
+    Selection is based on namelist directory keys instead of filename patterns.
+    """
+    resolved_files: List[Path] = []
+    for assignment in assignments:
+        if assignment.key not in _TIME_REFERENCE_DIR_KEYS:
+            continue
+        assignment_domain = _parse_domain_index(assignment.index)
+        if domain_idx is not None and assignment_domain not in (None, domain_idx):
+            continue
+        directory = resolve_namelist_path(assignment.value, nml_path, base_path)
+        if not directory.is_dir():
+            continue
+        iterator = directory.rglob("*.nc") if recursive else directory.glob("*.nc")
+        for nc_file in sorted(iterator):
+            if nc_file.is_file():
+                resolved_files.append(nc_file.resolve())
+    return _unique_paths(resolved_files)
+
+
 def guess_time_dim(da: xr.DataArray) -> Optional[str]:
     """Guess the time dimension of a DataArray."""
     for dim in da.dims:
@@ -272,6 +320,117 @@ def _to_float(value) -> float:
         return float("nan")
 
 
+def _infer_time_resolution_seconds(dataset_paths: Sequence[Path]) -> Optional[float]:
+    """Infer input temporal resolution in seconds from time coordinates."""
+    deltas_seconds: List[float] = []
+    for dataset_path in dataset_paths:
+        with get_xarray_ds_from_file(dataset_path) as ds:
+            for da in ds.data_vars.values():
+                time_dim = guess_time_dim(da)
+                if time_dim is None:
+                    continue
+                coord = da.coords.get(time_dim)
+                if coord is None or coord.size < 2:
+                    continue
+                try:
+                    if not np.issubdtype(coord.dtype, np.datetime64):
+                        continue
+                except TypeError:
+                    continue
+                values = coord.values.astype("datetime64[s]").astype("int64")
+                diffs = np.diff(values).astype(float)
+                positive_diffs = diffs[diffs > 0]
+                if positive_diffs.size > 0:
+                    deltas_seconds.extend(positive_diffs.tolist())
+    if not deltas_seconds:
+        return None
+    return float(np.median(np.asarray(deltas_seconds)))
+
+
+def _closest_time_unit_code(seconds: float) -> str:
+    """Return closest supported time unit code for given seconds."""
+    return min(
+        _SECONDS_PER_TIME_UNIT,
+        key=lambda code: abs(seconds - _SECONDS_PER_TIME_UNIT[code]),
+    )
+
+
+def _find_rate_time_unit(unit: str) -> Optional[dict]:
+    """Find denominator time unit markers like `/s` or `d-1`."""
+    if not unit:
+        return None
+    token_map = {
+        "s": ["seconds", "second", "secs", "sec", "s"],
+        "d": ["days", "day", "d"],
+        "month": ["months", "month", "mons", "mon"],
+        "y": ["years", "year", "yrs", "yr", "y"],
+    }
+    for code, tokens in token_map.items():
+        alt = "|".join(sorted(tokens, key=len, reverse=True))
+        slash_pattern = re.compile(rf"/\s*({alt})\b", re.IGNORECASE)
+        slash_match = slash_pattern.search(unit)
+        if slash_match is not None:
+            return {
+                "code": code,
+                "style": "slash",
+                "start": slash_match.start(),
+                "end": slash_match.end(),
+                "text": slash_match.group(0),
+            }
+
+        exp_pattern = re.compile(
+            rf"(?<![A-Za-z0-9_])({alt})\s*\^?\s*-\s*1\b",
+            re.IGNORECASE,
+        )
+        exp_match = exp_pattern.search(unit)
+        if exp_match is not None:
+            return {
+                "code": code,
+                "style": "exp",
+                "start": exp_match.start(),
+                "end": exp_match.end(),
+                "text": exp_match.group(0),
+            }
+    return None
+
+
+def _rewrite_unit_to_target_time(unit: str, target_code: str) -> str:
+    """Rewrite denominator time unit in `unit` to target code."""
+    found = _find_rate_time_unit(unit)
+    if found is None:
+        return unit
+    source_text = found["text"]
+    if found["style"] == "slash":
+        replacement = f"/{target_code}"
+    else:
+        replacement = f"{target_code}-1"
+        if "^" in source_text:
+            replacement = f"{target_code}^-1"
+    return f"{unit[:found['start']]}{replacement}{unit[found['end']:]}"
+
+
+def _convert_stats_to_target_time_unit(
+    stats: dict,
+    target_time_seconds: float,
+) -> dict:
+    """Convert rate-like stats to a target temporal resolution."""
+    unit = str(stats.get("unit", "")).strip()
+    found = _find_rate_time_unit(unit)
+    if found is None:
+        return stats
+    source_code = found["code"]
+    source_seconds = _SECONDS_PER_TIME_UNIT[source_code]
+    target_code = _closest_time_unit_code(target_time_seconds)
+    target_seconds = _SECONDS_PER_TIME_UNIT[target_code]
+    factor = target_seconds / source_seconds
+    converted = dict(stats)
+    converted["min_value"] = _to_float(converted["min_value"]) * factor
+    converted["mean_value"] = _to_float(converted["mean_value"]) * factor
+    converted["max_value"] = _to_float(converted["max_value"]) * factor
+    converted["unit"] = _rewrite_unit_to_target_time(unit, target_code)
+    return converted
+
+
 def compute_variable_stats(
     da: xr.DataArray, temporal_mean: bool = False
 ) -> Optional[dict]:
@@ -291,16 +450,23 @@ def compute_variable_stats(
     min_value = _to_float(stats_da.min(skipna=True).values)
     mean_value = _to_float(stats_da.mean(skipna=True).values)
     max_value = _to_float(stats_da.max(skipna=True).values)
+    unit = da.attrs.get("units", "")
+    unit_clean = str(unit).strip() if unit is not None else ""
 
     return {
         "min_value": min_value,
         "mean_value": mean_value,
         "max_value": max_value,
+        "unit": unit_clean,
     }
 
 
 def collect_stats_rows(
-    dataset_paths: Sequence[Path], vartype: str, temporal_mean: bool = False
+    dataset_paths: Sequence[Path],
+    vartype: str,
+    temporal_mean: bool = False,
+    convert_units: bool = False,
+    target_time_seconds: Optional[float] = None,
 ) -> List[dict]:
     """Collect table rows for all numeric variables in given datasets."""
     rows: List[dict] = []
@@ -333,13 +499,25 @@ def collect_stats_rows(
                         da.dtype,
                     )
                     continue
+                if (
+                    convert_units
+                    and vartype == "output"
+                    and target_time_seconds is not None
+                ):
+                    stats = _convert_stats_to_target_time_unit(
+                        stats=stats,
+                        target_time_seconds=target_time_seconds,
+                    )
                 rows.append(
                     {
                         "file_name": dataset_path.name,
                         "variable": var_name,
                         "vartype": vartype,
                         "file_path": str(dataset_path),
-                        **stats,
+                        "min_value": f"{_to_float(stats['min_value']):.8g}",
+                        "mean_value": f"{_to_float(stats['mean_value']):.8g}",
+                        "max_value": f"{_to_float(stats['max_value']):.8g}",
+                        "unit": stats.get("unit", ""),
                     }
                 )
     return rows
@@ -407,6 +585,7 @@ def create_mhm_run_overview(
     output_dir: Path,
     recursive_input_search: bool = False,
     temporal_mean: bool = False,
+    convert_units: bool = False,
 ) -> None:
     """Create a CSV overview table for input/output NetCDF variables."""
     assignments = parse_namelist_string_assignments(namelist_file)
@@ -454,11 +633,35 @@ def create_mhm_run_overview(
             dataset_paths=input_files,
             vartype="input",
             temporal_mean=temporal_mean,
+            convert_units=False,
+            target_time_seconds=None,
         )
+        input_time_reference_files = collect_input_time_reference_files(
+            assignments=assignments,
+            nml_path=namelist_file,
+            base_path=base_path,
+            recursive=recursive_input_search,
+            domain_idx=domain_idx,
+        )
+        if not input_time_reference_files:
+            input_time_reference_files = input_files
+        target_time_seconds = _infer_time_resolution_seconds(input_time_reference_files)
+        if convert_units and target_time_seconds is not None:
+            logger.info(
+                "Inferred input temporal resolution: %.3f seconds (closest: %s).",
+                target_time_seconds,
+                _closest_time_unit_code(target_time_seconds),
+            )
+        if convert_units and target_time_seconds is None:
+            logger.warning(
+                "Could not infer input temporal resolution; output units will not be converted."
+            )
         rows_output = collect_stats_rows(
             dataset_paths=output_files,
             vartype="output",
             temporal_mean=temporal_mean,
+            convert_units=convert_units,
+            target_time_seconds=target_time_seconds,
         )
 
         table_local = pd.DataFrame(rows_input + rows_output, columns=_TABLE_COLUMNS)
