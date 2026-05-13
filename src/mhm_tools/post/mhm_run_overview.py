@@ -15,6 +15,9 @@ The written table has columns:
 
 Rows are ordered with all input variables first, then output variables.
 Within each type, rows are sorted by `file_name` and then `variable`.
+
+If multiple domains are configured using indexed paths (for example
+`dir_out(1)`, `dir_out(2)`), one CSV table per domain is written.
 """
 
 import logging
@@ -37,6 +40,7 @@ _ASSIGNMENT_RE = re.compile(
     r"(?:\(\s*(?P<index>[^)]*)\s*\))?\s*=\s*(?P<value>.+?)\s*$"
 )
 _STRING_RE = re.compile(r"""['"]([^'"]*)['"]""")
+_NDOMAINS_RE = re.compile(r"^\s*ndomains\s*=\s*(\d+)\b", re.IGNORECASE)
 
 _OUTPUT_FILENAME = ["mHM_Fluxes_States.nc", "discharge.nc"]
 _EXCLUDED_INPUT_DIR_KEYS = {
@@ -125,17 +129,58 @@ def _unique_paths(paths: Iterable[Path]) -> List[Path]:
     return unique
 
 
+def _parse_domain_index(index: Optional[str]) -> Optional[int]:
+    """Parse a single integer domain index from assignment index text."""
+    if index is None:
+        return None
+    stripped = index.strip()
+    if stripped.isdigit():
+        return int(stripped)
+    return None
+
+
+def _get_domain_indices(assignments: Sequence[NmlStringAssignment]) -> List[int]:
+    """Extract sorted unique domain indices from `dir_out(<i>)` entries."""
+    indices = {
+        parsed
+        for assignment in assignments
+        if assignment.key == "dir_out"
+        for parsed in [_parse_domain_index(assignment.index)]
+        if parsed is not None
+    }
+    return sorted(indices)
+
+
+def _parse_n_domains(nml_path: Path) -> Optional[int]:
+    """Parse `nDomains` from namelist.
+
+    Returns `None` if no value is found.
+    """
+    for raw_line in nml_path.read_text(encoding="utf-8").splitlines():
+        line = _strip_namelist_comment(raw_line).strip()
+        if not line:
+            continue
+        match = _NDOMAINS_RE.match(line)
+        if match is not None:
+            return int(match.group(1))
+    return None
+
+
 def collect_input_netcdf_files(
     assignments: Sequence[NmlStringAssignment],
     nml_path: Path,
     base_path: Optional[Path],
     recursive: bool,
+    domain_idx: Optional[int] = None,
 ) -> List[Path]:
     """Collect input NetCDF files from namelist entries."""
     resolved_files: List[Path] = []
     resolved_dirs: List[Path] = []
 
     for assignment in assignments:
+        assignment_domain = _parse_domain_index(assignment.index)
+        if domain_idx is not None and assignment_domain not in (None, domain_idx):
+            continue
         if (
             assignment.key.startswith("dir_")
             and assignment.key not in _EXCLUDED_INPUT_DIR_KEYS
@@ -166,19 +211,36 @@ def collect_output_flux_files(
     assignments: Sequence[NmlStringAssignment],
     nml_path: Path,
     base_path: Optional[Path],
+    domain_idx: Optional[int] = None,
 ) -> List[Path]:
     """Collect `mHM_Fluxes_States.nc` files from `dir_Out(*)` entries."""
     output_files: List[Path] = []
     for assignment in assignments:
         if assignment.key != "dir_out":
             continue
+        assignment_domain = _parse_domain_index(assignment.index)
+        if domain_idx is not None and assignment_domain != domain_idx:
+            continue
         out_dir = resolve_namelist_path(assignment.value, nml_path, base_path)
+        found_in_dir = False
         for filename in _OUTPUT_FILENAME:
             candidate = out_dir / filename
             if candidate.is_file():
                 output_files.append(candidate.resolve())
-            else:
-                logger.warning("Output file not found: %s", candidate)
+                found_in_dir = True
+                continue
+            recursive_candidates = sorted(
+                p.resolve() for p in out_dir.rglob(filename) if p.is_file()
+            )
+            if recursive_candidates:
+                output_files.extend(recursive_candidates)
+                found_in_dir = True
+        if not found_in_dir:
+            logger.warning(
+                "No known output files (%s) found in %s",
+                ", ".join(_OUTPUT_FILENAME),
+                out_dir,
+            )
     return _unique_paths(output_files)
 
 
@@ -296,6 +358,15 @@ def _resolve_output_csv_path(output_dir: Path) -> Path:
     return output_dir / "variable_summary.csv"
 
 
+def _resolve_output_csv_path_for_domain(output_dir: Path, domain_idx: int) -> Path:
+    """Resolve per-domain output CSV path."""
+    if output_dir.suffix.lower() == ".csv":
+        output_dir.parent.mkdir(parents=True, exist_ok=True)
+        return output_dir.with_name(f"{output_dir.stem}_domain{domain_idx}.csv")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir / f"variable_summary_domain{domain_idx}.csv"
+
+
 def _sort_overview_table(table: pd.DataFrame) -> pd.DataFrame:
     """Sort table by vartype, file_name, and variable.
 
@@ -339,34 +410,75 @@ def create_mhm_run_overview(
 ) -> None:
     """Create a CSV overview table for input/output NetCDF variables."""
     assignments = parse_namelist_string_assignments(namelist_file)
+    configured_domain_indices = _get_domain_indices(assignments)
+    n_domains = _parse_n_domains(namelist_file)
+    if n_domains is not None and n_domains > 0:
+        domain_indices = list(range(1, n_domains + 1))
+    else:
+        domain_indices = configured_domain_indices
 
-    input_files = collect_input_netcdf_files(
-        assignments=assignments,
-        nml_path=namelist_file,
-        base_path=base_path,
-        recursive=recursive_input_search,
-    )
-    output_files = collect_output_flux_files(
-        assignments=assignments,
-        nml_path=namelist_file,
-        base_path=base_path,
-    )
+    if n_domains is not None:
+        logger.info(
+            "Using nDomains=%d to select active domains: %s",
+            n_domains,
+            domain_indices,
+        )
 
-    logger.info("Found %d input NetCDF files.", len(input_files))
-    logger.info("Found %d output flux files.", len(output_files))
+    def _build_table_for_domain(domain_idx: Optional[int]) -> pd.DataFrame:
+        input_files = collect_input_netcdf_files(
+            assignments=assignments,
+            nml_path=namelist_file,
+            base_path=base_path,
+            recursive=recursive_input_search,
+            domain_idx=domain_idx,
+        )
+        output_files = collect_output_flux_files(
+            assignments=assignments,
+            nml_path=namelist_file,
+            base_path=base_path,
+            domain_idx=domain_idx,
+        )
 
-    rows_input = collect_stats_rows(
-        dataset_paths=input_files, vartype="input", temporal_mean=temporal_mean
-    )
-    rows_output = collect_stats_rows(
-        dataset_paths=output_files, vartype="output", temporal_mean=temporal_mean
-    )
+        if domain_idx is None:
+            logger.info("Found %d input NetCDF files.", len(input_files))
+            logger.info("Found %d output flux files.", len(output_files))
+        else:
+            logger.info(
+                "Domain %d: found %d input NetCDF files and %d output flux files.",
+                domain_idx,
+                len(input_files),
+                len(output_files),
+            )
 
-    # Keep requested ordering: input rows first, then output rows.
-    table = pd.DataFrame(rows_input + rows_output, columns=_TABLE_COLUMNS)
-    table = _drop_duplicate_rows(table)
-    table = _sort_overview_table(table)
+        rows_input = collect_stats_rows(
+            dataset_paths=input_files,
+            vartype="input",
+            temporal_mean=temporal_mean,
+        )
+        rows_output = collect_stats_rows(
+            dataset_paths=output_files,
+            vartype="output",
+            temporal_mean=temporal_mean,
+        )
 
+        table_local = pd.DataFrame(rows_input + rows_output, columns=_TABLE_COLUMNS)
+        return _sort_overview_table(_drop_duplicate_rows(table_local))
+
+    if len(domain_indices) > 1:
+        for domain_idx in domain_indices:
+            table = _build_table_for_domain(domain_idx=domain_idx)
+            output_csv = _resolve_output_csv_path_for_domain(output_dir, domain_idx)
+            pretty_print_df(table, 70)
+            table.to_csv(output_csv, index=False)
+            logger.info(
+                "Domain %d: wrote %d rows to %s", domain_idx, len(table), output_csv
+            )
+        return
+
+    if len(domain_indices) == 1:
+        table = _build_table_for_domain(domain_idx=domain_indices[0])
+    else:
+        table = _build_table_for_domain(domain_idx=None)
     output_csv = _resolve_output_csv_path(output_dir)
     pretty_print_df(table, 70)
     table.to_csv(output_csv, index=False)
