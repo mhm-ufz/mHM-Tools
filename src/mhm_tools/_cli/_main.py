@@ -68,6 +68,7 @@ _COMMAND_MODULES: List[Tuple[str, object]] = [
     ("run-overview", _mhm_run_overview),
 ]
 _LOG_LEVEL_CHOICES = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+_GROUP_ORDER = ("required arguments", "optional arguments", "flags", "options")
 
 
 class AliasGroup(click.Group):
@@ -95,6 +96,46 @@ class AliasGroup(click.Group):
         if target is None:
             return None
         return super().get_command(ctx, target)
+
+
+class GroupedOption(click.Option):
+    """Click option with an attached source argument-group label."""
+
+    def __init__(self, *args, option_group: str = "options", **kwargs):
+        self.option_group = option_group
+        super().__init__(*args, **kwargs)
+
+
+class GroupedCommand(click.Command):
+    """Click command that renders options grouped by source parser groups."""
+
+    def format_options(self, ctx, formatter):
+        grouped_records = {}
+        for param in self.get_params(ctx):
+            if not isinstance(param, click.Option):
+                continue
+            record = param.get_help_record(ctx)
+            if record is None:
+                continue
+            group_name = getattr(param, "option_group", "options")
+            grouped_records.setdefault(group_name, []).append(record)
+
+        if not grouped_records:
+            return
+
+        ordered_groups = []
+        lowered_keys = {key.lower(): key for key in grouped_records}
+        for preferred in _GROUP_ORDER:
+            key = lowered_keys.get(preferred)
+            if key is not None:
+                ordered_groups.append(key)
+        for key in grouped_records:
+            if key not in ordered_groups:
+                ordered_groups.append(key)
+
+        for group_name in ordered_groups:
+            with formatter.section(group_name):
+                formatter.write_dl(grouped_records[group_name])
 
 
 def _validate_log_level_option(ctx, param, value):  # noqa: ARG001
@@ -188,7 +229,7 @@ def _convert_callback(action: argparse.Action) -> Callable:
     return _callback
 
 
-def _action_to_click_option(action: argparse.Action):
+def _action_to_click_option(action: argparse.Action, option_group: str = "options"):
     """Convert one parser action to a Click option."""
     option_strings = tuple(_expand_long_option_aliases(action.option_strings))
     if not option_strings:
@@ -228,7 +269,11 @@ def _action_to_click_option(action: argparse.Action):
         kwargs["callback"] = _convert_callback(action)
 
     param_decls = [*list(option_strings), action.dest]
-    return click.Option(param_decls=param_decls, **kwargs)
+    return GroupedOption(
+        param_decls=param_decls,
+        option_group=option_group,
+        **kwargs,
+    )
 
 
 def _build_click_command(command_name: str, module):
@@ -239,11 +284,18 @@ def _build_click_command(command_name: str, module):
     )
     module.add_args(parser)
 
+    action_groups = {}
+    for group in parser._action_groups:
+        group_title = group.title or "options"
+        for group_action in group._group_actions:
+            action_groups[id(group_action)] = group_title
+
     params = []
     for action in parser._actions:
         if isinstance(action, argparse._HelpAction):
             continue
-        option = _action_to_click_option(action)
+        option_group = action_groups.get(id(action), "options")
+        option = _action_to_click_option(action, option_group=option_group)
         if option is not None:
             params.append(option)
 
@@ -251,7 +303,7 @@ def _build_click_command(command_name: str, module):
         args = SimpleNamespace(**kwargs)
         return module.run(args)
 
-    return click.Command(
+    return GroupedCommand(
         name=command_name,
         callback=_callback,
         params=params,
