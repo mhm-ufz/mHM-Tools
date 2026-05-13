@@ -1,6 +1,7 @@
 """Click-based command line interface for mhm-tools."""
 
 import argparse
+import difflib
 from types import SimpleNamespace
 from typing import Callable, List, Tuple
 
@@ -96,6 +97,22 @@ class AliasGroup(click.Group):
         if target is None:
             return None
         return super().get_command(ctx, target)
+
+    def resolve_command(self, ctx, args):
+        """Resolve command name and provide typo suggestions."""
+        try:
+            return super().resolve_command(ctx, args)
+        except click.UsageError as exc:
+            if not args:
+                raise
+            unknown = args[0]
+            candidates = sorted(set(self.commands.keys()) | set(self._aliases.keys()))
+            suggestions = difflib.get_close_matches(unknown, candidates, n=3, cutoff=0.5)
+            if not suggestions:
+                raise
+            suggestion_list = ", ".join(suggestions)
+            msg = f"No such command '{unknown}'. Did you mean: {suggestion_list}?"
+            raise click.UsageError(msg, ctx=ctx) from exc
 
 
 class GroupedOption(click.Option):
