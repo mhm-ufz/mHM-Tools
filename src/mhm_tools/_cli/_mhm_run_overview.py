@@ -60,6 +60,15 @@ def add_args(parser: argparse.ArgumentParser):
         action="store_true",
         help="Compute temporal means for variables with a 2 spatial dimensions and a time dimension before computing statistics.",
     )
+    flags.add_argument(
+        "--convert-units",
+        action="store_true",
+        help=(
+            "Convert output variable units with time denominators (s, d, m, y) "
+            "to the inferred temporal resolution of meteo input files with time coordinates. "
+            "Month length is assumed as 30.4 days."
+        ),
+    )
 
 
 def run(args: argparse.Namespace):
@@ -70,4 +79,5 @@ def run(args: argparse.Namespace):
         output_dir=args.output_dir.resolve(),
         recursive_input_search=args.recursive_input_search,
         temporal_mean=args.temporal_mean,
+        convert_units=args.convert_units,
     )
