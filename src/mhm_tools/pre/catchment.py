@@ -2206,9 +2206,9 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
         available_mem_gib=available_mem,
         chunking=chunking,
     ) as input_ds:
-        coord_slices_default = coordinate_slices.get("lat") == slice(
-            None, None
-        ) and coordinate_slices.get("lon") == slice(None, None)
+        if coordinate_slices is None:
+            coordinate_slices = {"lat": slice(None, None), "lon": slice(None, None)}
+            coord_slices_default = True
         if coord_slices_default and shape_folder:
             bounds = _shape_bounds_from_folder(shape_folder, gauge_ids, latlon=latlon)
             if bounds is not None:
