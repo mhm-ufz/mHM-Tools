@@ -36,7 +36,6 @@ class TestCreateRestart:
         ]
         for n in self.file_names:
             (self.morph_dir / f"{n}.nc").touch()
-        yield
 
     def test_read_morph_files(self):
         mf = mt.pre.MorphFiles(self.morph_dir)

@@ -13,7 +13,7 @@ except Exception:
     cdo = None
 from joblib import Parallel, delayed
 
-from mhm_tools.common.logger import ErrorLogger
+from mhm_tools.common.logger import ErrorLogger, log_arguments
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +64,9 @@ def merge_files_from_folder(
         delayed(_merge_chunk)(chunk, part_paths[i], options="-P 1 -O")
         for i, chunk in enumerate(chunks)
     )
-    part_parts_merged = [p for p in part_parts_merged if p is not None and p != ""]
+    part_parts_merged = [
+        Path(p) for p in part_parts_merged if p is not None and p != ""
+    ]
     # if len(part_parts_merged) != n_jobs:
     #     raise RuntimeError('mergtime failed probably OOM Error')
     # Final merge of parts (now allow CDO to use n_cpus internally)
@@ -82,7 +84,9 @@ def merge_files_from_folder(
         )
 
         part_parts_merged = [
-            p for p in out_files if p is not None and p != "" and Path(p).is_file()
+            Path(p)
+            for p in out_files
+            if p is not None and p != "" and Path(p).is_file()
         ]
         logger.debug(f"{recursive_depth} {len(out_files)} {len(part_parts_merged)}")
         if len(out_files) != len(part_parts_merged):
@@ -110,6 +114,7 @@ def merge_files_from_folder(
     return [str(out_file)]
 
 
+@log_arguments()
 def merge_files(input_path, input_file_part, output, n_cpus, preserve_folders=False):
     """
     Merge NetCDF files along time using CDO via its Python API.

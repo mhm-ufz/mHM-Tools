@@ -22,6 +22,7 @@ def add_args(parser):
 
     # Required arguments
     required = parser.add_argument_group("required arguments")
+    flags = parser.add_argument_group("flags")
     required.add_argument(
         "-i",
         "--in-dir",
@@ -37,15 +38,16 @@ def add_args(parser):
     required.add_argument(
         "-o", "--out-dir", required=True, help="Output directory for processed files"
     )
-    parser.add_argument(
+    # Optional arguments
+    optional = parser.add_argument_group("optional arguments")
+    optional.add_argument(
         "-v",
         "--var",
         required=False,
         help="Variable name to convert: 2t (temperature), tp (total precipitation), tprate (precipitation rate)",
     )
 
-    # Optional arguments
-    parser.add_argument(
+    optional.add_argument(
         "-u",
         "--out-file",
         default="*",
@@ -54,45 +56,45 @@ def add_args(parser):
             "otherwise literal name for each output file."
         ),
     )
-    parser.add_argument(
+    flags.add_argument(
         "--crop", action="store_true", help="Enable spatial cropping of the dataset"
     )
-    parser.add_argument(
+    optional.add_argument(
         "--lon-min",
         type=float,
         help="Minimum longitude for cropping",
         required=False,
         default=None,
     )
-    parser.add_argument(
+    optional.add_argument(
         "--lon-max",
         type=float,
         help="Maximum longitude for cropping",
         required=False,
         default=None,
     )
-    parser.add_argument(
+    optional.add_argument(
         "--lat-min",
         type=float,
         help="Minimum latitude for cropping",
         required=False,
         default=None,
     )
-    parser.add_argument(
+    optional.add_argument(
         "--lat-max",
         type=float,
         help="Maximum latitude for cropping",
         required=False,
         default=None,
     )
-    parser.add_argument(
+    optional.add_argument(
         "--use-mfdataset",
         type=bool,
         default=False,
         help="Use xarray.open_mfdataset for multi-file datasets",
     )
-    parser.add_argument(
-        "--target_frequency",
+    optional.add_argument(
+        "--target-frequency",
         type=str,
         default=None,
         help="Resample the dataset to this target frequency (hourly, daily).",

@@ -1,5 +1,6 @@
 """Create basin id file and deliniate catchments."""
 
+import csv
 import logging
 
 logger = logging.getLogger(__name__)
@@ -14,15 +15,16 @@ def add_args(parser):
         the main argument parser
     """
     required_args = parser.add_argument_group("required arguments")
+    flags = parser.add_argument_group("flags")
     required_args.add_argument(
         "-i",
-        "--input_file",
+        "--input-file",
         required=True,
         help=("Path to the input file"),
     )
     required_args.add_argument(
         "-o",
-        "--output_path",
+        "--output-path",
         required=True,
         help=(
             "Path to the output file. If a single file is written "
@@ -32,27 +34,6 @@ def add_args(parser):
     )
     # optional
     optional_args = parser.add_argument_group("optional arguments")
-    optional_args.add_argument(
-        "-S",
-        "--split_file",
-        action="store_false",
-        default=True,
-        help=(
-            "Write out multiple files. By default a single file is written "
-            "alternative is that the file is split up by variables."
-        ),
-    )
-    optional_args.add_argument(
-        "-C",
-        "--creator",
-        default=None,
-        help=(
-            "Level-2 (meteorology) information. Either an ascii (header) file, "
-            "a dictionary containing the header information "
-            "or a cell-size to determine information from level-0. "
-            "Level-2 information wont be written to the latlon file."
-        ),
-    )
     optional_args.add_argument(
         "--vn",
         "--varname",
@@ -72,11 +53,19 @@ def add_args(parser):
         help=("ftype of input variable, use 'nextxy', 'ldd' or 'd8'"),
     )
     optional_args.add_argument(
-        "--gauge_coords",
+        "--gauge-coords",
         default=None,
         help=(
             "Gauge coordinates in the form 'lat,lon' or multiple pairs like "
             "'lat1,lon1;lat2,lon2' (quote the value)."
+        ),
+    )
+    optional_args.add_argument(
+        "--gauges-csv",
+        default=None,
+        help=(
+            "Path to CSV with gauge definitions. Required columns: id, lat, lon. "
+            "Optional column: area (km2)."
         ),
     )
     optional_args.add_argument(
@@ -88,14 +77,21 @@ def add_args(parser):
         ),
     )
     optional_args.add_argument(
-        "--l1_resolution",
+        "--l0-resolution",
+        required=False,
+        type=float,
+        default=None,
+        help=("""Resolution of the morphological input grid."""),
+    )
+    optional_args.add_argument(
+        "--l1-resolution",
         required=False,
         type=float,
         default=None,
         help=("""Resolution of the mHM target grid."""),
     )
     optional_args.add_argument(
-        "--l11_resolution",
+        "--l11-resolution",
         required=False,
         type=float,
         default=None,
@@ -104,7 +100,7 @@ def add_args(parser):
         ),
     )
     optional_args.add_argument(
-        "--l2_resolution",
+        "--l2-resolution",
         required=False,
         type=float,
         default=None,
@@ -113,7 +109,7 @@ def add_args(parser):
         ),
     )
     optional_args.add_argument(
-        "--meteo_file",
+        "--meteo-file",
         required=False,
         type=str,
         default=None,
@@ -121,20 +117,20 @@ def add_args(parser):
             """Path to a meteo file to extract the l2 resolution from. Overwrites the l2_resolution argument."""
         ),
     )
-    optional_args.add_argument(
+    flags.add_argument(
         "--upscale",
         action="store_true",
         default=False,
         help=("""Upscale to l1_resolution."""),
     )
     optional_args.add_argument(
-        "--coords_are_not_latlon",
+        "--coords-are-not-latlon",
         action="store_false",
         default=True,
         help=("""Set this flag if the coordinates are in m not degree."""),
     )
     optional_args.add_argument(
-        "--mask_file",
+        "--mask-file",
         default="mask.nc",
         help=(
             "Path where to save the mask file. Default saving to output_path/mask.nc"
@@ -149,7 +145,17 @@ def add_args(parser):
         ),
     )
     optional_args.add_argument(
-        "--ref_catchment_area",
+        "--gauge-optimization-method",
+        default="basinex",
+        help=(
+            "Selection of the gauge optimization method. There are two methods implemented: "
+            "1. basinex: with increaing error (steps of 0.1) it selects all cells in the allowed radius and chooses the one closest to original gauge location. If none is found the allowed error is inceased up to max_error"
+            "2. burek: Based on Burek et. al. 2023 this calculates the metric as (distance_error + 2*facc_error) and chooses the minimum error"
+            "3. all: Uses both loggs comparison and then uses the one with over error value usually basinex"
+        ),
+    )
+    optional_args.add_argument(
+        "--ref-catchment-area",
         default=None,
         help=(
             "Reference catchment area in km^2 used to identify the outlet cell near the gauge coordinates. "
@@ -157,19 +163,27 @@ def add_args(parser):
         ),
     )
     optional_args.add_argument(
-        "--max_distance_cells",
+        "--max-distance-cells",
         default=5,
         type=int,
         help=("""Maximum distance in cells to search for the outlet cell."""),
     )
     optional_args.add_argument(
-        "--max_error",
+        "--max-error",
         default=0.05,
         type=float,
         help=("""Maximum error allowed when searching for the outlet cell."""),
     )
     optional_args.add_argument(
-        "--gauge_id",
+        "--shape-folder",
+        default=None,
+        help=(
+            "Folder with gauge shapefiles used for shape-based outlet matching. "
+            "Files are matched by gauge id contained in the filename."
+        ),
+    )
+    optional_args.add_argument(
+        "--gauge-id",
         required=False,
         default=None,
         help=(
@@ -178,7 +192,25 @@ def add_args(parser):
         ),
     )
     optional_args.add_argument(
-        "--available_mem",
+        "--gauge-info-csv",
+        required=False,
+        default="gauges_info.csv",
+        help=(
+            "Output gauge info csv (default: gauges_info.csv). "
+            "Columns: id, lon, lat, lon_old, lat_old, distance, area, old_area, area_error."
+        ),
+    )
+    optional_args.add_argument(
+        "--output-vars",
+        default="all",
+        help=(
+            "Comma-separated list of variables to output in the catchment file. "
+            "Default is 'all', which outputs all variables. "
+            "Variables include: 'flwdir', 'basin', 'uparea_grid', 'upgrid', 'grdare', 'elevtn'"
+        ),
+    )
+    optional_args.add_argument(
+        "--available-mem",
         required=False,
         type=str,
         default=None,
@@ -195,7 +227,7 @@ def add_args(parser):
     )
 
 
-def run(args):
+def run(args):  # noqa: PLR0912,PLR0915
     """Create the catchment file.
 
     Parameters
@@ -207,7 +239,7 @@ def run(args):
 
     from mhm_tools.common.cli_utils import get_available_mem_in_unit
     from mhm_tools.common.logger import ErrorLogger
-    from mhm_tools.pre.catchment import Resolution
+    from mhm_tools.common.utils import Resolution
 
     from ..pre import create_catchment
 
@@ -216,7 +248,71 @@ def run(args):
     gauge_ids = None
     ref_catchment_area = None
 
-    if args.gauge_coords is not None:
+    if args.gauges_csv is not None:
+        csv_path = Path(args.gauges_csv)
+        if not csv_path.is_file():
+            msg = f"Gauge CSV file not found: {csv_path}"
+            with ErrorLogger(logger):
+                raise FileNotFoundError(msg)
+        with csv_path.open("r", encoding="utf-8", newline="") as fp:
+            reader = csv.DictReader(fp)
+            if reader.fieldnames is None:
+                msg = f"Gauge CSV '{csv_path}' has no header."
+                with ErrorLogger(logger):
+                    raise ValueError(msg)
+            field_map = {name.strip().lower(): name for name in reader.fieldnames}
+            required = ("id", "lat", "lon")
+            missing = [col for col in required if col not in field_map]
+            if missing:
+                msg = (
+                    f"Gauge CSV '{csv_path}' is missing required column(s): {missing}. "
+                    "Required columns are: id, lat, lon."
+                )
+                with ErrorLogger(logger):
+                    raise ValueError(msg)
+            area_col = field_map.get("area")
+            gauge_coords = []
+            gauge_ids = []
+            areas = []
+            for row_no, row in enumerate(reader, start=2):
+                try:
+                    gid = str(row[field_map["id"]]).strip()
+                    if not gid:
+                        empty_id_msg = "empty gauge id"
+                        raise ValueError(empty_id_msg)
+                    lat = float(str(row[field_map["lat"]]).strip())
+                    lon = float(str(row[field_map["lon"]]).strip())
+                except Exception as exc:
+                    msg = f"Invalid id/lat/lon at row {row_no} in '{csv_path}': {exc}"
+                    with ErrorLogger(logger):
+                        raise ValueError(msg) from exc
+                gauge_ids.append(gid)
+                gauge_coords.append((lat, lon))
+                if area_col is not None:
+                    raw_area = str(row[area_col]).strip()
+                    areas.append(float(raw_area) if raw_area else None)
+            if not gauge_coords:
+                msg = f"Gauge CSV '{csv_path}' does not contain any gauge rows."
+                with ErrorLogger(logger):
+                    raise ValueError(msg)
+            if area_col is not None and any(area is not None for area in areas):
+                ref_catchment_area = areas
+            else:
+                ref_catchment_area = None
+        if (
+            args.gauge_coords is not None
+            or args.gauge_id is not None
+            or args.ref_catchment_area is not None
+        ):
+            logger.warning(
+                "Using gauges from --gauges_csv and ignoring --gauge_coords, --gauge_id and --ref_catchment_area."
+            )
+        logger.info(
+            f"Loaded {len(gauge_coords)} gauges from CSV '{csv_path}'. "
+            f"Area column {'found' if ref_catchment_area is not None else 'not provided'}."
+        )
+
+    if args.gauge_coords is not None and args.gauges_csv is None:
 
         def _parse_gauge_coords(raw_coords):
             if ";" in raw_coords:
@@ -256,13 +352,13 @@ def run(args):
         logger.info(
             f"using lonlatbox with extends: lat=({latmax}, {latmin}); lon=({lonmin}, {lonmax})"
         )
-    if args.gauge_id is not None:
+    if args.gauge_id is not None and args.gauges_csv is None:
         raw_ids = str(args.gauge_id)
         if "," in raw_ids:
-            gauge_ids = [int(val.strip()) for val in raw_ids.split(",") if val.strip()]
+            gauge_ids = [val.strip() for val in raw_ids.split(",") if val.strip()]
         else:
-            gauge_ids = int(raw_ids)
-    if args.ref_catchment_area is not None:
+            gauge_ids = raw_ids.strip()
+    if args.ref_catchment_area is not None and args.gauges_csv is None:
         raw_areas = str(args.ref_catchment_area)
         if "," in raw_areas:
             ref_catchment_area = [
@@ -297,9 +393,10 @@ def run(args):
     else:
         mask_file = args.mask_file
     coarse_resolutions = Resolution(
-        l1_resolution=args.l1_resolution,
-        l11_resolution=args.l11_resolution,
-        l2_resolution=args.l2_resolution,
+        l0=args.l0_resolution if args.l0_resolution is not None else None,
+        l1=args.l1_resolution,
+        l11=args.l11_resolution,
+        l2=args.l2_resolution,
         l2_file=args.meteo_file,
     )
     if args.ncpus > 1:
@@ -323,4 +420,9 @@ def run(args):
         max_error=args.max_error,
         gauge_ids=gauge_ids,
         ncpus=args.ncpus,
+        output_vars=(
+            None if str(args.output_vars).strip().lower() == "all" else args.output_vars
+        ),
+        gauge_opti_method=args.gauge_optimization_method,
+        shape_folder=args.shape_folder,
     )

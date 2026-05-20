@@ -79,6 +79,7 @@ class CreateSubdomainMasks:
         basin_id_file,
         basin_clusters,
         land_mask,
+        land_mask_variable="land_mask",
     ):
         # unique basins ids, need to be in variable 'basin'
         self.ref_file = basin_id_file
@@ -90,7 +91,7 @@ class CreateSubdomainMasks:
         self.land_file = land_mask
 
         self.output_dir = Path(output_dir)
-
+        self.land_mask_variable = land_mask_variable
         out_dir_path = self.output_dir
         if not out_dir_path.is_dir():
             out_dir_path.mkdir(parents=True)
@@ -155,9 +156,9 @@ class CreateSubdomainMasks:
                 raise ValueError(msg)
         new_ids = self.read_var(fname=self.ref_file, var_name="basin")
         orig_ids = self.read_var(fname=self.pgb_file, var_name="mask")
-        land_mask = self.read_var(fname=self.land_file, var_name="land_mask").astype(
-            bool
-        )
+        land_mask = self.read_var(
+            fname=self.land_file, var_name=self.land_mask_variable
+        ).astype(bool)
         ds_ref_file = get_xarray_ds_from_file(self.ref_file).sel(
             lat=land_mask.lat, lon=land_mask.lon, method="nearest"
         )
@@ -276,29 +277,7 @@ class CreateSubdomainMasks:
         # first process fdir
         logger.info("processing fdir")
         data_var_values = ds_sub_ref_file["flwdir"].values
-        # land_mask_values = land_mask.values
-        # nan values inside the land mask are changed to sink values
-        # ds_sub_ref_file[data_var] = ds_sub_ref_file[data_var].where(
-        #     ~np.isnan(ds_sub_ref_file[data_var]) | np.isnan(land_mask),
-        #     0
-        # )
-        # # replace all values where land mask is nan with nan unless they are sink values
-        # ds_sub_ref_file[data_var] = ds_sub_ref_file[data_var].where(
-        #     ~np.isnan(land_mask) | (ds_sub_ref_file[data_var]==0),
-        #     np.nan
-        # )
-        # Replace values where ds_sub_ref_file[data_var] is NaN and land_mask is not NaN with 0
-        # sink_value = 0 if 0 in data_var_values else 5
-        # # First condition: Set to sink_value where data_var is NaN and land_mask is not NaN
-        # logger.debug(f"flwdir data_vars {data_var_values}")
-        # data_var_values[(data_var_values == 247) & (land_mask_values != 0)] = sink_value
-
-        # # Second condition: Replace all values where land_mask is 0 with NaN unless they are sink values (0)
-        # data_var_values[land_mask_values == 0 & (data_var_values != sink_value)] = (
-        #     sink_value
-        # )
         data_var_values[np.isnan(land_mask)] = np.nan
-        # -9999.0
         ds_sub_ref_file["flwdir"].values = data_var_values
 
         for data_var in ds_sub_ref_file.data_vars:
@@ -312,18 +291,6 @@ class CreateSubdomainMasks:
                 land_mask != 0, np.nan
             )
 
-            # # for uparea_grid set all nan values where the fdir is sink_value to 0
-            # if data_var == "uparea_grid":
-            #     logger.info(f"data_var_values dtype: {data_var_values.dtype}")
-            #     logger.info(f"flwdir dtype: {ds_sub_ref_file['flwdir'].values.dtype}")
-            #     mask_da = ds_sub_ref_file[
-            #         data_var
-            #     ].isnull() & (  # xarray-friendly check for NaNs
-            #         ds_sub_ref_file["flwdir"] == sink_value
-            #     )
-            #     ds_sub_ref_file[data_var].data[mask_da] = sink_value
-            # ds_sub_ref_file[data_var].values = data_var_values
-
         # Write the output to a netCDF file
         fname = self.out_file_name + ".nc"
         logger.info(f"Writing to {fname}")
@@ -334,7 +301,12 @@ class CreateSubdomainMasks:
 
 @log_arguments()
 def create_subdomain_masks(
-    output_dir, output_file_name, basin_id_file, basin_clusters, land_mask
+    output_dir,
+    output_file_name,
+    basin_id_file,
+    basin_clusters,
+    land_mask,
+    land_mask_variable,
 ):
     """Create subdomain masks based on the provided input parameters.
 
@@ -355,6 +327,7 @@ def create_subdomain_masks(
         basin_id_file=basin_id_file,
         basin_clusters=basin_clusters,
         land_mask=land_mask,
+        land_mask_variable=land_mask_variable,
     )
     with get_xarray_ds_from_file(basin_id_file) as ds:
         lat = ds.lat

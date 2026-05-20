@@ -1,5 +1,6 @@
 """File handling utils."""
 
+import contextlib
 import logging
 from dataclasses import dataclass
 from enum import Enum
@@ -13,6 +14,7 @@ from mhm_tools.common.constants import NC_ENCODE_DEFAULTS, NO_DATA
 from mhm_tools.common.esri_grid import standardize_header, write_grid, write_header
 from mhm_tools.common.logger import ErrorLogger, log_arguments, log_errors
 from mhm_tools.common.netcdf import (
+    generate_bounds,
     read_dataset,
     sanitize_nc_encoding,
     set_netcdf_encoding,
@@ -83,7 +85,11 @@ def set_grid(
     data_attrs: Optional[Dict[str, Union[str, float, int]]] = None,
 ) -> xr.Dataset:
     """Attach ``data`` to a preserved grid definition."""
-    coords = dict(grid.template.coords.items())
+    coords = {}
+    for name, coord in grid.template.coords.items():
+        # Only include coords compatible with the target variable dims.
+        if set(coord.dims).issubset(set(grid.dims)):
+            coords[name] = coord
     da = xr.DataArray(
         data,
         coords=coords,
@@ -297,7 +303,7 @@ def chunk_dataset(ds, chunk_type, available_mem_gib):
             raise e
 
 
-def get_xarray_ds_from_file(
+def get_xarray_ds_from_file(  # noqa: PLR0912
     file_path,
     var_name=None,
     chunking=False,
@@ -313,13 +319,14 @@ def get_xarray_ds_from_file(
 ):
     """Read file and return xarray dataset."""
     file_path = Path(file_path)
-    logger.info(f"Reading {file_path} to xarray with chunking = {chunking}")
+    logger.debug(f"Reading {file_path} to xarray with chunking = {chunking}")
     ds_out = None
     if not file_path.is_file():
         msg = f"File path does not point to an existing file: {file_path}"
         with ErrorLogger(logger):
             raise ValueError(msg)
-    if file_path.suffix == ".asc":
+    suffix = file_path.suffix.lower()
+    if suffix == ".asc":
         if landcover:
             logger.info("Reading ascii landcover file.")
             ds_out = read_ascii_to_xarray(
@@ -334,14 +341,40 @@ def get_xarray_ds_from_file(
                 var_name=var_name,
             )
         chunk_type = ChunkType.SPACE
-    elif file_path.suffix == ".nc":
+    elif suffix == ".nc":
         ds_out = read_dataset(
             file_path=file_path,
             use_mfdataset=use_mfdataset,
             engine=engine,
         )
+    elif suffix in {".tif", ".tiff"}:
+        import rioxarray as rxr
+
+        da = rxr.open_rasterio(file_path)
+        if var_name is not None:
+            da = da.rename(var_name)
+        else:
+            da.name = "data"
+        if "band" in da.dims and da.sizes.get("band", 0) == 1:
+            da = da.squeeze("band", drop=True)
+        nodata = None
+        with contextlib.suppress(Exception):
+            nodata = da.rio.nodata
+        if nodata is not None:
+            da.attrs.setdefault("nodata_value", nodata)
+            da.attrs.setdefault("_FillValue", nodata)
+        if "x" in da.coords:
+            da["x"].attrs.setdefault("axis", "X")
+        if "y" in da.coords:
+            da["y"].attrs.setdefault("axis", "Y")
+        ds_out = da.to_dataset()
+        if "spatial_ref" in ds_out.coords:
+            ds_out = ds_out.drop_vars("spatial_ref")
     else:
-        msg = f"Reading file types other than asci and netcdf is not implemented. The suffix of the file was: {file_path.suffix}"
+        msg = (
+            "Reading file types other than asci, netcdf, and geotiff is not "
+            f"implemented. The suffix of the file was: {file_path.suffix}"
+        )
         with ErrorLogger(logger):
             raise NotImplementedError(msg)
     lat_key = get_coord_key(ds_out, lat=True, raise_exception=False)
@@ -392,6 +425,7 @@ def write_xarray_to_file(  # noqa: PLR0912, PLR0915
     engine="netcdf4",
     # available_mem_gib=None,
     # compute_kwargs=None,
+    resolution=None,
 ):
     """Write xarray Datasets to file with file type depending on the file suffix."""
     file_path = Path(file_path)
@@ -403,7 +437,7 @@ def write_xarray_to_file(  # noqa: PLR0912, PLR0915
     # ds = chunk_if_too_big(ds)
     # ds = ds.chunk({'time': 512, 'lat': 121, 'lon': 131})
     if file_path.suffix == ".asc":
-        write_xarray_to_ascii(ds, file_path, var_name)
+        write_xarray_to_ascii(ds, file_path, var_name, resolution=resolution)
     elif file_path.suffix == ".nc":
         if isinstance(ds, xr.DataArray):
             var_name = ds.name
@@ -426,6 +460,63 @@ def write_xarray_to_file(  # noqa: PLR0912, PLR0915
         else:
             # Ensure encoding only targets data variables (avoid coords/bounds)
             encoding = {k: v for k, v in encoding.items() if k in data_vars}
+        # Ensure time and its bounds have consistent encoding to avoid decode issues
+        time_key = get_coord_key(ds, time=True, raise_exception=False)
+        if time_key is not None:
+            time_da = ds[time_key]
+            bounds_name = time_da.attrs.get("bounds")
+            if bounds_name in ds:
+                bnds_da = ds[bounds_name]
+                # If bounds are numeric but time is datetime, regenerate bounds
+                if np.issubdtype(time_da.dtype, np.datetime64) and not np.issubdtype(
+                    bnds_da.dtype, np.datetime64
+                ):
+                    try:
+                        ds = ds.copy(deep=False)
+                        ds.coords[bounds_name] = generate_bounds(time_da)
+                        bnds_da = ds[bounds_name]
+                    except Exception:
+                        logger.debug("Could not regenerate time bounds", exc_info=True)
+                # If both are numeric but bounds look wildly out of scale, rebuild.
+                if np.issubdtype(time_da.dtype, np.number) and np.issubdtype(
+                    bnds_da.dtype, np.number
+                ):
+                    try:
+                        tmax = float(np.nanmax(np.abs(time_da.values)))
+                        bmax = float(np.nanmax(np.abs(bnds_da.values)))
+                        if tmax > 0 and bmax / tmax > 1e6:
+                            logger.warning(
+                                "Time bounds look out of scale (max=%s vs time max=%s); "
+                                "regenerating bounds from time.",
+                                bmax,
+                                tmax,
+                            )
+                            ds = ds.copy(deep=False)
+                            ds.coords[bounds_name] = generate_bounds(time_da)
+                            bnds_da = ds[bounds_name]
+                    except Exception:
+                        logger.debug(
+                            "Could not validate/regenerate numeric time bounds",
+                            exc_info=True,
+                        )
+                if "units" not in time_da.encoding:
+                    if "units" in time_da.attrs:
+                        time_da.encoding["units"] = time_da.attrs["units"]
+                    else:
+                        time_da.encoding["units"] = "days since 1970-01-01 00:00:00"
+                if "calendar" not in time_da.encoding and "calendar" in time_da.attrs:
+                    time_da.encoding["calendar"] = time_da.attrs["calendar"]
+                if "units" not in bnds_da.encoding:
+                    bnds_da.encoding["units"] = time_da.encoding.get("units")
+                if (
+                    "calendar" in time_da.encoding
+                    and "calendar" not in bnds_da.encoding
+                ):
+                    bnds_da.encoding["calendar"] = time_da.encoding["calendar"]
+                # Avoid units/calendar in bounds attrs; xarray will set these during encoding.
+                for key in ("units", "calendar"):
+                    if key in bnds_da.attrs:
+                        bnds_da.attrs.pop(key, None)
         # if False and available_mem_gib is not None:
         #     # ds = chunk_dataset(ds, ChunkType.TIME, available_mem_gib//50)
         #     dask.config.set(
@@ -554,6 +645,33 @@ def write_xarray_to_file(  # noqa: PLR0912, PLR0915
             encoding = sanitize_nc_encoding(ds_clean, merged_encoding)
             logger.info(f"Using encoding: {encoding}")
             set_netcdf_encoding(ds_clean, encoding)
+            # Ensure time/bounds attrs do not contain units/calendar before encode
+            time_key_clean = get_coord_key(ds_clean, time=True, raise_exception=False)
+            if time_key_clean is not None:
+                time_var = ds_clean[time_key_clean]
+                bounds_name_clean = time_var.attrs.get("bounds")
+                # ensure time encoding has units/calendar
+                if "units" not in time_var.encoding:
+                    if "units" in time_var.attrs:
+                        time_var.encoding["units"] = time_var.attrs["units"]
+                    else:
+                        time_var.encoding["units"] = "days since 1970-01-01 00:00:00"
+                if "calendar" not in time_var.encoding and "calendar" in time_var.attrs:
+                    time_var.encoding["calendar"] = time_var.attrs["calendar"]
+                # remove units/calendar from time attrs to avoid xarray overwrite error
+                for key in ("units", "calendar"):
+                    time_var.attrs.pop(key, None)
+                if bounds_name_clean in ds_clean:
+                    bnds_var = ds_clean[bounds_name_clean]
+                    if "units" not in bnds_var.encoding:
+                        bnds_var.encoding["units"] = time_var.encoding.get("units")
+                    if (
+                        "calendar" in time_var.encoding
+                        and "calendar" not in bnds_var.encoding
+                    ):
+                        bnds_var.encoding["calendar"] = time_var.encoding["calendar"]
+                    for key in ("units", "calendar"):
+                        bnds_var.attrs.pop(key, None)
             ds_clean.to_netcdf(
                 file_path, engine=engine, format="NETCDF4", encoding=encoding
             )
@@ -561,6 +679,16 @@ def write_xarray_to_file(  # noqa: PLR0912, PLR0915
             logger.error(f"Error while writing to {file_path}")
             logger.error(ds)
             logger.info(f"Trying to write without encoding {encoding}")
+            # also scrub time/bounds attrs on fallback
+            time_key_raw = get_coord_key(ds, time=True, raise_exception=False)
+            if time_key_raw is not None:
+                time_var = ds[time_key_raw]
+                bounds_name_raw = time_var.attrs.get("bounds")
+                for key in ("units", "calendar"):
+                    time_var.attrs.pop(key, None)
+                if bounds_name_raw in ds:
+                    for key in ("units", "calendar"):
+                        ds[bounds_name_raw].attrs.pop(key, None)
             ds.to_netcdf(file_path, engine=engine, format="NETCDF4")
     else:
         msg = f"Writing to file types other than asci and netcdf is not implemented. The suffix of the file was: {file_path.suffix}"
@@ -568,7 +696,9 @@ def write_xarray_to_file(  # noqa: PLR0912, PLR0915
             raise NotImplementedError(msg)
 
 
-def write_xarray_to_ascii(dataset, filepath, data_var=None, nodata_value=None):
+def write_xarray_to_ascii(
+    dataset, filepath, data_var=None, nodata_value=None, resolution=None
+):
     """Write xarray Dataset to an ASCII file that can be read by mHM."""
     # check if a data_var can be optained for writing the data
     if data_var is None and isinstance(dataset, xr.Dataset):
@@ -589,6 +719,8 @@ def write_xarray_to_ascii(dataset, filepath, data_var=None, nodata_value=None):
         nodata_value = typ(NO_DATA)
 
     header = create_header(dataset, no_data_value=nodata_value)
+    if resolution is not None:
+        header["cellsize"] = resolution
 
     data_to_write = data
     if isinstance(data_to_write, xr.DataArray):
@@ -634,6 +766,8 @@ def read_ascii_to_xarray(
 
     # Load the data values
     data_values = np.loadtxt(filepath, skiprows=i + 1)
+    if isinstance(nodata_value, int):
+        data_values = data_values.astype(np.int32)
 
     # Calculate latitude and longitude coordinates
     lon = np.arange(
@@ -763,14 +897,12 @@ def move_reserved_attrs_to_encoding(
                     encoding[name][key] = val
         return ds, encoding
 
-    if isinstance(obj, xr.DataArray):  # DataArray
-        da = obj.copy()
-        _process_var(da)
-        names = [da.name] if da.name is not None else ["__dataarray__"]
+    if not isinstance(obj, xr.DataArray):
+        msg = f"wrong type {obj}"
+        raise ValueError(msg)
     # DataArray
     da = obj.copy(deep=False)
     _process_var(da)
-    names = [da.name] if da.name is not None else ["__dataarray__"]
 
     coord_encoding = {}
     if include_coords:
@@ -786,11 +918,148 @@ def move_reserved_attrs_to_encoding(
     if da.name is not None and da.encoding:
         data_encoding[da.name] = {k: v for k, v in da.encoding.items() if k in reserved}
 
-        # Merge data + coords encodings
-        encoding = {**coord_encoding, **data_encoding}
-        return da, encoding
-    msg = f"wrong type {obj}"
-    raise ValueError(msg)
-    # Merge data + coords encodings
     encoding = {**coord_encoding, **data_encoding}
     return da, encoding
+
+
+def get_dataset_from_path(
+    path,
+    var_name=None,
+    chunking=None,
+    available_mem_gib=None,
+    chunk_type=ChunkType.SPACE,
+    use_mfdataset=False,
+    engine="netcdf4",
+    normalize_latlon_coords=False,
+    force_decending_y=False,
+    force_ascending_y=False,
+    landcover=False,
+    landcover_year_start=None,
+    available_mem=None,
+    file_name="*.*",
+):
+    """Load a dataset from a file, directory, or pattern.
+
+    This mirrors ``get_xarray_ds_from_file`` for single-file inputs and
+    extends it to directories (multi-file datasets).
+    """
+    if path is None:
+        path_is_none_msg = "Input path is None. Please provide a valid file path, directory path, or glob pattern."
+        with ErrorLogger(logger):
+            raise ValueError(path_is_none_msg)
+
+    if available_mem_gib is None and available_mem is not None:
+        available_mem_gib = available_mem
+        if chunking is None:
+            chunking = True
+    if chunking is None:
+        chunking = False
+
+    def _postprocess(ds_out):
+        lat_key = get_coord_key(ds_out, lat=True, raise_exception=False)
+        lon_key = get_coord_key(ds_out, lon=True, raise_exception=False)
+        if lat_key is not None and (
+            (force_decending_y and ds_out[lat_key].data[0] < ds_out[lat_key].data[-1])
+            or (
+                force_ascending_y and ds_out[lat_key].data[0] > ds_out[lat_key].data[-1]
+            )
+        ):
+            ds_out = ds_out.sel({lat_key: slice(None, None, -1)})
+
+        logger.debug(ds_out)
+        logger.debug(lat_key)
+        logger.debug(lon_key)
+
+        if normalize_latlon_coords:
+            ds_out = normalize_lat_lon(ds_out, lat_key, lon_key, raise_exceptions=False)
+
+        if lon_key is None and lat_key is None:
+            logger.warning("Dataset does not have lon and lat key.")
+        elif lon_key is None or lat_key is None:
+            logger.error("Dataset has only one of lon at lat keys.")
+
+        if chunking and available_mem_gib is not None:
+            ds_out = chunk_dataset(ds_out, chunk_type, available_mem_gib)
+        else:
+            for name in list(ds_out.variables):
+                enc = ds_out.variables[name].encoding
+                enc.pop("chunksizes", None)
+                enc.pop("_ChunkSizes", None)
+                enc.pop("chunks", None)
+                enc["contiguous"] = True
+
+        return ds_out
+
+    def _is_dir_or_list(p):
+        if isinstance(p, list):
+            return True
+        if isinstance(p, str):
+            p = Path(p)
+        return p.is_dir()
+
+    if _is_dir_or_list(path):
+        file_list = []
+        if not isinstance(path, list):
+            path = Path(path)
+            file_list = list(path.rglob(file_name))
+        else:
+            path = [Path(p) for p in path]
+            for p in path:
+                if p.is_file():
+                    file_list.append(p)
+                elif p.is_dir():
+                    file_list.extend(list(p.rglob(file_name)))
+        if not file_list:
+            with ErrorLogger(logger):
+                msg = f"No files found in {path}."
+                raise ValueError(msg)
+        if len(file_list) == 1:
+            return get_xarray_ds_from_file(
+                file_list[0],
+                var_name=var_name,
+                chunking=chunking,
+                available_mem_gib=available_mem_gib,
+                chunk_type=chunk_type,
+                use_mfdataset=use_mfdataset,
+                engine=engine,
+                normalize_latlon_coords=normalize_latlon_coords,
+                force_decending_y=force_decending_y,
+                force_ascending_y=force_ascending_y,
+                landcover=landcover,
+                landcover_year_start=landcover_year_start,
+            )
+        non_nc = [p for p in file_list if Path(p).suffix != ".nc"]
+        if non_nc:
+            with ErrorLogger(logger):
+                msg = "Multi-file loading supports NetCDF files only."
+                raise ValueError(msg)
+        ds_out = read_dataset(file_list, use_mfdataset=use_mfdataset, engine=engine)
+        return _postprocess(ds_out)
+
+    path_in = path
+    path = Path(path_in)
+
+    if path.is_file():
+        return get_xarray_ds_from_file(
+            path,
+            var_name=var_name,
+            chunking=chunking,
+            available_mem_gib=available_mem_gib,
+            chunk_type=chunk_type,
+            use_mfdataset=use_mfdataset,
+            engine=engine,
+            normalize_latlon_coords=normalize_latlon_coords,
+            force_decending_y=force_decending_y,
+            force_ascending_y=force_ascending_y,
+            landcover=landcover,
+            landcover_year_start=landcover_year_start,
+        )
+
+    path_str = str(path_in)
+    if any(w in path_str for w in ("*", "?", "[", "]")) and path_str.endswith(".nc"):
+        ds_out = read_dataset(path_str, use_mfdataset=use_mfdataset, engine=engine)
+        return _postprocess(ds_out)
+
+    with ErrorLogger(logger):
+        msg = f"Path {path} does not exist."
+        raise ValueError(msg)
