@@ -60,27 +60,28 @@ def add_args(parser: argparse.ArgumentParser):
     )
 
     # optional arguments
-    parser.add_argument("--colorbar-label", default="", help="Label for the colorbar")
-    parser.add_argument("--title", default="", help="Title for the plot")
-    parser.add_argument(
+    optional = parser.add_argument_group("optional arguments")
+    optional.add_argument("--colorbar-label", default="", help="Label for the colorbar")
+    optional.add_argument("--title", default="", help="Title for the plot")
+    optional.add_argument(
         "--x-min", type=str2float, default=None, help="Minimum longitude to display"
     )
-    parser.add_argument(
+    optional.add_argument(
         "--x-max", type=str2float, default=None, help="Maximum longitude to display"
     )
-    parser.add_argument(
+    optional.add_argument(
         "--y-min", type=str2float, default=None, help="Minimum latitude to display"
     )
-    parser.add_argument(
+    optional.add_argument(
         "--y-max", type=str2float, default=None, help="Maximum latitude to display"
     )
-    parser.add_argument(
+    optional.add_argument(
         "--cmap", default="RdBu_r", help="Matplotlib colormap name to use"
     )
-    parser.add_argument(
+    optional.add_argument(
         "--vmin", type=str2float, default=None, help="Minimum data value for colormap"
     )
-    parser.add_argument(
+    optional.add_argument(
         "--vmax", type=str2float, default=None, help="Maximum data value for colormap"
     )
 

@@ -173,6 +173,41 @@ class TestAsciiReadWrite(unittest.TestCase, BaseDatasetMixin):
     #         fh.write_xarray_to_ascii(ds, asc_path, data_var="cats")
     #         s = asc_path.read_text()
     #         self.assertIn("a b c", s)
+    def test_get_xarray_ds_from_file_ascii_preserves_dtype_kind(self):
+        lat = np.array([52.0, 51.0, 50.0])
+        lon = np.array([10.0, 11.0, 12.0, 13.0])
+
+        int_data = np.arange(lat.size * lon.size, dtype=np.int32).reshape(
+            lat.size, lon.size
+        )
+        float_data = np.arange(lat.size * lon.size, dtype=np.float64).reshape(
+            lat.size, lon.size
+        )
+
+        int_ds = xr.Dataset(
+            {"var": (("lat", "lon"), int_data)}, coords={"lat": lat, "lon": lon}
+        )
+        float_ds = xr.Dataset(
+            {"var": (("lat", "lon"), float_data)}, coords={"lat": lat, "lon": lon}
+        )
+
+        with tempfile.TemporaryDirectory() as td:
+            int_path = Path(td) / "int.asc"
+            float_path = Path(td) / "float.asc"
+            fh.write_xarray_to_ascii(int_ds, int_path, data_var="var")
+            fh.write_xarray_to_ascii(float_ds, float_path, data_var="var")
+
+            int_out = fh.get_xarray_ds_from_file(int_path, var_name="var")
+            float_out = fh.get_xarray_ds_from_file(float_path, var_name="var")
+
+            self.assertTrue(
+                np.issubdtype(int_out["var"].dtype, np.integer),
+                f"Expected integer dtype, got {int_out['var'].dtype}",
+            )
+            self.assertTrue(
+                np.issubdtype(float_out["var"].dtype, np.floating),
+                f"Expected float dtype, got {float_out['var'].dtype}",
+            )
 
     def test_write_xarray_to_ascii_multiple_vars_without_data_var_returns_none(self):
         lat = np.array([1, 0])
@@ -220,8 +255,56 @@ class TestWriteXarrayToFile(unittest.TestCase, BaseDatasetMixin):
             with self.assertRaises(NotImplementedError):
                 fh.write_xarray_to_file(ds, out)
 
+    def test_set_grid_ignores_incompatible_coords(self):
+        time = np.array(["2017-01-01", "2017-01-02"], dtype="datetime64[ns]")
+        da = xr.DataArray(
+            np.random.rand(2, 2, 2),
+            dims=("time", "lat", "lon"),
+            coords={
+                "time": ("time", time, {"bounds": "time_bnds"}),
+                "lat": ("lat", [10.0, 11.0]),
+                "lon": ("lon", [100.0, 101.0]),
+            },
+            name="v",
+        )
+        ds = da.to_dataset()
+        ds["time_bnds"] = xr.DataArray(
+            np.stack([time - np.timedelta64(1, "D"), time], axis=1),
+            dims=("time", "bnds"),
+            coords={"time": ds["time"]},
+        )
+
+        grid = fh.get_grid(ds)
+        new_data = np.zeros((2, 2, 2))
+        out = fh.set_grid(new_data, grid, "pet")
+
+        self.assertEqual(out["pet"].dims, ("time", "lat", "lon"))
+        self.assertIn("time_bnds", out.variables)
+
 
 class TestGetXarrayDsFromFile(unittest.TestCase, BaseDatasetMixin):
+    def test_get_xarray_ds_from_file_asci(self):
+        lat = np.array([50.0, 51.0, 52.0])
+        lon = np.array([10.0, 11.0, 12.0, 13.0])
+        data = np.arange(lat.size * lon.size, dtype=np.float32).reshape(
+            lat.size, lon.size
+        )
+        asc_lat_ds = xr.Dataset(
+            {"var": (("lat", "lon"), data)}, coords={"lat": lat, "lon": lon}
+        )
+
+        with tempfile.TemporaryDirectory() as td:
+            nc_path = Path(td) / "asc.nc"
+            asc_lat_ds.to_netcdf(nc_path)
+
+            with patch.object(fh, "read_dataset", return_value=asc_lat_ds):
+                out = fh.get_xarray_ds_from_file(nc_path, force_ascending_y=True)
+                self.assertGreater(out["lat"].values[-1], out["lat"].values[0])
+                out.close()
+                out = fh.get_xarray_ds_from_file(nc_path, force_decending_y=True)
+                self.assertGreater(out["lat"].values[0], out["lat"].values[-1])
+                out.close()
+
     def test_get_xarray_ds_from_file_nc_flow(self):
         ds_with_time = self.make_ds_with_time(lon_coord="x", lat_coord="y")
         engines = [e for e in ["netcdf4", "h5netcdf"] if _engine_available(e)]
@@ -351,6 +434,21 @@ class TestGetXarrayDsFromFile(unittest.TestCase, BaseDatasetMixin):
                 self.assertGreater(out["lat"].values[0], out["lat"].values[-1])
                 out.close()
 
+
+class TestGetDatasetFromPath(unittest.TestCase, BaseDatasetMixin):
+    def test_get_dataset_from_path_file(self):
+        ds = self.make_simple_ds()
+        with tempfile.TemporaryDirectory() as td:
+            nc_path = Path(td) / "single.nc"
+            ds.to_netcdf(nc_path)
+
+            out = fh.get_dataset_from_path(nc_path)
+            self.assertIn("lat", out.coords)
+            self.assertIn("lon", out.coords)
+            self.assertIn("var", out.data_vars)
+            self.assertIsNone(out["var"].chunks)
+
+    def test_get_dataset_from_path_directory(self):
         lat = np.array([50.0, 51.0, 52.0])
         lon = np.array([10.0, 11.0, 12.0, 13.0])
         data = np.arange(lat.size * lon.size, dtype=np.float32).reshape(
@@ -361,16 +459,37 @@ class TestGetXarrayDsFromFile(unittest.TestCase, BaseDatasetMixin):
         )
 
         with tempfile.TemporaryDirectory() as td:
-            nc_path = Path(td) / "asc.nc"
-            asc_lat_ds.to_netcdf(nc_path)
+            base = Path(td)
+            year_dir = base / "2000"
+            year_dir.mkdir(parents=True, exist_ok=True)
+            file_list = []
+            for name in ["a.nc", "b.nc"]:
+                p = year_dir / name
+                p.write_text("stub")
+                file_list.append(p)
 
             with patch.object(fh, "read_dataset", return_value=asc_lat_ds):
-                out = fh.get_xarray_ds_from_file(nc_path, force_ascending_y=True)
-                self.assertGreater(out["lat"].values[-1], out["lat"].values[0])
-                out.close()
-                out = fh.get_xarray_ds_from_file(nc_path, force_decending_y=True)
+                out = fh.get_dataset_from_path(base, force_decending_y=True)
                 self.assertGreater(out["lat"].values[0], out["lat"].values[-1])
-                out.close()
+                self.assertIn("var", out.data_vars)
+
+    def test_get_dataset_from_path_directory_empty_raises(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            with self.assertRaises(ValueError):
+                fh.get_dataset_from_path(base)
+
+    def test_get_dataset_from_path_wildcard(self):
+        ds = self.make_simple_ds()
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            for name in ["a.nc", "b.nc"]:
+                ds.to_netcdf(base / name)
+
+            with patch.object(fh, "read_dataset", return_value=ds) as mocked:
+                out = fh.get_dataset_from_path(str(base / "*.nc"))
+                self.assertIn("var", out.data_vars)
+                self.assertTrue(mocked.called)
 
 
 class TestCropAndCoords(unittest.TestCase, BaseDatasetMixin):
