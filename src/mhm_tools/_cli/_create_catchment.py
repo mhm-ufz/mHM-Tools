@@ -77,6 +77,13 @@ def add_args(parser):
         ),
     )
     optional_args.add_argument(
+        "--l0-resolution",
+        required=False,
+        type=float,
+        default=None,
+        help=("""Resolution of the morphological input grid."""),
+    )
+    optional_args.add_argument(
         "--l1-resolution",
         required=False,
         type=float,
@@ -269,7 +276,10 @@ def run(args):  # noqa: PLR0912,PLR0915
             areas = []
             for row_no, row in enumerate(reader, start=2):
                 try:
-                    gid = int(str(row[field_map["id"]]).strip())
+                    gid = str(row[field_map["id"]]).strip()
+                    if not gid:
+                        empty_id_msg = "empty gauge id"
+                        raise ValueError(empty_id_msg)
                     lat = float(str(row[field_map["lat"]]).strip())
                     lon = float(str(row[field_map["lon"]]).strip())
                 except Exception as exc:
@@ -345,9 +355,9 @@ def run(args):  # noqa: PLR0912,PLR0915
     if args.gauge_id is not None and args.gauges_csv is None:
         raw_ids = str(args.gauge_id)
         if "," in raw_ids:
-            gauge_ids = [int(val.strip()) for val in raw_ids.split(",") if val.strip()]
+            gauge_ids = [val.strip() for val in raw_ids.split(",") if val.strip()]
         else:
-            gauge_ids = int(raw_ids)
+            gauge_ids = raw_ids.strip()
     if args.ref_catchment_area is not None and args.gauges_csv is None:
         raw_areas = str(args.ref_catchment_area)
         if "," in raw_areas:
@@ -383,6 +393,7 @@ def run(args):  # noqa: PLR0912,PLR0915
     else:
         mask_file = args.mask_file
     coarse_resolutions = Resolution(
+        l0=args.l0_resolution if args.l0_resolution is not None else None,
         l1=args.l1_resolution,
         l11=args.l11_resolution,
         l2=args.l2_resolution,
@@ -413,4 +424,5 @@ def run(args):  # noqa: PLR0912,PLR0915
             None if str(args.output_vars).strip().lower() == "all" else args.output_vars
         ),
         gauge_opti_method=args.gauge_optimization_method,
+        shape_folder=args.shape_folder,
     )

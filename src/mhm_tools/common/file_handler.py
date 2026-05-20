@@ -425,6 +425,7 @@ def write_xarray_to_file(  # noqa: PLR0912, PLR0915
     engine="netcdf4",
     # available_mem_gib=None,
     # compute_kwargs=None,
+    resolution=None,
 ):
     """Write xarray Datasets to file with file type depending on the file suffix."""
     file_path = Path(file_path)
@@ -436,7 +437,7 @@ def write_xarray_to_file(  # noqa: PLR0912, PLR0915
     # ds = chunk_if_too_big(ds)
     # ds = ds.chunk({'time': 512, 'lat': 121, 'lon': 131})
     if file_path.suffix == ".asc":
-        write_xarray_to_ascii(ds, file_path, var_name)
+        write_xarray_to_ascii(ds, file_path, var_name, resolution=resolution)
     elif file_path.suffix == ".nc":
         if isinstance(ds, xr.DataArray):
             var_name = ds.name
@@ -725,7 +726,9 @@ def write_xarray_to_file(  # noqa: PLR0912, PLR0915
             raise NotImplementedError(msg)
 
 
-def write_xarray_to_ascii(dataset, filepath, data_var=None, nodata_value=None):
+def write_xarray_to_ascii(
+    dataset, filepath, data_var=None, nodata_value=None, resolution=None
+):
     """Write xarray Dataset to an ASCII file that can be read by mHM."""
     # check if a data_var can be optained for writing the data
     if data_var is None and isinstance(dataset, xr.Dataset):
@@ -746,6 +749,8 @@ def write_xarray_to_ascii(dataset, filepath, data_var=None, nodata_value=None):
         nodata_value = typ(NO_DATA)
 
     header = create_header(dataset, no_data_value=nodata_value)
+    if resolution is not None:
+        header["cellsize"] = resolution
 
     data_to_write = data
     if isinstance(data_to_write, xr.DataArray):

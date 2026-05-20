@@ -568,11 +568,17 @@ def get_upscaling_factor(resolutions, max_resolution=False, l1=False, l2=True):
     if max_resolution:
         upscale_res = resolutions.get_max_resolution()
     if upscale_res is None:
-        return 1
+        return 1, input_res
+    logger.debug(
+        f"Computing upscaling factor for input_res {input_res} and upscale_res {upscale_res}"
+    )
     ratio = upscale_res / input_res
     ratio_round = int(ratio + 0.5)
     if abs(ratio_round - ratio) < 1e-6:
-        return ratio_round
+        return ratio_round, upscale_res
+    logger.debug(
+        f"Computed upscaling ratio: {ratio:.8f}, rounded: {ratio_round} with difference {abs(ratio_round - ratio):.8f}"
+    )
     msg = (
         "Upscaling only works if target resolution is integer multiple of L0 "
         f"but target/L0 = {ratio:.4f}"
@@ -620,10 +626,10 @@ def cut_to_filled_area(
         f"L0 initial window (rows, cols): [{min_row}:{max_row}], [{min_col}:{max_col}]"
     )
 
-    factor = get_upscaling_factor(resolutions, l2=True)
+    factor, upscale_resolution = get_upscaling_factor(resolutions, l2=True)
     if factor > 1:
         logger.info(
-            f"Regridding to fit coarse grid with res {max([r for r in [resolutions.l1, resolutions.l11, resolutions.l2] if r is not None])} (factor {factor})"
+            f"Regridding to fit coarse grid with res {upscale_resolution} (factor {factor})"
         )
         if resolutions.l2_file is not None and not repeat:
             logger.debug(f"Aligning to L2 grid from file {resolutions.l2_file}")
