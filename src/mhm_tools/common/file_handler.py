@@ -671,6 +671,42 @@ def write_xarray_to_file(  # noqa: PLR0912, PLR0915
                         bnds_var.encoding["calendar"] = time_var.encoding["calendar"]
                     for key in ("units", "calendar"):
                         bnds_var.attrs.pop(key, None)
+            # Coordinates must not carry stale chunk/compression/backend metadata.
+            # Keep only safe coord encoding keys and force fill-disabled coords.
+            coord_allowed_encoding = {"dtype", "_FillValue", "units", "calendar"}
+            coord_drop_encoding = {
+                "zlib",
+                "szip",
+                "zstd",
+                "bzip2",
+                "blosc",
+                "shuffle",
+                "complevel",
+                "fletcher32",
+                "contiguous",
+                "chunksizes",
+                "preferred_chunks",
+                "source",
+                "original_shape",
+                "_ChunkSizes",
+                "chunks",
+                "compression",
+                "chunking",
+            }
+            for coord in ds_clean.coords:
+                enc = dict(ds_clean[coord].encoding) if ds_clean[coord].encoding else {}
+                for key in coord_drop_encoding:
+                    enc.pop(key, None)
+                enc = {k: v for k, v in enc.items() if k in coord_allowed_encoding}
+                if coord in ds_clean.dims:
+                    enc["_FillValue"] = None
+                ds_clean[coord].encoding = enc
+            logger.debug(
+                "Coordinate lon dtype=%s shape=%s encoding=%s",
+                ds_clean["lon"].dtype,
+                ds_clean["lon"].shape,
+                ds_clean["lon"].encoding,
+            )
             ds_clean.to_netcdf(
                 file_path, engine=engine, format="NETCDF4", encoding=encoding
             )
