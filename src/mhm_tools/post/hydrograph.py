@@ -6,11 +6,13 @@ Authors
 """
 
 import logging
+import re
 from pathlib import Path
 
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import xarray as xr
 from matplotlib import gridspec
 
@@ -20,6 +22,19 @@ from mhm_tools.common.spatial_metrics import create_csv_from_dict
 from mhm_tools.common.utils import dict_to_multiline_string
 
 logger = logging.getLogger(__name__)
+
+
+def _ensure_non_interactive_backend(show):
+    """Switch to a non-interactive backend when plots are not shown.
+
+    This avoids X/GUI backend issues in headless or multi-process runs.
+    """
+    if show:
+        return
+    try:
+        plt.switch_backend("Agg")
+    except Exception as exc:
+        logger.debug("Failed to switch matplotlib backend to Agg: %s", exc)
 
 
 class Catchment:
@@ -107,14 +122,86 @@ class Hydrograph:
     show = False
     save = False
     calc_stats = False
+    # Colorblind-safe defaults: observed is red, simulations avoid reds.
+    OBS_COLOR = "#D55E00"
+    SIM_COLOR = "#0072B2"
+    sim_name = None
+    sim_names = None
+    multi_sim_named = False
+    sim_colors = None
 
     def __init__(self, simulation=None, observation=None, calc_stats=True):
         self.plots = [0, 0, 0, 0, 0]
         self.calc_stats = calc_stats
         self.sim_discharge_data_list = None
         self.sim_discharge_data_median = None
+        self.sim_name = None
+        self.sim_names = None
+        self.multi_sim_named = False
+        self.sim_colors = None
         if simulation is not None and observation is not None:
             self.set_discharge(simulation=simulation, observation=observation)
+
+    def _get_sim_colors(self, n):
+        """Return a list of distinct colors for simulations."""
+        if self.sim_colors is not None and len(self.sim_colors) >= n:
+            return self.sim_colors[:n]
+        # Colorblind-safe palette (no reds) to keep observed line distinct.
+        colors = [
+            self.SIM_COLOR,  # blue
+            "#56B4E9",  # sky blue
+            "#009E73",  # bluish green
+            "#F0E442",  # yellow
+            "#CC79A7",  # purple
+            "#332288",  # indigo
+            "#117733",  # dark green
+            "#999933",  # olive
+            "#88CCEE",  # light cyan
+            "#000000",  # black
+        ]
+        out = [colors[i % len(colors)] for i in range(n)]
+        self.sim_colors = out
+        return out
+
+    def _infer_catchment_name(self):
+        """Infer catchment name from available data if not set."""
+        if self.catchment.name:
+            return
+
+        def _from_name(name):
+            if not name:
+                return None
+            ids = re.findall(r"(\d+)", str(name))
+            if not ids:
+                return None
+            return str(int(ids[-1].lstrip("0") or "0"))
+
+        def _from_da(da):
+            if da is None:
+                return None
+            name = _from_name(getattr(da, "name", None))
+            if name:
+                return name
+            if "id" in da.coords:
+                try:
+                    ids = da.coords["id"].values
+                    if np.size(ids) == 1:
+                        return str(int(np.asarray(ids).item()))
+                except Exception:
+                    return None
+            return None
+
+        for da in [self.obs_discharge_data, self.sim_discharge_data]:
+            name = _from_da(da)
+            if name:
+                self.catchment.name = name
+                return
+        if self.sim_discharge_data_list:
+            for da in self.sim_discharge_data_list:
+                name = _from_da(da)
+                if name:
+                    self.catchment.name = name
+                    return
 
     def set_discharge(self, simulation=None, observation=None):
         """Set the discharge variables and remove nan values."""
@@ -375,7 +462,7 @@ class Hydrograph:
         if labels is None:
             labels = ["simulated discharge", "observed discharge"]
         if colors is None:
-            colors = ["#EF4340", "#3A4F99"]
+            colors = [Hydrograph.SIM_COLOR, Hydrograph.OBS_COLOR]
         for i, yvalue in enumerate(yvalues):
             arguments["color"] = colors[i]
             if labels:
@@ -403,6 +490,12 @@ class Hydrograph:
         """
         if not code:
             self.logger.warning("No plots will be produced since none were specified.")
+            return
+        if not self.save and not self.show:
+            self.logger.info(
+                'No plots will be produced since both "save" and "show" are False.'
+            )
+            return
         if "t" in code:
             self.plots[0] = 1
         if "y" in code:
@@ -511,36 +604,78 @@ class Hydrograph:
         #     yvalues=[self.sim_discharge_data, self.obs_discharge_data],
         #     s=1.0,
         # )
+        min_sim_time = None
+        max_sim_time = None
         if self.has_multi_sim():
-            for sim in self.sim_discharge_data_list:
-                ax1.plot(
-                    sim.time,
-                    sim,
-                    color="0.7",
-                    linewidth=0.3,
-                    alpha=0.7,
-                    label=None,
-                )
-            ax1.plot(
-                self.sim_discharge_data_median.time,
-                self.sim_discharge_data_median,
-                color="red",
-                linewidth=0.6,
-                label="sim median",
-            )
+            if self.multi_sim_named and self.sim_names:
+                colors = self._get_sim_colors(len(self.sim_discharge_data_list))
+                for sim, name, color in zip(
+                    self.sim_discharge_data_list, self.sim_names, colors
+                ):
+                    max_sim_time = (
+                        sim.time.max().data
+                        if max_sim_time is None or sim.time.max().data < max_sim_time
+                        else max_sim_time  # if multiple named simulations, use the earliest max time to set xlim
+                    )
+                    min_sim_time = (
+                        sim.time.min().data
+                        if min_sim_time is None or sim.time.min().data < min_sim_time
+                        else min_sim_time
+                    )
+                    ax1.plot(
+                        sim.time,
+                        sim,
+                        color=color,
+                        linewidth=0.4,
+                        alpha=0.9,
+                        label=name,
+                    )
+            else:
+                for sim in self.sim_discharge_data_list:
+                    max_sim_time = (
+                        sim.time.max().data
+                        if max_sim_time is None or sim.time.max().data < max_sim_time
+                        else max_sim_time  # if multiple unnamed simulations, use the earliest max time to set xlim
+                    )
+                    min_sim_time = (
+                        sim.time.min().data
+                        if min_sim_time is None or sim.time.min().data < min_sim_time
+                        else min_sim_time
+                    )
+                    ax1.plot(
+                        sim.time,
+                        sim,
+                        color="0.7",
+                        linewidth=0.4,
+                        alpha=0.7,
+                        label=None,
+                    )
+                if self.sim_discharge_data_median is not None:
+                    ax1.plot(
+                        self.sim_discharge_data_median.time,
+                        self.sim_discharge_data_median,
+                        color=self.SIM_COLOR,
+                        linewidth=0.4,
+                        label="sim median",
+                    )
             ax1.plot(
                 self.obs_discharge_data.time,
                 self.obs_discharge_data,
-                color="#3A4F99",
-                linewidth=0.5,
+                color=self.OBS_COLOR,
+                linewidth=0.4,
                 label="observed discharge",
             )
         else:
+            max_sim_time = self.sim_discharge_data.time.max().data
+            min_sim_time = self.sim_discharge_data.time.min().data
             self.plot_on_axis(
                 function=ax1.plot,
                 yvalues=[self.sim_discharge_data, self.obs_discharge_data],
-                linewidth=0.3,
-                # labels=[],  # no labels
+                linewidth=0.4,
+                labels=[
+                    self.sim_name or "simulated discharge",
+                    "observed discharge",
+                ],
             )
         ax1.legend()
         title = ""
@@ -558,12 +693,13 @@ class Hydrograph:
             horizontalalignment="center",
         )
         ax1.set_ylabel(r"Q $[m^3 s^{-1}]$")
-        xmin = min(
-            self.sim_discharge_data_nonan.time.min(),
+        # set xlim to the common time range of sim and obs, but only within the actual time range of the data (in case one has a shorter time range than the other)
+        xmin = max(
+            min_sim_time,
             self.obs_discharge_data_nonan.time.min(),
         )
-        xmax = max(
-            self.sim_discharge_data_nonan.time.max(),
+        xmax = min(
+            max_sim_time,
             self.obs_discharge_data_nonan.time.max(),
         )
         ax1.set_xlim(xmin, xmax)
@@ -595,9 +731,16 @@ class Hydrograph:
             return
         if self.has_multi_sim():
             sim_aligned = xr.align(*self.sim_discharge_data_list, join="inner")
-            sim_stack = xr.concat(sim_aligned, dim="member")
-            sim_discharge_yearly = sim_stack.resample(time="YE").mean(skipna=True)
-            sim_discharge_yearly_median = sim_discharge_yearly.median(dim="member")
+            if self.multi_sim_named and self.sim_names:
+                sim_discharge_yearly_list = [
+                    sim.resample(time="YE").mean(skipna=True) for sim in sim_aligned
+                ]
+                sim_discharge_yearly = sim_discharge_yearly_list[0]
+                sim_discharge_yearly_median = None
+            else:
+                sim_stack = xr.concat(sim_aligned, dim="member")
+                sim_discharge_yearly = sim_stack.resample(time="YE").mean(skipna=True)
+                sim_discharge_yearly_median = sim_discharge_yearly.median(dim="member")
         else:
             sim_discharge_yearly = self.sim_discharge_data_nonan.resample(
                 time="YE"
@@ -674,25 +817,40 @@ class Hydrograph:
         ax2.spines["right"].set_visible(False)
 
         if self.has_multi_sim():
-            for member in sim_discharge_yearly:
-                ax2.plot(
-                    time_yearly_sim,
-                    member,
-                    color="0.7",
-                    linewidth=0.3,
-                    alpha=0.7,
-                )
-            ax2.plot(
-                [int(y.dt.year.data) for y in sim_discharge_yearly_median.time],
-                sim_discharge_yearly_median,
-                color="red",
-                linewidth=0.6,
-                label="sim median",
-            )
+            if self.multi_sim_named and self.sim_names:
+                colors = self._get_sim_colors(len(sim_discharge_yearly_list))
+                for member, name, color in zip(
+                    sim_discharge_yearly_list, self.sim_names, colors
+                ):
+                    ax2.plot(
+                        time_yearly_sim,
+                        member,
+                        color=color,
+                        linewidth=0.5,
+                        alpha=0.9,
+                        label=name,
+                    )
+            else:
+                for member in sim_discharge_yearly:
+                    ax2.plot(
+                        time_yearly_sim,
+                        member,
+                        color="0.7",
+                        linewidth=0.6,
+                        alpha=0.7,
+                    )
+                if sim_discharge_yearly_median is not None:
+                    ax2.plot(
+                        [int(y.dt.year.data) for y in sim_discharge_yearly_median.time],
+                        sim_discharge_yearly_median,
+                        color=self.SIM_COLOR,
+                        linewidth=0.6,
+                        label="sim median",
+                    )
             ax2.plot(
                 time_yearly_obs,
                 obs_discharge_yearly,
-                color="#3A4F99",
+                color=self.OBS_COLOR,
                 linewidth=0.5,
                 label="observed discharge",
             )
@@ -707,12 +865,16 @@ class Hydrograph:
                 function=ax2.plot,
                 xvalues=[time_yearly_sim, time_yearly_obs],
                 yvalues=[sim_discharge_yearly, obs_discharge_yearly],
-                linewidth=0.3,
+                linewidth=0.6,
+                labels=[
+                    self.sim_name or "simulated discharge",
+                    "observed discharge",
+                ],
             )
         if r == 0:
             ax2.legend()
         ax2.set_ylabel(r"Q $[m^3 s^{-1}]$")
-        ax2.set_xlim(np.min(years_combined) - 0.5, np.max(years_combined) + 0.5)
+        ax2.set_xlim(np.min(years_combined), np.max(years_combined))
         ax2.set_xticks(
             years_combined[:: len((years_combined) - np.min(years_combined)) // 3]
         )
@@ -733,13 +895,15 @@ class Hydrograph:
 
         if self.has_multi_sim():
             sim_aligned = xr.align(*self.sim_discharge_data_list, join="inner")
-            sim_stack = xr.concat(sim_aligned, dim="member")
             season_sim_all = [
-                self.get_long_time_monthly_mean(sim_stack.isel(member=i), long=True)
-                for i in range(sim_stack.sizes["member"])
+                self.get_long_time_monthly_mean(sim_aligned[i], long=True)
+                for i in range(len(sim_aligned))
             ]
             season_sim_all = np.array(season_sim_all)
-            season_sim = np.nanmedian(season_sim_all, axis=0)
+            if self.multi_sim_named and self.sim_names:
+                season_sim = season_sim_all[0]
+            else:
+                season_sim = np.nanmedian(season_sim_all, axis=0)
         else:
             season_sim = self.get_long_time_monthly_mean(
                 self.sim_discharge_data, long=True
@@ -804,25 +968,37 @@ class Hydrograph:
         self.logger.debug(f"sim: {season_sim}")
         self.logger.debug(f"osb: {season_obs}")
         if self.has_multi_sim():
-            for series in season_sim_all:
+            if self.multi_sim_named and self.sim_names:
+                colors = self._get_sim_colors(len(season_sim_all))
+                for series, name, color in zip(season_sim_all, self.sim_names, colors):
+                    ax3.plot(
+                        np.arange(0, 14),
+                        series,
+                        color=color,
+                        linewidth=0.5,
+                        alpha=0.9,
+                        label=name,
+                    )
+            else:
+                for series in season_sim_all:
+                    ax3.plot(
+                        np.arange(0, 14),
+                        series,
+                        color="0.7",
+                        linewidth=0.6,
+                        alpha=0.7,
+                    )
                 ax3.plot(
                     np.arange(0, 14),
-                    series,
-                    color="0.7",
-                    linewidth=0.3,
-                    alpha=0.7,
+                    season_sim,
+                    color=self.SIM_COLOR,
+                    linewidth=0.6,
+                    label="sim median",
                 )
             ax3.plot(
                 np.arange(0, 14),
-                season_sim,
-                color="red",
-                linewidth=0.6,
-                label="sim median",
-            )
-            ax3.plot(
-                np.arange(0, 14),
                 season_obs,
-                color="#3A4F99",
+                color=self.OBS_COLOR,
                 linewidth=0.5,
                 label="observed discharge",
             )
@@ -840,7 +1016,11 @@ class Hydrograph:
                 function=ax3.plot,
                 xvalues=np.arange(0, 14),
                 yvalues=[season_sim, season_obs],
-                linewidth=0.3,
+                linewidth=0.6,
+                labels=[
+                    self.sim_name or "simulated discharge",
+                    "observed discharge",
+                ],
             )
 
         if r == 0:
@@ -877,31 +1057,57 @@ class Hydrograph:
                 np.array(sim).flatten() for sim in self.sim_discharge_data_list
             ]
             sim_series = [s[~np.isnan(s)] for s in sim_series]
-            sim_median = np.array(self.sim_discharge_data_median).flatten()
-            sim_median = sim_median[~np.isnan(sim_median)]
+            if self.multi_sim_named and self.sim_names:
+                sim_median = None
+            else:
+                sim_median = np.array(self.sim_discharge_data_median).flatten()
+                sim_median = sim_median[~np.isnan(sim_median)]
         else:
             sim_median = np.array(self.sim_discharge_data_nonan).flatten()
             sim_median = sim_median[~np.isnan(sim_median)]
         obs = np.array(self.obs_discharge_data_nonan).flatten()
         obs = obs[~np.isnan(obs)]
-        if sim_median.size == 0 or obs.size == 0:
+        if not (self.multi_sim_named and self.sim_names) and (
+            sim_median.size == 0 or obs.size == 0
+        ):
             self.logger.warning("Flow duration plot skipped: no valid discharge data.")
             ax_p.set_axis_off()
             return
         if self.has_multi_sim():
             sim_sorted_all = [np.sort(s)[::-1] for s in sim_series if s.size > 0]
-            for series in sim_sorted_all:
-                sim_p = (np.arange(1, series.size + 1) / (series.size + 1)) * 100.0
-                ax_p.plot(sim_p, series, color="0.7", linewidth=0.3, alpha=0.7)
-            sim_sorted = np.sort(sim_median)[::-1]
-            sim_p = (np.arange(1, sim_sorted.size + 1) / (sim_sorted.size + 1)) * 100.0
-            ax_p.plot(sim_p, sim_sorted, color="red", linewidth=0.6, label="sim median")
+            if self.multi_sim_named and self.sim_names:
+                colors = self._get_sim_colors(len(sim_sorted_all))
+                for series, name, color in zip(sim_sorted_all, self.sim_names, colors):
+                    sim_p = (np.arange(1, series.size + 1) / (series.size + 1)) * 100.0
+                    ax_p.plot(
+                        sim_p,
+                        series,
+                        color=color,
+                        linewidth=0.6,
+                        alpha=0.9,
+                        label=name,
+                    )
+            else:
+                for series in sim_sorted_all:
+                    sim_p = (np.arange(1, series.size + 1) / (series.size + 1)) * 100.0
+                    ax_p.plot(sim_p, series, color="0.7", linewidth=0.6, alpha=0.7)
+                sim_sorted = np.sort(sim_median)[::-1]
+                sim_p = (
+                    np.arange(1, sim_sorted.size + 1) / (sim_sorted.size + 1)
+                ) * 100.0
+                ax_p.plot(
+                    sim_p,
+                    sim_sorted,
+                    color=self.SIM_COLOR,
+                    linewidth=0.6,
+                    label="sim median",
+                )
             obs_sorted = np.sort(obs)[::-1]
             obs_p = (np.arange(1, obs_sorted.size + 1) / (obs_sorted.size + 1)) * 100.0
             ax_p.plot(
                 obs_p,
                 obs_sorted,
-                color="#3A4F99",
+                color=self.OBS_COLOR,
                 linewidth=0.5,
                 label="observed discharge",
             )
@@ -915,9 +1121,16 @@ class Hydrograph:
                 xvalues=[sim_p, obs_p],
                 yvalues=[sim_sorted, obs_sorted],
                 linewidth=0.6,
+                labels=[
+                    self.sim_name or "simulated discharge",
+                    "observed discharge",
+                ],
             )
         if r == 0:
             ax_p.legend()
+        ax_p.set_xlim(-0.5, 100)
+        ax_p.set_xticks([0, 25, 50, 75, 100])
+        ax_p.set_ylim(-0.5, None)
         ax_p.set_xlabel("% time flow equaled or exceeded")
         ax_p.set_ylabel(r"Q $[m^3 s^{-1}]$")
         ax_p.set_title("Flow duration", horizontalalignment="center")
@@ -953,8 +1166,9 @@ class Hydrograph:
             s=50.0,
             colors=["black"],
             edgecolor="white",
-            linewidth=0.3,
+            linewidth=0.6,
             alpha=0.1,
+            labels=[self.sim_name or "simulated discharge"],
         )
         xvalues = np.linspace(0, 1e6, 10000)
         self.plot_on_axis(
@@ -1043,13 +1257,8 @@ class Hydrograph:
         bool | None
             True on success, False/None if no plots are created or data are insufficient.
         """
-        if sum(self.plots) == 0:
-            self.logger.warning("Create no plots")
-            return None
-        # load data
-
+        _ensure_non_interactive_backend(self.show)
         # calculate metrics at timestep resolution (generally hourly)
-        self.logger.debug(self.sim_discharge_data)
         if self.calc_stats:
             logger.info("Crop to overlapping time.")
             if not self.crop_data_to_overlapping_time():
@@ -1059,7 +1268,10 @@ class Hydrograph:
                 self.obs_discharge_data, self.sim_discharge_data
             ):
                 return False
-
+        if sum(self.plots) == 0:
+            self.logger.warning("Create no plots")
+            return True
+        self._infer_catchment_name()
         # create figure and determining the number of rows and cols
         fig = plt.figure(figsize=(7, 8))
         nrows = sum(self.plots) // 2 + 1
@@ -1071,6 +1283,7 @@ class Hydrograph:
         gs = fig.add_gridspec(nrows, ncols, width_ratios=[1, 1])
 
         # write title
+        logger.info(f"catchment name: {self.catchment.name}")
         fig.text(
             s=f"{self.catchment.name}",
             x=0.01,
@@ -1086,8 +1299,18 @@ class Hydrograph:
                 horizontalalignment="center",
                 fontsize="x-large",
             )
+        suptitle_text = f"\n{self.title}\n"
+        # If seasonality is the only selected plot, show only alpha and beta in suptitle.
+        if self.calc_stats and self.plots[2] and sum(self.plots) == 1:
+            stats = (
+                f"alpha = {self.objectives.alpha:.2f}, "
+                f"beta = {self.objectives.beta:.2f}"
+            )
+            suptitle_text = (
+                f"\n{self.title}\n{stats}\n" if self.title else f"\n{stats}\n"
+            )
         fig.suptitle(
-            t=f"\n{self.title}\n",
+            t=suptitle_text,
             x=0.5,
             y=0.97,
             horizontalalignment="center",
@@ -1131,8 +1354,8 @@ class Hydrograph:
 
 
 @log_arguments()
-def get_hydrograph_from_path(
-    input_path, output_file, show, save, title, plot_code, prec_path
+def get_hydrograph_from_path(  # noqa: PLR0912, PLR0915
+    input_path, output_file, show, save, title, plot_code, prec_path, sim_names=None
 ):
     """Read discharge data and produce a hydrograph with multiple analyses.
 
@@ -1145,23 +1368,46 @@ def get_hydrograph_from_path(
     )
     multi_input = len(input_paths) > 1
     input_path = input_paths if multi_input else input_paths[0]
-    hydro = Hydrograph()
+
+    def _normalize_names(names):
+        if names is None:
+            return None
+        if isinstance(names, str):
+            names = [names]
+        names = list(names)
+        if len(names) == 1 and "," in names[0]:
+            names = [n.strip() for n in names[0].split(",") if n.strip()]
+        return names or None
+
+    sim_names = _normalize_names(sim_names)
+    named_multi = bool(multi_input and sim_names and len(sim_names) == len(input_paths))
+    if multi_input and sim_names and not named_multi:
+        logger.warning(
+            "Provided %d names but %d input paths; ignoring names.",
+            len(sim_names),
+            len(input_paths),
+        )
+        sim_names = None
+
+    hydro = Hydrograph(calc_stats=not named_multi)
+    hydro.show = show
+    hydro.save = save
     hydro.check_which_plots_to_create(plot_code)
     if multi_input:
         hydro.plots[4] = 0
     output_file = Path(output_file)
-    if output_file.suffix and output_file.parent.exists():
+    if output_file.is_dir():
+        hydro.output_file = output_file / "hydrograph.png"
+    elif output_file.suffix:
+        output_file.parent.mkdir(parents=True, exist_ok=True)
         hydro.output_file = output_file
-    else:
-        if output_file.suffix:
-            output_file = output_file.parent
-        if not output_file.is_dir():
-            output_file.mkdir(parents=True)
+    else:  # is non existing directory
+        output_file.mkdir(parents=True)
         hydro.output_file = output_file / "hydrograph.png"
 
     hydro.title = title
-    hydro.show = show
-    hydro.save = save
+    if not multi_input and sim_names:
+        hydro.sim_name = sim_names[0]
     prec_path = Path(prec_path)
     if multi_input:
         input_paths = [Path(p) for p in input_path]
@@ -1193,6 +1439,11 @@ def get_hydrograph_from_path(
                 if obs_var_name is None:
                     obs_var_name = obs_var
                     obs = discharge_data[obs_var]
+                    # derive catchment name from obs variable (e.g. Qobs_0006342210)
+                    if hydro.catchment.name is None:
+                        ids = re.findall(r"(\d+)", obs_var_name)
+                        if ids:
+                            hydro.catchment.name = str(int(ids[-1].lstrip("0") or "0"))
                 elif obs_var_name != obs_var:
                     msg = (
                         "Observed discharge variable name differs between inputs: "
@@ -1202,11 +1453,18 @@ def get_hydrograph_from_path(
                         raise ValueError(msg)
                 sims.append(discharge_data[sim_var])
         sims_aligned = xr.align(*sims, join="inner")
-        sim_stack = xr.concat(sims_aligned, dim="member")
-        sim_median = sim_stack.median(dim="member")
-        hydro.set_discharge(simulation=sim_median, observation=obs)
-        hydro.sim_discharge_data_list = list(sims_aligned)
-        hydro.sim_discharge_data_median = sim_median
+        if named_multi:
+            hydro.multi_sim_named = True
+            hydro.sim_names = sim_names
+            hydro.sim_discharge_data_list = list(sims_aligned)
+            hydro.sim_discharge_data_median = None
+            hydro.set_discharge(simulation=sims_aligned[0], observation=obs)
+        else:
+            sim_stack = xr.concat(sims_aligned, dim="member")
+            sim_median = sim_stack.median(dim="member")
+            hydro.set_discharge(simulation=sim_median, observation=obs)
+            hydro.sim_discharge_data_list = list(sims_aligned)
+            hydro.sim_discharge_data_median = sim_median
         hydro.get_catchment_area(input_paths[0], ndecimal=0)
     else:
         input_path = Path(input_path)
@@ -1217,7 +1475,36 @@ def get_hydrograph_from_path(
         hydro.get_catchment_area(input_path, ndecimal=0)
     hydro.load_precipiation_data(prec_path)
     hydro.get_hydrograph()
-    hydro.write_output()
+    if named_multi:
+        # compute per-simulation metrics and write to csv
+        catchment_id = None
+        if obs_var_name:
+            ids = re.findall(r"(\d+)", obs_var_name)
+            if ids:
+                catchment_id = int(ids[-1].lstrip("0") or "0")
+        metrics_rows = []
+        for sim, name in zip(hydro.sim_discharge_data_list, sim_names):
+            h = Hydrograph(calc_stats=True)
+            if not h.set_discharge(simulation=sim, observation=obs):
+                continue
+            try:
+                if not h.crop_data_to_overlapping_time():
+                    continue
+                if not h.calc_objectives(h.obs_discharge_data, h.sim_discharge_data):
+                    continue
+            except Exception:
+                continue
+            row = {**h.objectives.__dict__}
+            if catchment_id is not None:
+                row["id"] = catchment_id
+            row["name"] = name
+            metrics_rows.append(row)
+        if metrics_rows:
+            pd.DataFrame(metrics_rows).to_csv(
+                hydro.output_file.parent / "kge.csv", index=False
+            )
+    else:
+        hydro.write_output()
 
 
 @log_arguments()
@@ -1254,8 +1541,14 @@ def gen_hydrograph_by_data_sets(
             hydro.catchment.area = area
             hydro.check_which_plots_to_create(plot_code)
             if not hydro.get_hydrograph():
+                logger.debug(
+                    f"get_hydrograph returned False for {id}. Simulations: {simulations}, Observation: {observation}"
+                )
                 logger.error(missing_data_error_msg)
         else:
+            logger.debug(
+                f"set_discharge returned False for {id}. Simulations: {simulations}, Observation: {observation}"
+            )
             logger.error(missing_data_error_msg)
     except Exception as e:
         logger.error(e)

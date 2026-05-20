@@ -208,7 +208,8 @@ class TestGetOverlappingTimeSlice(XarrayUtilsBase):
         print(sl)
         self.assertIsInstance(sl, slice)
         self.assertEqual(sl.start, pd.to_datetime("2021-01-03"))
-        self.assertEqual(sl.stop, pd.to_datetime("2021-01-06"))
+        # For daily buckets the stop is expanded to the end of that day.
+        self.assertEqual(sl.stop.date(), pd.to_datetime("2021-01-06").date())
 
     def test_no_overlap_logs_warning(self):
         t1 = np.array(np.arange("2021-01-01", "2021-01-03", dtype="datetime64[D]"))
@@ -234,6 +235,34 @@ class TestGetOverlappingTimeSlice(XarrayUtilsBase):
         )
         with self.assertRaises(Exception):
             get_overlapping_time_slice(ds1, ds2)
+
+    def test_daily_bucket_ignores_intraday_offsets(self):
+        sim_time = pd.date_range("1990-01-01 11:00:00", periods=30, freq="D")
+        obs_time = pd.date_range("1990-01-01 00:00:00", periods=31, freq="D")
+        sim = xr.Dataset(
+            {"a": ("time", np.ones(sim_time.size))}, coords={"time": sim_time}
+        )
+        obs = xr.Dataset(
+            {"b": ("time", np.ones(obs_time.size))}, coords={"time": obs_time}
+        )
+
+        sl = get_overlapping_time_slice(sim, obs)
+        self.assertEqual(sl.start, pd.to_datetime("1990-01-01 00:00:00"))
+        self.assertEqual(sl.stop.date(), pd.to_datetime("1990-01-30").date())
+
+    def test_month_bucket_ignores_day_in_month(self):
+        sim_time = pd.to_datetime(["1990-01-01", "1990-02-01", "1990-03-01"])
+        obs_time = pd.to_datetime(["1990-01-15", "1990-02-15", "1990-03-15"])
+        sim = xr.Dataset(
+            {"a": ("time", np.ones(sim_time.size))}, coords={"time": sim_time}
+        )
+        obs = xr.Dataset(
+            {"b": ("time", np.ones(obs_time.size))}, coords={"time": obs_time}
+        )
+
+        sl = get_overlapping_time_slice(sim, obs)
+        self.assertEqual(sl.start, pd.to_datetime("1990-01-01 00:00:00"))
+        self.assertEqual(sl.stop.date(), pd.to_datetime("1990-03-31").date())
 
 
 class TestCropDs(XarrayUtilsBase):

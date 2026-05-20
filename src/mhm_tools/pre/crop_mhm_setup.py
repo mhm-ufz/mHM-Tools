@@ -247,7 +247,9 @@ def crop_file_with_header(ds_in, file_path, output_path, lonslice, latslice):
     logger.debug(f"x: {index_x_min}, {index_x_max}")
     logger.debug(f"y: {index_y_min}, {index_y_max}")
     # write header file
-    header_out_path = output_path / header.name
+    header_out_dir = output_path if output_path.is_dir() else output_path.parent
+    header_out_dir.mkdir(parents=True, exist_ok=True)
+    header_out_path = header_out_dir / header.name
     xll = header_information["xllcorner"] + header_information["cellsize"] * index_x_min
     yll = header_information["yllcorner"] + header_information["cellsize"] * (
         header_information["nrows"] - index_y_max
@@ -394,7 +396,10 @@ def crop_file(  # noqa: PLR0912 PLR0915
 ):
     """Crops one file by lat and lon slice and may mask it with the mask dataarray."""
     logger.info(f"Cropping the file {input_file}")
-    output_file = output_path / input_file.relative_to(input_path)
+    if input_path.is_file():
+        output_file = output_path / input_file.name
+    else:
+        output_file = output_path / input_file.relative_to(input_path)
     output_file.parent.mkdir(parents=True, exist_ok=True)
     if output_suffix is not None:
         output_file = output_file.with_suffix(output_suffix)
@@ -453,7 +458,7 @@ def crop_file(  # noqa: PLR0912 PLR0915
             ds_cropped, header_path = crop_file_with_header(
                 ds,
                 input_file,
-                output_path / input_file.parent.relative_to(input_path),
+                output_file,
                 lonslice=lonslice,
                 latslice=latslice,
             )
