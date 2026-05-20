@@ -701,12 +701,6 @@ def write_xarray_to_file(  # noqa: PLR0912, PLR0915
                 if coord in ds_clean.dims:
                     enc["_FillValue"] = None
                 ds_clean[coord].encoding = enc
-            logger.debug(
-                "Coordinate lon dtype=%s shape=%s encoding=%s",
-                ds_clean["lon"].dtype,
-                ds_clean["lon"].shape,
-                ds_clean["lon"].encoding,
-            )
             ds_clean.to_netcdf(
                 file_path, engine=engine, format="NETCDF4", encoding=encoding
             )
