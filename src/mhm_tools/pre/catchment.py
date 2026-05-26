@@ -2220,6 +2220,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
         available_mem_gib=available_mem,
         chunking=chunking,
     ) as input_ds:
+        coord_slices_default = False
         if coordinate_slices is None:
             coordinate_slices = {"lat": slice(None, None), "lon": slice(None, None)}
             coord_slices_default = True
