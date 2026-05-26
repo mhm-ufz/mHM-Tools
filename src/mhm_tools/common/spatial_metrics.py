@@ -60,6 +60,64 @@ def nan_area_mean(data):
     return np.nanmean(data, axis=(1, 2))
 
 
+def desesonalized_nan_area_mean(data, time_index=None):
+    """Create a one-year daily climatology from a multi-year gridded time series.
+
+    Parameters
+    ----------
+    data : np.ndarray
+        Array with shape (time, y, x).
+    time_index : array-like, optional
+        Time stamps matching the first dimension of ``data``. If provided, values
+        are grouped by calendar day and returned as a 366-day climatology.
+        Feb 29 is interpolated as the mean of Feb 28 and Mar 1.
+    """
+    area_mean = nan_area_mean(data)
+
+    if time_index is not None:
+        time_index = pd.to_datetime(time_index)
+        if len(time_index) != len(area_mean):
+            msg = (
+                "Length mismatch between time_index and data time dimension: "
+                f"{len(time_index)} != {len(area_mean)}"
+            )
+            raise ValueError(msg)
+        df = pd.DataFrame(
+            {"value": area_mean, "month_day": pd.Index(time_index).strftime("%m-%d")}
+        )
+        climatology = df.groupby("month_day")["value"].mean()
+
+        feb_28 = climatology.get("02-28", np.nan)
+        mar_01 = climatology.get("03-01", np.nan)
+        climatology.loc["02-29"] = np.nanmean([feb_28, mar_01])
+
+        clim_dates = pd.date_range("2000-01-01", "2000-12-31", freq="D")
+        clim_month_day = clim_dates.strftime("%m-%d")
+        return np.array(
+            [climatology.get(month_day, np.nan) for month_day in clim_month_day],
+            dtype=float,
+        )
+
+    if len(area_mean) % 365 == 0:
+        days_per_year = 365
+    elif len(area_mean) % 366 == 0:
+        days_per_year = 366
+    else:
+        msg = (
+            "Cannot infer daily climatology without time_index. "
+            "Provide time_index or use a time dimension divisible by 365 or 366."
+        )
+        raise ValueError(msg)
+
+    reshaped = area_mean.reshape(-1, days_per_year)
+    daily_climatology = np.nanmean(reshaped, axis=0)
+    if days_per_year == 366:
+        daily_climatology[59] = np.nanmean(
+            [daily_climatology[58], daily_climatology[60]]
+        )
+    return daily_climatology
+
+
 def create_dic_of_objective_functions(arr_s, arr_o, metrics, func=nothing, param=""):
     """Call objective_functions function applying the 'func' function to all input data and providing the metrics that should be calculated."""
     return objective_functions(func(arr_s), func(arr_o), metrics=metrics, param=param)

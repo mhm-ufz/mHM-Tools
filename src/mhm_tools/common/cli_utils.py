@@ -69,7 +69,7 @@ def get_coords_from_mask(mask, mask_key=None):
                 for key in ["mask", "land_mask", "mask_l2"]
                 if key in mask_ds.data_vars
             )
-        mask_da = mask_ds[mask_key]
+        mask_da = mask_ds[mask_key].load()
         lon_key = get_coord_key(mask_da, lon=True)
         lat_key = get_coord_key(mask_da, lat=True)
         lon = mask_da[lon_key]

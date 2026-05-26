@@ -612,6 +612,34 @@ def plot_single_map(
     return im, bounds, extent, ticks
 
 
+def round_sensibly(value):
+    """Round map half-range to sensible steps and return decimals for labels.
+
+    Returns
+    -------
+    tuple[float, int]
+        (rounded_value, round_dec)
+    """
+    value = float(abs(value))
+    if not np.isfinite(value) or value == 0:
+        return 1e-6, 6
+
+    thresholds = [
+        (1.4, 2, 2),  # step 0.5
+        (0.15, 5, 2),  # step 0.2
+        (0.015, 50, 3),  # step 0.02
+        (0.0015, 500, 4),  # step 0.002
+        (0.00015, 5000, 5),  # step 0.0002
+        (0.0, 50000, 6),  # step 0.00002
+    ]
+    for threshold, scale, round_dec in thresholds:
+        if value > threshold:
+            rounded = round(value * scale) / scale
+            rounded = max(rounded, 1 / scale)
+            return rounded, round_dec
+    return value, 6
+
+
 def resample_to_coarser_calendar(
     ds_input: xr.Dataset, ds_ref: xr.Dataset
 ) -> Tuple[xr.Dataset, xr.Dataset]:
@@ -1090,38 +1118,54 @@ def plot_map_global_climate2(
     diff_mean = np.asarray(np.where(diff_mean == np.inf, np.nan, diff_mean))
     fig = plt.figure(figsize=(10.5, 6.2))
     gs = fig.add_gridspec(2, 4, height_ratios=[1.0, 1.0])
-    ax_rel_mean = fig.add_subplot(gs[0, 1:3])
-    ax_clim = fig.add_subplot(gs[1, 1:3])
+    ax_rel_mean = fig.add_subplot(gs[1, 1:3])
+    ax_diff = fig.add_subplot(gs[0, 1:3])
     if input_name is not None and ref_name is not None:
         title = f"Comparision {input_name} with {ref_name}"
     if overlapping_years is not None and len(overlapping_years) > 1:
         title += f" for years {overlapping_years[0]}-{overlapping_years[-1]}"
     fig.suptitle(title, fontweight="normal", fontsize="x-large")
 
-    mean_diff_1 = max(np.abs(1 - np.nanmin(rel_mean)), np.abs(1 - np.nanmax(rel_mean)))
+    vmin = np.nanquantile(rel_mean, 0.01)
+    vmax = np.nanquantile(rel_mean, 0.99)
+    mean_diff_1 = max(abs(vmin), abs(vmax))
+    mean_diff_1, round_dec = round_sensibly(mean_diff_1)
+    logger.debug(
+        "mean_diff_1=%s, vmin=%s, vmax=%s, round_dec=%s",
+        mean_diff_1,
+        vmin,
+        vmax,
+        round_dec,
+    )
     im0, bounds0, extend0, ticks0 = plot_single_map(
-        ax_rel_mean, rel_mean, mean_diff_1, bounds_type="fixed"
+        ax_rel_mean, rel_mean, mean_diff_1, bounds_type="max", center=0
     )
-    ax_rel_mean.set_title(
-        f"a) Relative Mean (median={np.nanmedian(rel_mean):.2f}, mean={total_rel_mean:.2f})"
+    title_rel_mean = (
+        f"b) Relative Mean Difference (median={np.nanmedian(rel_mean):.{round_dec}f}"
     )
+    if total_rel_mean is not None:
+        title_rel_mean += f", mean={total_rel_mean:.{round_dec}f}"
+    title_rel_mean += ")"
+    ax_rel_mean.set_title(title_rel_mean)
 
     vmin = np.nanquantile(diff_mean, 0.01)
     vmax = np.nanquantile(diff_mean, 0.99)
     diff_diff_1 = max(abs(vmin), abs(vmax))
-    if diff_diff_1 > 1.4:
-        # round to next 0.5
-        diff_diff_1 = round((diff_diff_1 * 2) / 2) / 4 * 4.5
-    else:
-        # round to next 0.2
-        diff_diff_1 = round((diff_diff_1 * 5) / 5) / 4 * 4.5
+    diff_diff_1, round_dec = round_sensibly(diff_diff_1)
+    logger.debug(
+        "diff_diff_1=%s, vmin=%s, vmax=%s, round_dec=%s",
+        diff_diff_1,
+        vmin,
+        vmax,
+        round_dec,
+    )
     im1, bounds1, extend1, ticks1 = plot_single_map(
-        ax_clim, diff_mean, diff_diff_1, center=0, bounds_type="max"
+        ax_diff, diff_mean, diff_diff_1, center=0, bounds_type="max"
     )
-    ax_clim.set_title(
-        f"b) Difference Mean (median={np.nanmedian(diff_mean):.2f}mm/day, mean={np.nanmean(diff_mean):.2f}mm/day)"
+    ax_diff.set_title(
+        f"a) Mean Difference (median={np.nanmedian(diff_mean):.{round_dec}f}mm/day, mean={np.nanmean(diff_mean):.{round_dec}f}mm/day)"
     )
-    divider1 = make_axes_locatable(ax_clim)
+    divider1 = make_axes_locatable(ax_diff)
     cax1 = divider1.append_axes("right", size="5%", pad=0.1)
     fig.colorbar(
         im1, cax=cax1, label="mm", boundaries=bounds1, extend=extend1, ticks=ticks1
@@ -1130,10 +1174,10 @@ def plot_map_global_climate2(
     divider0 = make_axes_locatable(ax_rel_mean)
     cax0 = divider0.append_axes("right", size="5%", pad=0.1)
     fig.colorbar(
-        im0, cax=cax0, label="", boundaries=bounds0, extend=extend0, ticks=ticks0
+        im0, cax=cax0, label="%", boundaries=bounds0, extend=extend0, ticks=ticks0
     )
 
-    for ax in [ax_rel_mean, ax_clim]:
+    for ax in [ax_rel_mean, ax_diff]:
         for spine in ax.spines.values():
             spine.set_linewidth(0.5)
     ax_rel_mean.set_yticks([])
@@ -1142,10 +1186,10 @@ def plot_map_global_climate2(
     for spine in ax_rel_mean.spines.values():
         spine.set_linewidth(0.25)
     if diff_mean.ndim != 1:
-        ax_clim.set_yticks([])
-        ax_clim.set_xticks([])
-        ax_clim.yaxis.labelpad = 0
-        for spine in ax_clim.spines.values():
+        ax_diff.set_yticks([])
+        ax_diff.set_xticks([])
+        ax_diff.yaxis.labelpad = 0
+        for spine in ax_diff.spines.values():
             spine.set_linewidth(0.25)
     plt.tight_layout()
 
@@ -1193,8 +1237,16 @@ def create_map_from_output(
             output_path=output_path,
         )
     elif global_climate:
+        rel_mean_diff = (
+            100
+            * (np.nanmean(input_clim, axis=0) - np.nanmean(ref_clim, axis=0))
+            / np.nanmean(ref_clim, axis=0)
+        )
+        rel_mean_diff = np.where(
+            np.nanmax(ref_clim, axis=0) < 0.1, np.nan, rel_mean_diff
+        )
         plot_map_global_climate2(
-            rel_mean=rel_mean,
+            rel_mean=rel_mean_diff,
             diff_mean=np.nanmean(input_clim, axis=0) - np.nanmean(ref_clim, axis=0),
             input_name=input_name,
             ref_name=ref_name,
@@ -1557,8 +1609,16 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
                 overlapping_years=overlapping_years,
             )
         elif global_climate:
+            rel_mean_diff = (
+                100
+                * (np.nanmean(input_clim, axis=0) - np.nanmean(ref_clim, axis=0))
+                / np.nanmean(ref_clim, axis=0)
+            )
+            rel_mean_diff = np.where(
+                np.nanmax(ref_clim, axis=0) < 0.1, np.nan, rel_mean_diff
+            )
             plot_map_global_climate2(
-                rel_mean=rel_mean,
+                rel_mean=rel_mean_diff,
                 diff_mean=np.nanmean(input_clim, axis=0) - np.nanmean(ref_clim, axis=0),
                 input_name=input_name,
                 ref_name=ref_name,
@@ -1742,7 +1802,12 @@ def get_years_from_path(path, raise_exception=True, file_name="*.*"):
     """Get available years from a dataset folder structure or file."""
     if path.is_dir():
         if len(year_structure_paths(path, file_name=file_name)) == 0:
-            with get_dataset_from_path(list(path.rglob(file_name))) as ds:
+            matching_files = list(path.rglob(file_name))
+            if not matching_files:
+                msg = f"No files matching pattern '{file_name}' found in directory {path}."
+                with ErrorLogger(logger):
+                    raise ValueError(msg)
+            with get_dataset_from_path(matching_files, file_name=file_name) as ds:
                 if "time" in ds.coords:
                     return [int(y) for y in np.unique(ds.time.dt.year.data)]
                 msg = f"No year structure found in directory {path} and files do not contain a time coordinate to determine years."
@@ -1763,7 +1828,14 @@ def get_years_from_path(path, raise_exception=True, file_name="*.*"):
     return []
 
 
-def get_available_years(input_path, ref_path, year_slice=None, direct_comp=True):
+def get_available_years(
+    input_path,
+    ref_path,
+    year_slice=None,
+    direct_comp=True,
+    input_file_name="*.*",
+    ref_file_name="*.*",
+):
     """Determine available years from constrains and datasets.
 
     If no reference data is given it will only be the input years inside
@@ -1771,12 +1843,14 @@ def get_available_years(input_path, ref_path, year_slice=None, direct_comp=True)
     """
     logger.info("Determining available years.")
     # get all years from input data
-    years_in = get_years_from_path(input_path)
+    years_in = get_years_from_path(input_path, file_name=input_file_name)
     years_in.sort()
     logger.debug(f"Input years: {years_in}")
 
     # get all years from reference data
-    years_ref = get_years_from_path(ref_path, raise_exception=False)
+    years_ref = get_years_from_path(
+        ref_path, raise_exception=False, file_name=ref_file_name
+    )
     years_ref.sort()
     logger.debug(f"Ref years: {years_ref}")
 
@@ -1791,7 +1865,7 @@ def get_available_years(input_path, ref_path, year_slice=None, direct_comp=True)
             continue
         if year_slice.stop is not None and year > year_slice.stop:
             continue
-        if not years_ref or year in years_ref:
+        if not years_ref or year in years_ref or not direct_comp:
             years.append(year)
     return years
 
@@ -1895,11 +1969,40 @@ def gridded_data_evaluation(
         )
         return
 
-    if input_path.is_dir() and len(year_structure_paths(input_path)) == 0:
-        # check if the input path has the right structure
-        input_path = input_path / "mHM_Fluxes_States.nc"
+    bootstrap_requested = (
+        n_bootstrap_years is not None
+        and n_bootstrap_selections is not None
+        and n_bootstrap_selections > 0
+    )
 
-    available_years = get_available_years(input_path, ref_path, year_slice, direct_comp)
+    if bootstrap_requested:
+        if input_path.is_dir() and len(year_structure_paths(input_path)) == 0:
+            msg = (
+                "Bootstrapping requires year-structured input data directories (YYYY/...). "
+                f"Input path '{input_path}' has no year-folder structure."
+            )
+            with ErrorLogger(logger):
+                raise ValueError(msg)
+        if (
+            ref_path is not None
+            and ref_path.is_dir()
+            and len(year_structure_paths(ref_path)) == 0
+        ):
+            msg = (
+                "Bootstrapping requires year-structured reference data directories (YYYY/...). "
+                f"Reference path '{ref_path}' has no year-folder structure."
+            )
+            with ErrorLogger(logger):
+                raise ValueError(msg)
+
+    available_years = get_available_years(
+        input_path,
+        ref_path,
+        year_slice,
+        direct_comp,
+        input_file_name=input.file_name,
+        ref_file_name=ref.file_name,
+    )
     logger.info(f"Years {available_years} are available for comparison.")
     if not available_years:
         logger.error("Since no data is available the program is stoped.")
@@ -2018,8 +2121,19 @@ def gridded_data_evaluation(
                     ref_name=ref.name,
                 )
             elif global_climate:
+                rel_mean_diff = (
+                    100
+                    * (
+                        np.nanmean(results["input_clim"], axis=0)
+                        - np.nanmean(results["ref_clim"], axis=0)
+                    )
+                    / np.nanmean(results["ref_clim"], axis=0)
+                )
+                rel_mean_diff = np.where(
+                    np.nanmax(results["ref_clim"], axis=0) < 0.1, np.nan, rel_mean_diff
+                )
                 plot_map_global_climate2(
-                    rel_mean=results["rel_mean"],
+                    rel_mean=rel_mean_diff,
                     diff_mean=np.nanmean(results["input_clim"], axis=0)
                     - np.nanmean(results["ref_clim"], axis=0),
                     output_path=output_path,
