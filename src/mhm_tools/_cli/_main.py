@@ -107,7 +107,9 @@ class AliasGroup(click.Group):
                 raise
             unknown = args[0]
             candidates = sorted(set(self.commands.keys()) | set(self._aliases.keys()))
-            suggestions = difflib.get_close_matches(unknown, candidates, n=3, cutoff=0.5)
+            suggestions = difflib.get_close_matches(
+                unknown, candidates, n=3, cutoff=0.5
+            )
             if not suggestions:
                 raise
             suggestion_list = ", ".join(suggestions)
