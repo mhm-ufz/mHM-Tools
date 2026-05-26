@@ -453,10 +453,18 @@ def write_xarray_to_file(  # noqa: PLR0912, PLR0915
             logger.info(f"Setting data vars as input varname [var_name]: {data_vars}")
         logger.debug(f"data vars: {data_vars}")
         if encoding is None:
-            encoding = {
-                v: {"zlib": True, "complevel": 4, "shuffle": True, **NC_ENCODE_DEFAULTS}
-                for v in data_vars
-            }
+            if engine == "scipy":
+                encoding = {v: dict(NC_ENCODE_DEFAULTS) for v in data_vars}
+            else:
+                encoding = {
+                    v: {
+                        "zlib": True,
+                        "complevel": 4,
+                        "shuffle": True,
+                        **NC_ENCODE_DEFAULTS,
+                    }
+                    for v in data_vars
+                }
         else:
             # Ensure encoding only targets data variables (avoid coords/bounds)
             encoding = {k: v for k, v in encoding.items() if k in data_vars}
@@ -643,6 +651,27 @@ def write_xarray_to_file(  # noqa: PLR0912, PLR0915
                     ds_clean[name] = da.fillna(fillv).astype(dtype)
 
             encoding = sanitize_nc_encoding(ds_clean, merged_encoding)
+            if engine == "scipy":
+                # scipy backend writes NetCDF3 and does not support compression flags.
+                for key in list(encoding):
+                    for unsupported in (
+                        "zlib",
+                        "szip",
+                        "zstd",
+                        "bzip2",
+                        "blosc",
+                        "shuffle",
+                        "complevel",
+                        "fletcher32",
+                        "contiguous",
+                        "chunksizes",
+                        "preferred_chunks",
+                        "_ChunkSizes",
+                        "chunks",
+                        "compression",
+                        "chunking",
+                    ):
+                        encoding[key].pop(unsupported, None)
             logger.info(f"Using encoding: {encoding}")
             set_netcdf_encoding(ds_clean, encoding)
             # Ensure time/bounds attrs do not contain units/calendar before encode
@@ -702,10 +731,28 @@ def write_xarray_to_file(  # noqa: PLR0912, PLR0915
                 if coord in ds_clean.dims:
                     enc["_FillValue"] = None
                 ds_clean[coord].encoding = enc
+            nc_format = "NETCDF4" if engine != "scipy" else "NETCDF3_64BIT"
             ds_clean.to_netcdf(
-                file_path, engine=engine, format="NETCDF4", encoding=encoding
+                file_path, engine=engine, format=nc_format, encoding=encoding
             )
-        except ValueError:
+        except ValueError as e:
+            msg = str(e)
+            if engine == "netcdf4" and "numpy.dtype size changed" in msg:
+                logger.warning(
+                    "netcdf4 backend failed with ABI mismatch while writing %s. "
+                    "Retrying with scipy backend (NETCDF3_64BIT).",
+                    file_path,
+                )
+                write_xarray_to_file(
+                    ds=ds,
+                    file_path=file_path,
+                    var_name=var_name,
+                    create_folder=create_folder,
+                    encoding=None,
+                    engine="scipy",
+                    resolution=resolution,
+                )
+                return
             logger.error(f"Error while writing to {file_path}")
             logger.error(ds)
             logger.info(f"Trying to write without encoding {encoding}")
@@ -719,7 +766,29 @@ def write_xarray_to_file(  # noqa: PLR0912, PLR0915
                 if bounds_name_raw in ds:
                     for key in ("units", "calendar"):
                         ds[bounds_name_raw].attrs.pop(key, None)
-            ds.to_netcdf(file_path, engine=engine, format="NETCDF4")
+            fallback_format = "NETCDF4" if engine != "scipy" else "NETCDF3_64BIT"
+            ds.to_netcdf(file_path, engine=engine, format=fallback_format)
+        except Exception as e:
+            # Frequently caused by binary ABI mismatch in netCDF4 stack in worker processes.
+            if engine != "netcdf4":
+                raise
+            msg = str(e)
+            if "numpy.dtype size changed" not in msg:
+                raise
+            logger.warning(
+                "netcdf4 backend failed with ABI mismatch while writing %s. "
+                "Retrying with scipy backend (NETCDF3_64BIT).",
+                file_path,
+            )
+            write_xarray_to_file(
+                ds=ds,
+                file_path=file_path,
+                var_name=var_name,
+                create_folder=create_folder,
+                encoding=None,
+                engine="scipy",
+                resolution=resolution,
+            )
     else:
         msg = f"Writing to file types other than asci and netcdf is not implemented. The suffix of the file was: {file_path.suffix}"
         with ErrorLogger(logger):
