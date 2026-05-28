@@ -1340,14 +1340,20 @@ class MHMRestartFile:
             for sgrid in self.subgrids:
                 with get_xarray_ds_from_file(sgrid.morph_files.slope) as ds_slope:
                     data = ds_slope["slope"]
-                    flattened = data.values.flatten()
-                    flattened_no_nan = flattened[~np.isnan(flattened)]
-                    td.update(flattened_no_nan)
+                    flattened = np.asarray(data.values).ravel()
+                    finite_values = flattened[np.isfinite(flattened)]
+                    if finite_values.size > 0:
+                        td.update(finite_values)
             for sgrid in self.subgrids:
                 with get_xarray_ds_from_file(sgrid.morph_files.slope) as ds_slope:
                     data = ds_slope["slope"]
-                    cdf = td.cdf(data.values)
-                    cdf = xr.DataArray(cdf, dims=["latitude", "longitude"])
+                    data_values = np.asarray(data.values)
+                    finite_mask = np.isfinite(data_values)
+                    cdf = np.full(data_values.shape, np.nan, dtype=float)
+                    finite_values = data_values[finite_mask]
+                    if finite_values.size > 0:
+                        cdf[finite_mask] = td.cdf(finite_values)
+                    cdf = xr.DataArray(cdf, dims=data.dims, coords=data.coords)
                     ds_slope["slope"] = cdf
                     ds_slope_emp = ds_slope.rename({"slope": "slope_emp"})
                     write_xarray_to_file(ds_slope_emp, sgrid.path / "slope_emp.nc")
