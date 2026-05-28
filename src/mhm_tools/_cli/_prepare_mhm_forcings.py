@@ -56,6 +56,11 @@ def add_args(parser):
             "otherwise literal name for each output file."
         ),
     )
+    optional.add_argument(
+        "--out-var",
+        default=None,
+        help="Rename output variable to this name.",
+    )
     flags.add_argument(
         "--crop", action="store_true", help="Enable spatial cropping of the dataset"
     )
@@ -124,4 +129,5 @@ def run(args):
         lat_max=args.lat_max,
         use_mfdataset=args.use_mfdataset,
         target_frequency=args.target_frequency,
+        out_var=args.out_var,
     )

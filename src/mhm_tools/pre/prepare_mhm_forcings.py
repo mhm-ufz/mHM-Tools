@@ -136,6 +136,7 @@ def prepare_forcings(
     lat_max: Optional[float] = None,
     use_mfdataset: bool = False,
     target_frequency: Optional[str] = None,
+    out_var: Optional[str] = None,
 ) -> None:
     """Loop through all files matching in_file in in_dir, convert units.
 
@@ -168,6 +169,9 @@ def prepare_forcings(
 
         # Convert units and get DataArray
         da, encoding = convert_units(ds, var)
+
+        if out_var:
+            da = da.rename(out_var)
 
         # Crop spatially
         if crop:
