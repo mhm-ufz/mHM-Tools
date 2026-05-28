@@ -43,6 +43,13 @@ PRECIPITATION_UNITS = ["m", "kg m-2", "mm"]
 PRECIPITATION_RATE_UNITS = ["kg m-2 s-1", "mm s-1", "mm d-1"]
 
 
+def _normalize_unit_string(units: str) -> str:
+    """Normalize common unit-string variants to canonical forms."""
+    normalized = units.strip().lower().replace("**", "")
+    normalized = " ".join(normalized.split())
+    return normalized
+
+
 def convert_units(ds: Union[xr.Dataset, xr.DataArray], var: str) -> xr.DataArray:
     """Convert variable to standard units.
 
@@ -62,22 +69,25 @@ def convert_units(ds: Union[xr.Dataset, xr.DataArray], var: str) -> xr.DataArray
     if not units:
         msg = f"Variable '{var}' missing 'units' attribute."
         raise ValueError(msg)
-    logger.info(f"units are: {units}")
+    normalized_units = _normalize_unit_string(units)
+    logger.info(f"units are: {units} (normalized: {normalized_units})")
     # Temperature
-    if units in TEMPERATURE_UNITS:
-        if units in ["K", "Kelvin", "kelvin"]:
+    if normalized_units in [_normalize_unit_string(u) for u in TEMPERATURE_UNITS]:
+        if normalized_units in ["k", "kelvin"]:
             da = da - 273.15
-        elif units in ["F", "°F", "degF", "fahrenheit"]:
+        elif normalized_units in ["f", "°f", "degf", "fahrenheit"]:
             da = (da - 32) * (5 / 9)
         da.attrs["units"] = "degC"
     # Total precipitation
-    elif units in PRECIPITATION_UNITS:
-        if units in ["m", "kg m-2"]:
+    elif normalized_units in [_normalize_unit_string(u) for u in PRECIPITATION_UNITS]:
+        if normalized_units in ["m", "kg m-2"]:
             da = da * 1000
         da.attrs["units"] = "mm"
 
     # Precipitation rate
-    elif units in PRECIPITATION_RATE_UNITS:
+    elif normalized_units in [
+        _normalize_unit_string(u) for u in PRECIPITATION_RATE_UNITS
+    ]:
         freq = pd.infer_freq(da.indexes["time"])
         if not freq or not freq.startswith(("h", "D")):
             msg = (
@@ -87,15 +97,15 @@ def convert_units(ds: Union[xr.Dataset, xr.DataArray], var: str) -> xr.DataArray
             with ErrorLogger(logger):
                 raise ValueError(msg)
         factor = 1.0
-        if "kg" in units and "s-1" in units:
+        if "kg" in normalized_units and "s-1" in normalized_units:
             factor = (
                 86400 if freq.startswith("D") else 3600 if freq.startswith("h") else 1
             )
-        elif units == "mm d-1" and freq:
+        elif normalized_units == "mm d-1" and freq:
             factor = (
                 1 if freq.startswith("D") else 1 / 24 if freq.startswith("h") else 1
             )
-        elif units == "mm s-1":
+        elif normalized_units == "mm s-1":
             factor = (
                 90000 if freq.startswith("D") else 3600 if freq.startswith("h") else 1
             )
