@@ -1168,7 +1168,7 @@ def plot_map_global_climate2(
     divider1 = make_axes_locatable(ax_diff)
     cax1 = divider1.append_axes("right", size="5%", pad=0.1)
     fig.colorbar(
-        im1, cax=cax1, label="mm", boundaries=bounds1, extend=extend1, ticks=ticks1
+        im1, cax=cax1, label="mm/day", boundaries=bounds1, extend=extend1, ticks=ticks1
     )
 
     divider0 = make_axes_locatable(ax_rel_mean)
@@ -1196,6 +1196,147 @@ def plot_map_global_climate2(
     file_name = f"et_map_global_climate2_{input_name}_{ref_name}.png".replace(" ", "_")
     plt.savefig(output_path / file_name, dpi=800)
     logger.info(f"created et_map {output_path / file_name}")
+
+
+@log_errors(raise_exceptions=True)
+def plot_map_local_climate(
+    input_clim,
+    ref_clim,
+    input_name,
+    ref_name,
+    output_path,
+    overlapping_years=None,
+):
+    """Create monthly local-climate maps for relative and absolute differences.
+
+    Produces two figures with 12 small maps (one per month):
+    - Relative climatology difference in percent
+    - Absolute climatology difference in native units (e.g. mm/day)
+    """
+    month_labels = (
+        "Jan",
+        "Feb",
+        "Mar",
+        "Apr",
+        "May",
+        "Jun",
+        "Jul",
+        "Aug",
+        "Sep",
+        "Oct",
+        "Nov",
+        "Dec",
+    )
+    input_clim = np.asarray(input_clim)
+    ref_clim = np.asarray(ref_clim)
+    if input_clim.shape != ref_clim.shape or input_clim.ndim != 3:
+        msg = (
+            "input_clim and ref_clim must both be 3D arrays with equal shape "
+            "(month, lat, lon). "
+            f"Got {input_clim.shape} and {ref_clim.shape}."
+        )
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    if input_clim.shape[0] != 12:
+        msg = (
+            "Monthly local-climate plotting expects exactly 12 climatology slices. "
+            f"Got {input_clim.shape[0]}."
+        )
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+
+    # Avoid unstable percentages where reference climatology is close to zero.
+    ref_safe = np.where(np.abs(ref_clim) < 0.1, np.nan, ref_clim)
+    rel_monthly = 100.0 * (input_clim - ref_safe) / ref_safe
+    abs_monthly = input_clim - ref_clim
+
+    def _plot_monthly_panels(
+        values, unit_label, panel_title, output_file_name, colorbar_label
+    ):
+        values = np.where(values == np.inf, np.nan, values)
+        values = np.where(values == -np.inf, np.nan, values)
+        finite_values = values[np.isfinite(values)]
+        if finite_values.size == 0:
+            diff_to_mean = 1e-6
+        else:
+            q01 = float(np.nanquantile(finite_values, 0.01))
+            q99 = float(np.nanquantile(finite_values, 0.99))
+            diff_to_mean = max(abs(q01), abs(q99))
+            diff_to_mean, _ = round_sensibly(diff_to_mean)
+
+        fig = plt.figure(figsize=(14.0, 8.5))
+        gs = fig.add_gridspec(
+            3,
+            5,
+            width_ratios=[1.0, 1.0, 1.0, 1.0, 0.085],
+            wspace=0.06,
+            hspace=0.18,
+        )
+        axes = np.array(
+            [[fig.add_subplot(gs[i, j]) for j in range(4)] for i in range(3)]
+        )
+        cax = fig.add_subplot(gs[:, 4])
+        if input_name is not None and ref_name is not None:
+            title = f"Comparision {input_name} with {ref_name}"
+        else:
+            title = "Local Climate Comparison"
+        if overlapping_years is not None and len(overlapping_years) > 1:
+            title += f" for years {overlapping_years[0]}-{overlapping_years[-1]}"
+        fig.suptitle(f"{title}\n{panel_title}", fontsize="x-large", fontweight="normal")
+
+        im = None
+        bounds = None
+        extend = None
+        ticks = None
+        for month_idx, ax in enumerate(axes.flat):
+            month_values = values[month_idx]
+            im, bounds, extend, ticks = plot_single_map(
+                ax,
+                month_values,
+                diff_to_mean=diff_to_mean,
+                center=0,
+                bounds_type="max",
+            )
+            ax.set_title(month_labels[month_idx], fontsize="medium")
+            ax.set_xticks([])
+            ax.set_yticks([])
+            ax.yaxis.labelpad = 0
+            for spine in ax.spines.values():
+                spine.set_linewidth(0.25)
+
+        cbar = fig.colorbar(
+            im,
+            cax=cax,
+            boundaries=bounds,
+            extend=extend,
+            ticks=ticks,
+            label=colorbar_label,
+        )
+        cbar.ax.tick_params(labelsize=8)
+        fig.subplots_adjust(left=0.03, right=0.94, bottom=0.04, top=0.89)
+        plt.savefig(output_path / output_file_name, dpi=400)
+        logger.info("created et_map %s", output_path / output_file_name)
+
+    rel_file_name = (
+        f"et_map_local_climate_rel_{input_name}_{ref_name}.png".replace(" ", "_")
+    )
+    abs_file_name = (
+        f"et_map_local_climate_abs_{input_name}_{ref_name}.png".replace(" ", "_")
+    )
+    _plot_monthly_panels(
+        rel_monthly,
+        "%",
+        "Monthly Relative Climatology Difference",
+        rel_file_name,
+        "Relative Climatology Difference [%]",
+    )
+    _plot_monthly_panels(
+        abs_monthly,
+        "mm/day",
+        "Monthly Absolute Climatology Difference",
+        abs_file_name,
+        "Absolute Climatology Difference [mm/day]",
+    )
 
 
 def create_map_from_output(
@@ -1252,6 +1393,13 @@ def create_map_from_output(
             ref_name=ref_name,
             output_path=output_path,
             total_rel_mean=np.nanmean(input_clim) / np.nanmean(ref_clim),
+        )
+        plot_map_local_climate(
+            input_clim=input_clim,
+            ref_clim=ref_clim,
+            input_name=input_name,
+            ref_name=ref_name,
+            output_path=output_path,
         )
     else:
         plot_map_bias_only(
@@ -1624,6 +1772,13 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
                 ref_name=ref_name,
                 output_path=output_path,
                 overlapping_years=overlapping_years,
+            )
+            plot_map_local_climate(
+                input_clim=input_clim,
+                ref_clim=ref_clim,
+                input_name=input_name,
+                ref_name=ref_name,
+                output_path=output_path,
             )
         else:
             plot_map_bias_only(
@@ -2139,6 +2294,13 @@ def gridded_data_evaluation(
                     output_path=output_path,
                     input_name=input.name,
                     ref_name=ref.name,
+                )
+                plot_map_local_climate(
+                    input_clim=results["input_clim"],
+                    ref_clim=results["ref_clim"],
+                    input_name=input.name,
+                    ref_name=ref.name,
+                    output_path=output_path,
                 )
             else:
                 plot_map_bias_only(
