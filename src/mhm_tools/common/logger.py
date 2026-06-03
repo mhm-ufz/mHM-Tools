@@ -16,10 +16,11 @@ def configure_mhm_tools_logger(
     log_file=None,
     log_file_level=None,
     no_colsole_logging=False,
+    propagate=False,
 ):
     """Configure the parser settings formatting as well as Stream and File handler."""
     logger = logging.getLogger("mhm_tools")
-    logger.propagate = False
+    logger.propagate = propagate
     general_level, error_msg_gnrl, error_msg_gnrl2 = get_lowest_level(
         log_level=log_level,
         log_file_level=log_file_level,

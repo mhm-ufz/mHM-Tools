@@ -32,6 +32,8 @@ logger = logging.getLogger(__name__)
 # more on this in the cut_classical_mhm_setups branch There are classes for Morph and meteo data
 ######
 
+CF_DEFAULT_CONVENTIONS = "CF-1.12"
+
 
 @dataclass
 class GridDefinition:
@@ -445,13 +447,24 @@ def write_xarray_to_file(  # noqa: PLR0912, PLR0915
             ds = ds.to_dataset(name=var_name)
             data_vars = [var_name]
             logger.debug(f"Creating data vars from dataarray name: {data_vars}")
-        elif var_name is None:
+        elif var_name is None or var_name not in ds.data_vars:
+            if var_name is not None and var_name not in ds.data_vars:
+                logger.warning(
+                    "Requested var_name %r not found in dataset. Using all data variables instead.",
+                    var_name,
+                )
             logger.info(f"Taking data vars from list of ds.data_vars {ds.data_vars}")
             data_vars = list(ds.data_vars)
         else:
             data_vars = [var_name]
             logger.info(f"Setting data vars as input varname [var_name]: {data_vars}")
+
+        if not data_vars:
+            logger.warning(
+                "Dataset has no data variables. Writing coordinate-only dataset."
+            )
         logger.debug(f"data vars: {data_vars}")
+        _apply_cf_baseline_metadata(ds, data_vars)
         if encoding is None:
             encoding = {
                 v: {
@@ -710,7 +723,7 @@ def write_xarray_to_file(  # noqa: PLR0912, PLR0915
             ds_clean.to_netcdf(
                 file_path, engine=engine, format="NETCDF4", encoding=encoding
             )
-        except ValueError as e:
+        except ValueError:
             logger.error(f"Error while writing to {file_path}")
             logger.error(ds)
             logger.info(f"Trying to write without encoding {encoding}")
@@ -732,6 +745,87 @@ def write_xarray_to_file(  # noqa: PLR0912, PLR0915
         msg = f"Writing to file types other than asci and netcdf is not implemented. The suffix of the file was: {file_path.suffix}"
         with ErrorLogger(logger):
             raise NotImplementedError(msg)
+
+
+def _apply_cf_baseline_metadata(ds: xr.Dataset, data_vars: Sequence[str]) -> None:
+    """Best-effort CF baseline metadata enrichment for NetCDF output.
+
+    This function intentionally does not raise on missing metadata. It logs
+    warnings and leaves the dataset writeable.
+    """
+    if "Conventions" not in ds.attrs:
+        ds.attrs["Conventions"] = CF_DEFAULT_CONVENTIONS
+    elif not str(ds.attrs["Conventions"]).startswith("CF-"):
+        logger.warning(
+            "Global attribute 'Conventions' is not CF-like (%r). Leaving it unchanged.",
+            ds.attrs["Conventions"],
+        )
+
+    lat_key = get_coord_key(ds, lat=True, raise_exception=False)
+    lon_key = get_coord_key(ds, lon=True, raise_exception=False)
+    time_key = get_coord_key(ds, time=True, raise_exception=False)
+
+    if lat_key is None:
+        logger.warning(
+            "Could not infer latitude coordinate; skipping CF latitude attrs."
+        )
+    else:
+        if _lacks_explicit_cf_axis_metadata(ds[lat_key]):
+            logger.warning(
+                "Could not infer latitude coordinate from explicit metadata; "
+                "using inferred coordinate %r.",
+                lat_key,
+            )
+        lat = ds[lat_key]
+        lat.attrs.setdefault("standard_name", "latitude")
+        lat.attrs.setdefault("units", "degrees_north")
+        lat.attrs.setdefault("axis", "Y")
+
+    if lon_key is None:
+        logger.warning(
+            "Could not infer longitude coordinate; skipping CF longitude attrs."
+        )
+    else:
+        if _lacks_explicit_cf_axis_metadata(ds[lon_key]):
+            logger.warning(
+                "Could not infer longitude coordinate from explicit metadata; "
+                "using inferred coordinate %r.",
+                lon_key,
+            )
+        lon = ds[lon_key]
+        lon.attrs.setdefault("standard_name", "longitude")
+        lon.attrs.setdefault("units", "degrees_east")
+        lon.attrs.setdefault("axis", "X")
+
+    if time_key is None:
+        logger.warning("Could not infer time coordinate; skipping CF time attrs.")
+    else:
+        time = ds[time_key]
+        time.attrs.setdefault("standard_name", "time")
+        time.attrs.setdefault("axis", "T")
+
+    for name in data_vars:
+        if name not in ds.data_vars:
+            logger.warning(
+                "Requested data variable %r not in dataset; skipping CF checks for it.",
+                name,
+            )
+            continue
+        attrs = ds[name].attrs
+        if "units" not in attrs:
+            logger.warning(
+                "Data variable %r has no 'units' attribute (CF-recommended).", name
+            )
+        if "standard_name" not in attrs and "long_name" not in attrs:
+            logger.warning(
+                "Data variable %r has neither 'standard_name' nor 'long_name' (CF-recommended).",
+                name,
+            )
+
+
+def _lacks_explicit_cf_axis_metadata(coord: xr.DataArray) -> bool:
+    attrs = coord.attrs
+    return not any(key in attrs for key in ("axis", "standard_name", "units"))
 
 
 def write_xarray_to_ascii(
