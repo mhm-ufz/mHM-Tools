@@ -1564,7 +1564,6 @@ class Catchment:
     def delineate_basin(
         self,
         gauge,
-        stream_order=4,
         max_distance_cells=5,
         max_error=0.25,
         raise_on_sanity_check=True,
@@ -1616,16 +1615,9 @@ class Catchment:
         )
         outlet_linear_idx = np.ravel_multi_index(outlet_idx, self._fdir.shape)
 
-        if ref_catchment_area is not None and error is not None:
-            streams_mask = (upstream_area > ref_catchment_area * (1 - error - 1e-6)) & (
-                upstream_area < ref_catchment_area * (1 + error + 1e-6)
-            ).astype(bool)
-        else:
-            streams_mask = self._fdir.stream_order() >= stream_order
         try:
             basin = self._fdir.basins(
                 idxs=np.array([outlet_linear_idx], dtype=np.int64),
-                streams=streams_mask,
             )
         except Exception as e:
             logger.exception(f"pyflwdir.basins(idxs=...) failed for {outlet_idx}: {e}")
@@ -1656,21 +1648,6 @@ class Catchment:
         )
 
         if np.all(catchment_mask):
-            if stream_order > 1 and ref_catchment_area is None:
-                logger.info("Trying again with stream_order %d", stream_order - 1)
-                return self.delineate_basin(
-                    gauge,
-                    stream_order=stream_order - 1,
-                    max_distance_cells=max_distance_cells,
-                    max_error=max_error,
-                    raise_on_sanity_check=raise_on_sanity_check,
-                    upstream_area=upstream_area,
-                    mask_catchment=mask_catchment,
-                    save_coords=save_coords,
-                    gauge_opti_method=gauge_opti_method,
-                    shape_folder=shape_folder,
-                    raise_on_fallback=raise_on_fallback,
-                )
             logger.error("No catchment found for the given coordinates")
             return gauge
 
