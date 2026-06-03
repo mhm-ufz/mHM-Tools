@@ -378,7 +378,7 @@ def call_create_latlon(
     logger.info(f"Latlon file written to {latlon_output_file}")
 
 
-def crop_file(  # noqa: PLR0912 PLR0915
+def crop_file(  # noqa: PLR0912 PLR0915 PLR0913
     input_file,
     mask_da,
     latslice,

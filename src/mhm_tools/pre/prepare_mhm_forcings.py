@@ -46,8 +46,7 @@ PRECIPITATION_RATE_UNITS = ["kg m-2 s-1", "mm s-1", "mm d-1"]
 def _normalize_unit_string(units: str) -> str:
     """Normalize common unit-string variants to canonical forms."""
     normalized = units.strip().lower().replace("**", "")
-    normalized = " ".join(normalized.split())
-    return normalized
+    return " ".join(normalized.split())
 
 
 def convert_units(ds: Union[xr.Dataset, xr.DataArray], var: str) -> xr.DataArray:

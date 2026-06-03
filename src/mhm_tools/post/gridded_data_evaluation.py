@@ -1251,7 +1251,7 @@ def plot_map_local_climate(
     abs_monthly = input_clim - ref_clim
 
     def _plot_monthly_panels(
-        values, unit_label, panel_title, output_file_name, colorbar_label
+        values, panel_title, output_file_name, colorbar_label
     ):
         values = np.where(values == np.inf, np.nan, values)
         values = np.where(values == -np.inf, np.nan, values)
@@ -1317,22 +1317,20 @@ def plot_map_local_climate(
         plt.savefig(output_path / output_file_name, dpi=400)
         logger.info("created et_map %s", output_path / output_file_name)
 
-    rel_file_name = (
-        f"et_map_local_climate_rel_{input_name}_{ref_name}.png".replace(" ", "_")
+    rel_file_name = f"et_map_local_climate_rel_{input_name}_{ref_name}.png".replace(
+        " ", "_"
     )
-    abs_file_name = (
-        f"et_map_local_climate_abs_{input_name}_{ref_name}.png".replace(" ", "_")
+    abs_file_name = f"et_map_local_climate_abs_{input_name}_{ref_name}.png".replace(
+        " ", "_"
     )
     _plot_monthly_panels(
         rel_monthly,
-        "%",
         "Monthly Relative Climatology Difference",
         rel_file_name,
         "Relative Climatology Difference [%]",
     )
     _plot_monthly_panels(
         abs_monthly,
-        "mm/day",
         "Monthly Absolute Climatology Difference",
         abs_file_name,
         "Absolute Climatology Difference [mm/day]",

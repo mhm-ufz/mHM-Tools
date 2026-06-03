@@ -992,7 +992,10 @@ class MHMRestartFile:
             else slice(self.grid.l1.lat_min, self.grid.l1.lat_max)
         )
         ds_mask = mask_da.sel(
-            {mask_lon_key: slice(self.grid.l1.lon_min, self.grid.l1.lon_max), mask_lat_key: lat_slice}
+            {
+                mask_lon_key: slice(self.grid.l1.lon_min, self.grid.l1.lon_max),
+                mask_lat_key: lat_slice,
+            }
         )
         logger.debug(
             "land mask shape after sel: %s lat_min: %s, lat_max: %s",
@@ -1060,9 +1063,7 @@ class MHMRestartFile:
         )
         ds["L1_domain_cellarea"] = (
             ("lat_out", "lon_out"),
-            np.full_like(
-                land_mask_active, self.grid.l1.resolution**2, dtype=float
-            ),
+            np.full_like(land_mask_active, self.grid.l1.resolution**2, dtype=float),
         )
         ds["L0_domain_mask"] = (
             ("lat_out", "lon_out"),
@@ -1078,9 +1079,7 @@ class MHMRestartFile:
         )
         ds["L0_domain_cellarea"] = (
             ("lat_out", "lon_out"),
-            np.full_like(
-                land_mask_active, self.grid.l1.resolution**2, dtype=float
-            ),
+            np.full_like(land_mask_active, self.grid.l1.resolution**2, dtype=float),
         )
         ds["L1_fAsp"] = (
             ("lat_out", "lon_out"),
@@ -1219,9 +1218,7 @@ class MHMRestartFile:
                     slicer.append(None)
             logger.debug(f"Masking {data_var}")
             ds[data_var] = ds[data_var].where(
-                np.broadcast_to(
-                    land_mask_active[tuple(slicer)], ds[data_var].shape
-                )
+                np.broadcast_to(land_mask_active[tuple(slicer)], ds[data_var].shape)
             )
             if "L1_SoilHorizons" in ds[data_var].dims:
                 ds[data_var] = ds[data_var].transpose(
