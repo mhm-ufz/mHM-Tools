@@ -142,8 +142,8 @@ def _shape_iou(reference_gdf, candidate_gdf):
         or candidate_gdf.empty
     ):
         return 0.0
-    reference_geom = reference_gdf.geometry.unary_union
-    candidate_geom = candidate_gdf.geometry.unary_union
+    reference_geom = _geometry_union(reference_gdf.geometry)
+    candidate_geom = _geometry_union(candidate_gdf.geometry)
     if reference_geom.is_empty or candidate_geom.is_empty:
         return 0.0
     union_area = reference_geom.union(candidate_geom).area
@@ -153,6 +153,12 @@ def _shape_iou(reference_gdf, candidate_gdf):
     iou = float(intersection_area / union_area)
     logger.debug("Computed shape IoU: %.4f", iou)
     return iou
+
+
+def _geometry_union(geometry):
+    if hasattr(geometry, "union_all"):
+        return geometry.union_all()
+    return geometry.unary_union
 
 
 def _coords_from_transform(affine_transform, grid_shape):
@@ -2190,9 +2196,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
     )
     output_path = Path(output_path)
     id_gauges_out_path = (
-        output_path
-        if id_gauges_out_path is None
-        else Path(id_gauges_out_path)
+        output_path if id_gauges_out_path is None else Path(id_gauges_out_path)
     )
     id_gauges_out_path.mkdir(parents=True, exist_ok=True)
     if _is_list_of_float_tuples(gauge_coords) and len(gauge_coords) == 1:
