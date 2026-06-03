@@ -1107,7 +1107,7 @@ class Catchment:
         )
         return gauge_lat, gauge_lon
 
-    def find_best_gauge_location_shape(
+    def find_best_gauge_location_shape(  # noqa: PLR0911, PLR0912, PLR0915
         self,
         upstream_area,
         gauge_coords,
@@ -1120,6 +1120,7 @@ class Catchment:
         lat_values=None,
         lon_values=None,
         limit_by_error=False,
+        started_from_shape=False,
     ):
         """Find best gauge location using shape similarity."""
         if upstream_area is None:
@@ -1144,6 +1145,7 @@ class Catchment:
             lon_values = self.ds.lon.data
 
         if gauge_coords is None:
+            started_from_shape = True
             gauge_coords = self.derive_gauge_coords_from_shape(
                 upstream_area,
                 reference_shape,
@@ -1167,6 +1169,7 @@ class Catchment:
                 gauge_coords,
                 shape_label,
             )
+            started_from_shape = True
             gauge_coords = self.derive_gauge_coords_from_shape(
                 upstream_area,
                 reference_shape,
@@ -1277,6 +1280,45 @@ class Catchment:
         if best_candidate_index is None:
             logger.warning("No suitable candidate found for shape-based correction.")
             return None
+        if (
+            ref_catchment_area is None
+            and best_candidate_shape_iou <= 0
+            and not started_from_shape
+        ):
+            derived_coords = self.derive_gauge_coords_from_shape(
+                upstream_area,
+                reference_shape,
+                lat_values=lat_values,
+                lon_values=lon_values,
+                shape_label=shape_label,
+            )
+            if derived_coords is None:
+                logger.warning(
+                    "No shape-overlap candidate found around %s and no shape-derived "
+                    "start could be computed.",
+                    gauge_coords,
+                )
+                return None
+            logger.warning(
+                "No shape-overlap candidate found around gauge coordinates %s; "
+                "retrying from highest upstream-area cell inside %s.",
+                gauge_coords,
+                shape_label,
+            )
+            return self.find_best_gauge_location_shape(
+                upstream_area,
+                derived_coords,
+                ref_catchment_area,
+                shape_folder,
+                gauge_id,
+                max_distance_cells=max_distance_cells,
+                max_error=max_error,
+                reference_shape_gdf=reference_shape,
+                lat_values=lat_values,
+                lon_values=lon_values,
+                limit_by_error=limit_by_error,
+                started_from_shape=True,
+            )
         distance = distance_100m_units(
             best_candidate_index[0] - gauge_row,
             best_candidate_index[1] - gauge_col,
