@@ -20,7 +20,9 @@ def add_args(parser):
         "-i",
         "--input-file",
         required=True,
-        help=("Path to the input file"),
+        help=(
+            "Path to the input file. This is usually a flow direction file, but can also be a digital elevation model. In the latter case var must be set to 'dem'."
+        ),
     )
     required_args.add_argument(
         "-o",
@@ -37,7 +39,7 @@ def add_args(parser):
     optional_args.add_argument(
         "--vn",
         "--varname",
-        default="flwdir",
+        default="fdir",
         help=("Name of variable in output file"),
     )
     optional_args.add_argument(
@@ -49,7 +51,7 @@ def add_args(parser):
     optional_args.add_argument(
         "--ftp",
         "--ftype",
-        default="ldd",
+        default="d8",
         help=("ftype of input variable, use 'nextxy', 'ldd' or 'd8'"),
     )
     optional_args.add_argument(
@@ -198,6 +200,15 @@ def add_args(parser):
         help=(
             "Output gauge info csv (default: gauges_info.csv). "
             "Columns: id, lon, lat, lon_old, lat_old, distance, area, old_area, area_error."
+        ),
+    )
+    optional_args.add_argument(
+        "--id-gauges-out-path",
+        required=False,
+        default=None,
+        help=(
+            "Directory where idgauges.asc, idgauges.nc and gauge information files "
+            "(gauges_info.csv/.nc) are written. Default is --output-path."
         ),
     )
     optional_args.add_argument(
@@ -425,4 +436,10 @@ def run(args):  # noqa: PLR0912,PLR0915
         ),
         gauge_opti_method=args.gauge_optimization_method,
         shape_folder=args.shape_folder,
+        gauge_info_file=args.gauge_info_csv,
+        id_gauges_out_path=(
+            args.id_gauges_out_path
+            if args.id_gauges_out_path is not None
+            else args.output_path
+        ),
     )

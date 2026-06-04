@@ -378,7 +378,7 @@ def call_create_latlon(
     logger.info(f"Latlon file written to {latlon_output_file}")
 
 
-def crop_file(  # noqa: PLR0912 PLR0915
+def crop_file(  # noqa: PLR0912 PLR0915 PLR0913
     input_file,
     mask_da,
     latslice,
@@ -393,6 +393,8 @@ def crop_file(  # noqa: PLR0912 PLR0915
     no_cropping=False,
     lat_order="decreasing",
     output_suffix=None,
+    mask_all=False,
+    mask_var="mask",
 ):
     """Crops one file by lat and lon slice and may mask it with the mask dataarray."""
     logger.info(f"Cropping the file {input_file}")
@@ -497,7 +499,7 @@ def crop_file(  # noqa: PLR0912 PLR0915
             raise ValueError(msg)
 
     # only the dem file or and eventual mHM restart file are masked using the provided mask file
-    if "dem" in input_file.name.lower():  # or "mhm" in f.name.lower()
+    if "dem" in input_file.name.lower() or mask_all:  # or "mhm" in f.name.lower()
         if mask_da is not None:
             lon_key_mask = get_coord_key(mask_da, lon=True)
             lat_key_mask = get_coord_key(mask_da, lat=True)
@@ -510,6 +512,7 @@ def crop_file(  # noqa: PLR0912 PLR0915
                 lat_key_mask=lat_key_mask,
                 target_lon=ds_cropped[lon_key].data,
                 target_lat=ds_cropped[lat_key].data,
+                mask_key=mask_var,
                 lon_key_target=lon_key,
                 lat_key_target=lat_key,
             )
@@ -586,6 +589,8 @@ def crop_mhm_setup(  # noqa: PLR0913
     no_cropping=False,
     lat_order="decreasing",
     output_suffix=None,
+    mask_all=False,
+    mask_var="mask",
 ):
     """Cut out an existing mhm domain setup using a mask file."""
     # check if the input is correct
@@ -618,6 +623,8 @@ def crop_mhm_setup(  # noqa: PLR0913
             no_cropping=no_cropping,
             lat_order=lat_order,
             output_suffix=output_suffix,
+            mask_all=mask_all,
+            mask_var=mask_var,
         )
         for f in files
     )

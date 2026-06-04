@@ -15,6 +15,7 @@ from . import (
     _bankfull,
     _calculate_pet,
     _create_catchment,
+    _create_header,
     _create_idgauges,
     _create_mhm_restart_file,
     _create_subdomain_masks,
@@ -53,6 +54,7 @@ _COMMAND_MODULES: List[Tuple[str, object]] = [
     ("merge-files", _merge),
     ("regrid-file", _regrid),
     ("create-catchment", _create_catchment),
+    ("create-header", _create_header),
     ("crop-mhm-setup", _crop_mhm_setup),
     ("prepare-mhm-forcings", _prepare_mhm_forcings),
     ("calculate-pet", _calculate_pet),
@@ -107,7 +109,9 @@ class AliasGroup(click.Group):
                 raise
             unknown = args[0]
             candidates = sorted(set(self.commands.keys()) | set(self._aliases.keys()))
-            suggestions = difflib.get_close_matches(unknown, candidates, n=3, cutoff=0.5)
+            suggestions = difflib.get_close_matches(
+                unknown, candidates, n=3, cutoff=0.5
+            )
             if not suggestions:
                 raise
             suggestion_list = ", ".join(suggestions)

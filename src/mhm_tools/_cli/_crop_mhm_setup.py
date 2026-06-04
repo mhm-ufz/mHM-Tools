@@ -140,6 +140,15 @@ def add_args(parser):
             """Do not crop the file but only writes a header. This activate the forced header creation and only header functions."""
         ),
     )
+    flags.add_argument(
+        "--mask-all",
+        required=False,
+        default=False,
+        action="store_true",
+        help=(
+            """Apply the mask to all cropped files (not only DEM). Useful with --mask-var mask_l2 for meteo files."""
+        ),
+    )
     optional.add_argument(
         "--output-var",
         required=False,
@@ -221,4 +230,6 @@ def run(args):
         no_cropping=args.no_cropping,
         lat_order=args.lat_order,
         output_suffix=args.output_suffix,
+        mask_all=args.mask_all,
+        mask_var=args.mask_var,
     )

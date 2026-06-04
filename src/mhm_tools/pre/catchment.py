@@ -142,8 +142,8 @@ def _shape_iou(reference_gdf, candidate_gdf):
         or candidate_gdf.empty
     ):
         return 0.0
-    reference_geom = reference_gdf.geometry.unary_union
-    candidate_geom = candidate_gdf.geometry.unary_union
+    reference_geom = _geometry_union(reference_gdf.geometry)
+    candidate_geom = _geometry_union(candidate_gdf.geometry)
     if reference_geom.is_empty or candidate_geom.is_empty:
         return 0.0
     union_area = reference_geom.union(candidate_geom).area
@@ -153,6 +153,12 @@ def _shape_iou(reference_gdf, candidate_gdf):
     iou = float(intersection_area / union_area)
     logger.debug("Computed shape IoU: %.4f", iou)
     return iou
+
+
+def _geometry_union(geometry):
+    if hasattr(geometry, "union_all"):
+        return geometry.union_all()
+    return geometry.unary_union
 
 
 def _coords_from_transform(affine_transform, grid_shape):
@@ -1655,12 +1661,17 @@ class Catchment:
         frame=1,
         buffer=0,
         variables=None,
+        id_gauges_out_path=None,
     ):
         """Write the produced data to one or multiple files."""
         data_vars = {}
         out_path = Path(out_path)
         if not out_path.is_dir():
             out_path.mkdir(parents=True, exist_ok=True)
+        gauges_out_path = (
+            Path(id_gauges_out_path) if id_gauges_out_path is not None else out_path
+        )
+        gauges_out_path.mkdir(parents=True, exist_ok=True)
         selected_vars = _normalize_output_vars(variables)
         lat_slice_idx, lon_slice_idx = None, None
         lat_slice, lon_slice = None, None
@@ -1720,10 +1731,12 @@ class Catchment:
                         lon=self.gauge_lons,
                         data_var="idgauges",
                     )
-                    write_xarray_to_file(id_ds, out_path / "idgauges.nc", "idgauges")
+                    write_xarray_to_file(
+                        id_ds, gauges_out_path / "idgauges.nc", "idgauges"
+                    )
                     write_xarray_to_file(
                         id_ds,
-                        out_path / "idgauges.asc",
+                        gauges_out_path / "idgauges.asc",
                         "idgauges",
                         resolution=self.upscaled_resolution,
                     )
@@ -2174,6 +2187,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
     gauge_opti_method="basinex",
     shape_folder=None,
     gauge_info_file="gauges_info",
+    id_gauges_out_path=None,
     raise_on_fallback=True,
 ):
     """Create file containing catchment ids, flowdirection and upstream area from dem or flow direction."""
@@ -2181,6 +2195,10 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
         f"Creating catchment file for {var_name} using {var} and {ftype} from {input_file}"
     )
     output_path = Path(output_path)
+    id_gauges_out_path = (
+        output_path if id_gauges_out_path is None else Path(id_gauges_out_path)
+    )
+    id_gauges_out_path.mkdir(parents=True, exist_ok=True)
     if _is_list_of_float_tuples(gauge_coords) and len(gauge_coords) == 1:
         gauge_coords = gauge_coords[0]
     if isinstance(ref_catchment_area, list) and len(ref_catchment_area) == 1:
@@ -2206,6 +2224,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
         available_mem_gib=available_mem,
         chunking=chunking,
     ) as input_ds:
+        coord_slices_default = False
         if coordinate_slices is None:
             coordinate_slices = {"lat": slice(None, None), "lon": slice(None, None)}
             coord_slices_default = True
@@ -2316,6 +2335,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                         frame=frame,
                         mask_file=mask_file,
                         variables=output_vars,
+                        id_gauges_out_path=id_gauges_out_path,
                     )
                 # add paths to the temp files
                 temp_file1 = Path(output_path, "hydro1.nc")
@@ -2349,6 +2369,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                     frame=frame,
                     mask_file=mask_file,
                     variables=output_vars,
+                    id_gauges_out_path=id_gauges_out_path,
                 )
             return
         input_ds_sliced = input_ds.sel(
@@ -2397,7 +2418,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
             l0_shape_gdf = None
             if upscale and c.catchment_mask is not None:
                 write_gauges_out(
-                    gauge, output_path / f"{gauge_info_file}_{resolutions.l0}"
+                    gauge, id_gauges_out_path / f"{gauge_info_file}_{resolutions.l0}"
                 )
                 try:
                     l0_shape_gdf = _vectorize_mask_to_gdf(
@@ -2409,7 +2430,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                 except Exception as exc:
                     logger.warning("Could not build L0 basin shape: %s", exc)
             else:
-                write_gauges_out(gauge, output_path / gauge_info_file)
+                write_gauges_out(gauge, id_gauges_out_path / gauge_info_file)
             c.write_basin_shape(
                 output_path / "shapes",
                 gauge_id=gauge_ids if not isinstance(gauge_ids, list) else gauge_ids[0],
@@ -2432,7 +2453,8 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                     )
                     gauge.update(lat=new_coords[0], lon=new_coords[1])
                 write_gauges_out(
-                    gauge, output_path / f"{gauge_info_file}_{c.upscaled_resolution}"
+                    gauge,
+                    id_gauges_out_path / f"{gauge_info_file}_{c.upscaled_resolution}",
                 )
             c.write(
                 output_path,
@@ -2442,6 +2464,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                 frame=frame,
                 buffer=frame,
                 variables=output_vars,
+                id_gauges_out_path=id_gauges_out_path,
             )
             return
         logger.info("Creating basin id file for region.")
@@ -2627,10 +2650,10 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                 if upscale:
                     write_gauges_out(
                         gauges,
-                        output_path / f"{gauge_info_file}_{resolutions.l0}",
+                        id_gauges_out_path / f"{gauge_info_file}_{resolutions.l0}",
                     )
                 else:
-                    write_gauges_out(gauges, output_path / gauge_info_file)
+                    write_gauges_out(gauges, id_gauges_out_path / gauge_info_file)
 
         _compute_requested_outputs(c)
         if upscale and c.is_upscaled and gauges:
@@ -2663,7 +2686,8 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                     )
                     gauge.update(lat=new_coords[0], lon=new_coords[1])
             write_gauges_out(
-                gauges, output_path / f"{gauge_info_file}_{c.upscaled_resolution}"
+                gauges,
+                id_gauges_out_path / f"{gauge_info_file}_{c.upscaled_resolution}",
             )
         c.write(
             output_path,
@@ -2671,4 +2695,5 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
             mask_file=mask_file,
             frame=frame,
             variables=output_vars,
+            id_gauges_out_path=id_gauges_out_path,
         )

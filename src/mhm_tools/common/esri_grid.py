@@ -220,7 +220,7 @@ def write_grid(file, header, data=None, dtype="f4"):
 
 
 def check_resolutions(
-    cellsize_1, cellsize_2, first_finer=False, name_1="LA", name_2="LB"
+    cellsize_1, cellsize_2, first_finer=False, name_1="LA", name_2="LB", tol=1e-7
 ):
     """Check two resolutions for compatibility.
 
@@ -262,13 +262,29 @@ def check_resolutions(
     )
     ratio = np.rint(f_ratio).astype(int)
     # same check as done by mHM
-    if not np.isclose(ratio, f_ratio, atol=1e-7, rtol=0.0):
+    if not np.isclose(ratio, f_ratio, atol=tol, rtol=0.0):
         msg = (
             "Cell Size missmatch: "
             f"{name_1} ({cellsize_1}) and "
             f"{name_2} ({cellsize_2}) are not compatible. "
             f"Ratio: {f_ratio}"
         )
+        if tol < 1e-5:
+            logger.warning(
+                f"Cell Size missmatch: "
+                f"{name_1} ({cellsize_1}) and "
+                f"{name_2} ({cellsize_2}) are not compatible. "
+                f"Ratio: {f_ratio}"
+                f"Increasing tolerance to {tol*10} to avoid error."
+            )
+            return check_resolutions(
+                cellsize_1=cellsize_1,
+                cellsize_2=cellsize_2,
+                first_finer=first_finer,
+                name_1=name_1,
+                name_2=name_2,
+                tol=tol * 10,
+            )
         with ErrorLogger(logger):
             raise ValueError(msg)
     return ratio
