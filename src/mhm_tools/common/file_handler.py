@@ -19,6 +19,7 @@ from mhm_tools.common.netcdf import (
     sanitize_nc_encoding,
     set_netcdf_encoding,
 )
+from mhm_tools.common.provenance import apply_output_provenance
 from mhm_tools.common.xarray_utils import (
     get_coord_key,
     get_dtype,
@@ -464,6 +465,7 @@ def write_xarray_to_file(  # noqa: PLR0912, PLR0915
                 "Dataset has no data variables. Writing coordinate-only dataset."
             )
         logger.debug(f"data vars: {data_vars}")
+        ds = apply_output_provenance(ds)
         _apply_cf_baseline_metadata(ds, data_vars)
         if encoding is None:
             encoding = {

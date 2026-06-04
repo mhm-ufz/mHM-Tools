@@ -27,6 +27,7 @@ from mhm_tools.common.file_handler import (
 )
 from mhm_tools.common.logger import ErrorLogger, log_arguments
 from mhm_tools.common.netcdf import generate_bounds
+from mhm_tools.common.provenance import apply_output_provenance
 from mhm_tools.common.utils import (
     Resolution,
     coord_to_index,
@@ -600,6 +601,7 @@ def write_gauges_to_nc(gauges, output_target, filename="gauges_info.nc"):
         "lat": {"dtype": "float64", "_FillValue": np.nan},
         "area": {"dtype": "float64", "_FillValue": np.nan},
     }
+    ds = apply_output_provenance(ds)
     ds.to_netcdf(output_path, engine="netcdf4", format="NETCDF4", encoding=encoding)
     logger.info(
         "Wrote gauge information for %d gauges to %s", len(station_ids), output_path

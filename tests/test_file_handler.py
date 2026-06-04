@@ -7,6 +7,8 @@ import numpy as np
 import xarray as xr
 
 import mhm_tools.common.file_handler as fh
+from mhm_tools._version import __version__
+from mhm_tools.common.provenance import CREATED_ATTR, HISTORY_ATTR, VERSION_ATTR
 
 
 def _engine_available(engine: str) -> bool:
@@ -230,6 +232,7 @@ class TestAsciiReadWrite(unittest.TestCase, BaseDatasetMixin):
 class TestWriteXarrayToFile(unittest.TestCase, BaseDatasetMixin):
     def test_write_xarray_to_file_nc(self):
         ds = self.make_simple_ds()
+        ds.attrs[HISTORY_ATTR] = "previous processing step"
         engines = [e for e in ["netcdf4", "h5netcdf"] if _engine_available(e)]
         if not engines:
             self.skipTest("No NetCDF engine available for writing.")
@@ -238,8 +241,12 @@ class TestWriteXarrayToFile(unittest.TestCase, BaseDatasetMixin):
                 nc_path = Path(td) / "ds.nc"
                 fh.write_xarray_to_file(ds, nc_path, engine=engine)
                 self.assertTrue(nc_path.is_file())
-                back = xr.open_dataset(nc_path, engine=engine)
-                self.assertIn("var", back)
+                with xr.open_dataset(nc_path, engine=engine) as back:
+                    self.assertIn("var", back)
+                    self.assertEqual(back.attrs[VERSION_ATTR], __version__)
+                    self.assertIn(CREATED_ATTR, back.attrs)
+                    self.assertIn("previous processing step", back.attrs[HISTORY_ATTR])
+                    self.assertIn("mhm-tools command:", back.attrs[HISTORY_ATTR])
 
     def test_write_xarray_to_file_asc(self):
         ds = self.make_simple_ds()
@@ -247,6 +254,11 @@ class TestWriteXarrayToFile(unittest.TestCase, BaseDatasetMixin):
             asc_path = Path(td) / "out.asc"
             fh.write_xarray_to_file(ds, asc_path, var_name="var")
             self.assertTrue(asc_path.is_file())
+            text = asc_path.read_text(encoding="utf-8")
+            self.assertNotIn(VERSION_ATTR, text)
+            self.assertNotIn(CREATED_ATTR, text)
+            back = fh.read_ascii_to_xarray(asc_path, var_name="var")
+            self.assertIn("var", back)
 
     def test_write_xarray_to_file_unsupported_suffix_raises(self):
         ds = self.make_simple_ds()

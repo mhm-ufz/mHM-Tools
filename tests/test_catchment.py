@@ -7,7 +7,9 @@ import numpy as np
 import xarray as xr
 
 import mhm_tools.common.utils
+from mhm_tools._version import __version__
 from mhm_tools.common.file_handler import get_xarray_ds_from_file
+from mhm_tools.common.provenance import CREATED_ATTR, HISTORY_ATTR, VERSION_ATTR
 from mhm_tools.common.utils import distance_100m_units, find_best_gauge_location_by_area
 from mhm_tools.common.xarray_utils import get_coord_key
 from mhm_tools.pre import catchment
@@ -213,6 +215,13 @@ class TestCatchment(unittest.TestCase):
         self.assertEqual(len(written_rows), 1)
         self.assertEqual(written_rows[0]["id"], "101")
         self.assertAlmostEqual(float(written_rows[0]["distance"]), 1.25)
+        catchment.write_gauges_to_nc([gauge], out_dir, "gauges_info.nc")
+        nc_file = out_dir / "gauges_info.nc"
+        self.assertTrue(nc_file.exists())
+        with xr.open_dataset(nc_file) as nc_ds:
+            self.assertEqual(nc_ds.attrs[VERSION_ATTR], __version__)
+            self.assertIn(CREATED_ATTR, nc_ds.attrs)
+            self.assertIn("mhm-tools command:", nc_ds.attrs[HISTORY_ATTR])
 
     def test_write_gauge_info_csv_no_rows(self):
         out_dir = self.tmp_path / "gauge_csv_empty"
