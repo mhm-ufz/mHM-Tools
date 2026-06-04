@@ -820,6 +820,126 @@ class TestCatchment(unittest.TestCase):
                 seq_ds["idgauges"].values, par_ds["idgauges"].values
             )
 
+    def test_shape_based_create_catchment_matches_reference_basin(self):
+        """Shape-only delineation should reproduce the basin used to create the shape."""
+        self._require_geospatial()
+        if (
+            not self.FDIR_PATH.exists()
+            or self.GAUGE_LAT is None
+            or self.GAUGE_LON is None
+            or self.REF_AREA is None
+        ):
+            self.skipTest(
+                "Set FDIR_PATH, GAUGE_LAT, GAUGE_LON and REF_AREA in this test file to run this integration test."
+            )
+
+        with get_xarray_ds_from_file(str(self.FDIR_PATH)) as ds:
+            var_name = (
+                self.FDIR_VAR
+                if self.FDIR_VAR in ds.data_vars
+                else list(ds.data_vars)[0]
+            )
+
+        gauge_id = 101
+        gauge_coords = (float(self.GAUGE_LAT[0]), float(self.GAUGE_LON[0]))
+        ref_area = float(self.REF_AREA[0])
+        common_kwargs = {
+            "input_file": str(self.FDIR_PATH),
+            "var_name": var_name,
+            "var": "fdir",
+            "ftype": "d8",
+            "gauge_ids": gauge_id,
+            "max_distance_cells": 10,
+            "max_error": 0.25,
+            "latlon": True,
+            "frame": 0,
+            "output_vars": ["basin"],
+            "raise_on_fallback": True,
+        }
+
+        reference_dir = self.tmp_path / "shape_reference"
+        shape_with_coords_dir = self.tmp_path / "shape_with_coords"
+        shape_only_dir = self.tmp_path / "shape_only"
+
+        catchment.create_catchment(
+            output_path=reference_dir,
+            gauge_coords=gauge_coords,
+            ref_catchment_area=ref_area,
+            **common_kwargs,
+        )
+        shape_folder = reference_dir / "shapes"
+        self.assertTrue(
+            (shape_folder / f"basin_{gauge_id}.shp").is_file(),
+            "Reference catchment shapefile was not written.",
+        )
+
+        catchment.create_catchment(
+            output_path=shape_with_coords_dir,
+            gauge_coords=gauge_coords,
+            shape_folder=shape_folder,
+            **common_kwargs,
+        )
+        catchment.create_catchment(
+            output_path=shape_only_dir,
+            gauge_coords=None,
+            shape_folder=shape_folder,
+            **common_kwargs,
+        )
+
+        reference_mask = self._read_basin_mask(reference_dir / "basin_ids.nc")
+        shape_with_coords_mask = self._read_basin_mask(
+            shape_with_coords_dir / "basin_ids.nc"
+        )
+        shape_only_mask = self._read_basin_mask(shape_only_dir / "basin_ids.nc")
+
+        self._assert_same_basin_mask(reference_mask, shape_with_coords_mask)
+        self._assert_same_basin_mask(reference_mask, shape_only_mask)
+        self._assert_same_gauge_cell(
+            reference_dir / "idgauges.nc",
+            shape_with_coords_dir / "idgauges.nc",
+            gauge_id,
+        )
+        self._assert_same_gauge_cell(
+            reference_dir / "idgauges.nc",
+            shape_only_dir / "idgauges.nc",
+            gauge_id,
+        )
+
+    def _read_basin_mask(self, path):
+        self.assertTrue(path.is_file(), f"Missing basin output: {path}")
+        with xr.open_dataset(path) as ds:
+            return (ds["basin"] > 0).load()
+
+    def _assert_same_basin_mask(self, expected, actual):
+        expected_aligned, actual_aligned = xr.align(
+            expected, actual, join="outer", fill_value=False
+        )
+        np.testing.assert_array_equal(
+            expected_aligned.values,
+            actual_aligned.values,
+            "Delineated basin mask does not match the reference shape basin.",
+        )
+
+    def _assert_same_gauge_cell(self, expected_path, actual_path, gauge_id):
+        self.assertTrue(
+            expected_path.is_file(), f"Missing gauge output: {expected_path}"
+        )
+        self.assertTrue(actual_path.is_file(), f"Missing gauge output: {actual_path}")
+        with xr.open_dataset(expected_path) as expected_ds, xr.open_dataset(
+            actual_path
+        ) as actual_ds:
+            expected_cells = np.argwhere(expected_ds["idgauges"].values == gauge_id)
+            actual_cells = np.argwhere(actual_ds["idgauges"].values == gauge_id)
+            self.assertEqual(expected_cells.shape[0], 1)
+            self.assertEqual(actual_cells.shape[0], 1)
+            expected_row, expected_col = expected_cells[0]
+            actual_row, actual_col = actual_cells[0]
+            expected_lat = float(expected_ds["idgauges"]["lat"].values[expected_row])
+            expected_lon = float(expected_ds["idgauges"]["lon"].values[expected_col])
+            actual_lat = float(actual_ds["idgauges"]["lat"].values[actual_row])
+            actual_lon = float(actual_ds["idgauges"]["lon"].values[actual_col])
+            self.assertEqual((expected_lat, expected_lon), (actual_lat, actual_lon))
+
     def test_shape_comparison_l0(self):
         self._require_geospatial()
         if (
