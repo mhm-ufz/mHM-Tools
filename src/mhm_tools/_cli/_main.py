@@ -108,11 +108,12 @@ _GROUP_ORDER = ("required arguments", "optional arguments", "flags", "options")
 
 
 class AliasGroup(click.Group):
-    """Click group that supports hidden command aliases."""
+    """Click group that supports aliases and preserves command insertion order."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._aliases = {}
+        self._path_aliases = {}
 
     def add_alias(self, alias: str, target: str) -> None:
         """Register an alias that resolves to an existing command."""
@@ -123,6 +124,27 @@ class AliasGroup(click.Group):
             msg = f"Cannot alias unknown command '{target}'."
             raise click.ClickException(msg)
         self._aliases[alias] = target
+
+    def add_path_alias(self, alias: str, target_path: Tuple[str, ...]) -> None:
+        """Register an alias that expands to a nested command path."""
+        if alias in self.commands:
+            msg = f"Alias '{alias}' collides with an existing command."
+            raise click.ClickException(msg)
+        if not target_path:
+            msg = f"Cannot alias '{alias}' to an empty command path."
+            raise click.ClickException(msg)
+        if target_path[0] not in self.commands:
+            msg = f"Cannot alias '{alias}' to unknown command path '{target_path}'."
+            raise click.ClickException(msg)
+        self._path_aliases[alias] = target_path
+
+    def list_commands(self, _ctx):
+        """Return commands in their assigned insertion order."""
+        return [
+            name
+            for name, command in self.commands.items()
+            if not getattr(command, "hidden", False)
+        ]
 
     def get_command(self, ctx, cmd_name):
         command = super().get_command(ctx, cmd_name)
@@ -135,13 +157,19 @@ class AliasGroup(click.Group):
 
     def resolve_command(self, ctx, args):
         """Resolve command name and provide typo suggestions."""
+        if args and args[0] in self._path_aliases:
+            args = [*self._path_aliases[args[0]], *args[1:]]
         try:
             return super().resolve_command(ctx, args)
         except click.UsageError as exc:
             if not args:
                 raise
             unknown = args[0]
-            candidates = sorted(set(self.commands.keys()) | set(self._aliases.keys()))
+            candidates = sorted(
+                set(self.commands.keys())
+                | set(self._aliases.keys())
+                | set(self._path_aliases.keys())
+            )
             suggestions = difflib.get_close_matches(
                 unknown, candidates, n=3, cutoff=0.5
             )
@@ -388,6 +416,21 @@ def _add_command_with_aliases(
     _add_dash_underscore_alias(group, command_name)
 
 
+def _add_path_aliases(
+    group: AliasGroup,
+    command_name: str,
+    target_path: Tuple[str, ...],
+) -> None:
+    """Register legacy top-level aliases that expand to a grouped command."""
+    aliases = [command_name]
+    if "-" in command_name:
+        aliases.append(command_name.replace("-", "_"))
+    if "_" in command_name:
+        aliases.append(command_name.replace("_", "-"))
+    for alias in aliases:
+        group.add_path_alias(alias, target_path)
+
+
 @click.group(
     cls=AliasGroup,
     context_settings={"help_option_names": ["-h", "--help"]},
@@ -449,6 +492,7 @@ def cli(
     )
 
 
+_LEGACY_COMMAND_PATHS = []
 for _group_name, _group_help, _group_commands in _COMMAND_GROUPS:
     _group = AliasGroup(
         name=_group_name,
@@ -462,12 +506,11 @@ for _group_name, _group_help, _group_commands in _COMMAND_GROUPS:
             prog_path=f"mhm-tools {_group_name} {_command_name}",
         )
         _add_command_with_aliases(_group, _cmd, _command_name)
+        _LEGACY_COMMAND_PATHS.append((_command_name, (_group_name, _command_name)))
     _add_command_with_aliases(cli, _group, _group_name)
 
-for _command_name, _module in _COMMAND_MODULES:
-    _legacy_cmd = _build_click_command(_command_name, _module)
-    _legacy_cmd.hidden = True
-    _add_command_with_aliases(cli, _legacy_cmd, _command_name)
+for _command_name, _target_path in _LEGACY_COMMAND_PATHS:
+    _add_path_aliases(cli, _command_name, _target_path)
 
 
 if trogon_tui is not None:
