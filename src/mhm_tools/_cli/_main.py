@@ -43,6 +43,42 @@ try:
 except Exception:  # pragma: no cover - optional dependency
     trogon_tui = None
 
+
+def _patch_trogon_command_tree_order() -> None:
+    """Make Trogon's command tree respect Click insertion order."""
+    if trogon_tui is None:
+        return
+    try:
+        from rich.text import Text
+        from trogon.widgets.command_tree import CommandTree
+    except Exception:
+        return
+
+    def _ordered_on_mount(self):
+        def build_tree(data, node):
+            for cmd_name, cmd_data in data.items():
+                if cmd_name == self.command_name:
+                    continue
+                if cmd_data.subcommands:
+                    label = Text(cmd_name)
+                    if cmd_data.is_group:
+                        group_style = self.get_component_rich_style("group")
+                        label.stylize(group_style)
+                        label.append(" ")
+                        label.append("group", "dim i")
+                    child = node.add(label, allow_expand=False, data=cmd_data)
+                    build_tree(cmd_data.subcommands, child)
+                else:
+                    node.add_leaf(cmd_name, data=cmd_data)
+            return node
+
+        build_tree(self.cli_metadata, self.root)
+        self.root.expand_all()
+        self.select_node(self.root)
+
+    CommandTree.on_mount = _ordered_on_mount
+
+
 _COMMAND_GROUPS: List[Tuple[str, str, List[Tuple[str, object]]]] = [
     (
         "setup_creation",
@@ -53,21 +89,6 @@ _COMMAND_GROUPS: List[Tuple[str, str, List[Tuple[str, object]]]] = [
             ("create-header", _create_header),
             ("calculate-pet", _calculate_pet),
             ("prepare-mhm-forcings", _prepare_mhm_forcings),
-            ("create-id-gauges", _create_idgauges),
-            ("create-subdomain-masks", _create_subdomain_masks),
-            ("create-mhm-restart-file", _create_mhm_restart_file),
-            ("landcover-ascii-to-nc", _landcover_ascii_to_nc),
-        ],
-    ),
-    (
-        "evaluation",
-        "Evaluate simulations against observations or reference data.",
-        [
-            ("hydrograph", _hydrograph),
-            ("gridded-data-evaluation", _gridded_data_evaluation),
-            ("discharge-evaluation", _discharge_evaluation),
-            ("bankfull", _bankfull),
-            ("taylor-diagram", _taylor_diagram),
         ],
     ),
     (
@@ -75,20 +96,23 @@ _COMMAND_GROUPS: List[Tuple[str, str, List[Tuple[str, object]]]] = [
         "Convert, regrid, merge, and derive gridded data products.",
         [
             ("converter-nc-ascii", _file_converter),
+            ("latlon", _latlon),
             ("merge-files", _merge),
             ("regrid-file", _regrid),
             ("long-term-mean", _long_term_mean),
             ("difference", _difference),
             ("relative-difference", _relative_difference),
             ("ratio", _ratio),
-            ("latlon", _latlon),
+            ("bankfull", _bankfull),
         ],
     ),
     (
-        "visualization",
-        "Create diagnostic plots and run summaries.",
+        "evaluation",
+        "Evaluate simulations against observations or reference data.",
         [
-            ("2d-map", _2d_map),
+            ("discharge-evaluation", _discharge_evaluation),
+            ("hydrograph", _hydrograph),
+            ("gridded-data-evaluation", _gridded_data_evaluation),
             ("run-overview", _mhm_run_overview),
         ],
     ),
@@ -99,18 +123,67 @@ _COMMAND_GROUPS: List[Tuple[str, str, List[Tuple[str, object]]]] = [
             ("link-folder-tree", _link_folder_tree),
         ],
     ),
+    (
+        "visualization",
+        "Create diagnostic plots and run summaries.",
+        [
+            ("2d-map", _2d_map),
+            ("taylor-diagram", _taylor_diagram),
+        ],
+    ),
+    (
+        "mHMv5-to-mHMv6-setup-conversion",
+        "Convert mHM5 setup files to mHMv6 format.",
+        [
+            ("landcover-ascii-to-nc", _landcover_ascii_to_nc),
+        ],
+    ),
+    (
+        "legacy",
+        "Legacy top-level commands (aliases to grouped commands).",
+        [
+            ("create-id-gauges", _create_idgauges),
+            ("create-subdomain-masks", _create_subdomain_masks),
+            ("create-mhm-restart-file", _create_mhm_restart_file),
+        ],
+    ),
 ]
 _COMMAND_MODULES: List[Tuple[str, object]] = [
     command for _, _, commands in _COMMAND_GROUPS for command in commands
 ]
 _LOG_LEVEL_CHOICES = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 _GROUP_ORDER = ("required arguments", "optional arguments", "flags", "options")
+_ROOT_OPTION_ALIASES = {
+    "--log_level": "--log-level",
+    "--log_file": "--log-file",
+    "--log_file_level": "--log-file-level",
+    "--no_console_output": "--no-console-output",
+}
+
+
+def _translate_option_aliases(args, option_aliases):
+    """Translate hidden option aliases to their canonical option names."""
+    translated_args = []
+    for arg in args:
+        if not arg.startswith("--"):
+            translated_args.append(arg)
+            continue
+        option_name, separator, option_value = arg.partition("=")
+        canonical = option_aliases.get(option_name)
+        if canonical is None:
+            translated_args.append(arg)
+            continue
+        translated_args.append(
+            f"{canonical}{separator}{option_value}" if separator else canonical
+        )
+    return translated_args
 
 
 class AliasGroup(click.Group):
     """Click group that supports aliases and preserves command insertion order."""
 
     def __init__(self, *args, **kwargs):
+        self.command_section_name = kwargs.pop("command_section_name", "Commands")
         super().__init__(*args, **kwargs)
         self._aliases = {}
         self._path_aliases = {}
@@ -179,6 +252,33 @@ class AliasGroup(click.Group):
             msg = f"No such command '{unknown}'. Did you mean: {suggestion_list}?"
             raise click.UsageError(msg, ctx=ctx) from exc
 
+    def parse_args(self, ctx, args):
+        """Translate hidden root option aliases before Click parses arguments."""
+        return super().parse_args(
+            ctx, _translate_option_aliases(args, _ROOT_OPTION_ALIASES)
+        )
+
+    def format_commands(self, ctx, formatter):
+        """Render command lists using the configured section heading."""
+        rows = []
+        for subcommand in self.list_commands(ctx):
+            command = self.get_command(ctx, subcommand)
+            if command is None or command.hidden:
+                continue
+            rows.append((subcommand, command))
+
+        if not rows:
+            return
+
+        limit = formatter.width - 6 - max(len(row[0]) for row in rows)
+        with formatter.section(self.command_section_name):
+            formatter.write_dl(
+                [
+                    (subcommand, command.get_short_help_str(limit))
+                    for subcommand, command in rows
+                ]
+            )
+
 
 class GroupedOption(click.Option):
     """Click option with an attached source argument-group label."""
@@ -190,6 +290,16 @@ class GroupedOption(click.Option):
 
 class GroupedCommand(click.Command):
     """Click command that renders options grouped by source parser groups."""
+
+    def __init__(self, *args, option_aliases=None, **kwargs):
+        self.option_aliases = option_aliases or {}
+        super().__init__(*args, **kwargs)
+
+    def parse_args(self, ctx, args):
+        """Translate legacy option aliases before Click parses arguments."""
+        return super().parse_args(
+            ctx, _translate_option_aliases(args, self.option_aliases)
+        )
 
     def format_options(self, ctx, formatter):
         grouped_records = {}
@@ -259,6 +369,38 @@ def _expand_long_option_aliases(option_strings):
     return tuple(expanded)
 
 
+def _canonical_option_strings(option_strings):
+    """Return visible option declarations while leaving aliases hidden."""
+    canonical = []
+    first_long_option = None
+    for option in option_strings:
+        if option.startswith("--"):
+            if first_long_option is None:
+                first_long_option = option
+            continue
+        canonical.append(option)
+    if first_long_option is not None:
+        canonical.append(first_long_option)
+    return tuple(canonical)
+
+
+def _option_aliases(option_strings):
+    """Map hidden option aliases to their visible canonical long option."""
+    canonical_options = _canonical_option_strings(option_strings)
+    canonical_long_options = [
+        option for option in canonical_options if option.startswith("--")
+    ]
+    if not canonical_long_options:
+        return {}
+    canonical_long_option = canonical_long_options[0]
+    aliases = {}
+    for option in _expand_long_option_aliases(option_strings):
+        if not option.startswith("--") or option in canonical_options:
+            continue
+        aliases[option] = canonical_long_option
+    return aliases
+
+
 def _normalize_default(action: argparse.Action):
     """Normalize parser defaults for Click option declarations."""
     default = action.default
@@ -313,7 +455,7 @@ def _convert_callback(action: argparse.Action) -> Callable:
 
 def _action_to_click_option(action: argparse.Action, option_group: str = "options"):
     """Convert one parser action to a Click option."""
-    option_strings = tuple(_expand_long_option_aliases(action.option_strings))
+    option_strings = tuple(_canonical_option_strings(action.option_strings))
     if not option_strings:
         return None
 
@@ -373,6 +515,7 @@ def _build_click_command(command_name: str, module, prog_path: Optional[str] = N
             action_groups[id(group_action)] = group_title
 
     params = []
+    option_aliases = {}
     for action in parser._actions:
         if isinstance(action, argparse._HelpAction):
             continue
@@ -380,6 +523,7 @@ def _build_click_command(command_name: str, module, prog_path: Optional[str] = N
         option = _action_to_click_option(action, option_group=option_group)
         if option is not None:
             params.append(option)
+            option_aliases.update(_option_aliases(action.option_strings))
 
     def _callback(**kwargs):
         args = SimpleNamespace(**kwargs)
@@ -390,6 +534,7 @@ def _build_click_command(command_name: str, module, prog_path: Optional[str] = N
         callback=_callback,
         params=params,
         help=module.__doc__,
+        option_aliases=option_aliases,
         context_settings={"help_option_names": ["-h", "--help"]},
     )
 
@@ -431,14 +576,22 @@ def _add_path_aliases(
         group.add_path_alias(alias, target_path)
 
 
+def _hide_tui_launcher(group: click.Group) -> None:
+    """Hide the TUI launcher from command-group listings."""
+    tui_command = group.commands.get("tui")
+    if tui_command is not None:
+        tui_command.hidden = True
+
+
 @click.group(
     cls=AliasGroup,
     context_settings={"help_option_names": ["-h", "--help"]},
+    subcommand_metavar="GROUP COMMAND [ARGS]...",
+    command_section_name="Command Groups",
 )
 @click.version_option(__version__, "-V", "--version", prog_name="mhm-tools")
 @click.option(
     "--log-level",
-    "--log_level",
     type=str,
     callback=_validate_log_level_option,
     default=None,
@@ -453,14 +606,12 @@ def _add_path_aliases(
 )
 @click.option(
     "--log-file",
-    "--log_file",
     type=str,
     default=None,
     help="Generate a log file.",
 )
 @click.option(
     "--log-file-level",
-    "--log_file_level",
     type=str,
     callback=_validate_log_level_option,
     default=None,
@@ -468,7 +619,6 @@ def _add_path_aliases(
 )
 @click.option(
     "--no-console-output",
-    "--no_console_output",
     is_flag=True,
     default=False,
     help="Prohibit console output.",
@@ -514,13 +664,17 @@ for _command_name, _target_path in _LEGACY_COMMAND_PATHS:
 
 
 if trogon_tui is not None:
+    _patch_trogon_command_tree_order()
     cli = trogon_tui()(cli)
+    _hide_tui_launcher(cli)
 else:
 
     @cli.command("tui", help="Open Textual TUI (requires 'trogon').")
     def _missing_tui():
         msg = "trogon is not installed. Install with: pip install trogon"
         raise click.ClickException(msg)
+
+    _hide_tui_launcher(cli)
 
 
 def main(argv=None):

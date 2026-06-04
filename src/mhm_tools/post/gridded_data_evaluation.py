@@ -1250,9 +1250,7 @@ def plot_map_local_climate(
     rel_monthly = 100.0 * (input_clim - ref_safe) / ref_safe
     abs_monthly = input_clim - ref_clim
 
-    def _plot_monthly_panels(
-        values, panel_title, output_file_name, colorbar_label
-    ):
+    def _plot_monthly_panels(values, panel_title, output_file_name, colorbar_label):
         values = np.where(values == np.inf, np.nan, values)
         values = np.where(values == -np.inf, np.nan, values)
         finite_values = values[np.isfinite(values)]
