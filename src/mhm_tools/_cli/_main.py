@@ -3,7 +3,7 @@
 import argparse
 import difflib
 from types import SimpleNamespace
-from typing import Callable, List, Tuple
+from typing import Callable, List, Optional, Tuple
 
 import click
 
@@ -43,32 +43,65 @@ try:
 except Exception:  # pragma: no cover - optional dependency
     trogon_tui = None
 
+_COMMAND_GROUPS: List[Tuple[str, str, List[Tuple[str, object]]]] = [
+    (
+        "setup_creation",
+        "Create and prepare mHM/mRM setup files.",
+        [
+            ("create-catchment", _create_catchment),
+            ("crop-mhm-setup", _crop_mhm_setup),
+            ("create-header", _create_header),
+            ("calculate-pet", _calculate_pet),
+            ("prepare-mhm-forcings", _prepare_mhm_forcings),
+            ("create-id-gauges", _create_idgauges),
+            ("create-subdomain-masks", _create_subdomain_masks),
+            ("create-mhm-restart-file", _create_mhm_restart_file),
+            ("landcover-ascii-to-nc", _landcover_ascii_to_nc),
+        ],
+    ),
+    (
+        "evaluation",
+        "Evaluate simulations against observations or reference data.",
+        [
+            ("hydrograph", _hydrograph),
+            ("gridded-data-evaluation", _gridded_data_evaluation),
+            ("discharge-evaluation", _discharge_evaluation),
+            ("bankfull", _bankfull),
+            ("taylor-diagram", _taylor_diagram),
+        ],
+    ),
+    (
+        "data_processing",
+        "Convert, regrid, merge, and derive gridded data products.",
+        [
+            ("converter-nc-ascii", _file_converter),
+            ("merge-files", _merge),
+            ("regrid-file", _regrid),
+            ("long-term-mean", _long_term_mean),
+            ("difference", _difference),
+            ("relative-difference", _relative_difference),
+            ("ratio", _ratio),
+            ("latlon", _latlon),
+        ],
+    ),
+    (
+        "visualization",
+        "Create diagnostic plots and run summaries.",
+        [
+            ("2d-map", _2d_map),
+            ("run-overview", _mhm_run_overview),
+        ],
+    ),
+    (
+        "utilities",
+        "General helper commands.",
+        [
+            ("link-folder-tree", _link_folder_tree),
+        ],
+    ),
+]
 _COMMAND_MODULES: List[Tuple[str, object]] = [
-    ("bankfull", _bankfull),
-    ("hydrograph", _hydrograph),
-    ("gridded-data-evaluation", _gridded_data_evaluation),
-    ("discharge-evaluation", _discharge_evaluation),
-    ("latlon", _latlon),
-    ("converter-nc-ascii", _file_converter),
-    ("landcover-ascii-to-nc", _landcover_ascii_to_nc),
-    ("merge-files", _merge),
-    ("regrid-file", _regrid),
-    ("create-catchment", _create_catchment),
-    ("create-header", _create_header),
-    ("crop-mhm-setup", _crop_mhm_setup),
-    ("prepare-mhm-forcings", _prepare_mhm_forcings),
-    ("calculate-pet", _calculate_pet),
-    ("create-id-gauges", _create_idgauges),
-    ("create-subdomain-masks", _create_subdomain_masks),
-    ("create-mhm-restart-file", _create_mhm_restart_file),
-    ("long-term-mean", _long_term_mean),
-    ("difference", _difference),
-    ("relative-difference", _relative_difference),
-    ("ratio", _ratio),
-    ("taylor-diagram", _taylor_diagram),
-    ("2d-map", _2d_map),
-    ("link-folder-tree", _link_folder_tree),
-    ("run-overview", _mhm_run_overview),
+    command for _, _, commands in _COMMAND_GROUPS for command in commands
 ]
 _LOG_LEVEL_CHOICES = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 _GROUP_ORDER = ("required arguments", "optional arguments", "flags", "options")
@@ -297,10 +330,10 @@ def _action_to_click_option(action: argparse.Action, option_group: str = "option
     )
 
 
-def _build_click_command(command_name: str, module):
+def _build_click_command(command_name: str, module, prog_path: Optional[str] = None):
     """Build one Click command from a parser-based command module."""
     parser = argparse.ArgumentParser(
-        prog=f"mhm-tools {command_name}",
+        prog=prog_path or f"mhm-tools {command_name}",
         add_help=False,
     )
     module.add_args(parser)
@@ -331,6 +364,28 @@ def _build_click_command(command_name: str, module):
         help=module.__doc__,
         context_settings={"help_option_names": ["-h", "--help"]},
     )
+
+
+def _add_dash_underscore_alias(group: AliasGroup, command_name: str) -> None:
+    """Add dash/underscore command aliases when applicable."""
+    aliases = []
+    if "-" in command_name:
+        aliases.append(command_name.replace("-", "_"))
+    if "_" in command_name:
+        aliases.append(command_name.replace("_", "-"))
+    for alias in aliases:
+        if alias not in group.commands:
+            group.add_alias(alias, command_name)
+
+
+def _add_command_with_aliases(
+    group: AliasGroup,
+    command: click.Command,
+    command_name: str,
+) -> None:
+    """Register a command and its dash/underscore alias."""
+    group.add_command(command, name=command_name)
+    _add_dash_underscore_alias(group, command_name)
 
 
 @click.group(
@@ -394,6 +449,27 @@ def cli(
     )
 
 
+for _group_name, _group_help, _group_commands in _COMMAND_GROUPS:
+    _group = AliasGroup(
+        name=_group_name,
+        help=_group_help,
+        context_settings={"help_option_names": ["-h", "--help"]},
+    )
+    for _command_name, _module in _group_commands:
+        _cmd = _build_click_command(
+            _command_name,
+            _module,
+            prog_path=f"mhm-tools {_group_name} {_command_name}",
+        )
+        _add_command_with_aliases(_group, _cmd, _command_name)
+    _add_command_with_aliases(cli, _group, _group_name)
+
+for _command_name, _module in _COMMAND_MODULES:
+    _legacy_cmd = _build_click_command(_command_name, _module)
+    _legacy_cmd.hidden = True
+    _add_command_with_aliases(cli, _legacy_cmd, _command_name)
+
+
 if trogon_tui is not None:
     cli = trogon_tui()(cli)
 else:
@@ -402,13 +478,6 @@ else:
     def _missing_tui():
         msg = "trogon is not installed. Install with: pip install trogon"
         raise click.ClickException(msg)
-
-
-for _command_name, _module in _COMMAND_MODULES:
-    _cmd = _build_click_command(_command_name, _module)
-    cli.add_command(_cmd, name=_command_name)
-    if "-" in _command_name:
-        cli.add_alias(_command_name.replace("-", "_"), _command_name)
 
 
 def main(argv=None):
