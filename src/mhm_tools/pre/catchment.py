@@ -2561,6 +2561,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
         logger.info(
             f"        lon {input_ds_sliced.lon.data[0]}, {input_ds_sliced.lon.data[-1]}"
         )
+        sliced_transform = get_transformation_matrix_nc(input_ds_sliced, var_name)
         single_shape_gauge = (
             gauge_coords is None
             and shape_folder is not None
@@ -2576,7 +2577,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                 var_name=var_name,
                 var=var,
                 ftype=ftype,
-                transform=transform,
+                transform=sliced_transform,
                 latlon=latlon,
                 out_var_name="basin_ids.nc",
                 do_shift=False,
@@ -2661,7 +2662,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
             var_name=var_name,
             var=var,
             ftype=ftype,
-            transform=transform,
+            transform=sliced_transform,
             latlon=latlon,
             out_var_name="basin_ids.nc",
             do_shift=False,
