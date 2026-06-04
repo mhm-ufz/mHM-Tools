@@ -3,7 +3,7 @@
 import argparse
 import difflib
 from types import SimpleNamespace
-from typing import Callable, List, Tuple
+from typing import Callable, List, Optional, Tuple
 
 import click
 
@@ -43,43 +43,150 @@ try:
 except Exception:  # pragma: no cover - optional dependency
     trogon_tui = None
 
+
+def _patch_trogon_command_tree_order() -> None:
+    """Make Trogon's command tree respect Click insertion order."""
+    if trogon_tui is None:
+        return
+    try:
+        from rich.text import Text
+        from trogon.widgets.command_tree import CommandTree
+    except Exception:
+        return
+
+    def _ordered_on_mount(self):
+        def build_tree(data, node):
+            for cmd_name, cmd_data in data.items():
+                if cmd_name == self.command_name:
+                    continue
+                if cmd_data.subcommands:
+                    label = Text(cmd_name)
+                    if cmd_data.is_group:
+                        group_style = self.get_component_rich_style("group")
+                        label.stylize(group_style)
+                        label.append(" ")
+                        label.append("group", "dim i")
+                    child = node.add(label, allow_expand=False, data=cmd_data)
+                    build_tree(cmd_data.subcommands, child)
+                else:
+                    node.add_leaf(cmd_name, data=cmd_data)
+            return node
+
+        build_tree(self.cli_metadata, self.root)
+        self.root.expand_all()
+        self.select_node(self.root)
+
+    CommandTree.on_mount = _ordered_on_mount
+
+
+_COMMAND_GROUPS: List[Tuple[str, str, List[Tuple[str, object]]]] = [
+    (
+        "setup_creation",
+        "Create and prepare mHM/mRM setup files.",
+        [
+            ("create-catchment", _create_catchment),
+            ("crop-mhm-setup", _crop_mhm_setup),
+            ("create-header", _create_header),
+            ("calculate-pet", _calculate_pet),
+            ("prepare-mhm-forcings", _prepare_mhm_forcings),
+        ],
+    ),
+    (
+        "data_processing",
+        "Convert, regrid, merge, and derive gridded data products.",
+        [
+            ("converter-nc-ascii", _file_converter),
+            ("latlon", _latlon),
+            ("merge-files", _merge),
+            ("regrid-file", _regrid),
+            ("long-term-mean", _long_term_mean),
+            ("difference", _difference),
+            ("relative-difference", _relative_difference),
+            ("ratio", _ratio),
+            ("bankfull", _bankfull),
+        ],
+    ),
+    (
+        "evaluation",
+        "Evaluate simulations against observations or reference data.",
+        [
+            ("discharge-evaluation", _discharge_evaluation),
+            ("hydrograph", _hydrograph),
+            ("gridded-data-evaluation", _gridded_data_evaluation),
+            ("run-overview", _mhm_run_overview),
+        ],
+    ),
+    (
+        "utilities",
+        "General helper commands.",
+        [
+            ("link-folder-tree", _link_folder_tree),
+        ],
+    ),
+    (
+        "visualization",
+        "Create diagnostic plots and run summaries.",
+        [
+            ("2d-map", _2d_map),
+            ("taylor-diagram", _taylor_diagram),
+        ],
+    ),
+    (
+        "mHMv5-to-mHMv6-setup-conversion",
+        "Convert mHM5 setup files to mHMv6 format.",
+        [
+            ("landcover-ascii-to-nc", _landcover_ascii_to_nc),
+        ],
+    ),
+    (
+        "legacy",
+        "Legacy top-level commands (aliases to grouped commands).",
+        [
+            ("create-id-gauges", _create_idgauges),
+            ("create-subdomain-masks", _create_subdomain_masks),
+            ("create-mhm-restart-file", _create_mhm_restart_file),
+        ],
+    ),
+]
 _COMMAND_MODULES: List[Tuple[str, object]] = [
-    ("bankfull", _bankfull),
-    ("hydrograph", _hydrograph),
-    ("gridded-data-evaluation", _gridded_data_evaluation),
-    ("discharge-evaluation", _discharge_evaluation),
-    ("latlon", _latlon),
-    ("converter-nc-ascii", _file_converter),
-    ("landcover-ascii-to-nc", _landcover_ascii_to_nc),
-    ("merge-files", _merge),
-    ("regrid-file", _regrid),
-    ("create-catchment", _create_catchment),
-    ("create-header", _create_header),
-    ("crop-mhm-setup", _crop_mhm_setup),
-    ("prepare-mhm-forcings", _prepare_mhm_forcings),
-    ("calculate-pet", _calculate_pet),
-    ("create-id-gauges", _create_idgauges),
-    ("create-subdomain-masks", _create_subdomain_masks),
-    ("create-mhm-restart-file", _create_mhm_restart_file),
-    ("long-term-mean", _long_term_mean),
-    ("difference", _difference),
-    ("relative-difference", _relative_difference),
-    ("ratio", _ratio),
-    ("taylor-diagram", _taylor_diagram),
-    ("2d-map", _2d_map),
-    ("link-folder-tree", _link_folder_tree),
-    ("run-overview", _mhm_run_overview),
+    command for _, _, commands in _COMMAND_GROUPS for command in commands
 ]
 _LOG_LEVEL_CHOICES = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 _GROUP_ORDER = ("required arguments", "optional arguments", "flags", "options")
+_ROOT_OPTION_ALIASES = {
+    "--log_level": "--log-level",
+    "--log_file": "--log-file",
+    "--log_file_level": "--log-file-level",
+    "--no_console_output": "--no-console-output",
+}
+
+
+def _translate_option_aliases(args, option_aliases):
+    """Translate hidden option aliases to their canonical option names."""
+    translated_args = []
+    for arg in args:
+        if not arg.startswith("--"):
+            translated_args.append(arg)
+            continue
+        option_name, separator, option_value = arg.partition("=")
+        canonical = option_aliases.get(option_name)
+        if canonical is None:
+            translated_args.append(arg)
+            continue
+        translated_args.append(
+            f"{canonical}{separator}{option_value}" if separator else canonical
+        )
+    return translated_args
 
 
 class AliasGroup(click.Group):
-    """Click group that supports hidden command aliases."""
+    """Click group that supports aliases and preserves command insertion order."""
 
     def __init__(self, *args, **kwargs):
+        self.command_section_name = kwargs.pop("command_section_name", "Commands")
         super().__init__(*args, **kwargs)
         self._aliases = {}
+        self._path_aliases = {}
 
     def add_alias(self, alias: str, target: str) -> None:
         """Register an alias that resolves to an existing command."""
@@ -90,6 +197,27 @@ class AliasGroup(click.Group):
             msg = f"Cannot alias unknown command '{target}'."
             raise click.ClickException(msg)
         self._aliases[alias] = target
+
+    def add_path_alias(self, alias: str, target_path: Tuple[str, ...]) -> None:
+        """Register an alias that expands to a nested command path."""
+        if alias in self.commands:
+            msg = f"Alias '{alias}' collides with an existing command."
+            raise click.ClickException(msg)
+        if not target_path:
+            msg = f"Cannot alias '{alias}' to an empty command path."
+            raise click.ClickException(msg)
+        if target_path[0] not in self.commands:
+            msg = f"Cannot alias '{alias}' to unknown command path '{target_path}'."
+            raise click.ClickException(msg)
+        self._path_aliases[alias] = target_path
+
+    def list_commands(self, _ctx):
+        """Return commands in their assigned insertion order."""
+        return [
+            name
+            for name, command in self.commands.items()
+            if not getattr(command, "hidden", False)
+        ]
 
     def get_command(self, ctx, cmd_name):
         command = super().get_command(ctx, cmd_name)
@@ -102,13 +230,19 @@ class AliasGroup(click.Group):
 
     def resolve_command(self, ctx, args):
         """Resolve command name and provide typo suggestions."""
+        if args and args[0] in self._path_aliases:
+            args = [*self._path_aliases[args[0]], *args[1:]]
         try:
             return super().resolve_command(ctx, args)
         except click.UsageError as exc:
             if not args:
                 raise
             unknown = args[0]
-            candidates = sorted(set(self.commands.keys()) | set(self._aliases.keys()))
+            candidates = sorted(
+                set(self.commands.keys())
+                | set(self._aliases.keys())
+                | set(self._path_aliases.keys())
+            )
             suggestions = difflib.get_close_matches(
                 unknown, candidates, n=3, cutoff=0.5
             )
@@ -117,6 +251,33 @@ class AliasGroup(click.Group):
             suggestion_list = ", ".join(suggestions)
             msg = f"No such command '{unknown}'. Did you mean: {suggestion_list}?"
             raise click.UsageError(msg, ctx=ctx) from exc
+
+    def parse_args(self, ctx, args):
+        """Translate hidden root option aliases before Click parses arguments."""
+        return super().parse_args(
+            ctx, _translate_option_aliases(args, _ROOT_OPTION_ALIASES)
+        )
+
+    def format_commands(self, ctx, formatter):
+        """Render command lists using the configured section heading."""
+        rows = []
+        for subcommand in self.list_commands(ctx):
+            command = self.get_command(ctx, subcommand)
+            if command is None or command.hidden:
+                continue
+            rows.append((subcommand, command))
+
+        if not rows:
+            return
+
+        limit = formatter.width - 6 - max(len(row[0]) for row in rows)
+        with formatter.section(self.command_section_name):
+            formatter.write_dl(
+                [
+                    (subcommand, command.get_short_help_str(limit))
+                    for subcommand, command in rows
+                ]
+            )
 
 
 class GroupedOption(click.Option):
@@ -129,6 +290,16 @@ class GroupedOption(click.Option):
 
 class GroupedCommand(click.Command):
     """Click command that renders options grouped by source parser groups."""
+
+    def __init__(self, *args, option_aliases=None, **kwargs):
+        self.option_aliases = option_aliases or {}
+        super().__init__(*args, **kwargs)
+
+    def parse_args(self, ctx, args):
+        """Translate legacy option aliases before Click parses arguments."""
+        return super().parse_args(
+            ctx, _translate_option_aliases(args, self.option_aliases)
+        )
 
     def format_options(self, ctx, formatter):
         grouped_records = {}
@@ -198,6 +369,38 @@ def _expand_long_option_aliases(option_strings):
     return tuple(expanded)
 
 
+def _canonical_option_strings(option_strings):
+    """Return visible option declarations while leaving aliases hidden."""
+    canonical = []
+    first_long_option = None
+    for option in option_strings:
+        if option.startswith("--"):
+            if first_long_option is None:
+                first_long_option = option
+            continue
+        canonical.append(option)
+    if first_long_option is not None:
+        canonical.append(first_long_option)
+    return tuple(canonical)
+
+
+def _option_aliases(option_strings):
+    """Map hidden option aliases to their visible canonical long option."""
+    canonical_options = _canonical_option_strings(option_strings)
+    canonical_long_options = [
+        option for option in canonical_options if option.startswith("--")
+    ]
+    if not canonical_long_options:
+        return {}
+    canonical_long_option = canonical_long_options[0]
+    aliases = {}
+    for option in _expand_long_option_aliases(option_strings):
+        if not option.startswith("--") or option in canonical_options:
+            continue
+        aliases[option] = canonical_long_option
+    return aliases
+
+
 def _normalize_default(action: argparse.Action):
     """Normalize parser defaults for Click option declarations."""
     default = action.default
@@ -252,7 +455,7 @@ def _convert_callback(action: argparse.Action) -> Callable:
 
 def _action_to_click_option(action: argparse.Action, option_group: str = "options"):
     """Convert one parser action to a Click option."""
-    option_strings = tuple(_expand_long_option_aliases(action.option_strings))
+    option_strings = tuple(_canonical_option_strings(action.option_strings))
     if not option_strings:
         return None
 
@@ -297,10 +500,10 @@ def _action_to_click_option(action: argparse.Action, option_group: str = "option
     )
 
 
-def _build_click_command(command_name: str, module):
+def _build_click_command(command_name: str, module, prog_path: Optional[str] = None):
     """Build one Click command from a parser-based command module."""
     parser = argparse.ArgumentParser(
-        prog=f"mhm-tools {command_name}",
+        prog=prog_path or f"mhm-tools {command_name}",
         add_help=False,
     )
     module.add_args(parser)
@@ -312,6 +515,7 @@ def _build_click_command(command_name: str, module):
             action_groups[id(group_action)] = group_title
 
     params = []
+    option_aliases = {}
     for action in parser._actions:
         if isinstance(action, argparse._HelpAction):
             continue
@@ -319,6 +523,7 @@ def _build_click_command(command_name: str, module):
         option = _action_to_click_option(action, option_group=option_group)
         if option is not None:
             params.append(option)
+            option_aliases.update(_option_aliases(action.option_strings))
 
     def _callback(**kwargs):
         args = SimpleNamespace(**kwargs)
@@ -329,18 +534,64 @@ def _build_click_command(command_name: str, module):
         callback=_callback,
         params=params,
         help=module.__doc__,
+        option_aliases=option_aliases,
         context_settings={"help_option_names": ["-h", "--help"]},
     )
+
+
+def _add_dash_underscore_alias(group: AliasGroup, command_name: str) -> None:
+    """Add dash/underscore command aliases when applicable."""
+    aliases = []
+    if "-" in command_name:
+        aliases.append(command_name.replace("-", "_"))
+    if "_" in command_name:
+        aliases.append(command_name.replace("_", "-"))
+    for alias in aliases:
+        if alias not in group.commands:
+            group.add_alias(alias, command_name)
+
+
+def _add_command_with_aliases(
+    group: AliasGroup,
+    command: click.Command,
+    command_name: str,
+) -> None:
+    """Register a command and its dash/underscore alias."""
+    group.add_command(command, name=command_name)
+    _add_dash_underscore_alias(group, command_name)
+
+
+def _add_path_aliases(
+    group: AliasGroup,
+    command_name: str,
+    target_path: Tuple[str, ...],
+) -> None:
+    """Register legacy top-level aliases that expand to a grouped command."""
+    aliases = [command_name]
+    if "-" in command_name:
+        aliases.append(command_name.replace("-", "_"))
+    if "_" in command_name:
+        aliases.append(command_name.replace("_", "-"))
+    for alias in aliases:
+        group.add_path_alias(alias, target_path)
+
+
+def _hide_tui_launcher(group: click.Group) -> None:
+    """Hide the TUI launcher from command-group listings."""
+    tui_command = group.commands.get("tui")
+    if tui_command is not None:
+        tui_command.hidden = True
 
 
 @click.group(
     cls=AliasGroup,
     context_settings={"help_option_names": ["-h", "--help"]},
+    subcommand_metavar="GROUP COMMAND [ARGS]...",
+    command_section_name="Command Groups",
 )
 @click.version_option(__version__, "-V", "--version", prog_name="mhm-tools")
 @click.option(
     "--log-level",
-    "--log_level",
     type=str,
     callback=_validate_log_level_option,
     default=None,
@@ -355,14 +606,12 @@ def _build_click_command(command_name: str, module):
 )
 @click.option(
     "--log-file",
-    "--log_file",
     type=str,
     default=None,
     help="Generate a log file.",
 )
 @click.option(
     "--log-file-level",
-    "--log_file_level",
     type=str,
     callback=_validate_log_level_option,
     default=None,
@@ -370,7 +619,6 @@ def _build_click_command(command_name: str, module):
 )
 @click.option(
     "--no-console-output",
-    "--no_console_output",
     is_flag=True,
     default=False,
     help="Prohibit console output.",
@@ -394,8 +642,31 @@ def cli(
     )
 
 
+_LEGACY_COMMAND_PATHS = []
+for _group_name, _group_help, _group_commands in _COMMAND_GROUPS:
+    _group = AliasGroup(
+        name=_group_name,
+        help=_group_help,
+        context_settings={"help_option_names": ["-h", "--help"]},
+    )
+    for _command_name, _module in _group_commands:
+        _cmd = _build_click_command(
+            _command_name,
+            _module,
+            prog_path=f"mhm-tools {_group_name} {_command_name}",
+        )
+        _add_command_with_aliases(_group, _cmd, _command_name)
+        _LEGACY_COMMAND_PATHS.append((_command_name, (_group_name, _command_name)))
+    _add_command_with_aliases(cli, _group, _group_name)
+
+for _command_name, _target_path in _LEGACY_COMMAND_PATHS:
+    _add_path_aliases(cli, _command_name, _target_path)
+
+
 if trogon_tui is not None:
+    _patch_trogon_command_tree_order()
     cli = trogon_tui()(cli)
+    _hide_tui_launcher(cli)
 else:
 
     @cli.command("tui", help="Open Textual TUI (requires 'trogon').")
@@ -403,12 +674,7 @@ else:
         msg = "trogon is not installed. Install with: pip install trogon"
         raise click.ClickException(msg)
 
-
-for _command_name, _module in _COMMAND_MODULES:
-    _cmd = _build_click_command(_command_name, _module)
-    cli.add_command(_cmd, name=_command_name)
-    if "-" in _command_name:
-        cli.add_alias(_command_name.replace("-", "_"), _command_name)
+    _hide_tui_launcher(cli)
 
 
 def main(argv=None):

@@ -16,13 +16,17 @@ def add_args(parser):
     flags = parser.add_argument_group("flags")
     optional.add_argument(
         "-i",
+        "--input-file",
         "--input",
+        dest="input",
         required=True,
         help="The path to input file. Can be ASCII, GeoTIFF, or NetCDF. The file type is determined by the file suffix.",
     )
     optional.add_argument(
         "-o",
+        "--output-file",
         "--output",
+        dest="output",
         required=True,
         help="The name of the output file. Can be ASCII or NetCDF. The file type is determined by the file suffix.",
     )

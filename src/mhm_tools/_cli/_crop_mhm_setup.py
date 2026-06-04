@@ -16,14 +16,18 @@ def add_args(parser):
     required_args = parser.add_argument_group("required arguments")
     required_args.add_argument(
         "-i",
+        "--input-dir",
         "--input-path",
+        dest="input_path",
         required=True,
         help="Path to the directory of the existing mHM setup. \
         Can also be used with a file path to crop a single file.",
     )
     required_args.add_argument(
         "-o",
+        "--output-dir",
         "--output-path",
+        dest="output_path",
         required=True,
         help="Path of the directory where the new domain setup should be saved.",
     )
@@ -31,7 +35,9 @@ def add_args(parser):
     flags = parser.add_argument_group("flags")
     optional.add_argument(
         "-f",
+        "--input-name",
         "--file-name",
+        dest="file_name",
         required=False,
         default="*.*",
         help="Input file name. E.g. '*.nc' to copy only nc files or 'pre*' to copy only precipitation files. If the file has a header in it's folder the header is reproduced regardless of wether nor not it fits the filename.",
