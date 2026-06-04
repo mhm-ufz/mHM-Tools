@@ -16,7 +16,9 @@ def add_args(parser):
     flags = parser.add_argument_group("flags")
     optional.add_argument(
         "-i",
+        "--input-dir",
         "--input-path",
+        dest="input_path",
         required=True,
         help="The path to input files.",
     )
