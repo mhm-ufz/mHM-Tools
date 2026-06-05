@@ -25,6 +25,7 @@ from mhm_tools.common.logger import ErrorLogger, log_arguments, log_errors
 from mhm_tools.common.spatial_metrics import create_results_csv
 from mhm_tools.common.utils import Resolution, cut_to_filled_area
 from mhm_tools.common.xarray_utils import (
+    crop_ds,
     get_clim_from_ds,
     get_coord_key,
     get_overlapping_time_slice,
@@ -127,6 +128,89 @@ def spearman_spatial_joblib(
         pval[i, j] = p
 
     return res, pval
+
+
+def crop_datasets_to_spatial_overlap(input_ds, ref_ds, input_name="input", ref_name="ref"):
+    """Crop input and reference datasets to their common spatial overlap."""
+
+    def _extent(ds):
+        lon_vals = np.asarray(ds["lon"].values)
+        lat_vals = np.asarray(ds["lat"].values)
+        return (
+            float(np.nanmin(lon_vals)),
+            float(np.nanmax(lon_vals)),
+            float(np.nanmin(lat_vals)),
+            float(np.nanmax(lat_vals)),
+        )
+
+    input_lon_min, input_lon_max, input_lat_min, input_lat_max = _extent(input_ds)
+    ref_lon_min, ref_lon_max, ref_lat_min, ref_lat_max = _extent(ref_ds)
+
+    overlap_lon_min = max(input_lon_min, ref_lon_min)
+    overlap_lon_max = min(input_lon_max, ref_lon_max)
+    overlap_lat_min = max(input_lat_min, ref_lat_min)
+    overlap_lat_max = min(input_lat_max, ref_lat_max)
+
+    if overlap_lon_min > overlap_lon_max or overlap_lat_min > overlap_lat_max:
+        msg = (
+            "Input and reference datasets do not share a common spatial overlap; "
+            "cannot compare them."
+        )
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+
+    cropped_input = crop_ds(
+        input_ds,
+        overlap_lon_min,
+        overlap_lon_max,
+        overlap_lat_min,
+        overlap_lat_max,
+    )
+    cropped_ref = crop_ds(
+        ref_ds,
+        overlap_lon_min,
+        overlap_lon_max,
+        overlap_lat_min,
+        overlap_lat_max,
+    )
+
+    input_cropped = (
+        cropped_input["lat"].size != input_ds["lat"].size
+        or cropped_input["lon"].size != input_ds["lon"].size
+    )
+    ref_cropped = (
+        cropped_ref["lat"].size != ref_ds["lat"].size
+        or cropped_ref["lon"].size != ref_ds["lon"].size
+    )
+
+    input_bounds_match_overlap = (
+        np.isclose(input_lon_min, overlap_lon_min)
+        and np.isclose(input_lon_max, overlap_lon_max)
+        and np.isclose(input_lat_min, overlap_lat_min)
+        and np.isclose(input_lat_max, overlap_lat_max)
+    )
+    ref_bounds_match_overlap = (
+        np.isclose(ref_lon_min, overlap_lon_min)
+        and np.isclose(ref_lon_max, overlap_lon_max)
+        and np.isclose(ref_lat_min, overlap_lat_min)
+        and np.isclose(ref_lat_max, overlap_lat_max)
+    )
+
+    if input_cropped or ref_cropped:
+        if input_bounds_match_overlap and not ref_bounds_match_overlap:
+            logger.info(
+                "Input spatial extent is a subset of reference; cropping reference to the common overlap."
+            )
+        elif ref_bounds_match_overlap and not input_bounds_match_overlap:
+            logger.warning(
+                "Reference spatial extent is a subset of input; cropping input to the common overlap."
+            )
+        else:
+            logger.warning(
+                "Cropping input and reference datasets to their common overlapping spatial extent."
+            )
+
+    return cropped_input, cropped_ref
 
 
 def get_std_from_ds(ds, input_var=None, clim=None, factor=1):
@@ -1565,6 +1649,8 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
         logger.error("Input dataset has empty coordinate.")
     if len(ref["lat"].data) < 1 or len(ref["lon"].data) < 1:
         logger.error("Ref dataset has empty coordinate.")
+
+    input, ref = crop_datasets_to_spatial_overlap(input, ref, input_name, ref_name)
     input, ref = regridd_to_higher_spatial_resolution(input, ref)
     output_name = f"{input_name}-{ref_name}.csv".replace(" ", "_")
     # compare and save statistics

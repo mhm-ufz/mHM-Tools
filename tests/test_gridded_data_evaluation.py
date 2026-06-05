@@ -3,6 +3,7 @@ import xarray as xr
 
 from mhm_tools.post.gridded_data_evaluation import (
     compare_input_with_ref,
+    crop_datasets_to_spatial_overlap,
     infer_time_resolution_hours_from_files,
     normalize_time_axis,
     regridd_to_higher_spatial_resolution,
@@ -91,6 +92,38 @@ def test_regridd_to_higher_spatial_resolution_uses_coarse_tolerance():
     assert np.isfinite(out2["v"].values).all()
     print(out2["v"].values)
     assert np.allclose(out2["v"].values, 2.0)
+
+
+def test_crop_datasets_to_spatial_overlap_preserves_overlap_and_regrids(caplog):
+    lat_input = np.array([0.2, 0.4, 0.6])
+    lon_input = np.array([0.2, 0.4, 0.6])
+    lat_ref = np.array([0.2, 0.6, 1.0])
+    lon_ref = np.array([0.2, 0.6, 1.0])
+
+    input_ds = xr.Dataset(
+        {"mean": (("lat", "lon"), np.ones((lat_input.size, lon_input.size)))},
+        coords={"lat": lat_input, "lon": lon_input},
+    )
+    ref_ds = xr.Dataset(
+        {"mean": (("lat", "lon"), np.full((lat_ref.size, lon_ref.size), 2.0))},
+        coords={"lat": lat_ref, "lon": lon_ref},
+    )
+
+    caplog.set_level("INFO")
+    cropped_input, cropped_ref = crop_datasets_to_spatial_overlap(
+        input_ds, ref_ds, input_name="input", ref_name="ref"
+    )
+
+    assert np.array_equal(cropped_input["lat"].values, lat_input)
+    assert np.array_equal(cropped_input["lon"].values, lon_input)
+    assert np.array_equal(cropped_ref["lat"].values, np.array([0.2, 0.6]))
+    assert np.array_equal(cropped_ref["lon"].values, np.array([0.2, 0.6]))
+    assert "Input spatial extent is a subset of reference" in caplog.text
+
+    out_input, out_ref = regridd_to_higher_spatial_resolution(cropped_input, cropped_ref)
+    assert out_input["mean"].shape == out_ref["mean"].shape
+    assert out_input["mean"].shape == cropped_input["mean"].shape
+    assert np.allclose(out_ref["mean"].values, 2.0)
 
 
 def test_compare_input_with_ref_keeps_rel_fields_as_dataarrays(monkeypatch, tmp_path):
