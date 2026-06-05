@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
+import logging
 import shlex
 import sys
 from datetime import datetime, timezone
 
 import xarray as xr
+logger = logging.getLogger(__name__)
 
-from mhm_tools._version import __version__
+try:
+    from mhm_tools._version import __version__
+except ModuleNotFoundError:  # pragma: no cover
+    __version__ = None
+    logger.warning(
+        "Could not obtain mhm_tools version from mhm_tools._version; version will be omitted",
+    )
 
 VERSION_ATTR = "mhm_tools_version"
 CREATED_ATTR = "date_created"
@@ -25,7 +33,8 @@ def apply_output_provenance(ds: xr.Dataset) -> xr.Dataset:
     """Add mhm-tools version, creation date, and command to NetCDF global attrs."""
     ds = ds.copy(deep=False)
     date = creation_date()
-    ds.attrs[VERSION_ATTR] = __version__
+    if __version__ is not None:
+        ds.attrs[VERSION_ATTR] = __version__
     ds.attrs[CREATED_ATTR] = date
     ds.attrs[HISTORY_ATTR] = _append_history(
         ds.attrs.get(HISTORY_ATTR, ds.attrs.get(LEGACY_HISTORY_ATTR)),
