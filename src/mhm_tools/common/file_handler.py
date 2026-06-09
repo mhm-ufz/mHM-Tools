@@ -29,10 +29,6 @@ from mhm_tools.common.xarray_utils import (
 
 logger = logging.getLogger(__name__)
 
-######
-# more on this in the cut_classical_mhm_setups branch There are classes for Morph and meteo data
-######
-
 CF_DEFAULT_CONVENTIONS = "CF-1.12"
 
 
@@ -177,7 +173,7 @@ def crop_file_by_mask(ds, mask_file):
 
 
 def chunk_dataset_space_only(
-    ds: xr.Dataset, available_mem_gib: float
+    ds: xr.Dataset, available_mem_gib: float, var_name: Optional[str] = None
 ) -> Dict[str, int]:
     """Chunk only in space (lat/lon), leaving time whole, sized to available memory.
 
@@ -190,9 +186,10 @@ def chunk_dataset_space_only(
         f"Chunking spatial dims to fit ≈{available_mem_gib} GiB (time unchunked)"
     )
     # --- pick one variable to get dtype size ---
-    var = get_single_data_var(ds)
+    if var_name is None:
+        var_name = get_single_data_var(ds)
 
-    dtype_sz = ds[var].dtype.itemsize  # bytes per element
+    dtype_sz = ds[var_name].dtype.itemsize  # bytes per element
 
     # --- find coordinate names ---
     lat_key = get_coord_key(ds, lat=True)
@@ -229,7 +226,9 @@ def chunk_dataset_space_only(
     return chunks
 
 
-def chunk_dataset_space_and_time(ds, available_mem_gib) -> Dict[str, int]:
+def chunk_dataset_space_and_time(
+    ds, available_mem_gib, var_name: Optional[str] = None
+) -> Dict[str, int]:
     """Chunk dataset adjusting chunk size to avaiable memory.
 
     Simple heuristic:
@@ -241,7 +240,8 @@ def chunk_dataset_space_and_time(ds, available_mem_gib) -> Dict[str, int]:
     )
     # ---------------- metadata only (cheap) --------------------------------
     if isinstance(ds, xr.Dataset):
-        var_name = next(iter(ds.data_vars))  # first data variable
+        if var_name is None:
+            var_name = next(iter(ds.data_vars))  # first data variable
         var = ds[var_name]  # an xarray.Variable wrapper
     else:
         var = ds
@@ -251,7 +251,7 @@ def chunk_dataset_space_and_time(ds, available_mem_gib) -> Dict[str, int]:
     lon_key = get_coord_key(ds, lon=True)
     time_key = get_coord_key(ds, time=True, raise_exception=False)
     if time_key is None:
-        return chunk_dataset_space_only(ds, available_mem_gib)
+        return chunk_dataset_space_only(ds, available_mem_gib, var_name)
 
     ny = ds.sizes[lat_key]
     nx = ds.sizes[lon_key]
@@ -291,12 +291,12 @@ class ChunkType(Enum):
 
 
 @log_arguments()
-def chunk_dataset(ds, chunk_type, available_mem_gib):
+def chunk_dataset(ds, chunk_type, available_mem_gib, var_name=None):
     """Chunk xarray.DataSet depending on chunk_type and available memory."""
     if chunk_type == ChunkType.TIME:
-        chunks = chunk_dataset_space_and_time(ds, available_mem_gib)
+        chunks = chunk_dataset_space_and_time(ds, available_mem_gib, var_name)
     if chunk_type == ChunkType.SPACE:
-        chunks = chunk_dataset_space_only(ds, available_mem_gib)
+        chunks = chunk_dataset_space_only(ds, available_mem_gib, var_name)
     try:
         return ds.chunk(chunks)
     except Exception as e:
@@ -306,6 +306,7 @@ def chunk_dataset(ds, chunk_type, available_mem_gib):
             raise e
 
 
+@log_arguments()
 def get_xarray_ds_from_file(  # noqa: PLR0912
     file_path,
     var_name=None,
@@ -401,7 +402,7 @@ def get_xarray_ds_from_file(  # noqa: PLR0912
         logger.error("Dataset has only one of lon at lat keys.")
 
     if chunking and available_mem_gib is not None:
-        ds_out = chunk_dataset(ds_out, chunk_type, available_mem_gib)
+        ds_out = chunk_dataset(ds_out, chunk_type, available_mem_gib, var_name)
     else:
         # if no chunking remove chunking encoding because this might cause errors while writing
         for name in list(ds_out.variables):
@@ -537,29 +538,6 @@ def write_xarray_to_file(  # noqa: PLR0912, PLR0915
                 for key in ("units", "calendar"):
                     if key in bnds_da.attrs:
                         bnds_da.attrs.pop(key, None)
-        # if False and available_mem_gib is not None:
-        #     # ds = chunk_dataset(ds, ChunkType.TIME, available_mem_gib//50)
-        #     dask.config.set(
-        #         {"array.slicing.split_large_chunks": True}
-        #     )  # also works as context manager
-        #     # 3) Limit threads for the local threaded scheduler
-        #     pool = ThreadPoolExecutor(max_workers=1)
-        #     with dask.config.set(scheduler="threads", pool=pool):
-        #         # ds.to_netcdf(file#_path, engine=engine, format='NETCDF4',
-        #         # encoding=encoding)
-        #         delayed = ds.to_netcdf(
-        #             file_path, engine="netcdf4", encoding=encoding, compute=False
-        #         )
-        #         delayed.compute(
-        #             scheduler="threads",
-        #             num_workers=1,
-        #             **(compute_kwargs or {}),
-        #         )
-        # else:
-        #     ds, encoding = move_reserved_attrs_to_encoding(ds, encoding=encoding)
-
-        # if var_name is not None:
-        # encoding = generate_safe_nc_encoding(ds[var_name])
         try:
 
             # Ensure variable attrs do not contain encoding-only keys that
@@ -1113,7 +1091,7 @@ def get_dataset_from_path(
             logger.error("Dataset has only one of lon at lat keys.")
 
         if chunking and available_mem_gib is not None:
-            ds_out = chunk_dataset(ds_out, chunk_type, available_mem_gib)
+            ds_out = chunk_dataset(ds_out, chunk_type, available_mem_gib, var_name)
         else:
             for name in list(ds_out.variables):
                 enc = ds_out.variables[name].encoding
