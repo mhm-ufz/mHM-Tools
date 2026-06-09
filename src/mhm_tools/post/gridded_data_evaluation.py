@@ -132,15 +132,25 @@ def spearman_spatial_joblib(
 
 def crop_datasets_to_spatial_overlap(input_ds, ref_ds):
     """Crop input and reference datasets to their common spatial overlap."""
-
     def _extent(ds):
-        lon_vals = np.asarray(ds["lon"].values)
-        lat_vals = np.asarray(ds["lat"].values)
+        lon_key = get_coord_key(ds, lon=True)
+        lat_key = get_coord_key(ds, lat=True)
+        lon_vals = np.asarray(ds[lon_key].values)
+        lat_vals = np.asarray(ds[lat_key].values)
+        res = (
+            ds.attrs.get("spatial_resolution")
+            if "spatial_resolution" in ds.attrs
+            else (
+                lon_vals[1] - lon_vals[0]
+                if lon_vals.size > 1
+                else lat_vals[1] - lat_vals[0] if lat_vals.size > 1 else 0
+            )
+        )
         return (
-            float(np.nanmin(lon_vals)),
-            float(np.nanmax(lon_vals)),
-            float(np.nanmin(lat_vals)),
-            float(np.nanmax(lat_vals)),
+            float(np.nanmin(lon_vals)) - float(res) / 2,
+            float(np.nanmax(lon_vals)) + float(res) / 2,
+            float(np.nanmin(lat_vals)) - float(res) / 2,
+            float(np.nanmax(lat_vals)) + float(res) / 2,
         )
 
     input_lon_min, input_lon_max, input_lat_min, input_lat_max = _extent(input_ds)
