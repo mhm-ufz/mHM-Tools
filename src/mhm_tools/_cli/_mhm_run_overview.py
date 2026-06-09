@@ -17,8 +17,6 @@ Rows are written with all input variables first, then output variables.
 import argparse
 from pathlib import Path
 
-from mhm_tools.post.mhm_run_overview import create_mhm_run_overview
-
 
 def add_args(parser: argparse.ArgumentParser):
     """Add CLI arguments for the mhm_run_overview subcommand."""
@@ -73,6 +71,8 @@ def add_args(parser: argparse.ArgumentParser):
 
 def run(args: argparse.Namespace):
     """Run run-overview statistics export."""
+    from mhm_tools.post.mhm_run_overview import create_mhm_run_overview
+
     create_mhm_run_overview(
         namelist_file=args.namelist.resolve(),
         base_path=args.base_path.resolve() if args.base_path is not None else None,

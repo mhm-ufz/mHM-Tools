@@ -2025,7 +2025,10 @@ def regridd_to_higher_spatial_resolution(ds1, ds2):
             method="nearest",
             tolerance=coarse_res,
         )
-    if regridded_ds["lat"].shape != fine_ds["lat"].shape or regridded_ds["lon"].shape != fine_ds["lon"].shape:
+    if (
+        regridded_ds["lat"].shape != fine_ds["lat"].shape
+        or regridded_ds["lon"].shape != fine_ds["lon"].shape
+    ):
         debug_msg = (
             f"Regridding resulted in unexpected coordinate shapes. "
             f"Coarse lat shape: {coarse_ds['lat'].shape}, Coarse lon shape: {coarse_ds['lon'].shape}, "
@@ -2050,6 +2053,7 @@ def regridd_to_higher_spatial_resolution(ds1, ds2):
     if coarse_ds is ds1:
         return aligned_coarse, aligned_fine
     return aligned_fine, aligned_coarse
+
 
 def get_years_from_path(path, raise_exception=True, file_name="*.*"):
     """Get available years from a dataset folder structure or file."""

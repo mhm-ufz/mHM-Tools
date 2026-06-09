@@ -13,7 +13,7 @@ from mhm_tools.common.utils import distance_100m_units, find_best_gauge_location
 from mhm_tools.common.xarray_utils import get_coord_key
 from mhm_tools.pre import catchment
 
-try: 
+try:
     from mhm_tools._version import __version__
 except ImportError:
     __version__ = "not_available"

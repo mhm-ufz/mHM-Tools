@@ -2,6 +2,7 @@
 
 import argparse
 import difflib
+import importlib
 from types import SimpleNamespace
 from typing import Callable, List, Optional, Tuple
 
@@ -10,33 +11,6 @@ import click
 from mhm_tools.common.logger import configure_mhm_tools_logger
 
 from .. import __version__
-from . import (
-    _2d_map,
-    _bankfull,
-    _calculate_pet,
-    _create_catchment,
-    _create_header,
-    _create_idgauges,
-    _create_mhm_restart_file,
-    _create_subdomain_masks,
-    _crop_mhm_setup,
-    _difference,
-    _discharge_evaluation,
-    _file_converter,
-    _gridded_data_evaluation,
-    _hydrograph,
-    _landcover_ascii_to_nc,
-    _latlon,
-    _link_folder_tree,
-    _long_term_mean,
-    _merge,
-    _mhm_run_overview,
-    _prepare_mhm_forcings,
-    _ratio,
-    _regrid,
-    _relative_difference,
-    _taylor_diagram,
-)
 
 try:
     from trogon import tui as trogon_tui
@@ -84,67 +58,67 @@ _COMMAND_GROUPS: List[Tuple[str, str, List[Tuple[str, object]]]] = [
         "setup_creation",
         "Create and prepare mHM/mRM setup files.",
         [
-            ("create-catchment", _create_catchment),
-            ("crop-mhm-setup", _crop_mhm_setup),
-            ("create-header", _create_header),
-            ("calculate-pet", _calculate_pet),
-            ("prepare-mhm-forcings", _prepare_mhm_forcings),
+            ("create-catchment", "mhm_tools._cli._create_catchment"),
+            ("crop-mhm-setup", "mhm_tools._cli._crop_mhm_setup"),
+            ("create-header", "mhm_tools._cli._create_header"),
+            ("calculate-pet", "mhm_tools._cli._calculate_pet"),
+            ("prepare-mhm-forcings", "mhm_tools._cli._prepare_mhm_forcings"),
         ],
     ),
     (
         "data_processing",
         "Convert, regrid, merge, and derive gridded data products.",
         [
-            ("converter-nc-ascii", _file_converter),
-            ("latlon", _latlon),
-            ("merge-files", _merge),
-            ("regrid-file", _regrid),
-            ("long-term-mean", _long_term_mean),
-            ("difference", _difference),
-            ("relative-difference", _relative_difference),
-            ("ratio", _ratio),
-            ("bankfull", _bankfull),
+            ("converter-nc-ascii", "mhm_tools._cli._file_converter"),
+            ("latlon", "mhm_tools._cli._latlon"),
+            ("merge-files", "mhm_tools._cli._merge"),
+            ("regrid-file", "mhm_tools._cli._regrid"),
+            ("long-term-mean", "mhm_tools._cli._long_term_mean"),
+            ("difference", "mhm_tools._cli._difference"),
+            ("relative-difference", "mhm_tools._cli._relative_difference"),
+            ("ratio", "mhm_tools._cli._ratio"),
+            ("bankfull", "mhm_tools._cli._bankfull"),
         ],
     ),
     (
         "evaluation",
         "Evaluate simulations against observations or reference data.",
         [
-            ("discharge-evaluation", _discharge_evaluation),
-            ("hydrograph", _hydrograph),
-            ("gridded-data-evaluation", _gridded_data_evaluation),
-            ("run-overview", _mhm_run_overview),
+            ("discharge-evaluation", "mhm_tools._cli._discharge_evaluation"),
+            ("hydrograph", "mhm_tools._cli._hydrograph"),
+            ("gridded-data-evaluation", "mhm_tools._cli._gridded_data_evaluation"),
+            ("run-overview", "mhm_tools._cli._mhm_run_overview"),
         ],
     ),
     (
         "utilities",
         "General helper commands.",
         [
-            ("link-folder-tree", _link_folder_tree),
+            ("link-folder-tree", "mhm_tools._cli._link_folder_tree"),
         ],
     ),
     (
         "visualization",
         "Create diagnostic plots and run summaries.",
         [
-            ("2d-map", _2d_map),
-            ("taylor-diagram", _taylor_diagram),
+            ("2d-map", "mhm_tools._cli._2d_map"),
+            ("taylor-diagram", "mhm_tools._cli._taylor_diagram"),
         ],
     ),
     (
         "mHMv5-to-mHMv6-setup-conversion",
         "Convert mHM5 setup files to mHMv6 format.",
         [
-            ("landcover-ascii-to-nc", _landcover_ascii_to_nc),
+            ("landcover-ascii-to-nc", "mhm_tools._cli._landcover_ascii_to_nc"),
         ],
     ),
     (
         "legacy",
         "Legacy top-level commands (aliases to grouped commands).",
         [
-            ("create-id-gauges", _create_idgauges),
-            ("create-subdomain-masks", _create_subdomain_masks),
-            ("create-mhm-restart-file", _create_mhm_restart_file),
+            ("create-id-gauges", "mhm_tools._cli._create_idgauges"),
+            ("create-subdomain-masks", "mhm_tools._cli._create_subdomain_masks"),
+            ("create-mhm-restart-file", "mhm_tools._cli._create_mhm_restart_file"),
         ],
     ),
 ]
@@ -650,9 +624,14 @@ for _group_name, _group_help, _group_commands in _COMMAND_GROUPS:
         context_settings={"help_option_names": ["-h", "--help"]},
     )
     for _command_name, _module in _group_commands:
+        # If the module is a string, import it lazily here.
+        if isinstance(_module, str):
+            _module_obj = importlib.import_module(_module)
+        else:
+            _module_obj = _module
         _cmd = _build_click_command(
             _command_name,
-            _module,
+            _module_obj,
             prog_path=f"mhm-tools {_group_name} {_command_name}",
         )
         _add_command_with_aliases(_group, _cmd, _command_name)

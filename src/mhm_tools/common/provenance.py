@@ -16,7 +16,7 @@ try:
 except ModuleNotFoundError:  # pragma: no cover
     __version__ = "not_available"
     logger.warning(
-        "Could not obtain mhm_tools version from mhm_tools._version; version will be omitted",
+        "Could not obtain mhm_tools version from mhm_tools._version",
     )
 
 VERSION_ATTR = "mhm_tools_version"
