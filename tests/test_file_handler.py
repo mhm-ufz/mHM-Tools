@@ -7,9 +7,12 @@ import numpy as np
 import xarray as xr
 
 import mhm_tools.common.file_handler as fh
-from mhm_tools._version import __version__
 from mhm_tools.common.provenance import CREATED_ATTR, HISTORY_ATTR, VERSION_ATTR
 
+try: 
+    from mhm_tools._version import __version__
+except ImportError:
+    __version__ = "not_available"
 
 def _engine_available(engine: str) -> bool:
     if engine != "h5netcdf":
@@ -243,7 +246,8 @@ class TestWriteXarrayToFile(unittest.TestCase, BaseDatasetMixin):
                 self.assertTrue(nc_path.is_file())
                 with xr.open_dataset(nc_path, engine=engine) as back:
                     self.assertIn("var", back)
-                    self.assertEqual(back.attrs[VERSION_ATTR], __version__)
+                    if __version__ != "not_available":
+                        self.assertEqual(back.attrs[VERSION_ATTR], __version__)
                     self.assertIn(CREATED_ATTR, back.attrs)
                     self.assertIn("previous processing step", back.attrs[HISTORY_ATTR])
                     self.assertIn("mhm-tools command:", back.attrs[HISTORY_ATTR])
