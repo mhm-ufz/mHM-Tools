@@ -2224,6 +2224,13 @@ def gridded_data_evaluation(
         )
         return
 
+    # when reading both datasets into memory, we need to ensure that we have enough memory for both
+    avaiable_mem = (
+        avaiable_mem / 2
+        if avaiable_mem is not None and ref_path is not None
+        else avaiable_mem
+    )
+
     bootstrap_requested = (
         n_bootstrap_years is not None
         and n_bootstrap_selections is not None
