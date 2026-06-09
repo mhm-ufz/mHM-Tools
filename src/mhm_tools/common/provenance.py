@@ -8,14 +8,15 @@ import sys
 from datetime import datetime, timezone
 
 import xarray as xr
+
 logger = logging.getLogger(__name__)
 
 try:
     from mhm_tools._version import __version__
 except ModuleNotFoundError:  # pragma: no cover
-    __version__ = None
+    __version__ = "not_available"
     logger.warning(
-        "Could not obtain mhm_tools version from mhm_tools._version; version will be omitted",
+        "Could not obtain mhm_tools version from mhm_tools._version",
     )
 
 VERSION_ATTR = "mhm_tools_version"
@@ -33,7 +34,7 @@ def apply_output_provenance(ds: xr.Dataset) -> xr.Dataset:
     """Add mhm-tools version, creation date, and command to NetCDF global attrs."""
     ds = ds.copy(deep=False)
     date = creation_date()
-    if __version__ is not None:
+    if __version__ != "not_available":
         ds.attrs[VERSION_ATTR] = __version__
     ds.attrs[CREATED_ATTR] = date
     ds.attrs[HISTORY_ATTR] = _append_history(

@@ -399,3 +399,22 @@ def generate_bounds(
     first = first_lower.assign_coords({dim: da[dim][0]})
     all_bounds = xr.concat([first, bounds], dim=dim)
     return all_bounds.transpose()
+
+
+def generate_bounds_for_all_coords(
+    ds: xr.Dataset, bounds_dim: str = "bnds"
+) -> xr.Dataset:
+    """Generate bounds for all 1D coordinate DataArrays in the dataset."""
+    ds_out = ds.copy(deep=False)
+    for coord in ds.coords:
+        da = ds[coord]
+        if da.ndim == 1 and da.sizes[da.dims[0]] >= 2:
+            try:
+                ds_out.coords[f"{coord}_bnds"] = generate_bounds(da, bounds_dim)
+                if "bounds" not in da.attrs:
+                    da.attrs["bounds"] = f"{coord}_bnds"
+            except Exception:
+                logger.debug(
+                    f"Could not generate bounds for coordinate '{coord}'", exc_info=True
+                )
+    return ds_out

@@ -22,12 +22,14 @@ from mhm_tools.common.file_handler import (
     write_xarray_to_file,
 )
 from mhm_tools.common.logger import ErrorLogger, log_arguments, log_errors
+from mhm_tools.common.netcdf import generate_bounds_for_all_coords
 from mhm_tools.common.spatial_metrics import create_results_csv
 from mhm_tools.common.utils import Resolution, cut_to_filled_area
 from mhm_tools.common.xarray_utils import (
     crop_ds,
     get_clim_from_ds,
     get_coord_key,
+    get_ds_extend,
     get_overlapping_time_slice,
     spearman_correlation,
     timedelta_to_alias,
@@ -130,21 +132,10 @@ def spearman_spatial_joblib(
     return res, pval
 
 
-def crop_datasets_to_spatial_overlap(input_ds, ref_ds, input_name="input", ref_name="ref"):
+def crop_datasets_to_spatial_overlap(input_ds, ref_ds):
     """Crop input and reference datasets to their common spatial overlap."""
-
-    def _extent(ds):
-        lon_vals = np.asarray(ds["lon"].values)
-        lat_vals = np.asarray(ds["lat"].values)
-        return (
-            float(np.nanmin(lon_vals)),
-            float(np.nanmax(lon_vals)),
-            float(np.nanmin(lat_vals)),
-            float(np.nanmax(lat_vals)),
-        )
-
-    input_lon_min, input_lon_max, input_lat_min, input_lat_max = _extent(input_ds)
-    ref_lon_min, ref_lon_max, ref_lat_min, ref_lat_max = _extent(ref_ds)
+    input_lon_min, input_lon_max, input_lat_min, input_lat_max = get_ds_extend(input_ds)
+    ref_lon_min, ref_lon_max, ref_lat_min, ref_lat_max = get_ds_extend(ref_ds)
 
     overlap_lon_min = max(input_lon_min, ref_lon_min)
     overlap_lon_max = min(input_lon_max, ref_lon_max)
@@ -285,6 +276,7 @@ def get_file_stats(
             "lon": get_coord_values(ds_croped, lon=True),
         },
     )
+    output = generate_bounds_for_all_coords(output)
     if direct_comp:
         ts = ds_croped[input_var] * factor
         ts.name = "time_series"
@@ -570,6 +562,7 @@ def get_stats_one_pass(
         {"clim": clim, "std": std, "mean": mean},
         coords={"month": np.arange(1, 13, 1), "lat": lat, "lon": lon},
     )
+    output = generate_bounds_for_all_coords(output)
     # Trigger computation if needed
     if output_path is not None:
         output_file = (
@@ -1531,8 +1524,17 @@ def get_stats(
                     available_mem_gib=available_mem,
                     chunk_type=ChunkType.SPACE,
                     force_decending_y=True,
+                    var_name=var,
                 )
-                return apply_spatial_mask(ds, mask_da)
+                stats_ds = get_file_stats(
+                    ds,
+                    var,
+                    factor,
+                    coordinate_slice,
+                    output_path=output_file,
+                    avaiable_years=available_years,
+                    direct_comp=direct_comp,
+                )
             if path.is_dir():
                 file_list = get_files(
                     path, available_years=available_years, file_name=file_name
@@ -1573,7 +1575,8 @@ def get_stats(
                 with ErrorLogger(logger):
                     msg = "Wrong statisitcs file. If you want to create new statistics you have to provide a var."
                     raise KeyError(msg)
-    return apply_spatial_mask(stats_ds, mask_da)
+    masked_ds = apply_spatial_mask(stats_ds, mask_da)
+    return generate_bounds_for_all_coords(masked_ds)
 
 
 def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
@@ -1650,7 +1653,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
     if len(ref["lat"].data) < 1 or len(ref["lon"].data) < 1:
         logger.error("Ref dataset has empty coordinate.")
 
-    input, ref = crop_datasets_to_spatial_overlap(input, ref, input_name, ref_name)
+    input, ref = crop_datasets_to_spatial_overlap(input, ref)
     input, ref = regridd_to_higher_spatial_resolution(input, ref)
     output_name = f"{input_name}-{ref_name}.csv".replace(" ", "_")
     # compare and save statistics
@@ -2000,17 +2003,6 @@ def regridd_to_higher_spatial_resolution(ds1, ds2):
         coarse_ds, fine_ds = ds1, ds2
     else:
         coarse_ds, fine_ds = ds2, ds1
-    # if (lat_res_1 * lon_res_1) == (lat_res_2 * lon_res_2):
-    #         return ds1, ds2
-    #     if (lat_res_1 * lon_res_1) > (lat_res_2 * lon_res_2):
-    #         coarse_ds, fine_ds = ds1, ds2
-    #     else:
-    #         coarse_ds, fine_ds = ds2, ds1
-
-    # Perform nearest-neighbor regridding
-    # regridded_ds = coarse_ds.interp(
-    #     lat=fine_ds["lat"], lon=fine_ds["lon"], method="nearest"
-    # )
     coarse_res = _coord_spacing(coarse_ds.get("lat")) or _coord_spacing(
         coarse_ds.get("lon")
     )
@@ -2025,14 +2017,34 @@ def regridd_to_higher_spatial_resolution(ds1, ds2):
             method="nearest",
             tolerance=coarse_res,
         )
-
-    # Return regridded dataset and finer dataset
-    # logger.info(
-    #     f'Regridded the two datasets to the resolution lat: {coarse_ds["lat"].data[1]-coarse_ds["lat"].data[0]}, lon: {coarse_ds["lon"].data[1]-coarse_ds["lon"].data[0]}'
-    # )
+    if (
+        regridded_ds["lat"].shape != fine_ds["lat"].shape
+        or regridded_ds["lon"].shape != fine_ds["lon"].shape
+    ):
+        debug_msg = (
+            f"Regridding resulted in unexpected coordinate shapes. "
+            f"Coarse lat shape: {coarse_ds['lat'].shape}, Coarse lon shape: {coarse_ds['lon'].shape}, "
+            f"Fine lat shape: {fine_ds['lat'].shape}, Fine lon shape: {fine_ds['lon'].shape}, "
+            f"Regridded lat shape: {regridded_ds['lat'].shape}, Regridded lon shape: {regridded_ds['lon'].shape}."
+            f"With bounds coarse lat: ({coarse_ds['lat'].min().item()}, {coarse_ds['lat'].max().item()}), "
+            f"With bounds fine lat: ({fine_ds['lat'].min().item()}, {fine_ds['lat'].max().item()}), "
+            f"With bounds regridded lat: ({regridded_ds['lat'].min().item()}, {regridded_ds['lat'].max().item()})"
+        )
+        logger.debug(debug_msg)
+        try:
+            aligned_coarse, aligned_fine = xr.align(regridded_ds, fine_ds, join="inner")
+        except Exception as e:
+            # If align fails for any reason, fall back to returning the best-effort regridded dataset
+            with ErrorLogger(logger):
+                logger.error(
+                    f"Alignment of regridded dataset with fine dataset failed. Returning best-effort regridded dataset. Debug info: {debug_msg}"
+                )
+                raise e
+    else:
+        aligned_coarse, aligned_fine = regridded_ds, fine_ds
     if coarse_ds is ds1:
-        return regridded_ds, ds2
-    return ds1, regridded_ds
+        return aligned_coarse, aligned_fine
+    return aligned_fine, aligned_coarse
 
 
 def get_years_from_path(path, raise_exception=True, file_name="*.*"):
@@ -2205,6 +2217,13 @@ def gridded_data_evaluation(
             global_climate=global_climate,
         )
         return
+
+    # when reading both datasets into memory, we need to ensure that we have enough memory for both
+    avaiable_mem = (
+        avaiable_mem / 2
+        if avaiable_mem is not None and ref_path is not None
+        else avaiable_mem
+    )
 
     bootstrap_requested = (
         n_bootstrap_years is not None

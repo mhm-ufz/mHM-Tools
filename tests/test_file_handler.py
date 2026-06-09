@@ -7,8 +7,12 @@ import numpy as np
 import xarray as xr
 
 import mhm_tools.common.file_handler as fh
-from mhm_tools._version import __version__
 from mhm_tools.common.provenance import CREATED_ATTR, HISTORY_ATTR, VERSION_ATTR
+
+try:
+    from mhm_tools._version import __version__
+except ImportError:
+    __version__ = "not_available"
 
 
 def _engine_available(engine: str) -> bool:
@@ -109,11 +113,11 @@ class TestChunkHelpers(unittest.TestCase, BaseDatasetMixin):
         ds = self.make_ds_with_time()
         flags = {"space": False, "space_time": False}
 
-        def _space_only(_ds, _mem):
+        def _space_only(_ds, _mem, *args):
             flags["space"] = True
             return {"lat": 2, "lon": 2, "time": -1}
 
-        def _space_time(_ds, _mem):
+        def _space_time(_ds, _mem, *args):
             flags["space_time"] = True
             return {"lat": 1, "lon": 2, "time": 1}
 
@@ -243,7 +247,8 @@ class TestWriteXarrayToFile(unittest.TestCase, BaseDatasetMixin):
                 self.assertTrue(nc_path.is_file())
                 with xr.open_dataset(nc_path, engine=engine) as back:
                     self.assertIn("var", back)
-                    self.assertEqual(back.attrs[VERSION_ATTR], __version__)
+                    if __version__ != "not_available":
+                        self.assertEqual(back.attrs[VERSION_ATTR], __version__)
                     self.assertIn(CREATED_ATTR, back.attrs)
                     self.assertIn("previous processing step", back.attrs[HISTORY_ATTR])
                     self.assertIn("mhm-tools command:", back.attrs[HISTORY_ATTR])
@@ -332,7 +337,7 @@ class TestGetXarrayDsFromFile(unittest.TestCase, BaseDatasetMixin):
                 ), patch.object(
                     fh,
                     "chunk_dataset",
-                    side_effect=lambda ds, ctype, mem: ds.chunk(
+                    side_effect=lambda ds, ctype, mem, *args: ds.chunk(
                         {"time": -1, "lat": 2, "lon": 2}
                     ),
                 ):
@@ -368,7 +373,7 @@ class TestGetXarrayDsFromFile(unittest.TestCase, BaseDatasetMixin):
                 ), patch.object(
                     fh,
                     "chunk_dataset",
-                    side_effect=lambda ds, ctype, mem: ds.chunk(
+                    side_effect=lambda ds, ctype, mem, *args: ds.chunk(
                         {"time": -1, "lat": 2, "lon": 2}
                     ),
                 ):

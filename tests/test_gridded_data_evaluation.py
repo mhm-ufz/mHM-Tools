@@ -1,6 +1,8 @@
 import numpy as np
+import pytest
 import xarray as xr
 
+from mhm_tools.common.logger import configure_mhm_tools_logger
 from mhm_tools.post.gridded_data_evaluation import (
     compare_input_with_ref,
     crop_datasets_to_spatial_overlap,
@@ -8,6 +10,20 @@ from mhm_tools.post.gridded_data_evaluation import (
     normalize_time_axis,
     regridd_to_higher_spatial_resolution,
 )
+
+# TODO: add a setup fixture to configure the logger to ERROR level to avoid cluttering test output with INFO logs also set propagate to True
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _configure_test_logging():
+    """Configure mhm_tools logging for the test session.
+
+    Sets the package logger to ERROR and enables propagation so pytest's
+    caplog captures log records without cluttering test output.
+    """
+    # Only enable propagation so pytest's caplog can capture package logs.
+    configure_mhm_tools_logger(propagate=True)
+    yield
 
 
 def _write_timeseries_nc(path, times):
@@ -110,9 +126,7 @@ def test_crop_datasets_to_spatial_overlap_preserves_overlap_and_regrids(caplog):
     )
 
     caplog.set_level("INFO")
-    cropped_input, cropped_ref = crop_datasets_to_spatial_overlap(
-        input_ds, ref_ds, input_name="input", ref_name="ref"
-    )
+    cropped_input, cropped_ref = crop_datasets_to_spatial_overlap(input_ds, ref_ds)
 
     assert np.array_equal(cropped_input["lat"].values, lat_input)
     assert np.array_equal(cropped_input["lon"].values, lon_input)
@@ -120,7 +134,9 @@ def test_crop_datasets_to_spatial_overlap_preserves_overlap_and_regrids(caplog):
     assert np.array_equal(cropped_ref["lon"].values, np.array([0.2, 0.6]))
     assert "Input spatial extent is a subset of reference" in caplog.text
 
-    out_input, out_ref = regridd_to_higher_spatial_resolution(cropped_input, cropped_ref)
+    out_input, out_ref = regridd_to_higher_spatial_resolution(
+        cropped_input, cropped_ref
+    )
     assert out_input["mean"].shape == out_ref["mean"].shape
     assert out_input["mean"].shape == cropped_input["mean"].shape
     assert np.allclose(out_ref["mean"].values, 2.0)
