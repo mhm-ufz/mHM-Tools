@@ -1532,7 +1532,15 @@ def get_stats(
                     chunk_type=ChunkType.SPACE,
                     force_decending_y=True,
                 )
-                return apply_spatial_mask(ds, mask_da)
+                stats_ds = get_file_stats(
+                    ds,
+                    var,
+                    factor,
+                    coordinate_slice,
+                    output_path=output_file,
+                    avaiable_years=available_years,
+                    direct_comp=direct_comp,
+                )
             if path.is_dir():
                 file_list = get_files(
                     path, available_years=available_years, file_name=file_name
@@ -2000,17 +2008,6 @@ def regridd_to_higher_spatial_resolution(ds1, ds2):
         coarse_ds, fine_ds = ds1, ds2
     else:
         coarse_ds, fine_ds = ds2, ds1
-    # if (lat_res_1 * lon_res_1) == (lat_res_2 * lon_res_2):
-    #         return ds1, ds2
-    #     if (lat_res_1 * lon_res_1) > (lat_res_2 * lon_res_2):
-    #         coarse_ds, fine_ds = ds1, ds2
-    #     else:
-    #         coarse_ds, fine_ds = ds2, ds1
-
-    # Perform nearest-neighbor regridding
-    # regridded_ds = coarse_ds.interp(
-    #     lat=fine_ds["lat"], lon=fine_ds["lon"], method="nearest"
-    # )
     coarse_res = _coord_spacing(coarse_ds.get("lat")) or _coord_spacing(
         coarse_ds.get("lon")
     )
