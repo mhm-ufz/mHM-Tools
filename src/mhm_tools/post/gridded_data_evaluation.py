@@ -22,12 +22,14 @@ from mhm_tools.common.file_handler import (
     write_xarray_to_file,
 )
 from mhm_tools.common.logger import ErrorLogger, log_arguments, log_errors
+from mhm_tools.common.netcdf import generate_bounds_for_all_coords
 from mhm_tools.common.spatial_metrics import create_results_csv
 from mhm_tools.common.utils import Resolution, cut_to_filled_area
 from mhm_tools.common.xarray_utils import (
     crop_ds,
     get_clim_from_ds,
     get_coord_key,
+    get_ds_extend,
     get_overlapping_time_slice,
     spearman_correlation,
     timedelta_to_alias,
@@ -132,29 +134,8 @@ def spearman_spatial_joblib(
 
 def crop_datasets_to_spatial_overlap(input_ds, ref_ds):
     """Crop input and reference datasets to their common spatial overlap."""
-    def _extent(ds):
-        lon_key = get_coord_key(ds, lon=True)
-        lat_key = get_coord_key(ds, lat=True)
-        lon_vals = np.asarray(ds[lon_key].values)
-        lat_vals = np.asarray(ds[lat_key].values)
-        res = (
-            ds.attrs.get("spatial_resolution")
-            if "spatial_resolution" in ds.attrs
-            else (
-                lon_vals[1] - lon_vals[0]
-                if lon_vals.size > 1
-                else lat_vals[1] - lat_vals[0] if lat_vals.size > 1 else 0
-            )
-        )
-        return (
-            float(np.nanmin(lon_vals)) - float(res) / 2,
-            float(np.nanmax(lon_vals)) + float(res) / 2,
-            float(np.nanmin(lat_vals)) - float(res) / 2,
-            float(np.nanmax(lat_vals)) + float(res) / 2,
-        )
-
-    input_lon_min, input_lon_max, input_lat_min, input_lat_max = _extent(input_ds)
-    ref_lon_min, ref_lon_max, ref_lat_min, ref_lat_max = _extent(ref_ds)
+    input_lon_min, input_lon_max, input_lat_min, input_lat_max = get_ds_extend(input_ds)
+    ref_lon_min, ref_lon_max, ref_lat_min, ref_lat_max = get_ds_extend(ref_ds)
 
     overlap_lon_min = max(input_lon_min, ref_lon_min)
     overlap_lon_max = min(input_lon_max, ref_lon_max)
@@ -295,6 +276,7 @@ def get_file_stats(
             "lon": get_coord_values(ds_croped, lon=True),
         },
     )
+    output = generate_bounds_for_all_coords(output)
     if direct_comp:
         ts = ds_croped[input_var] * factor
         ts.name = "time_series"
@@ -580,6 +562,7 @@ def get_stats_one_pass(
         {"clim": clim, "std": std, "mean": mean},
         coords={"month": np.arange(1, 13, 1), "lat": lat, "lon": lon},
     )
+    output = generate_bounds_for_all_coords(output)
     # Trigger computation if needed
     if output_path is not None:
         output_file = (
@@ -1592,7 +1575,8 @@ def get_stats(
                 with ErrorLogger(logger):
                     msg = "Wrong statisitcs file. If you want to create new statistics you have to provide a var."
                     raise KeyError(msg)
-    return apply_spatial_mask(stats_ds, mask_da)
+    masked_ds = apply_spatial_mask(stats_ds, mask_da)
+    return generate_bounds_for_all_coords(masked_ds)
 
 
 def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915

@@ -15,6 +15,7 @@ from mhm_tools.common.esri_grid import standardize_header, write_grid, write_hea
 from mhm_tools.common.logger import ErrorLogger, log_arguments, log_errors
 from mhm_tools.common.netcdf import (
     generate_bounds,
+    generate_bounds_for_all_coords,
     read_dataset,
     sanitize_nc_encoding,
     set_netcdf_encoding,
@@ -320,6 +321,7 @@ def get_xarray_ds_from_file(  # noqa: PLR0912
     force_ascending_y=False,
     landcover=False,
     landcover_year_start=None,
+    create_bounds=False,
 ):
     """Read file and return xarray dataset."""
     file_path = Path(file_path)
@@ -395,7 +397,8 @@ def get_xarray_ds_from_file(  # noqa: PLR0912
     if normalize_latlon_coords:
         # re-name input coords to lat and lon
         ds_out = normalize_lat_lon(ds_out, lat_key, lon_key, raise_exceptions=False)
-
+    if create_bounds:
+        ds_out = generate_bounds_for_all_coords(ds_out)
     if lon_key is None and lat_key is None:
         logger.warning("Dataset does not have lon and lat key.")
     elif lon_key is None or lat_key is None:
