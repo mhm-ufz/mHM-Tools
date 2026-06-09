@@ -1531,6 +1531,7 @@ def get_stats(
                     available_mem_gib=available_mem,
                     chunk_type=ChunkType.SPACE,
                     force_decending_y=True,
+                    var_name=var,
                 )
                 stats_ds = get_file_stats(
                     ds,
