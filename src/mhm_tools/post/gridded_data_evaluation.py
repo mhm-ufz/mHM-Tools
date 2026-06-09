@@ -130,7 +130,7 @@ def spearman_spatial_joblib(
     return res, pval
 
 
-def crop_datasets_to_spatial_overlap(input_ds, ref_ds, input_name="input", ref_name="ref"):
+def crop_datasets_to_spatial_overlap(input_ds, ref_ds):
     """Crop input and reference datasets to their common spatial overlap."""
 
     def _extent(ds):
@@ -1650,7 +1650,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
     if len(ref["lat"].data) < 1 or len(ref["lon"].data) < 1:
         logger.error("Ref dataset has empty coordinate.")
 
-    input, ref = crop_datasets_to_spatial_overlap(input, ref, input_name, ref_name)
+    input, ref = crop_datasets_to_spatial_overlap(input, ref)
     input, ref = regridd_to_higher_spatial_resolution(input, ref)
     output_name = f"{input_name}-{ref_name}.csv".replace(" ", "_")
     # compare and save statistics
@@ -2025,15 +2025,31 @@ def regridd_to_higher_spatial_resolution(ds1, ds2):
             method="nearest",
             tolerance=coarse_res,
         )
-
-    # Return regridded dataset and finer dataset
-    # logger.info(
-    #     f'Regridded the two datasets to the resolution lat: {coarse_ds["lat"].data[1]-coarse_ds["lat"].data[0]}, lon: {coarse_ds["lon"].data[1]-coarse_ds["lon"].data[0]}'
-    # )
+    if regridded_ds["lat"].shape != fine_ds["lat"].shape or regridded_ds["lon"].shape != fine_ds["lon"].shape:
+        debug_msg = (
+            f"Regridding resulted in unexpected coordinate shapes. "
+            f"Coarse lat shape: {coarse_ds['lat'].shape}, Coarse lon shape: {coarse_ds['lon'].shape}, "
+            f"Fine lat shape: {fine_ds['lat'].shape}, Fine lon shape: {fine_ds['lon'].shape}, "
+            f"Regridded lat shape: {regridded_ds['lat'].shape}, Regridded lon shape: {regridded_ds['lon'].shape}."
+            f"With bounds coarse lat: ({coarse_ds['lat'].min().item()}, {coarse_ds['lat'].max().item()}), "
+            f"With bounds fine lat: ({fine_ds['lat'].min().item()}, {fine_ds['lat'].max().item()}), "
+            f"With bounds regridded lat: ({regridded_ds['lat'].min().item()}, {regridded_ds['lat'].max().item()})"
+        )
+        logger.debug(debug_msg)
+        try:
+            aligned_coarse, aligned_fine = xr.align(regridded_ds, fine_ds, join="inner")
+        except Exception as e:
+            # If align fails for any reason, fall back to returning the best-effort regridded dataset
+            with ErrorLogger(logger):
+                logger.error(
+                    f"Alignment of regridded dataset with fine dataset failed. Returning best-effort regridded dataset. Debug info: {debug_msg}"
+                )
+                raise e
+    else:
+        aligned_coarse, aligned_fine = regridded_ds, fine_ds
     if coarse_ds is ds1:
-        return regridded_ds, ds2
-    return ds1, regridded_ds
-
+        return aligned_coarse, aligned_fine
+    return aligned_fine, aligned_coarse
 
 def get_years_from_path(path, raise_exception=True, file_name="*.*"):
     """Get available years from a dataset folder structure or file."""
