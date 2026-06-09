@@ -7,17 +7,14 @@ import numpy as np
 import xarray as xr
 
 import mhm_tools.common.utils
+from mhm_tools import __version__
 from mhm_tools.common.file_handler import get_xarray_ds_from_file
 from mhm_tools.common.provenance import CREATED_ATTR, HISTORY_ATTR, VERSION_ATTR
 from mhm_tools.common.utils import distance_100m_units, find_best_gauge_location_by_area
 from mhm_tools.common.xarray_utils import get_coord_key
 from mhm_tools.pre import catchment
 
-try:
-    from mhm_tools._version import __version__
-except ImportError:
-    __version__ = "not_available"
-
+#
 HERE = Path(__file__).parent
 
 

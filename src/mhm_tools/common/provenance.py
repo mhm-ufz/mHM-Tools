@@ -9,15 +9,10 @@ from datetime import datetime, timezone
 
 import xarray as xr
 
+from mhm_tools import __version__
+
 logger = logging.getLogger(__name__)
 
-try:
-    from mhm_tools._version import __version__
-except ModuleNotFoundError:  # pragma: no cover
-    __version__ = "not_available"
-    logger.warning(
-        "Could not obtain mhm_tools version from mhm_tools._version",
-    )
 
 VERSION_ATTR = "mhm_tools_version"
 CREATED_ATTR = "date_created"

@@ -7,12 +7,8 @@ import numpy as np
 import xarray as xr
 
 import mhm_tools.common.file_handler as fh
+from mhm_tools import __version__
 from mhm_tools.common.provenance import CREATED_ATTR, HISTORY_ATTR, VERSION_ATTR
-
-try:
-    from mhm_tools._version import __version__
-except ImportError:
-    __version__ = "not_available"
 
 
 def _engine_available(engine: str) -> bool:
