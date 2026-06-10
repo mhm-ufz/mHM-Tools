@@ -10,6 +10,7 @@ from scipy.stats import spearmanr
 
 from mhm_tools.common.constants import LAT_KEYS, LON_KEYS, TIME_KEYS
 from mhm_tools.common.logger import ErrorLogger
+from mhm_tools.common.netcdf import generate_bounds_for_all_coords
 
 logger = logging.getLogger(__name__)
 
@@ -399,3 +400,45 @@ def get_dtype(ds):
             raise ValueError(msg)
     except Exception:
         return "f4"
+
+
+def get_ds_extend(ds, var=None, recursive_search=True):
+    """Get the spatial extent of a dataset as (lon_min, lon_max, lat_min, lat_max) from its bounds."""
+    from mhm_tools.common.resolution_handler import get_file_res
+
+    if var is not None:
+        # get the coordinate keys from the variable if possible, otherwise from the dataset
+        lon_key = get_coord_key(ds[var], lon=True)
+        lat_key = get_coord_key(ds[var], lat=True)
+    else:
+        lon_key = get_coord_key(ds, lon=True)
+        lat_key = get_coord_key(ds, lat=True)
+    lon = ds[lon_key]
+    lat = ds[lat_key]
+    lon_bnds_key = lon.attrs.get("bounds", None)
+    lat_bnds_key = lat.attrs.get("bounds", None)
+    if lon_bnds_key is not None and lat_bnds_key is not None:
+        lon_min = float(ds[lon_bnds_key].values.min())
+        lon_max = float(ds[lon_bnds_key].values.max())
+        lat_min = float(ds[lat_bnds_key].values.min())
+        lat_max = float(ds[lat_bnds_key].values.max())
+        return lon_min, lon_max, lat_min, lat_max
+    if recursive_search:
+        ds = generate_bounds_for_all_coords(ds)
+        return get_ds_extend(ds, var=var, recursive_search=False)
+    logger.warning(
+        "Could not find coordinate bounds for dataset; estimating spatial extent from coordinate values."
+    )
+    lon_vals = np.asarray(ds[lon_key].values)
+    lat_vals = np.asarray(ds[lat_key].values)
+    res = (
+        ds.attrs.get("spatial_resolution")
+        if "spatial_resolution" in ds.attrs
+        else (get_file_res(ds[lon_key], ds[lat_key], None))
+    )
+    return (
+        float(np.nanmin(lon_vals)) - float(res) / 2,
+        float(np.nanmax(lon_vals)) + float(res) / 2,
+        float(np.nanmin(lat_vals)) - float(res) / 2,
+        float(np.nanmax(lat_vals)) + float(res) / 2,
+    )

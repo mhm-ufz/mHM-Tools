@@ -11,9 +11,11 @@ This module provides helpers for common command-line tasks such as:
 import argparse
 import logging
 
+import numpy as np
+
 from mhm_tools.common.file_handler import get_xarray_ds_from_file
 from mhm_tools.common.logger import ErrorLogger
-from mhm_tools.common.xarray_utils import get_coord_key
+from mhm_tools.common.xarray_utils import get_coord_key, get_ds_extend
 
 logger = logging.getLogger(__name__)
 
@@ -69,52 +71,15 @@ def get_coords_from_mask(mask, mask_key=None):
                 for key in ["mask", "land_mask", "mask_l2"]
                 if key in mask_ds.data_vars
             )
-        mask_da = mask_ds[mask_key]
-        lon_key = get_coord_key(mask_da, lon=True)
-        lat_key = get_coord_key(mask_da, lat=True)
-        lon = mask_da[lon_key]
-        lat = mask_da[lat_key]
-        lon_min_target_grid = lon.min()
-        lon_max_target_grid = lon.max()
-        lat_min_target_grid = lat.min()
-        lat_max_target_grid = lat.max()
+        mask_da = mask_ds[mask_key].load()
+        (
+            lon_min_target_grid,
+            lon_max_target_grid,
+            lat_min_target_grid,
+            lat_max_target_grid,
+        ) = get_ds_extend(mask_ds, mask_key)
 
-        # if bounds are avaiable use them:
-        # try to get it from coordinate bounds
-        if "bounds" in lon.attrs and "bounds" in lat.attrs:
-            lon_bounds_key = lon.attrs["bounds"]
-            lon_bounds = mask_ds[lon_bounds_key]
-            lat_bounds_key = lat.attrs["bounds"]
-            lat_bounds = mask_ds[lat_bounds_key]
-            resolution = float(lon_bounds.values[0][1] - lon_bounds.values[0][0]) / 2
-            lon_min_target_grid = lon_bounds.values[0][0]
-            lon_max_target_grid = lon_bounds.values[-1][1]
-            lat_min_target_grid = lat_bounds.values[0][0]
-            lat_max_target_grid = lat_bounds.values[-1][1]
-        else:
-            # change values from center cell to corner values
-            try:
-                resolution = float(lon.values[1] - lon.values[0])
-                lon_min_target_grid -= resolution / 2
-                lon_max_target_grid += resolution / 2
-                lat_min_target_grid -= resolution / 2
-                lat_max_target_grid += resolution / 2
-            except Exception as e:
-                if mask_key == "mask_l2":
-                    # switch to different mask key for min max calculation
-                    mask_key = "mask"
-                    mask_da_fine = mask_ds[mask_key]
-                    lon_key_fine = get_coord_key(mask_da_fine, lon=True)
-                    lat_key_fine = get_coord_key(mask_da_fine, lat=True)
-                    lon_fine = mask_da_fine[lon_key_fine]
-                    lat_fine = mask_da_fine[lat_key_fine]
-                    resolution = float(lon_fine.values[1] - lon_fine.values[0])
-                    lon_min_target_grid = lon_fine.min() - resolution / 2
-                    lon_max_target_grid = lon_fine.max() + resolution / 2
-                    lat_min_target_grid = lat_fine.min() - resolution / 2
-                    lat_max_target_grid = lat_fine.max() + resolution / 2
-                else:
-                    raise e
+        resolution = np.median(np.diff(mask_ds[get_coord_key(mask_ds, lon=True)]))
 
         logger.debug(
             f"Read coord from mask file: lat ({lat_min_target_grid} to {lat_max_target_grid}) {(lon_max_target_grid-lat_min_target_grid)/resolution} cells and lon ({lon_min_target_grid} to {lon_max_target_grid}) {(lon_max_target_grid-lat_min_target_grid)/resolution} cells"

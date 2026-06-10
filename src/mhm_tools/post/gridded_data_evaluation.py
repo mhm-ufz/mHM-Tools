@@ -22,11 +22,15 @@ from mhm_tools.common.file_handler import (
     write_xarray_to_file,
 )
 from mhm_tools.common.logger import ErrorLogger, log_arguments, log_errors
+from mhm_tools.common.netcdf import generate_bounds_for_all_coords
+from mhm_tools.common.resolution_handler import Resolution
 from mhm_tools.common.spatial_metrics import create_results_csv
-from mhm_tools.common.utils import Resolution, cut_to_filled_area
+from mhm_tools.common.utils import cut_to_filled_area
 from mhm_tools.common.xarray_utils import (
+    crop_ds,
     get_clim_from_ds,
     get_coord_key,
+    get_ds_extend,
     get_overlapping_time_slice,
     spearman_correlation,
     timedelta_to_alias,
@@ -129,6 +133,78 @@ def spearman_spatial_joblib(
     return res, pval
 
 
+def crop_datasets_to_spatial_overlap(input_ds, ref_ds):
+    """Crop input and reference datasets to their common spatial overlap."""
+    input_lon_min, input_lon_max, input_lat_min, input_lat_max = get_ds_extend(input_ds)
+    ref_lon_min, ref_lon_max, ref_lat_min, ref_lat_max = get_ds_extend(ref_ds)
+
+    overlap_lon_min = max(input_lon_min, ref_lon_min)
+    overlap_lon_max = min(input_lon_max, ref_lon_max)
+    overlap_lat_min = max(input_lat_min, ref_lat_min)
+    overlap_lat_max = min(input_lat_max, ref_lat_max)
+
+    if overlap_lon_min > overlap_lon_max or overlap_lat_min > overlap_lat_max:
+        msg = (
+            "Input and reference datasets do not share a common spatial overlap; "
+            "cannot compare them."
+        )
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+
+    cropped_input = crop_ds(
+        input_ds,
+        overlap_lon_min,
+        overlap_lon_max,
+        overlap_lat_min,
+        overlap_lat_max,
+    )
+    cropped_ref = crop_ds(
+        ref_ds,
+        overlap_lon_min,
+        overlap_lon_max,
+        overlap_lat_min,
+        overlap_lat_max,
+    )
+
+    input_cropped = (
+        cropped_input["lat"].size != input_ds["lat"].size
+        or cropped_input["lon"].size != input_ds["lon"].size
+    )
+    ref_cropped = (
+        cropped_ref["lat"].size != ref_ds["lat"].size
+        or cropped_ref["lon"].size != ref_ds["lon"].size
+    )
+
+    input_bounds_match_overlap = (
+        np.isclose(input_lon_min, overlap_lon_min)
+        and np.isclose(input_lon_max, overlap_lon_max)
+        and np.isclose(input_lat_min, overlap_lat_min)
+        and np.isclose(input_lat_max, overlap_lat_max)
+    )
+    ref_bounds_match_overlap = (
+        np.isclose(ref_lon_min, overlap_lon_min)
+        and np.isclose(ref_lon_max, overlap_lon_max)
+        and np.isclose(ref_lat_min, overlap_lat_min)
+        and np.isclose(ref_lat_max, overlap_lat_max)
+    )
+
+    if input_cropped or ref_cropped:
+        if input_bounds_match_overlap and not ref_bounds_match_overlap:
+            logger.info(
+                "Input spatial extent is a subset of reference; cropping reference to the common overlap."
+            )
+        elif ref_bounds_match_overlap and not input_bounds_match_overlap:
+            logger.warning(
+                "Reference spatial extent is a subset of input; cropping input to the common overlap."
+            )
+        else:
+            logger.warning(
+                "Cropping input and reference datasets to their common overlapping spatial extent."
+            )
+
+    return cropped_input, cropped_ref
+
+
 def get_std_from_ds(ds, input_var=None, clim=None, factor=1):
     """Calculate maps of temporal standard deviation from an DataArray.
 
@@ -201,6 +277,7 @@ def get_file_stats(
             "lon": get_coord_values(ds_croped, lon=True),
         },
     )
+    output = generate_bounds_for_all_coords(output)
     if direct_comp:
         ts = ds_croped[input_var] * factor
         ts.name = "time_series"
@@ -486,6 +563,7 @@ def get_stats_one_pass(
         {"clim": clim, "std": std, "mean": mean},
         coords={"month": np.arange(1, 13, 1), "lat": lat, "lon": lon},
     )
+    output = generate_bounds_for_all_coords(output)
     # Trigger computation if needed
     if output_path is not None:
         output_file = (
@@ -610,6 +688,34 @@ def plot_single_map(
     norm = BoundaryNorm(bounds, cmap.N)
     im = ax.imshow(values_np, cmap=cmap, norm=norm)
     return im, bounds, extent, ticks
+
+
+def round_sensibly(value):
+    """Round map half-range to sensible steps and return decimals for labels.
+
+    Returns
+    -------
+    tuple[float, int]
+        (rounded_value, round_dec)
+    """
+    value = float(abs(value))
+    if not np.isfinite(value) or value == 0:
+        return 1e-6, 6
+
+    thresholds = [
+        (1.4, 2, 2),  # step 0.5
+        (0.15, 5, 2),  # step 0.2
+        (0.015, 50, 3),  # step 0.02
+        (0.0015, 500, 4),  # step 0.002
+        (0.00015, 5000, 5),  # step 0.0002
+        (0.0, 50000, 6),  # step 0.00002
+    ]
+    for threshold, scale, round_dec in thresholds:
+        if value > threshold:
+            rounded = round(value * scale) / scale
+            rounded = max(rounded, 1 / scale)
+            return rounded, round_dec
+    return value, 6
 
 
 def resample_to_coarser_calendar(
@@ -1090,50 +1196,66 @@ def plot_map_global_climate2(
     diff_mean = np.asarray(np.where(diff_mean == np.inf, np.nan, diff_mean))
     fig = plt.figure(figsize=(10.5, 6.2))
     gs = fig.add_gridspec(2, 4, height_ratios=[1.0, 1.0])
-    ax_rel_mean = fig.add_subplot(gs[0, 1:3])
-    ax_clim = fig.add_subplot(gs[1, 1:3])
+    ax_rel_mean = fig.add_subplot(gs[1, 1:3])
+    ax_diff = fig.add_subplot(gs[0, 1:3])
     if input_name is not None and ref_name is not None:
         title = f"Comparision {input_name} with {ref_name}"
     if overlapping_years is not None and len(overlapping_years) > 1:
         title += f" for years {overlapping_years[0]}-{overlapping_years[-1]}"
     fig.suptitle(title, fontweight="normal", fontsize="x-large")
 
-    mean_diff_1 = max(np.abs(1 - np.nanmin(rel_mean)), np.abs(1 - np.nanmax(rel_mean)))
+    vmin = np.nanquantile(rel_mean, 0.01)
+    vmax = np.nanquantile(rel_mean, 0.99)
+    mean_diff_1 = max(abs(vmin), abs(vmax))
+    mean_diff_1, round_dec = round_sensibly(mean_diff_1)
+    logger.debug(
+        "mean_diff_1=%s, vmin=%s, vmax=%s, round_dec=%s",
+        mean_diff_1,
+        vmin,
+        vmax,
+        round_dec,
+    )
     im0, bounds0, extend0, ticks0 = plot_single_map(
-        ax_rel_mean, rel_mean, mean_diff_1, bounds_type="fixed"
+        ax_rel_mean, rel_mean, mean_diff_1, bounds_type="max", center=0
     )
-    ax_rel_mean.set_title(
-        f"a) Relative Mean (median={np.nanmedian(rel_mean):.2f}, mean={total_rel_mean:.2f})"
+    title_rel_mean = (
+        f"b) Relative Mean Difference (median={np.nanmedian(rel_mean):.{round_dec}f}"
     )
+    if total_rel_mean is not None:
+        title_rel_mean += f", mean={total_rel_mean:.{round_dec}f}"
+    title_rel_mean += ")"
+    ax_rel_mean.set_title(title_rel_mean)
 
     vmin = np.nanquantile(diff_mean, 0.01)
     vmax = np.nanquantile(diff_mean, 0.99)
     diff_diff_1 = max(abs(vmin), abs(vmax))
-    if diff_diff_1 > 1.4:
-        # round to next 0.5
-        diff_diff_1 = round((diff_diff_1 * 2) / 2) / 4 * 4.5
-    else:
-        # round to next 0.2
-        diff_diff_1 = round((diff_diff_1 * 5) / 5) / 4 * 4.5
+    diff_diff_1, round_dec = round_sensibly(diff_diff_1)
+    logger.debug(
+        "diff_diff_1=%s, vmin=%s, vmax=%s, round_dec=%s",
+        diff_diff_1,
+        vmin,
+        vmax,
+        round_dec,
+    )
     im1, bounds1, extend1, ticks1 = plot_single_map(
-        ax_clim, diff_mean, diff_diff_1, center=0, bounds_type="max"
+        ax_diff, diff_mean, diff_diff_1, center=0, bounds_type="max"
     )
-    ax_clim.set_title(
-        f"b) Difference Mean (median={np.nanmedian(diff_mean):.2f}mm/day, mean={np.nanmean(diff_mean):.2f}mm/day)"
+    ax_diff.set_title(
+        f"a) Mean Difference (median={np.nanmedian(diff_mean):.{round_dec}f}mm/day, mean={np.nanmean(diff_mean):.{round_dec}f}mm/day)"
     )
-    divider1 = make_axes_locatable(ax_clim)
+    divider1 = make_axes_locatable(ax_diff)
     cax1 = divider1.append_axes("right", size="5%", pad=0.1)
     fig.colorbar(
-        im1, cax=cax1, label="mm", boundaries=bounds1, extend=extend1, ticks=ticks1
+        im1, cax=cax1, label="mm/day", boundaries=bounds1, extend=extend1, ticks=ticks1
     )
 
     divider0 = make_axes_locatable(ax_rel_mean)
     cax0 = divider0.append_axes("right", size="5%", pad=0.1)
     fig.colorbar(
-        im0, cax=cax0, label="", boundaries=bounds0, extend=extend0, ticks=ticks0
+        im0, cax=cax0, label="%", boundaries=bounds0, extend=extend0, ticks=ticks0
     )
 
-    for ax in [ax_rel_mean, ax_clim]:
+    for ax in [ax_rel_mean, ax_diff]:
         for spine in ax.spines.values():
             spine.set_linewidth(0.5)
     ax_rel_mean.set_yticks([])
@@ -1142,16 +1264,153 @@ def plot_map_global_climate2(
     for spine in ax_rel_mean.spines.values():
         spine.set_linewidth(0.25)
     if diff_mean.ndim != 1:
-        ax_clim.set_yticks([])
-        ax_clim.set_xticks([])
-        ax_clim.yaxis.labelpad = 0
-        for spine in ax_clim.spines.values():
+        ax_diff.set_yticks([])
+        ax_diff.set_xticks([])
+        ax_diff.yaxis.labelpad = 0
+        for spine in ax_diff.spines.values():
             spine.set_linewidth(0.25)
     plt.tight_layout()
 
     file_name = f"et_map_global_climate2_{input_name}_{ref_name}.png".replace(" ", "_")
     plt.savefig(output_path / file_name, dpi=800)
     logger.info(f"created et_map {output_path / file_name}")
+
+
+@log_errors(raise_exceptions=True)
+def plot_map_local_climate(
+    input_clim,
+    ref_clim,
+    input_name,
+    ref_name,
+    output_path,
+    overlapping_years=None,
+):
+    """Create monthly local-climate maps for relative and absolute differences.
+
+    Produces two figures with 12 small maps (one per month):
+    - Relative climatology difference in percent
+    - Absolute climatology difference in native units (e.g. mm/day)
+    """
+    month_labels = (
+        "Jan",
+        "Feb",
+        "Mar",
+        "Apr",
+        "May",
+        "Jun",
+        "Jul",
+        "Aug",
+        "Sep",
+        "Oct",
+        "Nov",
+        "Dec",
+    )
+    input_clim = np.asarray(input_clim)
+    ref_clim = np.asarray(ref_clim)
+    if input_clim.shape != ref_clim.shape or input_clim.ndim != 3:
+        msg = (
+            "input_clim and ref_clim must both be 3D arrays with equal shape "
+            "(month, lat, lon). "
+            f"Got {input_clim.shape} and {ref_clim.shape}."
+        )
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    if input_clim.shape[0] != 12:
+        msg = (
+            "Monthly local-climate plotting expects exactly 12 climatology slices. "
+            f"Got {input_clim.shape[0]}."
+        )
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+
+    # Avoid unstable percentages where reference climatology is close to zero.
+    ref_safe = np.where(np.abs(ref_clim) < 0.1, np.nan, ref_clim)
+    rel_monthly = 100.0 * (input_clim - ref_safe) / ref_safe
+    abs_monthly = input_clim - ref_clim
+
+    def _plot_monthly_panels(values, panel_title, output_file_name, colorbar_label):
+        values = np.where(values == np.inf, np.nan, values)
+        values = np.where(values == -np.inf, np.nan, values)
+        finite_values = values[np.isfinite(values)]
+        if finite_values.size == 0:
+            diff_to_mean = 1e-6
+        else:
+            q01 = float(np.nanquantile(finite_values, 0.01))
+            q99 = float(np.nanquantile(finite_values, 0.99))
+            diff_to_mean = max(abs(q01), abs(q99))
+            diff_to_mean, _ = round_sensibly(diff_to_mean)
+
+        fig = plt.figure(figsize=(14.0, 8.5))
+        gs = fig.add_gridspec(
+            3,
+            5,
+            width_ratios=[1.0, 1.0, 1.0, 1.0, 0.085],
+            wspace=0.06,
+            hspace=0.18,
+        )
+        axes = np.array(
+            [[fig.add_subplot(gs[i, j]) for j in range(4)] for i in range(3)]
+        )
+        cax = fig.add_subplot(gs[:, 4])
+        if input_name is not None and ref_name is not None:
+            title = f"Comparision {input_name} with {ref_name}"
+        else:
+            title = "Local Climate Comparison"
+        if overlapping_years is not None and len(overlapping_years) > 1:
+            title += f" for years {overlapping_years[0]}-{overlapping_years[-1]}"
+        fig.suptitle(f"{title}\n{panel_title}", fontsize="x-large", fontweight="normal")
+
+        im = None
+        bounds = None
+        extend = None
+        ticks = None
+        for month_idx, ax in enumerate(axes.flat):
+            month_values = values[month_idx]
+            im, bounds, extend, ticks = plot_single_map(
+                ax,
+                month_values,
+                diff_to_mean=diff_to_mean,
+                center=0,
+                bounds_type="max",
+            )
+            ax.set_title(month_labels[month_idx], fontsize="medium")
+            ax.set_xticks([])
+            ax.set_yticks([])
+            ax.yaxis.labelpad = 0
+            for spine in ax.spines.values():
+                spine.set_linewidth(0.25)
+
+        cbar = fig.colorbar(
+            im,
+            cax=cax,
+            boundaries=bounds,
+            extend=extend,
+            ticks=ticks,
+            label=colorbar_label,
+        )
+        cbar.ax.tick_params(labelsize=8)
+        fig.subplots_adjust(left=0.03, right=0.94, bottom=0.04, top=0.89)
+        plt.savefig(output_path / output_file_name, dpi=400)
+        logger.info("created et_map %s", output_path / output_file_name)
+
+    rel_file_name = f"et_map_local_climate_rel_{input_name}_{ref_name}.png".replace(
+        " ", "_"
+    )
+    abs_file_name = f"et_map_local_climate_abs_{input_name}_{ref_name}.png".replace(
+        " ", "_"
+    )
+    _plot_monthly_panels(
+        rel_monthly,
+        "Monthly Relative Climatology Difference",
+        rel_file_name,
+        "Relative Climatology Difference [%]",
+    )
+    _plot_monthly_panels(
+        abs_monthly,
+        "Monthly Absolute Climatology Difference",
+        abs_file_name,
+        "Absolute Climatology Difference [mm/day]",
+    )
 
 
 def create_map_from_output(
@@ -1193,13 +1452,28 @@ def create_map_from_output(
             output_path=output_path,
         )
     elif global_climate:
+        rel_mean_diff = (
+            100
+            * (np.nanmean(input_clim, axis=0) - np.nanmean(ref_clim, axis=0))
+            / np.nanmean(ref_clim, axis=0)
+        )
+        rel_mean_diff = np.where(
+            np.nanmax(ref_clim, axis=0) < 0.1, np.nan, rel_mean_diff
+        )
         plot_map_global_climate2(
-            rel_mean=rel_mean,
+            rel_mean=rel_mean_diff,
             diff_mean=np.nanmean(input_clim, axis=0) - np.nanmean(ref_clim, axis=0),
             input_name=input_name,
             ref_name=ref_name,
             output_path=output_path,
             total_rel_mean=np.nanmean(input_clim) / np.nanmean(ref_clim),
+        )
+        plot_map_local_climate(
+            input_clim=input_clim,
+            ref_clim=ref_clim,
+            input_name=input_name,
+            ref_name=ref_name,
+            output_path=output_path,
         )
     else:
         plot_map_bias_only(
@@ -1251,8 +1525,17 @@ def get_stats(
                     available_mem_gib=available_mem,
                     chunk_type=ChunkType.SPACE,
                     force_decending_y=True,
+                    var_name=var,
                 )
-                return apply_spatial_mask(ds, mask_da)
+                stats_ds = get_file_stats(
+                    ds,
+                    var,
+                    factor,
+                    coordinate_slice,
+                    output_path=output_file,
+                    avaiable_years=available_years,
+                    direct_comp=direct_comp,
+                )
             if path.is_dir():
                 file_list = get_files(
                     path, available_years=available_years, file_name=file_name
@@ -1293,7 +1576,8 @@ def get_stats(
                 with ErrorLogger(logger):
                     msg = "Wrong statisitcs file. If you want to create new statistics you have to provide a var."
                     raise KeyError(msg)
-    return apply_spatial_mask(stats_ds, mask_da)
+    masked_ds = apply_spatial_mask(stats_ds, mask_da)
+    return generate_bounds_for_all_coords(masked_ds)
 
 
 def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
@@ -1369,6 +1653,8 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
         logger.error("Input dataset has empty coordinate.")
     if len(ref["lat"].data) < 1 or len(ref["lon"].data) < 1:
         logger.error("Ref dataset has empty coordinate.")
+
+    input, ref = crop_datasets_to_spatial_overlap(input, ref)
     input, ref = regridd_to_higher_spatial_resolution(input, ref)
     output_name = f"{input_name}-{ref_name}.csv".replace(" ", "_")
     # compare and save statistics
@@ -1557,13 +1843,28 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
                 overlapping_years=overlapping_years,
             )
         elif global_climate:
+            rel_mean_diff = (
+                100
+                * (np.nanmean(input_clim, axis=0) - np.nanmean(ref_clim, axis=0))
+                / np.nanmean(ref_clim, axis=0)
+            )
+            rel_mean_diff = np.where(
+                np.nanmax(ref_clim, axis=0) < 0.1, np.nan, rel_mean_diff
+            )
             plot_map_global_climate2(
-                rel_mean=rel_mean,
+                rel_mean=rel_mean_diff,
                 diff_mean=np.nanmean(input_clim, axis=0) - np.nanmean(ref_clim, axis=0),
                 input_name=input_name,
                 ref_name=ref_name,
                 output_path=output_path,
                 overlapping_years=overlapping_years,
+            )
+            plot_map_local_climate(
+                input_clim=input_clim,
+                ref_clim=ref_clim,
+                input_name=input_name,
+                ref_name=ref_name,
+                output_path=output_path,
             )
         else:
             plot_map_bias_only(
@@ -1703,17 +2004,6 @@ def regridd_to_higher_spatial_resolution(ds1, ds2):
         coarse_ds, fine_ds = ds1, ds2
     else:
         coarse_ds, fine_ds = ds2, ds1
-    # if (lat_res_1 * lon_res_1) == (lat_res_2 * lon_res_2):
-    #         return ds1, ds2
-    #     if (lat_res_1 * lon_res_1) > (lat_res_2 * lon_res_2):
-    #         coarse_ds, fine_ds = ds1, ds2
-    #     else:
-    #         coarse_ds, fine_ds = ds2, ds1
-
-    # Perform nearest-neighbor regridding
-    # regridded_ds = coarse_ds.interp(
-    #     lat=fine_ds["lat"], lon=fine_ds["lon"], method="nearest"
-    # )
     coarse_res = _coord_spacing(coarse_ds.get("lat")) or _coord_spacing(
         coarse_ds.get("lon")
     )
@@ -1728,21 +2018,46 @@ def regridd_to_higher_spatial_resolution(ds1, ds2):
             method="nearest",
             tolerance=coarse_res,
         )
-
-    # Return regridded dataset and finer dataset
-    # logger.info(
-    #     f'Regridded the two datasets to the resolution lat: {coarse_ds["lat"].data[1]-coarse_ds["lat"].data[0]}, lon: {coarse_ds["lon"].data[1]-coarse_ds["lon"].data[0]}'
-    # )
+    if (
+        regridded_ds["lat"].shape != fine_ds["lat"].shape
+        or regridded_ds["lon"].shape != fine_ds["lon"].shape
+    ):
+        debug_msg = (
+            f"Regridding resulted in unexpected coordinate shapes. "
+            f"Coarse lat shape: {coarse_ds['lat'].shape}, Coarse lon shape: {coarse_ds['lon'].shape}, "
+            f"Fine lat shape: {fine_ds['lat'].shape}, Fine lon shape: {fine_ds['lon'].shape}, "
+            f"Regridded lat shape: {regridded_ds['lat'].shape}, Regridded lon shape: {regridded_ds['lon'].shape}."
+            f"With bounds coarse lat: ({coarse_ds['lat'].min().item()}, {coarse_ds['lat'].max().item()}), "
+            f"With bounds fine lat: ({fine_ds['lat'].min().item()}, {fine_ds['lat'].max().item()}), "
+            f"With bounds regridded lat: ({regridded_ds['lat'].min().item()}, {regridded_ds['lat'].max().item()})"
+        )
+        logger.debug(debug_msg)
+        try:
+            aligned_coarse, aligned_fine = xr.align(regridded_ds, fine_ds, join="inner")
+        except Exception as e:
+            # If align fails for any reason, fall back to returning the best-effort regridded dataset
+            with ErrorLogger(logger):
+                logger.error(
+                    f"Alignment of regridded dataset with fine dataset failed. Returning best-effort regridded dataset. Debug info: {debug_msg}"
+                )
+                raise e
+    else:
+        aligned_coarse, aligned_fine = regridded_ds, fine_ds
     if coarse_ds is ds1:
-        return regridded_ds, ds2
-    return ds1, regridded_ds
+        return aligned_coarse, aligned_fine
+    return aligned_fine, aligned_coarse
 
 
 def get_years_from_path(path, raise_exception=True, file_name="*.*"):
     """Get available years from a dataset folder structure or file."""
     if path.is_dir():
         if len(year_structure_paths(path, file_name=file_name)) == 0:
-            with get_dataset_from_path(list(path.rglob(file_name))) as ds:
+            matching_files = list(path.rglob(file_name))
+            if not matching_files:
+                msg = f"No files matching pattern '{file_name}' found in directory {path}."
+                with ErrorLogger(logger):
+                    raise ValueError(msg)
+            with get_dataset_from_path(matching_files, file_name=file_name) as ds:
                 if "time" in ds.coords:
                     return [int(y) for y in np.unique(ds.time.dt.year.data)]
                 msg = f"No year structure found in directory {path} and files do not contain a time coordinate to determine years."
@@ -1763,7 +2078,14 @@ def get_years_from_path(path, raise_exception=True, file_name="*.*"):
     return []
 
 
-def get_available_years(input_path, ref_path, year_slice=None, direct_comp=True):
+def get_available_years(
+    input_path,
+    ref_path,
+    year_slice=None,
+    direct_comp=True,
+    input_file_name="*.*",
+    ref_file_name="*.*",
+):
     """Determine available years from constrains and datasets.
 
     If no reference data is given it will only be the input years inside
@@ -1771,12 +2093,14 @@ def get_available_years(input_path, ref_path, year_slice=None, direct_comp=True)
     """
     logger.info("Determining available years.")
     # get all years from input data
-    years_in = get_years_from_path(input_path)
+    years_in = get_years_from_path(input_path, file_name=input_file_name)
     years_in.sort()
     logger.debug(f"Input years: {years_in}")
 
     # get all years from reference data
-    years_ref = get_years_from_path(ref_path, raise_exception=False)
+    years_ref = get_years_from_path(
+        ref_path, raise_exception=False, file_name=ref_file_name
+    )
     years_ref.sort()
     logger.debug(f"Ref years: {years_ref}")
 
@@ -1791,7 +2115,7 @@ def get_available_years(input_path, ref_path, year_slice=None, direct_comp=True)
             continue
         if year_slice.stop is not None and year > year_slice.stop:
             continue
-        if not years_ref or year in years_ref:
+        if not years_ref or year in years_ref or not direct_comp:
             years.append(year)
     return years
 
@@ -1895,11 +2219,47 @@ def gridded_data_evaluation(
         )
         return
 
-    if input_path.is_dir() and len(year_structure_paths(input_path)) == 0:
-        # check if the input path has the right structure
-        input_path = input_path / "mHM_Fluxes_States.nc"
+    # when reading both datasets into memory, we need to ensure that we have enough memory for both
+    avaiable_mem = (
+        avaiable_mem / 2
+        if avaiable_mem is not None and ref_path is not None
+        else avaiable_mem
+    )
 
-    available_years = get_available_years(input_path, ref_path, year_slice, direct_comp)
+    bootstrap_requested = (
+        n_bootstrap_years is not None
+        and n_bootstrap_selections is not None
+        and n_bootstrap_selections > 0
+    )
+
+    if bootstrap_requested:
+        if input_path.is_dir() and len(year_structure_paths(input_path)) == 0:
+            msg = (
+                "Bootstrapping requires year-structured input data directories (YYYY/...). "
+                f"Input path '{input_path}' has no year-folder structure."
+            )
+            with ErrorLogger(logger):
+                raise ValueError(msg)
+        if (
+            ref_path is not None
+            and ref_path.is_dir()
+            and len(year_structure_paths(ref_path)) == 0
+        ):
+            msg = (
+                "Bootstrapping requires year-structured reference data directories (YYYY/...). "
+                f"Reference path '{ref_path}' has no year-folder structure."
+            )
+            with ErrorLogger(logger):
+                raise ValueError(msg)
+
+    available_years = get_available_years(
+        input_path,
+        ref_path,
+        year_slice,
+        direct_comp,
+        input_file_name=input.file_name,
+        ref_file_name=ref.file_name,
+    )
     logger.info(f"Years {available_years} are available for comparison.")
     if not available_years:
         logger.error("Since no data is available the program is stoped.")
@@ -2018,13 +2378,31 @@ def gridded_data_evaluation(
                     ref_name=ref.name,
                 )
             elif global_climate:
+                rel_mean_diff = (
+                    100
+                    * (
+                        np.nanmean(results["input_clim"], axis=0)
+                        - np.nanmean(results["ref_clim"], axis=0)
+                    )
+                    / np.nanmean(results["ref_clim"], axis=0)
+                )
+                rel_mean_diff = np.where(
+                    np.nanmax(results["ref_clim"], axis=0) < 0.1, np.nan, rel_mean_diff
+                )
                 plot_map_global_climate2(
-                    rel_mean=results["rel_mean"],
+                    rel_mean=rel_mean_diff,
                     diff_mean=np.nanmean(results["input_clim"], axis=0)
                     - np.nanmean(results["ref_clim"], axis=0),
                     output_path=output_path,
                     input_name=input.name,
                     ref_name=ref.name,
+                )
+                plot_map_local_climate(
+                    input_clim=results["input_clim"],
+                    ref_clim=results["ref_clim"],
+                    input_name=input.name,
+                    ref_name=ref.name,
+                    output_path=output_path,
                 )
             else:
                 plot_map_bias_only(
