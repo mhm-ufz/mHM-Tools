@@ -5,6 +5,7 @@ from pathlib import Path
 
 import numpy as np
 import xarray as xr
+from pyproj import CRS, Transformer
 
 from mhm_tools.pre.pet_calc import (
     calculate_pet,
@@ -30,6 +31,88 @@ def _write_temp_nc(tmp_dir: Path, name: str, var_name: str, data: np.ndarray) ->
     path = tmp_dir / name
     ds.to_netcdf(path)
     return path
+
+
+def _write_projected_temp_nc(
+    tmp_dir: Path,
+    name: str,
+    var_name: str,
+    data: np.ndarray,
+    with_grid_mapping: bool = True,
+) -> Path:
+    x = np.array([4321000.0, 4326000.0])
+    y = np.array([3210000.0, 3215000.0])
+    time = np.array(["2020-01-01", "2020-01-02"], dtype="datetime64[ns]")
+    attrs = {"grid_mapping": "lambert_azimuthal_equal_area"}
+    data_vars = {
+        var_name: (
+            ("time", "y", "x"),
+            data.astype(np.float32),
+            attrs if with_grid_mapping else {},
+        )
+    }
+    if with_grid_mapping:
+        data_vars["lambert_azimuthal_equal_area"] = (
+            (),
+            0,
+            {
+                "grid_mapping_name": "lambert_azimuthal_equal_area",
+                "latitude_of_projection_origin": 52.0,
+                "longitude_of_projection_origin": 10.0,
+                "false_easting": 4321000.0,
+                "false_northing": 3210000.0,
+                "semi_major_axis": 6378137.0,
+                "inverse_flattening": 298.257223563,
+            },
+        )
+
+    ds = xr.Dataset(
+        data_vars,
+        coords={
+            "time": time,
+            "x": (
+                "x",
+                x,
+                {
+                    "axis": "X",
+                    "standard_name": "projection_x_coordinate",
+                    "units": "m",
+                },
+            ),
+            "y": (
+                "y",
+                y,
+                {
+                    "axis": "Y",
+                    "standard_name": "projection_y_coordinate",
+                    "units": "m",
+                },
+            ),
+        },
+    )
+    path = tmp_dir / name
+    ds.to_netcdf(path)
+    return path
+
+
+def _projected_latitudes() -> np.ndarray:
+    x = np.array([4321000.0, 4326000.0])
+    y = np.array([3210000.0, 3215000.0])
+    x_values, y_values = np.meshgrid(x, y)
+    crs = CRS.from_cf(
+        {
+            "grid_mapping_name": "lambert_azimuthal_equal_area",
+            "latitude_of_projection_origin": 52.0,
+            "longitude_of_projection_origin": 10.0,
+            "false_easting": 4321000.0,
+            "false_northing": 3210000.0,
+            "semi_major_axis": 6378137.0,
+            "inverse_flattening": 298.257223563,
+        }
+    )
+    transformer = Transformer.from_crs(crs, CRS.from_epsg(4326), always_xy=True)
+    _, lat = transformer.transform(x_values, y_values)
+    return lat
 
 
 class TestPetCalculatorMethods(unittest.TestCase):
@@ -193,3 +276,59 @@ class TestPetCalcFromFiles(unittest.TestCase):
                 "hargreaves-samani",
             )
             np.testing.assert_allclose(ds.pet.data, expected, rtol=1e-6, atol=0.0)
+
+    def test_oudin_from_projected_file_without_latitude(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_dir = Path(tmp)
+            tavg_data = np.array(
+                [
+                    [[10.0, 12.0], [8.0, 9.0]],
+                    [[11.0, 13.0], [7.0, 10.0]],
+                ]
+            )
+            tavg_file = _write_projected_temp_nc(
+                tmp_dir,
+                "tavg_projected.nc",
+                "tavg",
+                tavg_data,
+            )
+            out_file = tmp_dir / "pet.nc"
+            calculate_pet(
+                out_file=str(out_file),
+                tavg_file=str(tavg_file),
+                method="oudin",
+            )
+            ds = xr.open_dataset(out_file)
+            expected = self._expected_from_arrays(
+                tavg_data,
+                None,
+                None,
+                _projected_latitudes(),
+                ds.time.data,
+                "oudin",
+            )
+            np.testing.assert_allclose(ds.pet.data, expected, rtol=1e-6, atol=0.0)
+            self.assertIn("lambert_azimuthal_equal_area", ds)
+            self.assertEqual(
+                ds.pet.attrs["grid_mapping"],
+                "lambert_azimuthal_equal_area",
+            )
+            self.assertNotIn("latitude", ds)
+
+    def test_projected_file_without_latitude_requires_grid_mapping(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_dir = Path(tmp)
+            tavg_file = _write_projected_temp_nc(
+                tmp_dir,
+                "tavg_projected.nc",
+                "tavg",
+                np.ones((2, 2, 2)),
+                with_grid_mapping=False,
+            )
+            out_file = tmp_dir / "pet.nc"
+            with self.assertRaisesRegex(ValueError, "latitude.*grid_mapping"):
+                calculate_pet(
+                    out_file=str(out_file),
+                    tavg_file=str(tavg_file),
+                    method="oudin",
+                )

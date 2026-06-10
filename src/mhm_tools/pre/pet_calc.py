@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from joblib import Parallel, delayed
+from pyproj import CRS, Transformer
 
 from mhm_tools.common.file_handler import (
     get_grid,
@@ -91,8 +92,90 @@ def validate_tmin_tmax(tmin, tmax):
             raise ValueError(msg)
 
 
-def _get_latitude_da(ds: xr.Dataset) -> xr.DataArray:
-    """Return the latitude coordinate/auxiliary variable from ``ds``."""
+def _get_projected_coord_name(ds: xr.Dataset, axis: str) -> Optional[str]:
+    """Return the projected x/y coordinate name for ``axis``."""
+    axis = axis.upper()
+    standard_names = {
+        "X": "projection_x_coordinate",
+        "Y": "projection_y_coordinate",
+    }
+    coord_key_args = {"lon": axis == "X", "lat": axis == "Y"}
+    for name in list(ds.coords) + list(ds.dims):
+        if name not in ds:
+            continue
+        var = ds[name]
+        var_axis = str(var.attrs.get("axis", "")).upper()
+        standard_name = str(var.attrs.get("standard_name", "")).lower()
+        if var_axis == axis or standard_name == standard_names[axis]:
+            return name
+    return get_coord_key(ds, raise_exception=False, **coord_key_args)
+
+
+def _latitude_from_grid_mapping(
+    ds: xr.Dataset,
+    data_var: xr.DataArray,
+    template: xr.DataArray,
+) -> xr.DataArray:
+    """Derive latitude from a CF grid mapping and projected x/y coordinates."""
+    grid_mapping_name = data_var.attrs.get("grid_mapping")
+    if not grid_mapping_name or grid_mapping_name not in ds:
+        msg = (
+            "Dataset has no latitude coordinate and the data variable does not "
+            "reference a valid CF grid_mapping."
+        )
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+
+    grid_mapping = ds[grid_mapping_name]
+    try:
+        crs = CRS.from_cf(grid_mapping.attrs)
+    except Exception as e:
+        msg = (
+            f"Could not build a CRS from grid_mapping {grid_mapping_name!r}. "
+            "Provide latitude values or valid CF projection metadata."
+        )
+        with ErrorLogger(logger):
+            raise ValueError(msg) from e
+
+    x_name = _get_projected_coord_name(ds, "X")
+    y_name = _get_projected_coord_name(ds, "Y")
+    if x_name is None or y_name is None:
+        msg = (
+            "Dataset has no latitude coordinate and projected x/y coordinates "
+            "could not be identified."
+        )
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+
+    x = ds[x_name]
+    y = ds[y_name]
+    if x.ndim != 1 or y.ndim != 1:
+        msg = (
+            "Deriving latitude from grid_mapping currently requires 1D x/y "
+            "coordinates."
+        )
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+
+    x_values, y_values = np.meshgrid(x.data, y.data)
+    transformer = Transformer.from_crs(crs, CRS.from_epsg(4326), always_xy=True)
+    _, lat = transformer.transform(x_values, y_values)
+
+    lat_da = xr.DataArray(
+        lat,
+        dims=(y_name, x_name),
+        coords={y_name: y, x_name: x},
+        attrs={
+            "standard_name": "latitude",
+            "long_name": "latitude",
+            "units": "degrees_north",
+        },
+    )
+    return xr.broadcast(lat_da, template)[0]
+
+
+def _get_latitude_da(ds: xr.Dataset, data_var: xr.DataArray) -> xr.DataArray:
+    """Return latitude values for ``data_var`` as an xarray DataArray."""
 
     def _is_lat_candidate(name: str, var: xr.DataArray) -> bool:
         std_name = str(var.attrs.get("standard_name", "")).lower()
@@ -103,8 +186,8 @@ def _get_latitude_da(ds: xr.Dataset) -> xr.DataArray:
         if _is_lat_candidate(name, var):
             return var
 
-    lat_key = get_coord_key(ds, lat=True)
-    return ds[lat_key]
+    template = data_var.isel(time=0, drop=True) if "time" in data_var.dims else data_var
+    return _latitude_from_grid_mapping(ds, data_var, template)
 
 
 def pet_calculator(
@@ -286,7 +369,7 @@ def get_time_and_freq(ds, stat_freq):
 
 
 @log_arguments("INFO")
-def calculate_pet(
+def calculate_pet( # noqa: PLR0915
     out_file: str,
     tavg_file: Optional[str] = None,
     tmax_file: Optional[str] = None,
@@ -355,7 +438,7 @@ def calculate_pet(
     grid_var_name = grid_dataarray.name or get_single_data_var(grid_dataset)
     grid_definition = get_grid(grid_dataset, grid_var_name)
 
-    lat_da = _get_latitude_da(grid_dataset)
+    lat_da = _get_latitude_da(grid_dataset, grid_dataarray)
     template = grid_dataarray.isel(time=0, drop=True)
     lat_broadcast = xr.broadcast(lat_da, template)[0]
     lat3d = np.radians(lat_broadcast.data)[np.newaxis, ...]
@@ -399,6 +482,8 @@ def calculate_pet(
 
     # Wrap into DataArray
     data_attrs = {"units": "mm", "missing_value": -9999.0, "_FillValue": -9999.0}
+    if "grid_mapping" in grid_dataarray.attrs:
+        data_attrs["grid_mapping"] = grid_dataarray.attrs["grid_mapping"]
     pet_ds = set_grid(pet_data, grid_definition, "pet", data_attrs)
     logger.info("writing output")
     write_xarray_to_file(pet_ds, Path(out_file))

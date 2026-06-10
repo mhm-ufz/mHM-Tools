@@ -435,6 +435,19 @@ def write_xarray_to_file(  # noqa: PLR0912, PLR0915
     resolution=None,
 ):
     """Write xarray Datasets to file with file type depending on the file suffix."""
+
+    def _metadata_data_vars(dataset):
+        metadata_vars = set()
+        for coord in dataset.coords.values():
+            bounds = coord.attrs.get("bounds")
+            if bounds in dataset:
+                metadata_vars.add(bounds)
+        for var in dataset.data_vars.values():
+            grid_mapping = var.attrs.get("grid_mapping")
+            if grid_mapping in dataset:
+                metadata_vars.add(grid_mapping)
+        return metadata_vars
+
     file_path = Path(file_path)
     if create_folder and not file_path.parent.is_dir():
         file_path.parent.mkdir(parents=True)
@@ -459,7 +472,8 @@ def write_xarray_to_file(  # noqa: PLR0912, PLR0915
                     var_name,
                 )
             logger.info(f"Taking data vars from list of ds.data_vars {ds.data_vars}")
-            data_vars = list(ds.data_vars)
+            metadata_vars = _metadata_data_vars(ds)
+            data_vars = [v for v in ds.data_vars if v not in metadata_vars]
         else:
             data_vars = [var_name]
             logger.info(f"Setting data vars as input varname [var_name]: {data_vars}")
