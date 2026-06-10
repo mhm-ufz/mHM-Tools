@@ -13,6 +13,7 @@ def add_args(parser):
     flags = parser.add_argument_group("flags")
     optional.add_argument(
         "-i",
+        "--input-dir",
         "--input",
         dest="in_dir",
         required=True,
@@ -21,6 +22,7 @@ def add_args(parser):
     )
     optional.add_argument(
         "-o",
+        "--output-file",
         "--output",
         dest="out_file",
         required=False,

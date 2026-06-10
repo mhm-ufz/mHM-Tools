@@ -27,23 +27,36 @@ def _fallback_open(
 ) -> xr.Dataset:
     """Open a dataset with the provided xarray function.
 
-    Falls back from the h5netcdf to the netcdf4 engine if necessary.
+    Falls back between netcdf4, h5netcdf, and scipy engines if necessary.
     """
     try:
         return open_func(*args, **kwargs)
     except Exception as exc:
         if _fallback_attempt:
-            logger.error("Both h5netcdf and netcdf4 engines failed to open dataset.")
+            logger.error("All fallback engines failed to open dataset.")
             raise exc
         engine = kwargs.get("engine")
-        if "unrecognized engine 'h5netcdf'" in str(exc) or engine == "h5netcdf":
-            kwargs["engine"] = "netcdf4"
-            return _fallback_open(open_func, *args, _fallback_attempt=True, **kwargs)
-        if "unrecognized engine 'netcdf4'" in str(exc) or engine == "netcdf4":
-            kwargs["engine"] = "h5netcdf"
-            return _fallback_open(open_func, *args, _fallback_attempt=True, **kwargs)
+        if engine == "h5netcdf":
+            candidates = ["netcdf4", "scipy"]
+        elif engine == "netcdf4":
+            candidates = ["h5netcdf", "scipy"]
+        elif engine == "scipy":
+            candidates = ["h5netcdf", "netcdf4"]
+        else:
+            candidates = ["h5netcdf", "netcdf4", "scipy"]
+
+        for cand in candidates:
+            try:
+                kwargs["engine"] = cand
+                logger.debug("Retry opening dataset with fallback engine '%s'.", cand)
+                return _fallback_open(
+                    open_func, *args, _fallback_attempt=True, **kwargs
+                )
+            except Exception:
+                continue
+
         logger.error("Error opening dataset: %s", exc)
-        raise
+        raise exc
 
 
 def read_dataset(
@@ -386,3 +399,22 @@ def generate_bounds(
     first = first_lower.assign_coords({dim: da[dim][0]})
     all_bounds = xr.concat([first, bounds], dim=dim)
     return all_bounds.transpose()
+
+
+def generate_bounds_for_all_coords(
+    ds: xr.Dataset, bounds_dim: str = "bnds"
+) -> xr.Dataset:
+    """Generate bounds for all 1D coordinate DataArrays in the dataset."""
+    ds_out = ds.copy(deep=False)
+    for coord in ds.coords:
+        da = ds[coord]
+        if da.ndim == 1 and da.sizes[da.dims[0]] >= 2:
+            try:
+                ds_out.coords[f"{coord}_bnds"] = generate_bounds(da, bounds_dim)
+                if "bounds" not in da.attrs:
+                    da.attrs["bounds"] = f"{coord}_bnds"
+            except Exception:
+                logger.debug(
+                    f"Could not generate bounds for coordinate '{coord}'", exc_info=True
+                )
+    return ds_out

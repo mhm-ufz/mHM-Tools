@@ -45,6 +45,7 @@ def add_args(parser):
     required_args = parser.add_argument_group("required arguments")
     required_args.add_argument(
         "-i",
+        "--input-file",
         "--input",
         dest="in_file",
         required=True,
@@ -52,6 +53,7 @@ def add_args(parser):
     )
     required_args.add_argument(
         "-o",
+        "--output-file",
         "--output",
         dest="out_file",
         required=True,

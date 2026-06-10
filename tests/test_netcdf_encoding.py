@@ -1,8 +1,22 @@
+import logging
+
 import numpy as np
+import pytest
 import xarray as xr
 
 from mhm_tools.common.file_handler import write_xarray_to_file
 from mhm_tools.common.netcdf import sanitize_nc_encoding, set_netcdf_encoding
+
+
+@pytest.fixture(autouse=True)
+def _enable_mhm_tools_log_propagation_for_caplog():
+    mhm_logger = logging.getLogger("mhm_tools")
+    old_propagate = mhm_logger.propagate
+    mhm_logger.propagate = True
+    try:
+        yield
+    finally:
+        mhm_logger.propagate = old_propagate
 
 
 def _make_ds(dtype=float):
@@ -127,3 +141,64 @@ def test_write_xarray_to_file_regenerates_datetime_bounds(tmp_path):
     write_xarray_to_file(ds, out)
     ds_read = xr.open_dataset(out, engine="netcdf4")
     assert np.issubdtype(ds_read["time_bnds"].dtype, np.datetime64)
+
+
+def test_write_xarray_to_file_adds_cf_baseline_metadata(tmp_path):
+    ds = xr.Dataset(
+        {"v": (("time", "lat", "lon"), np.random.rand(2, 2, 2))},
+        coords={
+            "time": np.array(["2001-01-01", "2001-01-02"], dtype="datetime64[ns]"),
+            "lat": ("lat", [10.0, 11.0]),
+            "lon": ("lon", [100.0, 101.0]),
+        },
+    )
+
+    out = tmp_path / "cf_baseline.nc"
+    write_xarray_to_file(ds, out)
+    ds_read = xr.open_dataset(out, engine="netcdf4")
+
+    assert ds_read.attrs.get("Conventions") == "CF-1.12"
+    assert ds_read["lat"].attrs.get("standard_name") == "latitude"
+    assert ds_read["lat"].attrs.get("units") == "degrees_north"
+    assert ds_read["lat"].attrs.get("axis") == "Y"
+    assert ds_read["lon"].attrs.get("standard_name") == "longitude"
+    assert ds_read["lon"].attrs.get("units") == "degrees_east"
+    assert ds_read["lon"].attrs.get("axis") == "X"
+    assert ds_read["time"].attrs.get("standard_name") == "time"
+    assert ds_read["time"].attrs.get("axis") == "T"
+
+
+def test_write_xarray_to_file_warns_instead_of_crashing_when_metadata_missing(
+    tmp_path, caplog
+):
+    ds = xr.Dataset(
+        {"v": (("y", "x"), np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32))},
+        coords={"y": ("y", [0.0, 1.0]), "x": ("x", [0.0, 1.0])},
+    )
+
+    out = tmp_path / "missing_metadata.nc"
+    with caplog.at_level(logging.WARNING, logger="mhm_tools.common.file_handler"):
+        write_xarray_to_file(ds, out)
+
+    assert out.is_file()
+    warnings = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
+    assert any("Could not infer latitude coordinate" in msg for msg in warnings)
+    assert any("Could not infer longitude coordinate" in msg for msg in warnings)
+    assert any("Could not infer time coordinate" in msg for msg in warnings)
+    assert any("has no 'units' attribute" in msg for msg in warnings)
+
+
+def test_write_xarray_to_file_warns_and_falls_back_if_var_name_missing(
+    tmp_path, caplog
+):
+    ds = _make_ds(dtype=np.float32)
+    out = tmp_path / "fallback_varname.nc"
+
+    with caplog.at_level(logging.WARNING, logger="mhm_tools.common.file_handler"):
+        write_xarray_to_file(ds, out, var_name="does_not_exist")
+
+    assert out.is_file()
+    ds_read = xr.open_dataset(out, engine="netcdf4")
+    assert "v" in ds_read.data_vars
+    warnings = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
+    assert any("Requested var_name" in msg for msg in warnings)

@@ -15,13 +15,17 @@ def add_args(parser):
     flags = parser.add_argument_group("flags")
     required.add_argument(
         "-i",
+        "--input-dir",
         "--in-dir",
+        dest="in_dir",
         required=True,
         help="Input directory containing forcing NetCDF files",
     )
     required.add_argument(
         "-o",
+        "--output-dir",
         "--out-dir",
+        dest="out_dir",
         required=True,
         help="Output directory for processed files",
     )
@@ -29,7 +33,9 @@ def add_args(parser):
     optional = parser.add_argument_group("optional arguments")
     optional.add_argument(
         "-f",
+        "--input-name",
         "--in-file",
+        dest="in_file",
         required=False,
         default="*.nc",
         help="Input filename or glob pattern.",
@@ -63,7 +69,9 @@ def add_args(parser):
         help="Keep intermediate temporal files generated during processing.",
     )
     optional.add_argument(
+        "--output-name",
         "--out-file",
+        dest="out_file",
         default="long_term_mean.nc",
         help="Name of the output NetCDF file.",
     )

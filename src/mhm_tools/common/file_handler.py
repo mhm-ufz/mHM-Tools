@@ -15,10 +15,12 @@ from mhm_tools.common.esri_grid import standardize_header, write_grid, write_hea
 from mhm_tools.common.logger import ErrorLogger, log_arguments, log_errors
 from mhm_tools.common.netcdf import (
     generate_bounds,
+    generate_bounds_for_all_coords,
     read_dataset,
     sanitize_nc_encoding,
     set_netcdf_encoding,
 )
+from mhm_tools.common.provenance import apply_output_provenance
 from mhm_tools.common.xarray_utils import (
     get_coord_key,
     get_dtype,
@@ -28,9 +30,7 @@ from mhm_tools.common.xarray_utils import (
 
 logger = logging.getLogger(__name__)
 
-######
-# more on this in the cut_classical_mhm_setups branch There are classes for Morph and meteo data
-######
+CF_DEFAULT_CONVENTIONS = "CF-1.12"
 
 
 @dataclass
@@ -102,7 +102,14 @@ def set_grid(
     return ds
 
 
-def create_header(ds, output_path=None, no_data_value=None, cellsize=None) -> dict:
+def create_header(
+    ds,
+    output_path=None,
+    no_data_value=None,
+    cellsize=None,
+    xllcorner=None,
+    yllcorner=None,
+) -> dict:
     """Write a header file from a dataset.
 
     Takes an xarray Dataset and writes the ASCII header needed for GIS tools.
@@ -122,8 +129,10 @@ def create_header(ds, output_path=None, no_data_value=None, cellsize=None) -> di
             msg = "Cannot determine cellsize from dataset with only one x and one y value. Please provide cellsize as an argument."
             with ErrorLogger(logger):
                 raise ValueError(msg)
-    xllcorner = np.nanmin(x) - 0.5 * cellsize
-    yllcorner = np.nanmin(y) - 0.5 * cellsize
+    if xllcorner is None:
+        xllcorner = np.nanmin(x) - 0.5 * cellsize
+    if yllcorner is None:
+        yllcorner = np.nanmin(y) - 0.5 * cellsize
 
     ncols = len(x)
     nrows = len(y)
@@ -174,7 +183,7 @@ def crop_file_by_mask(ds, mask_file):
 
 
 def chunk_dataset_space_only(
-    ds: xr.Dataset, available_mem_gib: float
+    ds: xr.Dataset, available_mem_gib: float, var_name: Optional[str] = None
 ) -> Dict[str, int]:
     """Chunk only in space (lat/lon), leaving time whole, sized to available memory.
 
@@ -187,9 +196,10 @@ def chunk_dataset_space_only(
         f"Chunking spatial dims to fit ≈{available_mem_gib} GiB (time unchunked)"
     )
     # --- pick one variable to get dtype size ---
-    var = get_single_data_var(ds)
+    if var_name is None:
+        var_name = get_single_data_var(ds)
 
-    dtype_sz = ds[var].dtype.itemsize  # bytes per element
+    dtype_sz = ds[var_name].dtype.itemsize  # bytes per element
 
     # --- find coordinate names ---
     lat_key = get_coord_key(ds, lat=True)
@@ -226,7 +236,9 @@ def chunk_dataset_space_only(
     return chunks
 
 
-def chunk_dataset_space_and_time(ds, available_mem_gib) -> Dict[str, int]:
+def chunk_dataset_space_and_time(
+    ds, available_mem_gib, var_name: Optional[str] = None
+) -> Dict[str, int]:
     """Chunk dataset adjusting chunk size to avaiable memory.
 
     Simple heuristic:
@@ -238,7 +250,8 @@ def chunk_dataset_space_and_time(ds, available_mem_gib) -> Dict[str, int]:
     )
     # ---------------- metadata only (cheap) --------------------------------
     if isinstance(ds, xr.Dataset):
-        var_name = next(iter(ds.data_vars))  # first data variable
+        if var_name is None:
+            var_name = next(iter(ds.data_vars))  # first data variable
         var = ds[var_name]  # an xarray.Variable wrapper
     else:
         var = ds
@@ -248,7 +261,7 @@ def chunk_dataset_space_and_time(ds, available_mem_gib) -> Dict[str, int]:
     lon_key = get_coord_key(ds, lon=True)
     time_key = get_coord_key(ds, time=True, raise_exception=False)
     if time_key is None:
-        return chunk_dataset_space_only(ds, available_mem_gib)
+        return chunk_dataset_space_only(ds, available_mem_gib, var_name)
 
     ny = ds.sizes[lat_key]
     nx = ds.sizes[lon_key]
@@ -288,12 +301,12 @@ class ChunkType(Enum):
 
 
 @log_arguments()
-def chunk_dataset(ds, chunk_type, available_mem_gib):
+def chunk_dataset(ds, chunk_type, available_mem_gib, var_name=None):
     """Chunk xarray.DataSet depending on chunk_type and available memory."""
     if chunk_type == ChunkType.TIME:
-        chunks = chunk_dataset_space_and_time(ds, available_mem_gib)
+        chunks = chunk_dataset_space_and_time(ds, available_mem_gib, var_name)
     if chunk_type == ChunkType.SPACE:
-        chunks = chunk_dataset_space_only(ds, available_mem_gib)
+        chunks = chunk_dataset_space_only(ds, available_mem_gib, var_name)
     try:
         return ds.chunk(chunks)
     except Exception as e:
@@ -303,6 +316,7 @@ def chunk_dataset(ds, chunk_type, available_mem_gib):
             raise e
 
 
+@log_arguments()
 def get_xarray_ds_from_file(  # noqa: PLR0912
     file_path,
     var_name=None,
@@ -316,6 +330,7 @@ def get_xarray_ds_from_file(  # noqa: PLR0912
     force_ascending_y=False,
     landcover=False,
     landcover_year_start=None,
+    create_bounds=False,
 ):
     """Read file and return xarray dataset."""
     file_path = Path(file_path)
@@ -391,14 +406,15 @@ def get_xarray_ds_from_file(  # noqa: PLR0912
     if normalize_latlon_coords:
         # re-name input coords to lat and lon
         ds_out = normalize_lat_lon(ds_out, lat_key, lon_key, raise_exceptions=False)
-
+    if create_bounds:
+        ds_out = generate_bounds_for_all_coords(ds_out)
     if lon_key is None and lat_key is None:
         logger.warning("Dataset does not have lon and lat key.")
     elif lon_key is None or lat_key is None:
         logger.error("Dataset has only one of lon at lat keys.")
 
     if chunking and available_mem_gib is not None:
-        ds_out = chunk_dataset(ds_out, chunk_type, available_mem_gib)
+        ds_out = chunk_dataset(ds_out, chunk_type, available_mem_gib, var_name)
     else:
         # if no chunking remove chunking encoding because this might cause errors while writing
         for name in list(ds_out.variables):
@@ -428,6 +444,19 @@ def write_xarray_to_file(  # noqa: PLR0912, PLR0915
     resolution=None,
 ):
     """Write xarray Datasets to file with file type depending on the file suffix."""
+
+    def _metadata_data_vars(dataset):
+        metadata_vars = set()
+        for coord in dataset.coords.values():
+            bounds = coord.attrs.get("bounds")
+            if bounds in dataset:
+                metadata_vars.add(bounds)
+        for var in dataset.data_vars.values():
+            grid_mapping = var.attrs.get("grid_mapping")
+            if grid_mapping in dataset:
+                metadata_vars.add(grid_mapping)
+        return metadata_vars
+
     file_path = Path(file_path)
     if create_folder and not file_path.parent.is_dir():
         file_path.parent.mkdir(parents=True)
@@ -445,16 +474,34 @@ def write_xarray_to_file(  # noqa: PLR0912, PLR0915
             ds = ds.to_dataset(name=var_name)
             data_vars = [var_name]
             logger.debug(f"Creating data vars from dataarray name: {data_vars}")
-        elif var_name is None:
+        elif var_name is None or var_name not in ds.data_vars:
+            if var_name is not None and var_name not in ds.data_vars:
+                logger.warning(
+                    "Requested var_name %r not found in dataset. Using all data variables instead.",
+                    var_name,
+                )
             logger.info(f"Taking data vars from list of ds.data_vars {ds.data_vars}")
-            data_vars = list(ds.data_vars)
+            metadata_vars = _metadata_data_vars(ds)
+            data_vars = [v for v in ds.data_vars if v not in metadata_vars]
         else:
             data_vars = [var_name]
             logger.info(f"Setting data vars as input varname [var_name]: {data_vars}")
+
+        if not data_vars:
+            logger.warning(
+                "Dataset has no data variables. Writing coordinate-only dataset."
+            )
         logger.debug(f"data vars: {data_vars}")
+        ds = apply_output_provenance(ds)
+        _apply_cf_baseline_metadata(ds, data_vars)
         if encoding is None:
             encoding = {
-                v: {"zlib": True, "complevel": 4, "shuffle": True, **NC_ENCODE_DEFAULTS}
+                v: {
+                    "zlib": True,
+                    "complevel": 4,
+                    "shuffle": True,
+                    **NC_ENCODE_DEFAULTS,
+                }
                 for v in data_vars
             }
         else:
@@ -517,29 +564,6 @@ def write_xarray_to_file(  # noqa: PLR0912, PLR0915
                 for key in ("units", "calendar"):
                     if key in bnds_da.attrs:
                         bnds_da.attrs.pop(key, None)
-        # if False and available_mem_gib is not None:
-        #     # ds = chunk_dataset(ds, ChunkType.TIME, available_mem_gib//50)
-        #     dask.config.set(
-        #         {"array.slicing.split_large_chunks": True}
-        #     )  # also works as context manager
-        #     # 3) Limit threads for the local threaded scheduler
-        #     pool = ThreadPoolExecutor(max_workers=1)
-        #     with dask.config.set(scheduler="threads", pool=pool):
-        #         # ds.to_netcdf(file#_path, engine=engine, format='NETCDF4',
-        #         # encoding=encoding)
-        #         delayed = ds.to_netcdf(
-        #             file_path, engine="netcdf4", encoding=encoding, compute=False
-        #         )
-        #         delayed.compute(
-        #             scheduler="threads",
-        #             num_workers=1,
-        #             **(compute_kwargs or {}),
-        #         )
-        # else:
-        #     ds, encoding = move_reserved_attrs_to_encoding(ds, encoding=encoding)
-
-        # if var_name is not None:
-        # encoding = generate_safe_nc_encoding(ds[var_name])
         try:
 
             # Ensure variable attrs do not contain encoding-only keys that
@@ -672,6 +696,36 @@ def write_xarray_to_file(  # noqa: PLR0912, PLR0915
                         bnds_var.encoding["calendar"] = time_var.encoding["calendar"]
                     for key in ("units", "calendar"):
                         bnds_var.attrs.pop(key, None)
+            # Coordinates must not carry stale chunk/compression/backend metadata.
+            # Keep only safe coord encoding keys and force fill-disabled coords.
+            coord_allowed_encoding = {"dtype", "_FillValue", "units", "calendar"}
+            coord_drop_encoding = {
+                "zlib",
+                "szip",
+                "zstd",
+                "bzip2",
+                "blosc",
+                "shuffle",
+                "complevel",
+                "fletcher32",
+                "contiguous",
+                "chunksizes",
+                "preferred_chunks",
+                "source",
+                "original_shape",
+                "_ChunkSizes",
+                "chunks",
+                "compression",
+                "chunking",
+            }
+            for coord in ds_clean.coords:
+                enc = dict(ds_clean[coord].encoding) if ds_clean[coord].encoding else {}
+                for key in coord_drop_encoding:
+                    enc.pop(key, None)
+                enc = {k: v for k, v in enc.items() if k in coord_allowed_encoding}
+                if coord in ds_clean.dims:
+                    enc["_FillValue"] = None
+                ds_clean[coord].encoding = enc
             ds_clean.to_netcdf(
                 file_path, engine=engine, format="NETCDF4", encoding=encoding
             )
@@ -690,10 +744,94 @@ def write_xarray_to_file(  # noqa: PLR0912, PLR0915
                     for key in ("units", "calendar"):
                         ds[bounds_name_raw].attrs.pop(key, None)
             ds.to_netcdf(file_path, engine=engine, format="NETCDF4")
+        except Exception as e:
+            with ErrorLogger(logger):
+                raise e
     else:
         msg = f"Writing to file types other than asci and netcdf is not implemented. The suffix of the file was: {file_path.suffix}"
         with ErrorLogger(logger):
             raise NotImplementedError(msg)
+
+
+def _apply_cf_baseline_metadata(ds: xr.Dataset, data_vars: Sequence[str]) -> None:
+    """Best-effort CF baseline metadata enrichment for NetCDF output.
+
+    This function intentionally does not raise on missing metadata. It logs
+    warnings and leaves the dataset writeable.
+    """
+    if "Conventions" not in ds.attrs:
+        ds.attrs["Conventions"] = CF_DEFAULT_CONVENTIONS
+    elif not str(ds.attrs["Conventions"]).startswith("CF-"):
+        logger.warning(
+            "Global attribute 'Conventions' is not CF-like (%r). Leaving it unchanged.",
+            ds.attrs["Conventions"],
+        )
+
+    lat_key = get_coord_key(ds, lat=True, raise_exception=False)
+    lon_key = get_coord_key(ds, lon=True, raise_exception=False)
+    time_key = get_coord_key(ds, time=True, raise_exception=False)
+
+    if lat_key is None:
+        logger.warning(
+            "Could not infer latitude coordinate; skipping CF latitude attrs."
+        )
+    else:
+        if _lacks_explicit_cf_axis_metadata(ds[lat_key]):
+            logger.warning(
+                "Could not infer latitude coordinate from explicit metadata; "
+                "using inferred coordinate %r.",
+                lat_key,
+            )
+        lat = ds[lat_key]
+        lat.attrs.setdefault("standard_name", "latitude")
+        lat.attrs.setdefault("units", "degrees_north")
+        lat.attrs.setdefault("axis", "Y")
+
+    if lon_key is None:
+        logger.warning(
+            "Could not infer longitude coordinate; skipping CF longitude attrs."
+        )
+    else:
+        if _lacks_explicit_cf_axis_metadata(ds[lon_key]):
+            logger.warning(
+                "Could not infer longitude coordinate from explicit metadata; "
+                "using inferred coordinate %r.",
+                lon_key,
+            )
+        lon = ds[lon_key]
+        lon.attrs.setdefault("standard_name", "longitude")
+        lon.attrs.setdefault("units", "degrees_east")
+        lon.attrs.setdefault("axis", "X")
+
+    if time_key is None:
+        logger.warning("Could not infer time coordinate; skipping CF time attrs.")
+    else:
+        time = ds[time_key]
+        time.attrs.setdefault("standard_name", "time")
+        time.attrs.setdefault("axis", "T")
+
+    for name in data_vars:
+        if name not in ds.data_vars:
+            logger.warning(
+                "Requested data variable %r not in dataset; skipping CF checks for it.",
+                name,
+            )
+            continue
+        attrs = ds[name].attrs
+        if "units" not in attrs:
+            logger.warning(
+                "Data variable %r has no 'units' attribute (CF-recommended).", name
+            )
+        if "standard_name" not in attrs and "long_name" not in attrs:
+            logger.warning(
+                "Data variable %r has neither 'standard_name' nor 'long_name' (CF-recommended).",
+                name,
+            )
+
+
+def _lacks_explicit_cf_axis_metadata(coord: xr.DataArray) -> bool:
+    attrs = coord.attrs
+    return not any(key in attrs for key in ("axis", "standard_name", "units"))
 
 
 def write_xarray_to_ascii(
@@ -979,7 +1117,7 @@ def get_dataset_from_path(
             logger.error("Dataset has only one of lon at lat keys.")
 
         if chunking and available_mem_gib is not None:
-            ds_out = chunk_dataset(ds_out, chunk_type, available_mem_gib)
+            ds_out = chunk_dataset(ds_out, chunk_type, available_mem_gib, var_name)
         else:
             for name in list(ds_out.variables):
                 enc = ds_out.variables[name].encoding

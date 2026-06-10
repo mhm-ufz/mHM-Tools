@@ -2,6 +2,9 @@
 
 import logging
 
+from mhm_tools.common.file_handler import get_xarray_ds_from_file
+from mhm_tools.common.resolution_handler import Resolution
+
 logger = logging.getLogger(__name__)
 
 
@@ -16,14 +19,18 @@ def add_args(parser):
     required_args = parser.add_argument_group("required arguments")
     required_args.add_argument(
         "-i",
+        "--input-dir",
         "--input-path",
+        dest="input_path",
         required=True,
         help="Path to the directory of the existing mHM setup. \
         Can also be used with a file path to crop a single file.",
     )
     required_args.add_argument(
         "-o",
+        "--output-dir",
         "--output-path",
+        dest="output_path",
         required=True,
         help="Path of the directory where the new domain setup should be saved.",
     )
@@ -31,7 +38,9 @@ def add_args(parser):
     flags = parser.add_argument_group("flags")
     optional.add_argument(
         "-f",
+        "--input-name",
         "--file-name",
+        dest="file_name",
         required=False,
         default="*.*",
         help="Input file name. E.g. '*.nc' to copy only nc files or 'pre*' to copy only precipitation files. If the file has a header in it's folder the header is reproduced regardless of wether nor not it fits the filename.",
@@ -49,6 +58,10 @@ def add_args(parser):
     )
     optional.add_argument(
         "--l11-resolution",
+        required=False,
+    )
+    optional.add_argument(
+        "--l2-resolution",
         required=False,
     )
     optional.add_argument(
@@ -140,6 +153,15 @@ def add_args(parser):
             """Do not crop the file but only writes a header. This activate the forced header creation and only header functions."""
         ),
     )
+    flags.add_argument(
+        "--mask-all",
+        required=False,
+        default=False,
+        action="store_true",
+        help=(
+            """Apply the mask to all cropped files (not only DEM). Useful with --mask-var mask_l2 for meteo files."""
+        ),
+    )
     optional.add_argument(
         "--output-var",
         required=False,
@@ -201,14 +223,22 @@ def run(args):
         with ErrorLogger(logger):
             raise ValueError(msg)
     lonslice = slice(lon_min_target_grid, lon_max_target_grid)
-    # l0_resolution = float(args.lonlatbox.split(",")[4])
+    mask_ds = get_xarray_ds_from_file(args.mask_file)
+
     available_mem = get_available_mem_in_unit(args.available_mem)
+    resolutions = Resolution(
+        l1=args.l1_resolution,
+        l2=args.l2_resolution,
+        l11=args.l11_resolution,
+    )
+    logger.info(
+        f"Using resolutions: l0={resolutions.l0}, l1={resolutions.l1}, l2={resolutions.l2}, l11={resolutions.l11}"
+    )
     crop_mhm_setup(
         input_path=args.input_path,
         output_path=args.output_path,
-        mask_da=mask_da,
-        l1_resolution=args.l1_resolution,
-        l11_resolution=args.l11_resolution,
+        mask_ds=mask_ds,
+        resolutions=resolutions,
         lonslice=lonslice,
         latslice=latslice,
         crs=args.crs,
@@ -221,4 +251,6 @@ def run(args):
         no_cropping=args.no_cropping,
         lat_order=args.lat_order,
         output_suffix=args.output_suffix,
+        mask_all=args.mask_all,
+        mask_var=args.mask_var,
     )

@@ -1,6 +1,5 @@
 """Create the mHM restart file."""
 
-import itertools
 import logging
 import re
 import shutil
@@ -467,6 +466,8 @@ class MHMRestartFile:
             if self.increment_l1 is not None
             else None
         )
+        self._l1_land_mask_bbox = None
+        self._tile_origins = None
 
     def _create_namelist(self, replace_dict, out_file_path):
         if type(out_file_path) is not Path:
@@ -544,36 +545,118 @@ class MHMRestartFile:
         )
         return l0, l1
 
+    def _get_l1_land_mask_bbox(self):
+        """Get min/max lon/lat bbox containing finite land-mask values."""
+        if self._l1_land_mask_bbox is not None:
+            return self._l1_land_mask_bbox
+        if self.grid.land_mask_file is None:
+            msg = "No land_mask_file set on grid; cannot derive active tile bbox."
+            with ErrorLogger(logger):
+                raise ValueError(msg)
+        with get_xarray_ds_from_file(
+            self.grid.land_mask_file, normalize_latlon_coords=True
+        ) as ds_mask:
+            if "land_mask" in ds_mask.data_vars:
+                mask_da = ds_mask["land_mask"]
+            else:
+                mask_da = ds_mask[next(iter(ds_mask.data_vars))]
+            lat_key = get_coord_key(mask_da, lat=True)
+            lon_key = get_coord_key(mask_da, lon=True)
+            extra_dims = [d for d in mask_da.dims if d not in (lat_key, lon_key)]
+            for dim in extra_dims:
+                mask_da = mask_da.isel({dim: 0}, drop=True)
+            mask_da = mask_da.load()
+        valid = np.isfinite(mask_da.values)
+        if not np.any(valid):
+            msg = (
+                "Land mask has no finite values; cannot derive active tile bbox for "
+                "splitting."
+            )
+            with ErrorLogger(logger):
+                raise ValueError(msg)
+        valid_rows = np.where(np.any(valid, axis=1))[0]
+        valid_cols = np.where(np.any(valid, axis=0))[0]
+        lat_vals = mask_da[lat_key].values
+        lon_vals = mask_da[lon_key].values
+        lat_min = float(np.min(lat_vals[valid_rows]))
+        lat_max = float(np.max(lat_vals[valid_rows]))
+        lon_min = float(np.min(lon_vals[valid_cols]))
+        lon_max = float(np.max(lon_vals[valid_cols]))
+        self._l1_land_mask_bbox = {
+            "lon_min": lon_min,
+            "lon_max": lon_max,
+            "lat_min": lat_min,
+            "lat_max": lat_max,
+        }
+        logger.info(
+            "Using land-mask bbox for tiling: lon[%s, %s], lat[%s, %s]",
+            lon_min,
+            lon_max,
+            lat_min,
+            lat_max,
+        )
+        return self._l1_land_mask_bbox
+
+    def _tile_intersects_bbox(self, l1, bbox):
+        """Return True when an L1 tile intersects the bbox."""
+        eps = abs(float(self.grid.l1.resolution)) * 1e-9
+        lon_overlap = (l1.lon_min <= bbox["lon_max"] + eps) and (
+            l1.lon_max >= bbox["lon_min"] - eps
+        )
+        lat_overlap = (l1.lat_min <= bbox["lat_max"] + eps) and (
+            l1.lat_max >= bbox["lat_min"] - eps
+        )
+        return bool(lon_overlap and lat_overlap)
+
+    def _iter_active_tile_origins(self):
+        """Iterate over tile origins overlapping finite-value land-mask bbox."""
+        if self._tile_origins is not None:
+            return self._tile_origins
+        bbox = self._get_l1_land_mask_bbox()
+        lon_range = np.arange(
+            self.grid.l1.lon_min,
+            self.grid.l1.lon_max,
+            self.grid.l1.resolution * self.increment_l1,
+        )
+        lat_range = np.arange(
+            self.grid.l1.lat_min,
+            self.grid.l1.lat_max,
+            self.grid.l1.resolution * self.increment_l1,
+        )
+        origins = []
+        skipped = 0
+        for i, lon_min in enumerate(lon_range):
+            for j, lat_min in enumerate(lat_range):
+                _l0, l1 = self._create_latlon(lon_min, lat_min)
+                if self._tile_intersects_bbox(l1, bbox):
+                    origins.append((i, lon_min, j, lat_min))
+                else:
+                    skipped += 1
+        if not origins:
+            msg = "No tiles intersect the finite-value land-mask bbox."
+            with ErrorLogger(logger):
+                raise ValueError(msg)
+        logger.info(
+            "Using %d active tiles from land-mask bbox filter (skipped %d tiles).",
+            len(origins),
+            skipped,
+        )
+        self._tile_origins = origins
+        return self._tile_origins
+
     def _read_subgrids_from_files(self):
         """Read the subgrids from the files on disk."""
-        for i, lon_min in enumerate(
-            np.arange(
-                self.grid.l1.lon_min,
-                self.grid.l1.lon_max,
-                self.grid.l1.resolution * self.increment_l1,
-            )
-        ):
-            for j, lat_min in enumerate(
-                np.arange(
-                    self.grid.l1.lat_min,
-                    self.grid.l1.lat_max,
-                    self.grid.l1.resolution * self.increment_l1,
-                )
-            ):
-                l0, l1 = self._create_latlon(lon_min, lat_min)
-                subgrid_path = self.work_path / f"slice_{i}_{j}"
-                logger.debug(f"Reading subgrid {subgrid_path}")
-                logger.debug(
-                    f"l0: {l0.lon_min}, {l0.lon_max}, {l0.lat_min}, {l0.lat_max}"
-                )
-                if not subgrid_path.is_dir():
-                    logger.error(f"Subgrid {subgrid_path} not found")
-                    continue
-                grid = Grid(
-                    file_path=subgrid_path, name=subgrid_path.name, l0=l0, l1=l1
-                )
-                grid.read_morph_files()
-                self.subgrids.append(grid)
+        for i, lon_min, j, lat_min in self._iter_active_tile_origins():
+            l0, l1 = self._create_latlon(lon_min, lat_min)
+            subgrid_path = self.work_path / f"slice_{i}_{j}"
+            logger.debug(f"Reading subgrid {subgrid_path}")
+            logger.debug(f"l0: {l0.lon_min}, {l0.lon_max}, {l0.lat_min}, {l0.lat_max}")
+            if not subgrid_path.is_dir():
+                logger.error(f"Subgrid {subgrid_path} not found")
+                continue
+            grid = Grid(file_path=subgrid_path, name=subgrid_path.name, l0=l0, l1=l1)
+            grid.read_morph_files()
+            self.subgrids.append(grid)
 
     def _split_grid(self):  # has do addapted to different file types not just .nc
         """Split the grid into subgrids and write them to disk.
@@ -586,13 +669,21 @@ class MHMRestartFile:
             error_message = "Increment for splitting grids is not set"
             with ErrorLogger(logger):
                 raise ValueError(error_message)
+        self._tile_origins = self._iter_active_tile_origins()
+        sub_grid_paths = {}
         for name, file_path in self.grid.morph_files.get_files_as_dict().items():
             if file_path is not None and file_path:
-                sub_grid_paths = self._split_file(name, file_path)
+                current_paths = self._split_file(name, file_path)
+                if current_paths:
+                    sub_grid_paths.update(current_paths)
             else:
                 logger.warning(
                     f"There is no file for {name} that could be split at path {file_path}"
                 )
+        if not sub_grid_paths:
+            msg = "No subgrid files were created during split."
+            with ErrorLogger(logger):
+                raise ValueError(msg)
         logger.debug("Creating subgrids")
         self.subgrids = [Grid(file_path=k, **v) for k, v in sub_grid_paths.items()]
         logger.debug("Splitting grid done")
@@ -612,19 +703,20 @@ class MHMRestartFile:
         lon_slice = slice(l1.lon_min, l1.lon_max)
         lat_slice = slice(l1.lat_max, l1.lat_min)
         logger.debug(f"slice_{i}_{j}: lat {lat_slice}; lon {lon_slice}")
+        lon_key = get_coord_key(ds, lon=True)
+        lat_key = get_coord_key(ds, lat=True)
         ds_cut = ds.sel(
-            longitude=lon_slice,
-            latitude=lat_slice,
+            {lon_key: lon_slice, lat_key: lat_slice},
         )
         if "slope" in file_path.name or "geology" in file_path.name:
-            ds_cut = ds_cut.sortby("latitude")
+            ds_cut = ds_cut.sortby(lat_key)
         try:
             write_xarray_to_file(ds_cut, out_path)
             logger.debug(f"Written {out_path}")
         except Exception as e:
             logger.error(f"Failed to write {out_path} with {e}")
             logger.debug(f"{l1.lon_min}, {l1.lon_max}, {l1.lat_min}, {l1.lat_max}")
-            logger.debug(ds_cut["latitude"].values)
+            logger.debug(ds_cut[lat_key].values)
             return None
         return {
             out_dir: {
@@ -648,24 +740,14 @@ class MHMRestartFile:
             logger.error(f"File {file_path} is not a netCDF file")
             return None
         logger.debug(f"Splitting {file_path}")
+        tile_origins = self._iter_active_tile_origins()
         with get_xarray_ds_from_file(file_path) as ds:
-            lon_range = np.arange(
-                self.grid.l1.lon_min,
-                self.grid.l1.lon_max,
-                self.grid.l1.resolution * self.increment_l1,
-            )
-            lat_range = np.arange(
-                self.grid.l1.lat_min,
-                self.grid.l1.lat_max,
-                self.grid.l1.resolution * self.increment_l1,
-            )
-            iter_product = itertools.product(enumerate(lon_range), enumerate(lat_range))
             sub_grid_paths = Parallel(n_jobs=self.ncpus, backend="loky")(
                 delayed(self._split_cell)(ds, file_path, i, lon_min, j, lat_min)
-                for (i, lon_min), (j, lat_min) in iter_product
+                for i, lon_min, j, lat_min in tile_origins
             )
         logger.debug(f"Splitting {file_path} done")
-        return {k: v for d in sub_grid_paths for k, v in d.items()}
+        return {k: v for d in sub_grid_paths if d is not None for k, v in d.items()}
 
     def _order_dims(self, dims):
         """Order the dimensions of the data variable.
@@ -884,16 +966,42 @@ class MHMRestartFile:
     def _correct_restart_file(self, ds=None):
         if ds is None:
             ds = get_xarray_ds_from_file(self.grid.restart_file)
-        ds_mask = get_xarray_ds_from_file(self.grid.land_mask_file)
-        logger.debug(
-            f"land mask shape before sel: {ds_mask.land_mask.shape} lat_min: {ds_mask.land_mask.lat.min()}, lat_max: {ds_mask.land_mask.lat.max()}"
+        ds_mask = get_xarray_ds_from_file(
+            self.grid.land_mask_file, normalize_latlon_coords=True
         )
-        ds_mask = ds_mask.sel(
-            lon=slice(self.grid.l1.lon_min, self.grid.l1.lon_max),
-            lat=slice(self.grid.l1.lat_max, self.grid.l1.lat_min),
+        if "land_mask" in ds_mask.data_vars:
+            mask_da = ds_mask["land_mask"]
+        else:
+            mask_da = ds_mask[next(iter(ds_mask.data_vars))]
+        mask_lat_key = get_coord_key(mask_da, lat=True)
+        mask_lon_key = get_coord_key(mask_da, lon=True)
+        extra_dims = [d for d in mask_da.dims if d not in (mask_lat_key, mask_lon_key)]
+        for dim in extra_dims:
+            mask_da = mask_da.isel({dim: 0}, drop=True)
+        logger.debug(
+            "land mask shape before sel: %s lat_min: %s, lat_max: %s",
+            mask_da.shape,
+            mask_da[mask_lat_key].min(),
+            mask_da[mask_lat_key].max(),
+        )
+        lat_vals = mask_da[mask_lat_key].values
+        lat_descending = lat_vals[0] > lat_vals[-1]
+        lat_slice = (
+            slice(self.grid.l1.lat_max, self.grid.l1.lat_min)
+            if lat_descending
+            else slice(self.grid.l1.lat_min, self.grid.l1.lat_max)
+        )
+        ds_mask = mask_da.sel(
+            {
+                mask_lon_key: slice(self.grid.l1.lon_min, self.grid.l1.lon_max),
+                mask_lat_key: lat_slice,
+            }
         )
         logger.debug(
-            f"land mask shape after sel: {ds_mask.land_mask.shape} lat_min: {ds_mask.land_mask.lat.min()}, lat_max: {ds_mask.land_mask.lat.max()}"
+            "land mask shape after sel: %s lat_min: %s, lat_max: %s",
+            ds_mask.shape,
+            ds_mask[mask_lat_key].min(),
+            ds_mask[mask_lat_key].max(),
         )
         # logger.debug(f'lon: ds {ds['lon_out'].values[0]}-{ds['lon_out'].values[-1]} ; grid {self.grid.l1.lon_min}-{self.grid.l1.lon_max}')
         # logger.debug(f'lat: ds {ds['lat_out'].values[0]}-{ds['lat_out'].values[-1]} ; grid {self.grid.l1.lat_min}-{self.grid.l1.lat_max}')
@@ -901,15 +1009,16 @@ class MHMRestartFile:
         # logger.debug(f'mask lon: {ds_mask['lon'].data[0]} to {ds_mask['lon'].data[-1]} with length {np.shape(ds_mask['lon'].data)}')
         # logger.debug(f'ds: {np.shape(ds["L1_SoilMoistureExponent"].data)}')
         try:
-            mask_lat_key = get_coord_key(ds_mask, lat=True)
             ds_mask = ds_mask.sortby(mask_lat_key)
         except Exception as e:
             logger.error(f"Could not sort by latitude {e}")
             ds_mask = ds_mask.sortby("lat")
+        land_mask_data = ds_mask.values
+        land_mask_active = np.isfinite(land_mask_data) & (land_mask_data > 0)
         # ds_mask = xr.open_dataset(
         #     "/work/luedke/land_mask_0p1.nc"
         # ).sortby("latitude")
-        ncells = int(ds_mask["land_mask"].sum())
+        ncells = int(np.sum(land_mask_active))
         ds.attrs = {
             "xllcorner_L1": (
                 self.grid.l1.lon_min
@@ -942,7 +1051,7 @@ class MHMRestartFile:
         }
         ds["L1_domain_mask"] = (
             ("lat_out", "lon_out"),
-            ds_mask["land_mask"].data.astype(int),
+            land_mask_active.astype(int),
         )
         ds["L1_domain_lat"] = (
             ("lat_out", "lon_out"),
@@ -954,13 +1063,11 @@ class MHMRestartFile:
         )
         ds["L1_domain_cellarea"] = (
             ("lat_out", "lon_out"),
-            np.full_like(
-                ds_mask["land_mask"].data, self.grid.l1.resolution**2, dtype=float
-            ),
+            np.full_like(land_mask_active, self.grid.l1.resolution**2, dtype=float),
         )
         ds["L0_domain_mask"] = (
             ("lat_out", "lon_out"),
-            ds_mask["land_mask"].data.astype(int),
+            land_mask_active.astype(int),
         )
         ds["L0_domain_lat"] = (
             ("lat_out", "lon_out"),
@@ -972,9 +1079,7 @@ class MHMRestartFile:
         )
         ds["L0_domain_cellarea"] = (
             ("lat_out", "lon_out"),
-            np.full_like(
-                ds_mask["land_mask"].data, self.grid.l1.resolution**2, dtype=float
-            ),
+            np.full_like(land_mask_active, self.grid.l1.resolution**2, dtype=float),
         )
         ds["L1_fAsp"] = (
             ("lat_out", "lon_out"),
@@ -1074,7 +1179,7 @@ class MHMRestartFile:
         )
 
         mask = np.stack(
-            [np.isnan(ds["L1_maxInter"].data)[0, :, :] & ds_mask["land_mask"].data]
+            [np.isnan(ds["L1_maxInter"].data)[0, :, :] & land_mask_active]
             * ds["L1_maxInter"].shape[0],
             axis=0,
         )
@@ -1113,9 +1218,7 @@ class MHMRestartFile:
                     slicer.append(None)
             logger.debug(f"Masking {data_var}")
             ds[data_var] = ds[data_var].where(
-                np.broadcast_to(
-                    ds_mask["land_mask"].data[tuple(slicer)], ds[data_var].shape
-                )
+                np.broadcast_to(land_mask_active[tuple(slicer)], ds[data_var].shape)
             )
             if "L1_SoilHorizons" in ds[data_var].dims:
                 ds[data_var] = ds[data_var].transpose(
@@ -1234,14 +1337,20 @@ class MHMRestartFile:
             for sgrid in self.subgrids:
                 with get_xarray_ds_from_file(sgrid.morph_files.slope) as ds_slope:
                     data = ds_slope["slope"]
-                    flattened = data.values.flatten()
-                    flattened_no_nan = flattened[~np.isnan(flattened)]
-                    td.update(flattened_no_nan)
+                    flattened = np.asarray(data.values).ravel()
+                    finite_values = flattened[np.isfinite(flattened)]
+                    if finite_values.size > 0:
+                        td.update(finite_values)
             for sgrid in self.subgrids:
                 with get_xarray_ds_from_file(sgrid.morph_files.slope) as ds_slope:
                     data = ds_slope["slope"]
-                    cdf = td.cdf(data.values)
-                    cdf = xr.DataArray(cdf, dims=["latitude", "longitude"])
+                    data_values = np.asarray(data.values)
+                    finite_mask = np.isfinite(data_values)
+                    cdf = np.full(data_values.shape, np.nan, dtype=float)
+                    finite_values = data_values[finite_mask]
+                    if finite_values.size > 0:
+                        cdf[finite_mask] = td.cdf(finite_values)
+                    cdf = xr.DataArray(cdf, dims=data.dims, coords=data.coords)
                     ds_slope["slope"] = cdf
                     ds_slope_emp = ds_slope.rename({"slope": "slope_emp"})
                     write_xarray_to_file(ds_slope_emp, sgrid.path / "slope_emp.nc")
