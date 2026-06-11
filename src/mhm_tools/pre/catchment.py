@@ -1264,7 +1264,7 @@ class Catchment:
                 )  # sqrt(x1**2 + x2**2)
             else:
                 score = 1 - shape_overlap_ratio
-            if (
+            if score <= max_error and (
                 best_candidate_index is None
                 or score < best_candidate_score
                 or (
