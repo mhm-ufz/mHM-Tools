@@ -157,6 +157,80 @@ def _rasterize_shape_to_mask(reference_shape, grid_shape, affine_transform):
     return mask.astype(bool)
 
 
+def _cell_polygon(affine_transform, row_idx, col_idx):
+    """Create a polygon for one raster cell from an affine transform."""
+    try:
+        from shapely.geometry import Polygon
+    except Exception as exc:
+        error_msg = "shapely is required for shape/grid overlap calculation."
+        with ErrorLogger(logger):
+            raise ImportError(error_msg) from exc
+
+    corners = [
+        affine_transform * (col_idx, row_idx),
+        affine_transform * (col_idx + 1, row_idx),
+        affine_transform * (col_idx + 1, row_idx + 1),
+        affine_transform * (col_idx, row_idx + 1),
+    ]
+    return Polygon(corners)
+
+
+def _calculate_shape_area_on_grid(
+    reference_shape, cell_area, grid_shape, affine_transform
+):
+    """Calculate shape-covered area on a grid in km2.
+
+    Fractional cell overlap is used when shapely operations are available. If that
+    fails, fall back to summing cells from the existing rasterized shape mask.
+    """
+    if reference_shape is None or reference_shape.empty or cell_area is None:
+        return None
+
+    cell_area = np.asarray(cell_area)
+    if cell_area.shape != tuple(grid_shape):
+        msg = (
+            f"cell_area shape {cell_area.shape} does not match grid shape "
+            f"{tuple(grid_shape)} for shape area calculation."
+        )
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+
+    affine_transform = _as_affine(affine_transform)
+    shape_mask = _rasterize_shape_to_mask(
+        reference_shape,
+        grid_shape,
+        affine_transform,
+    )
+    if shape_mask is None or not np.any(shape_mask):
+        return None
+
+    try:
+        reference_geom = _geometry_union(reference_shape.geometry)
+        if reference_geom.is_empty:
+            return None
+
+        area = 0.0
+        for row_idx, col_idx in zip(*np.where(shape_mask)):
+            cell_geom = _cell_polygon(affine_transform, int(row_idx), int(col_idx))
+            cell_geom_area = cell_geom.area
+            if cell_geom_area <= 0:
+                continue
+            overlap_area = reference_geom.intersection(cell_geom).area
+            overlap_fraction = np.clip(overlap_area / cell_geom_area, 0.0, 1.0)
+            area += float(cell_area[row_idx, col_idx]) * float(overlap_fraction)
+        if area > 0:
+            return float(area)
+    except Exception as exc:
+        logger.debug(
+            "Could not calculate fractional shape/grid overlap; falling back to "
+            "rasterized-cell area sum: %s",
+            exc,
+        )
+
+    area = float(np.sum(cell_area[shape_mask]))
+    return area if area > 0 else None
+
+
 def _vectorize_mask_to_gdf(basin_mask, affine_transform, crs, value_name="basin"):
     """Vectorize a basin mask into a GeoDataFrame."""
     try:
@@ -1109,6 +1183,40 @@ class Catchment:
         )
         return gauge_lat, gauge_lon
 
+    def calculate_shape_area_on_current_grid(
+        self,
+        reference_shape,
+        shape_label="reference shape",
+    ):
+        """Calculate the area covered by a shape on the current grid in km2."""
+        if reference_shape is None or getattr(reference_shape, "empty", False):
+            return None
+        if self._fdir is None:
+            logger.warning(
+                "Flow direction is not initialized; cannot calculate shape area."
+            )
+            return None
+        if self.cell_area is None:
+            self.compute_cell_area()
+        shape_area = _calculate_shape_area_on_grid(
+            reference_shape,
+            self.cell_area,
+            self._fdir.shape,
+            getattr(self._fdir, "transform", self.transform),
+        )
+        if shape_area is None:
+            logger.warning(
+                "Could not calculate area covered by %s on the current grid.",
+                shape_label,
+            )
+            return None
+        logger.info(
+            "Calculated %.2f km2 covered by %s on the current grid.",
+            shape_area,
+            shape_label,
+        )
+        return shape_area
+
     def find_best_gauge_location_shape(  # noqa: PLR0911, PLR0912, PLR0915
         self,
         upstream_area,
@@ -1146,6 +1254,11 @@ class Catchment:
             lat_values = self.ds.lat.data
             lon_values = self.ds.lon.data
 
+        if ref_catchment_area is None:
+            ref_catchment_area = self.calculate_shape_area_on_current_grid(
+                reference_shape,
+                shape_label=shape_label,
+            )
         if gauge_coords is None:
             started_from_shape = True
             gauge_coords = self.derive_gauge_coords_from_shape(
