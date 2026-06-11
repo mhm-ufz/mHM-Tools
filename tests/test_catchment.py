@@ -1120,6 +1120,8 @@ class TestCatchment(unittest.TestCase):
             corrected_coords = c.correct_gauge_location_l1_from_shape(
                 l0_shape,
                 (self.GAUGE_LAT[0], self.GAUGE_LON[0]),
+                max_distance_cells=10,
+                max_error=0.3,
                 reference_upstream_area=self.REF_AREA[0],
             )
             self.assertIsNotNone(corrected_coords)

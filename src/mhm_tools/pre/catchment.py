@@ -1054,6 +1054,7 @@ class Catchment:
         l0_shape_gdf,
         gauge_coords,
         max_distance_cells=5,
+        max_error=0.5,
         ref_catchment_area=None,
         reference_upstream_area=None,
     ):
@@ -1086,7 +1087,7 @@ class Catchment:
             shape_folder=None,
             gauge_id=None,
             max_distance_cells=max_distance_cells,
-            max_error=1.0,
+            max_error=max_error,
             reference_shape_gdf=l0_shape_gdf,
             lat_values=lat_coords,
             lon_values=lon_coords,
@@ -1229,7 +1230,7 @@ class Catchment:
         reference_shape_gdf=None,
         lat_values=None,
         lon_values=None,
-        limit_by_error=False,
+        limit_by_error=True,
         started_from_shape=False,
     ):
         """Find best gauge location using shape similarity."""
@@ -1354,8 +1355,9 @@ class Catchment:
             basin_mask = basin > 0
             if not np.any(basin_mask):
                 continue
+            basin_transform = getattr(self._fdir, "transform", self.transform)
             gdf = _vectorize_mask_to_gdf(
-                basin_mask, self.transform, crs, value_name="basin"
+                basin_mask, basin_transform, crs, value_name="basin"
             )
             shape_overlap_ratio = _shape_iou(reference_shape, gdf)
             upstream_value = upstream_area[row_idx, col_idx]
@@ -1374,10 +1376,12 @@ class Catchment:
                 )
                 score = np.hypot(
                     1 - upstream_area_ratio, 1 - shape_overlap_ratio
+                ) / np.sqrt(
+                    2
                 )  # sqrt(x1**2 + x2**2)
             else:
                 score = 1 - shape_overlap_ratio
-            if score <= max_error and (
+            if (
                 best_candidate_index is None
                 or score < best_candidate_score
                 or (
@@ -1392,9 +1396,6 @@ class Catchment:
                 best_candidate_upstream_area = upstream_value
                 best_candidate_distance_100m = distance_100m
 
-        if best_candidate_index is None:
-            logger.warning("No suitable candidate found for shape-based correction.")
-            return None
         if (
             ref_catchment_area is None
             and best_candidate_shape_iou <= 0
@@ -1415,10 +1416,8 @@ class Catchment:
                 )
                 return None
             logger.warning(
-                "No shape-overlap candidate found around gauge coordinates %s; "
-                "retrying from highest upstream-area cell inside %s.",
-                gauge_coords,
-                shape_label,
+                f"No shape-overlap candidate found around gauge coordinates {gauge_coords}; "
+                f"retrying from highest upstream-area cell inside {shape_label}.",
             )
             return self.find_best_gauge_location_shape(
                 upstream_area,
@@ -1434,24 +1433,22 @@ class Catchment:
                 limit_by_error=limit_by_error,
                 started_from_shape=True,
             )
-        distance = distance_100m_units(
-            best_candidate_index[0] - gauge_row,
-            best_candidate_index[1] - gauge_col,
-            l0_resolution=self.upscaled_resolution,
-            lat_deg=lat_deg,
-        )
+        if best_candidate_index is None or best_candidate_score > max_error:
+            logger.warning("No suitable candidate found for shape-based correction.")
+            logger.warning(
+                f"Score {best_candidate_score:.3f} > {max_error} from IoU {best_candidate_shape_iou:.3f};  and area {best_candidate_upstream_area:.0f}km^2 / {ref_catchment_area:.0f}km^2."
+            )
+            return None
+
         area_error = (
             abs(1 - best_candidate_upstream_area / ref_catchment_area)
             if ref_catchment_area and best_candidate_upstream_area
-            else 0.0
+            else -9999
         )
         logger.info(
-            "Shape-based gauge correction used %s with IoU %.3f and area error %.3f.",
-            shape_label,
-            best_candidate_shape_iou,
-            area_error,
+            f"Shape-based gauge correction used {shape_label} with IoU {best_candidate_shape_iou:.3f}; area error {area_error:.3f} and distance {best_candidate_distance_100m/10:.2f}km.",
         )
-        return best_candidate_index, area_error, distance
+        return best_candidate_index, area_error, best_candidate_distance_100m
 
     def get_best_gauge_coordinate(
         self,
@@ -2746,6 +2743,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                     l0_shape_gdf,
                     (c.gauge_lats[-1], c.gauge_lons[-1]),
                     max_distance_cells=max_distance_cells,
+                    max_error=max_error,
                     ref_catchment_area=ref_catchment_area,
                 )
                 if new_coords is not None:
@@ -2993,6 +2991,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                     l0_shape_gdf,
                     (gauge.lat, gauge.lon),
                     max_distance_cells=max_distance_cells,
+                    max_error=max_error,
                     ref_catchment_area=gi.get("ref_area"),
                 )
                 if new_coords is not None:
