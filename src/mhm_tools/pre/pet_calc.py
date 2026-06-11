@@ -369,7 +369,7 @@ def get_time_and_freq(ds, stat_freq):
 
 
 @log_arguments("INFO")
-def calculate_pet( # noqa: PLR0915
+def calculate_pet(  # noqa: PLR0915
     out_file: str,
     tavg_file: Optional[str] = None,
     tmax_file: Optional[str] = None,

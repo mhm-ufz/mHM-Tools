@@ -44,7 +44,6 @@ dependencies = [
   "pandas<2; python_version=='3.8'",
   "pyproj",
   "pyflwdir",
-  "matplotlib",
   "scipy",
   "joblib",
   "crick",

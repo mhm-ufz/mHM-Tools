@@ -1525,7 +1525,7 @@ class Catchment:
                         max_distance_cells=max_distance_cells,
                         max_error=max_error,
                         method="basinex",
-                        raise_on_fallback=False,
+                        raise_on_fallback=True,
                     )
                 )
                 outlet_idx_bu, error_bu, distance_error_bu = (
@@ -1538,7 +1538,7 @@ class Catchment:
                         max_distance_cells=max_distance_cells,
                         max_error=max_error,
                         method="burek",
-                        raise_on_fallback=False,
+                        raise_on_fallback=True,
                     )
                 )
                 logger.info("Results of basin correction:")
@@ -1577,9 +1577,13 @@ class Catchment:
             logger.info(
                 f"Moved outlet {distance_error/10:.2}km shifting latitude {float(gauge_coords[0])} to {new_lat} and longitude {float(gauge_coords[1])} to {new_lon}."
             )
+        elif shape_result is None and shape_folder and gauge_id is not None:
+            error_msg = f"Shape-based correction failed for gauge_id {gauge_id}, and no area-based correction applied."
+            with ErrorLogger(logger):
+                raise ValueError(error_msg)
         else:
             logger.warning(
-                "No catchment area provided; falling back to original gauge coordinates."
+                "No catchment area or shape provided; falling back to original gauge coordinates."
             )
             if gauge_coords is None:
                 msg = "Gauge coordinates are required when neither shape-based nor area-based correction succeeds."
@@ -2869,22 +2873,6 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                 )
                 # combine all river masks
                 streams_mask = None
-                # logger.info("Creating stream masks for all gauges.")
-                # for gi in gauge_infos:
-                #     if gi["ref_area"] is None or gi["error"] is None:
-                #         continue
-                # if streams_mask is None:
-                #     low = gi["ref_area"] * (1 - gi["error"] - 1e-6)
-                #     high = gi["ref_area"] * (1 + gi["error"] + 1e-6)
-                #     streams_mask = np.asarray(
-                #         (upstream_area > low) & (upstream_area < high), dtype=bool
-                #     )
-                # else:
-                # low = gi["ref_area"] * (1 - gi["error"] - 1e-6)
-                # high = gi["ref_area"] * (1 + gi["error"] + 1e-6)
-                # streams_mask |= np.asarray(
-                #     (upstream_area > low) & (upstream_area < high), dtype=bool
-                # )
                 logger.info("Delineating basins for all gauges.")
                 # if streams_mask is None or not np.any(streams_mask):
                 # logger.warning("No river mask found for any gauge.")
