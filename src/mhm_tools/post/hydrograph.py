@@ -18,7 +18,7 @@ from matplotlib import gridspec
 
 from mhm_tools.common.file_handler import get_xarray_ds_from_file
 from mhm_tools.common.logger import ErrorLogger, log_arguments
-from mhm_tools.common.spatial_metrics import create_csv_from_dict
+from mhm_tools.common.metrics.metrics_handler import create_csv_from_dict
 from mhm_tools.common.utils import dict_to_multiline_string
 
 logger = logging.getLogger(__name__)
