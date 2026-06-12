@@ -57,7 +57,7 @@ def test_calculate_objectives_for_gridded_data_keys():
 
 
 def test_create_results_csv_defaults_to_all(tmp_path):
-    """Result CSV defaults to the existing TSM metric."""
+    """Result CSV defaults to all accepted metrics."""
     m1 = np.random.RandomState(2).rand(3, 2, 2)
     m2 = np.random.RandomState(3).rand(3, 2, 2)
 
@@ -71,6 +71,9 @@ def test_create_results_csv_defaults_to_all(tmp_path):
     df2 = pd.read_csv(tmp_path / "spaef.csv", index_col=0)
     assert "spaef" in df2.columns
     assert "comb" not in df2.columns
+    df3 = pd.read_csv(tmp_path / "esp.csv", index_col=0)
+    assert "esp" in df3.columns
+    assert "comb" not in df3.columns
 
 
 def test_create_results_csv_accepts_spaef(tmp_path):
@@ -93,6 +96,31 @@ def test_create_results_csv_accepts_spaef(tmp_path):
     assert "beta" in df.columns
     assert "gamma" in df.columns
     assert np.isclose(df.loc[0, "spaef"], 1.0)
+
+
+def test_create_results_csv_accepts_esp(tmp_path):
+    """Result CSV can write ESP components."""
+    m1 = np.arange(12, dtype=float).reshape(3, 2, 2)
+    m2 = m1.copy()
+
+    metrics_handler.create_results_csv(
+        map1=m1,
+        map2=m2,
+        ds1_name="input",
+        ds2_name="ref",
+        out_dir=tmp_path,
+        metric="esp",
+    )
+
+    df = pd.read_csv(tmp_path / "esp.csv", index_col=0)
+    assert "esp" in df.columns
+    assert "rs" in df.columns
+    assert "gamma" in df.columns
+    assert "alpha" in df.columns
+    assert np.isclose(df.loc[0, "esp"], 1.0)
+    assert np.isclose(df.loc[0, "rs"], 1.0)
+    assert np.isclose(df.loc[0, "gamma"], 1.0)
+    assert np.isclose(df.loc[0, "alpha"], 0.0)
 
 
 def test_create_results_csv_rejects_unknown_metric(tmp_path):
