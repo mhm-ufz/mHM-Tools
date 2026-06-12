@@ -5,15 +5,25 @@ import logging
 import pandas as pd
 
 from mhm_tools.common.metrics.esp import ESP
+from mhm_tools.common.metrics.mspaef import MSPAEF
 from mhm_tools.common.metrics.spaef import SPAEF
 from mhm_tools.common.metrics.tsm import calculate_tsm_for_gridded_data
+from mhm_tools.common.metrics.waspaef import WASPAEF
 from mhm_tools.common.utils import pretty_print_df
 
 logger = logging.getLogger(__name__)
 RESULT_METRIC_TSM = "TSM"
 RESULT_METRIC_SPAEF = "SPAEF"
 RESULT_METRIC_ESP = "ESP"
-ACCEPTED_RESULT_METRICS = (RESULT_METRIC_TSM, RESULT_METRIC_SPAEF, RESULT_METRIC_ESP)
+RESULT_METRIC_WASPAEF = "WASPAEF"
+RESULT_METRIC_MSPAEF = "MSPAEF"
+ACCEPTED_RESULT_METRICS = (
+    RESULT_METRIC_TSM,
+    RESULT_METRIC_SPAEF,
+    RESULT_METRIC_ESP,
+    RESULT_METRIC_WASPAEF,
+    RESULT_METRIC_MSPAEF,
+)
 
 
 def normalize_results_metric(metric):
@@ -54,6 +64,32 @@ def calculate_esp_for_gridded_data(map1, map2, ds1_name, ds2_name):
     }
 
 
+def calculate_waspaef_for_gridded_data(map1, map2, ds1_name, ds2_name):
+    """Calculate WASPAEF metrics for two gridded datasets."""
+    waspaef, rho, sigma, wd = WASPAEF(map1, map2)
+    return {
+        "name": ds1_name + "-" + ds2_name,
+        "waspaef": waspaef,
+        "rho": rho,
+        "sigma": sigma,
+        "wd": wd,
+    }
+
+
+def calculate_mspaef_for_gridded_data(map1, map2, ds1_name, ds2_name):
+    """Calculate MSPAEF metrics for two gridded datasets."""
+    mspaef, nrmse, sigma, sigma_error, mean_bias, rho = MSPAEF(map1, map2)
+    return {
+        "name": ds1_name + "-" + ds2_name,
+        "mspaef": mspaef,
+        "nrmse": nrmse,
+        "sigma": sigma,
+        "sigma_error": sigma_error,
+        "mean_bias": mean_bias,
+        "rho": rho,
+    }
+
+
 def calculate_results_metric(map1, map2, ds1_name, ds2_name, metric=RESULT_METRIC_TSM):
     """Calculate the requested gridded result metric."""
     metric = normalize_results_metric(metric)
@@ -67,6 +103,14 @@ def calculate_results_metric(map1, map2, ds1_name, ds2_name, metric=RESULT_METRI
         )
     if metric == RESULT_METRIC_ESP:
         return calculate_esp_for_gridded_data(
+            map1=map1, map2=map2, ds1_name=ds1_name, ds2_name=ds2_name
+        )
+    if metric == RESULT_METRIC_WASPAEF:
+        return calculate_waspaef_for_gridded_data(
+            map1=map1, map2=map2, ds1_name=ds1_name, ds2_name=ds2_name
+        )
+    if metric == RESULT_METRIC_MSPAEF:
+        return calculate_mspaef_for_gridded_data(
             map1=map1, map2=map2, ds1_name=ds1_name, ds2_name=ds2_name
         )
     msg = f"Unsupported result metric {metric!r}."

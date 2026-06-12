@@ -5,6 +5,8 @@ import pandas as pd
 import pytest
 
 from mhm_tools.common.metrics import metrics_handler, tsm
+from mhm_tools.common.metrics.mspaef import MSPAEF
+from mhm_tools.common.metrics.waspaef import WASPAEF
 
 
 def test_filter_nan_removes_pairs():
@@ -74,6 +76,12 @@ def test_create_results_csv_defaults_to_all(tmp_path):
     df3 = pd.read_csv(tmp_path / "esp.csv", index_col=0)
     assert "esp" in df3.columns
     assert "comb" not in df3.columns
+    df4 = pd.read_csv(tmp_path / "waspaef.csv", index_col=0)
+    assert "waspaef" in df4.columns
+    assert "comb" not in df4.columns
+    df5 = pd.read_csv(tmp_path / "mspaef.csv", index_col=0)
+    assert "mspaef" in df5.columns
+    assert "comb" not in df5.columns
 
 
 def test_create_results_csv_accepts_spaef(tmp_path):
@@ -121,6 +129,88 @@ def test_create_results_csv_accepts_esp(tmp_path):
     assert np.isclose(df.loc[0, "rs"], 1.0)
     assert np.isclose(df.loc[0, "gamma"], 1.0)
     assert np.isclose(df.loc[0, "alpha"], 0.0)
+
+
+def test_create_results_csv_accepts_WASPAEF(tmp_path):
+    """Result CSV can write WASPAEF components."""
+    m1 = np.arange(12, dtype=float).reshape(3, 2, 2)
+    m2 = m1.copy()
+
+    metrics_handler.create_results_csv(
+        map1=m1,
+        map2=m2,
+        ds1_name="input",
+        ds2_name="ref",
+        out_dir=tmp_path,
+        metric="WASPAEF",
+    )
+
+    df = pd.read_csv(tmp_path / "waspaef.csv", index_col=0)
+    assert "waspaef" in df.columns
+    assert "rho" in df.columns
+    assert "sigma" in df.columns
+    assert "wd" in df.columns
+    assert np.isclose(df.loc[0, "waspaef"], 0.0)
+    assert np.isclose(df.loc[0, "rho"], 1.0)
+    assert np.isclose(df.loc[0, "sigma"], 1.0)
+    assert np.isclose(df.loc[0, "wd"], 0.0)
+
+
+def test_waspaef_uses_original_values_for_wasserstein_distance():
+    """WASPAEF WD uses sorted original values and captures additive bias."""
+    m1 = np.arange(1, 10, 1)
+    m2 = np.arange(2, 11, 1)
+
+    waspaef, rho, sigma, wd = WASPAEF(m1, m2)
+
+    assert np.isclose(wd, 1)
+    assert np.isclose(rho, 1.0)
+    assert np.isclose(sigma, 1.0)
+    assert np.isclose(waspaef, 1)
+
+
+def test_create_results_csv_accepts_mspaef(tmp_path):
+    """Result CSV can write MSPAEF components."""
+    m1 = np.arange(12, dtype=float).reshape(3, 2, 2)
+    m2 = m1.copy()
+
+    metrics_handler.create_results_csv(
+        map1=m1,
+        map2=m2,
+        ds1_name="input",
+        ds2_name="ref",
+        out_dir=tmp_path,
+        metric="mspaef",
+    )
+
+    df = pd.read_csv(tmp_path / "mspaef.csv", index_col=0)
+    assert "mspaef" in df.columns
+    assert "nrmse" in df.columns
+    assert "sigma" in df.columns
+    assert "sigma_error" in df.columns
+    assert "mean_bias" in df.columns
+    assert "rho" in df.columns
+    assert np.isclose(df.loc[0, "mspaef"], 1.0)
+    assert np.isclose(df.loc[0, "nrmse"], 0.0)
+    assert np.isclose(df.loc[0, "sigma"], 1.0)
+    assert np.isclose(df.loc[0, "sigma_error"], 0.0)
+    assert np.isclose(df.loc[0, "mean_bias"], 0.0)
+    assert np.isclose(df.loc[0, "rho"], 1.0)
+
+
+def test_mspaef_uses_observed_iqr_for_bias_terms():
+    """MSPAEF normalizes RMSE and mean bias by the observed IQR."""
+    m1 = np.array([1.0, 2.0, 3.0])
+    m2 = np.array([0.0, 1.0, 2.0])
+
+    mspaef, nrmse, sigma, sigma_error, mean_bias, rho = MSPAEF(m1, m2)
+
+    assert np.isclose(nrmse, 1.0)
+    assert np.isclose(sigma, 1.0)
+    assert np.isclose(sigma_error, 0.0)
+    assert np.isclose(mean_bias, 1.0)
+    assert np.isclose(rho, 1.0)
+    assert np.isclose(mspaef, 0.2928932188134524)
 
 
 def test_create_results_csv_rejects_unknown_metric(tmp_path):

@@ -240,8 +240,8 @@ def add_args(parser):
     optional.add_argument(
         "--metric",
         required=False,
-        default="all",
-        help="Result metric written to results.csv. Accepted values: TSM, SPAEF, ESP, all.",
+        default="SPAEF",
+        help="Result metric written to results.csv. Accepted values: TSM, SPAEF, ESP, WASPAEF, MSPAEF, all.",
     )
 
 

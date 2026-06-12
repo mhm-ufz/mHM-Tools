@@ -2,6 +2,6 @@
 
 This package groups reusable metric routines for comparing model outputs with
 reference data. Metric implementations live in dedicated modules such as
-``tsm``, ``spaef``, and ``esp``; ``metrics_handler`` dispatches metric calls
-and writes CSV outputs.
+``tsm``, ``spaef``, ``esp``, ``waspaef``, and ``mspaef``; ``metrics_handler``
+dispatches metric calls and writes CSV outputs.
 """
