@@ -28,7 +28,7 @@ def dict_to_multiline_string(d: dict, spacing: int = 12) -> str:
     return "\n".join(lines)
 
 
-def pretty_print_df(df: pd.DataFrame, max_col_width: int = 30) -> None:
+def pretty_print_df(df: pd.DataFrame, max_col_width: int = 30, title="") -> None:
     """Pretty-print a DataFrame as an ASCII table with simple truncation.
 
     Numbers are right-aligned, other columns are left-aligned. Cells longer than
@@ -79,6 +79,10 @@ def pretty_print_df(df: pd.DataFrame, max_col_width: int = 30) -> None:
 
     # Header
     out_string = "\n"
+    if title:
+        out_string += "\n"
+        out_string += title
+        out_string += "\n"
     out_string += sep() + "\n"
     header_cells = [" " + fmt_cell(h, w, False) + " " for h, w in zip(headers, widths)]
     out_string += "|" + "|".join(header_cells) + "|\n"

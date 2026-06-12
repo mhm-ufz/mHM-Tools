@@ -237,6 +237,12 @@ def add_args(parser):
             "Frequency to resample input and ref dataset to. Options: (H, D, W, ME) or hourly, daily, weekly, monthly"
         ),
     )
+    optional.add_argument(
+        "--metric",
+        required=False,
+        default="all",
+        help="Result metric written to results.csv. Accepted values: TSM, spaef, all.",
+    )
 
 
 def run(args):
@@ -319,4 +325,5 @@ def run(args):
         bias_only=args.bias_only,
         global_climate=args.global_climate,
         target_time_freq=target_freq,
+        result_metric=args.metric,
     )

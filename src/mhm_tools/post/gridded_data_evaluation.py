@@ -22,8 +22,8 @@ from mhm_tools.common.file_handler import (
     write_xarray_to_file,
 )
 from mhm_tools.common.logger import ErrorLogger, log_arguments, log_errors
+from mhm_tools.common.metrics.metrics_handler import create_results_csv
 from mhm_tools.common.netcdf import generate_bounds_for_all_coords
-from mhm_tools.common.spatial_metrics import create_results_csv
 from mhm_tools.common.utils import Resolution, cut_to_filled_area
 from mhm_tools.common.xarray_utils import (
     crop_ds,
@@ -1603,6 +1603,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
     mask_da=None,
     input_file_name=None,
     ref_file_name=None,
+    result_metric="all",
 ):
     """Compare the two datasets."""
     output_path = Path(output_path)
@@ -1655,7 +1656,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
 
     input, ref = crop_datasets_to_spatial_overlap(input, ref)
     input, ref = regridd_to_higher_spatial_resolution(input, ref)
-    output_name = f"{input_name}-{ref_name}.csv".replace(" ", "_")
+    output_name = f"{input_name}-{ref_name}".replace(" ", "_")
     # compare and save statistics
     full_metrics = not bias_only and not global_climate
     with_std = not bias_only
@@ -1693,11 +1694,13 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
                     input_ts_np, ref_ts_np, spearman_correlation, ncpus
                 )
                 create_results_csv(
-                    input_ts_np,
-                    ref_ts_np,
-                    input_name,
-                    ref_name,
-                    output_path / output_name,
+                    map1=input_ts_np,
+                    map2=ref_ts_np,
+                    ds1_name=input_name,
+                    ds2_name=ref_name,
+                    out_dir=output_path,
+                    out_name=output_name,
+                    metric=result_metric,
                 )
         except ValueError as ve:
             logger.error("Input and ref do not have the same temporal extent.")
@@ -1712,11 +1715,13 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
             input_clim_np, ref_clim_np, spearman_correlation, ncpus
         )
         create_results_csv(
-            input_clim_np,
-            ref_clim_np,
-            input_name,
-            ref_name,
-            output_path / output_name,
+            map1=input_clim_np,
+            map2=ref_clim_np,
+            ds1_name=input_name,
+            ds2_name=ref_name,
+            out_dir=output_path,
+            out_name=output_name,
+            metric=result_metric,
         )
 
     if input["mean"].shape != ref["mean"].shape:
@@ -2183,22 +2188,23 @@ def infer_time_resolution_hours_from_files(files):
 
 
 @log_arguments()
-def gridded_data_evaluation(
+def gridded_data_evaluation(  # noqa: PLR0913
     input: EvalDataset,
     ref: EvalDataset,
     output_path,
-    only_plot=False,
     coordinate_slice=None,
-    n_cpus=1,
+    year_slice=None,
+    mask_da=None,
+    direct_comp=True,
     n_bootstrap_years=None,
     n_bootstrap_selections=None,
-    direct_comp=True,
-    year_slice=None,
-    avaiable_mem=None,
+    target_time_freq=None,
     bias_only=False,
     global_climate=False,
-    mask_da=None,
-    target_time_freq=None,
+    only_plot=False,
+    result_metric="all",
+    avaiable_mem=None,
+    n_cpus=1,
 ):
     """Validate a spatial variable by comparing dataset climatologies."""
     output_path = Path(output_path)
@@ -2356,6 +2362,7 @@ def gridded_data_evaluation(
                     bias_only=bias_only,
                     global_climate=global_climate,
                     mask_da=mask_da,
+                    result_metric=result_metric,
                 )
                 for bootstrap_index in range(n_bootstrap_selections)
             )
@@ -2437,4 +2444,5 @@ def gridded_data_evaluation(
             bias_only=bias_only,
             global_climate=global_climate,
             mask_da=mask_da,
+            result_metric=result_metric,
         )
