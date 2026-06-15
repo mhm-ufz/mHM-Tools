@@ -24,7 +24,8 @@ from mhm_tools.common.file_handler import (
 from mhm_tools.common.logger import ErrorLogger, log_arguments, log_errors
 from mhm_tools.common.metrics.metrics_handler import create_results_csv
 from mhm_tools.common.netcdf import generate_bounds_for_all_coords
-from mhm_tools.common.utils import Resolution, cut_to_filled_area
+from mhm_tools.common.resolution_handler import Resolution
+from mhm_tools.common.utils import cut_to_filled_area
 from mhm_tools.common.xarray_utils import (
     crop_ds,
     get_clim_from_ds,

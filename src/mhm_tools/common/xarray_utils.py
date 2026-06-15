@@ -404,6 +404,8 @@ def get_dtype(ds):
 
 def get_ds_extend(ds, var=None, recursive_search=True):
     """Get the spatial extent of a dataset as (lon_min, lon_max, lat_min, lat_max) from its bounds."""
+    from mhm_tools.common.resolution_handler import get_file_res
+
     if var is not None:
         # get the coordinate keys from the variable if possible, otherwise from the dataset
         lon_key = get_coord_key(ds[var], lon=True)
@@ -432,11 +434,7 @@ def get_ds_extend(ds, var=None, recursive_search=True):
     res = (
         ds.attrs.get("spatial_resolution")
         if "spatial_resolution" in ds.attrs
-        else (
-            lon_vals[1] - lon_vals[0]
-            if lon_vals.size > 1
-            else lat_vals[1] - lat_vals[0] if lat_vals.size > 1 else 0
-        )
+        else (get_file_res(ds[lon_key], ds[lat_key], None))
     )
     return (
         float(np.nanmin(lon_vals)) - float(res) / 2,

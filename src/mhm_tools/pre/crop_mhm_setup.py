@@ -16,6 +16,7 @@ from mhm_tools.common.file_handler import (
     write_xarray_to_file,
 )
 from mhm_tools.common.logger import ErrorLogger, log_arguments
+from mhm_tools.common.resolution_handler import Resolution, get_file_res
 from mhm_tools.common.xarray_utils import (
     crop_ds,
     get_coord_key,
@@ -380,7 +381,7 @@ def call_create_latlon(
 
 def crop_file(  # noqa: PLR0912 PLR0915 PLR0913
     input_file,
-    mask_da,
+    mask_ds,
     latslice,
     lonslice,
     output_path,
@@ -395,8 +396,12 @@ def crop_file(  # noqa: PLR0912 PLR0915 PLR0913
     output_suffix=None,
     mask_all=False,
     mask_var="mask",
+    resolutions=None,
 ):
     """Crops one file by lat and lon slice and may mask it with the mask dataarray."""
+    if resolutions is None:
+        logger.debug("No resolutions provided.")
+        resolutions = Resolution()
     logger.info(f"Cropping the file {input_file}")
     if input_path.is_file():
         output_file = output_path / input_file.name
@@ -500,10 +505,24 @@ def crop_file(  # noqa: PLR0912 PLR0915 PLR0913
 
     # only the dem file or and eventual mHM restart file are masked using the provided mask file
     if "dem" in input_file.name.lower() or mask_all:  # or "mhm" in f.name.lower()
-        if mask_da is not None:
-            lon_key_mask = get_coord_key(mask_da, lon=True)
-            lat_key_mask = get_coord_key(mask_da, lat=True)
-            latlon_files.set_dem_output_file(output_file)
+        if mask_ds is not None:
+            file_res = get_file_res(ds[lon_key], ds[lat_key], resolutions)
+            for var in mask_ds.data_vars:
+                mask_da = mask_ds[var]
+                lon_key_mask = get_coord_key(mask_da, lon=True)
+                lat_key_mask = get_coord_key(mask_da, lat=True)
+                # if resolution of mask matches target file use this maks var and do not regrid
+                mask_res = get_file_res(
+                    mask_ds[lon_key_mask], mask_ds[lat_key_mask], resolutions
+                )
+                if abs(mask_res - file_res) <= 1e-5:
+                    logger.debug(
+                        f"Mask resolution {mask_res} matches file resolution {file_res} (within tolerance). Using mask without regridding."
+                    )
+                    mask_var = var
+                    break
+            if "dem" in input_file.name.lower():
+                latlon_files.set_dem_output_file(output_file)
             logger.info("Masking dem file")
             logger.debug(f"dem ds before masking: {ds_cropped}")
             mask_regridded = regrid_mask(
@@ -560,23 +579,39 @@ def crop_file(  # noqa: PLR0912 PLR0915 PLR0913
         )
 
     logger.info(f"Written to {output_file}")
-    if force_header_creation and not (output_file.parent / "header.txt").is_file():
-        if len(ds[lon_key]) > 1:
-            file_res = abs(ds[lon_key].data[1] - ds[lon_key].data[0])
-        elif len(ds[lat_key]) > 1:
-            file_res = abs(ds[lat_key].data[1] - ds[lat_key].data[0])
-        create_header(ds_cropped, output_path=output_file.parent, cellsize=file_res)
+    if force_header_creation:
+        file_res = get_file_res(ds[lon_key], ds[lat_key], resolutions)
+        logger.info(
+            f"Creating header file for {output_file} with resolution {file_res}"
+        )
+        xllcorner = None
+        yllcorner = None
+        try:
+            mask_header = create_header(mask_ds["mask"], cellsize=resolutions.l0)
+            xllcorner = mask_header["xllcorner"]
+            yllcorner = mask_header["yllcorner"]
+            logger.debug(
+                f"Using xllcorner {xllcorner} and yllcorner {yllcorner} from mask header"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to create header for mask file: {e}")
+        create_header(
+            ds_cropped,
+            output_path=output_file.parent,
+            cellsize=file_res,
+            xllcorner=xllcorner,
+            yllcorner=yllcorner,
+        )
     return latlon_files
 
 
 @log_arguments()
 def crop_mhm_setup(  # noqa: PLR0913
-    mask_da,
+    mask_ds,
     output_path,
     input_path,
     overwrite=True,
-    l1_resolution=None,
-    l11_resolution=None,
+    resolutions=None,
     lonslice=None,
     latslice=None,
     crs=None,
@@ -596,6 +631,9 @@ def crop_mhm_setup(  # noqa: PLR0913
     # check if the input is correct
     output_path = Path(output_path)
     input_path = Path(input_path)
+    if resolutions is None:
+        logger.debug("No resolutions provided.")
+        resolutions = Resolution()
     # recusively get all the files from the input path if it is a dir
     logger.info(
         f"Cropping to: longitude ({lonslice.start}, {lonslice.stop}) and latitude ({latslice.stop}, {latslice.start})"
@@ -610,7 +648,7 @@ def crop_mhm_setup(  # noqa: PLR0913
     list_latlon_files = Parallel(n_jobs=n_jobs, backend="loky")(
         delayed(crop_file)(
             input_file=f,
-            mask_da=mask_da,
+            mask_ds=mask_ds,
             latslice=latslice,
             lonslice=lonslice,
             output_path=output_path,
@@ -625,17 +663,18 @@ def crop_mhm_setup(  # noqa: PLR0913
             output_suffix=output_suffix,
             mask_all=mask_all,
             mask_var=mask_var,
+            resolutions=resolutions,
         )
         for f in files
     )
     latlon_files = LatlonFiles()
     latlon_files.set_by_list_of_objects(list_latlon_files)
-    if l1_resolution is not None and latlon_files.are_set():
+    if resolutions.l1 is not None and latlon_files.are_set():
         logger.info("Creating latlon")
         call_create_latlon(
             latlon_files.dem_output_file,
-            l1_resolution,
-            l11_resolution,
+            resolutions.l1,
+            resolutions.l11,
             latlon_files.latlon_output_file,
             latlon_files.meteo_header_path,
             crs,
