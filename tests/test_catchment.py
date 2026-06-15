@@ -1150,3 +1150,34 @@ class TestCatchment(unittest.TestCase):
                 naive_iou,
                 "L1 shape correction did not improve shape agreement.",
             )
+
+    def test_merge_catchment_only_replaces_dateline_basins(self):
+        lat = np.array([1.0, 0.0])
+        lon = np.array([-179.0, -177.0, -100.0, 0.0, 100.0, 177.0, 179.0])
+        basin1 = np.array(
+            [
+                [1, 1, 2, 2, 2, 3, 3],
+                [1, 1, 2, 2, 2, 3, 3],
+            ]
+        )
+        basin2 = basin1 + 10
+        ds1 = xr.Dataset(
+            {"basin": (["lat", "lon"], basin1)},
+            coords={"lat": lat, "lon": lon},
+        )
+        ds2 = xr.Dataset(
+            {"basin": (["lat", "lon"], basin2)},
+            coords={"lat": lat, "lon": lon + 180},
+        )
+        path1 = self.tmp_path / "merge_hydro1.nc"
+        path2 = self.tmp_path / "merge_hydro2.nc"
+        out_path = self.tmp_path / "merge_out.nc"
+        ds1.to_netcdf(path1)
+        ds2.to_netcdf(path2)
+
+        catchment.merge_catchment(path1, path2, out_path)
+
+        with xr.open_dataset(out_path) as merged:
+            self.assertEqual(int(merged["basin"].sel(lat=1.0, lon=0.0)), 2)
+            self.assertGreater(int(merged["basin"].sel(lat=1.0, lon=-179.0)), 3)
+            self.assertGreater(int(merged["basin"].sel(lat=1.0, lon=179.0)), 3)

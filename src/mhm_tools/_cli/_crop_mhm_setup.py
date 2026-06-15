@@ -2,6 +2,9 @@
 
 import logging
 
+from mhm_tools.common.file_handler import get_xarray_ds_from_file
+from mhm_tools.common.resolution_handler import Resolution
+
 logger = logging.getLogger(__name__)
 
 
@@ -55,6 +58,10 @@ def add_args(parser):
     )
     optional.add_argument(
         "--l11-resolution",
+        required=False,
+    )
+    optional.add_argument(
+        "--l2-resolution",
         required=False,
     )
     optional.add_argument(
@@ -216,14 +223,22 @@ def run(args):
         with ErrorLogger(logger):
             raise ValueError(msg)
     lonslice = slice(lon_min_target_grid, lon_max_target_grid)
-    # l0_resolution = float(args.lonlatbox.split(",")[4])
+    mask_ds = get_xarray_ds_from_file(args.mask_file)
+
     available_mem = get_available_mem_in_unit(args.available_mem)
+    resolutions = Resolution(
+        l1=args.l1_resolution,
+        l2=args.l2_resolution,
+        l11=args.l11_resolution,
+    )
+    logger.info(
+        f"Using resolutions: l0={resolutions.l0}, l1={resolutions.l1}, l2={resolutions.l2}, l11={resolutions.l11}"
+    )
     crop_mhm_setup(
         input_path=args.input_path,
         output_path=args.output_path,
-        mask_da=mask_da,
-        l1_resolution=args.l1_resolution,
-        l11_resolution=args.l11_resolution,
+        mask_ds=mask_ds,
+        resolutions=resolutions,
         lonslice=lonslice,
         latslice=latslice,
         crs=args.crs,

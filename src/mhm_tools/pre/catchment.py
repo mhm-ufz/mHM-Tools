@@ -28,8 +28,8 @@ from mhm_tools.common.file_handler import (
 from mhm_tools.common.logger import ErrorLogger, log_arguments
 from mhm_tools.common.netcdf import generate_bounds
 from mhm_tools.common.provenance import apply_output_provenance
+from mhm_tools.common.resolution_handler import Resolution
 from mhm_tools.common.utils import (
-    Resolution,
     coord_to_index,
     cut_to_filled_area,
     distance_100m_units,
@@ -841,7 +841,10 @@ class Catchment:
     def _modify_data(self, data):
         # correct circumspanning data
         if self.do_shift:
-            return data.roll(lon=int(len(self.ds.lon) / 2), roll_coords=True)
+            shift = int(data.shape[1] / 2)
+            if isinstance(data, xr.DataArray):
+                return data.roll({data.dims[1]: shift}, roll_coords=False)
+            return np.roll(data, shift, axis=1)
         return data
 
     def _revert_data(self, data):
@@ -2386,12 +2389,11 @@ def merge_catchment(path1, path2, out_path):
     ds2 = get_xarray_ds_from_file(path2, engine="netcdf4")
 
     # select all the basins in the border area
-    mask_ids = np.unique(
-        ds1["basin"].where(
-            (ds1.lon.max() > CUTOFF_THRESHOLD)
-            | (ds1.lon.min() < (CUTOFF_THRESHOLD * -1))
-        )
-    )
+    border_cells = (ds1.lon > CUTOFF_THRESHOLD) | (ds1.lon < (CUTOFF_THRESHOLD * -1))
+    mask_ids = np.unique(ds1["basin"].where(border_cells))
+    mask_ids = mask_ids[np.isfinite(mask_ids)]
+    mask_ids = mask_ids[mask_ids != ds1["basin"].attrs.get("_FillValue", 0)]
+    mask_ids = mask_ids[mask_ids != 0]
     # get a mask of all the border area basins
     mask = ds1["basin"].isin(mask_ids)
     # modify the ids to avoid overlaps

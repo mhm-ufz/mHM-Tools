@@ -102,7 +102,14 @@ def set_grid(
     return ds
 
 
-def create_header(ds, output_path=None, no_data_value=None, cellsize=None) -> dict:
+def create_header(
+    ds,
+    output_path=None,
+    no_data_value=None,
+    cellsize=None,
+    xllcorner=None,
+    yllcorner=None,
+) -> dict:
     """Write a header file from a dataset.
 
     Takes an xarray Dataset and writes the ASCII header needed for GIS tools.
@@ -122,8 +129,10 @@ def create_header(ds, output_path=None, no_data_value=None, cellsize=None) -> di
             msg = "Cannot determine cellsize from dataset with only one x and one y value. Please provide cellsize as an argument."
             with ErrorLogger(logger):
                 raise ValueError(msg)
-    xllcorner = np.nanmin(x) - 0.5 * cellsize
-    yllcorner = np.nanmin(y) - 0.5 * cellsize
+    if xllcorner is None:
+        xllcorner = np.nanmin(x) - 0.5 * cellsize
+    if yllcorner is None:
+        yllcorner = np.nanmin(y) - 0.5 * cellsize
 
     ncols = len(x)
     nrows = len(y)
@@ -150,7 +159,7 @@ def create_header(ds, output_path=None, no_data_value=None, cellsize=None) -> di
                 raise ValueError(msg)
         header_str = write_header(header_out_path, header_dict, dtype)
         logger.info(
-            f"Writing header file to {header_out_path} with header str: {header_str}"
+            f"Writing header file to {header_out_path} with header str: \n{header_str}"
         )
     return header_dict
 
