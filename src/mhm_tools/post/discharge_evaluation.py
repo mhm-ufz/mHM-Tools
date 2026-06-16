@@ -2052,7 +2052,7 @@ def plot_cdf(df, output_path, boostrap_iterations=None):
         for var in variables:
             var_df = df[["id", var]].dropna(subset=[var]).copy()
             if var_df.empty:
-                logger.warning("No valid values for %s. Skipping %s plot.", var, plot)
+                logger.warning(f"No valid values for {var}. Skipping {plot} plot.")
                 continue
 
             var_df["region"] = var_df["id"].apply(_region_from_id)

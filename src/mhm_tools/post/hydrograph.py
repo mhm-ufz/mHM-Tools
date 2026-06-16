@@ -38,7 +38,7 @@ def _ensure_non_interactive_backend(show):
     try:
         plt.switch_backend("Agg")
     except Exception as exc:
-        logger.debug("Failed to switch matplotlib backend to Agg: %s", exc)
+        logger.debug(f"Failed to switch matplotlib backend to Agg: {exc}")
 
 
 class Catchment:
@@ -1387,9 +1387,8 @@ def get_hydrograph_from_path(  # noqa: PLR0912, PLR0915
     named_multi = bool(multi_input and sim_names and len(sim_names) == len(input_paths))
     if multi_input and sim_names and not named_multi:
         logger.warning(
-            "Provided %d names but %d input paths; ignoring names.",
-            len(sim_names),
-            len(input_paths),
+            f"Provided {len(sim_names)} names but {len(input_paths)} input paths; "
+            "ignoring names."
         )
         sim_names = None
 

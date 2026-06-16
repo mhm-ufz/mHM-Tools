@@ -599,11 +599,8 @@ class MHMRestartFile:
             "lat_max": lat_max,
         }
         logger.info(
-            "Using land-mask bbox for tiling: lon[%s, %s], lat[%s, %s]",
-            lon_min,
-            lon_max,
-            lat_min,
-            lat_max,
+            f"Using land-mask bbox for tiling: lon[{lon_min}, {lon_max}], "
+            f"lat[{lat_min}, {lat_max}]"
         )
         return self._l1_land_mask_bbox
 
@@ -647,9 +644,8 @@ class MHMRestartFile:
             with ErrorLogger(logger):
                 raise ValueError(msg)
         logger.info(
-            "Using %d active tiles from land-mask bbox filter (skipped %d tiles).",
-            len(origins),
-            skipped,
+            f"Using {len(origins)} active tiles from land-mask bbox filter "
+            f"(skipped {skipped} tiles)."
         )
         self._tile_origins = origins
         return self._tile_origins
@@ -989,10 +985,9 @@ class MHMRestartFile:
         for dim in extra_dims:
             mask_da = mask_da.isel({dim: 0}, drop=True)
         logger.debug(
-            "land mask shape before sel: %s lat_min: %s, lat_max: %s",
-            mask_da.shape,
-            mask_da[mask_lat_key].min(),
-            mask_da[mask_lat_key].max(),
+            f"land mask shape before sel: {mask_da.shape} "
+            f"lat_min: {mask_da[mask_lat_key].min()}, "
+            f"lat_max: {mask_da[mask_lat_key].max()}"
         )
         lat_vals = mask_da[mask_lat_key].values
         lat_descending = lat_vals[0] > lat_vals[-1]
@@ -1008,10 +1003,9 @@ class MHMRestartFile:
             }
         )
         logger.debug(
-            "land mask shape after sel: %s lat_min: %s, lat_max: %s",
-            ds_mask.shape,
-            ds_mask[mask_lat_key].min(),
-            ds_mask[mask_lat_key].max(),
+            f"land mask shape after sel: {ds_mask.shape} "
+            f"lat_min: {ds_mask[mask_lat_key].min()}, "
+            f"lat_max: {ds_mask[mask_lat_key].max()}"
         )
         # logger.debug(f'lon: ds {ds['lon_out'].values[0]}-{ds['lon_out'].values[-1]} ; grid {self.grid.l1.lon_min}-{self.grid.l1.lon_max}')
         # logger.debug(f'lat: ds {ds['lat_out'].values[0]}-{ds['lat_out'].values[-1]} ; grid {self.grid.l1.lat_min}-{self.grid.l1.lat_max}')

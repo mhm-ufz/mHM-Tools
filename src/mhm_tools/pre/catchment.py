@@ -69,7 +69,7 @@ CUTOFF_THRESHOLD = 175
 def _shape_crs(is_latlon):
     """Return a CRS string for shapefile operations based on lat/lon usage."""
     crs = "EPSG:4326" if is_latlon else None
-    logger.debug("Resolved shape CRS to %s", crs)
+    logger.debug(f"Resolved shape CRS to {crs}")
     return crs
 
 
@@ -85,12 +85,10 @@ def _find_shape_file(shape_folder, gauge_id):
         return None
     if len(matching_shapes) > 1:
         logger.warning(
-            "Multiple shapefiles matched gauge_id %s in %s. Using %s",
-            gauge_id,
-            shape_dir,
-            matching_shapes[0].name,
+            f"Multiple shapefiles matched gauge_id {gauge_id} in {shape_dir}. "
+            f"Using {matching_shapes[0].name}"
         )
-    logger.debug("Using shapefile %s for gauge_id %s", matching_shapes[0], gauge_id)
+    logger.debug(f"Using shapefile {matching_shapes[0]} for gauge_id {gauge_id}")
     return matching_shapes[0]
 
 
@@ -112,7 +110,7 @@ def _read_reference_shape(shape_folder, gauge_id, latlon):
             reference_shape = reference_shape.set_crs(crs)
         elif str(reference_shape.crs) != str(crs):
             reference_shape = reference_shape.to_crs(crs)
-    logger.debug("Loaded reference shape %s", shape_path)
+    logger.debug(f"Loaded reference shape {shape_path}")
     return reference_shape, shape_path
 
 
@@ -225,8 +223,7 @@ def _calculate_shape_area_on_grid(
     except Exception as exc:
         logger.debug(
             "Could not calculate fractional shape/grid overlap; falling back to "
-            "rasterized-cell area sum: %s",
-            exc,
+            f"rasterized-cell area sum: {exc}"
         )
 
     area = float(np.sum(cell_area[shape_mask]))
@@ -266,7 +263,7 @@ def _vectorize_mask_to_gdf(basin_mask, affine_transform, crs, value_name="basin"
         )
     gdf = gpd.GeoDataFrame.from_features(features_list, crs=crs)
     gdf[value_name] = gdf[value_name].astype(np.uint8)
-    logger.debug("Vectorized basin mask into %d features.", len(gdf))
+    logger.debug(f"Vectorized basin mask into {len(gdf)} features.")
     return gdf
 
 
@@ -288,7 +285,7 @@ def _shape_iou(reference_gdf, candidate_gdf):
         return 0.0
     intersection_area = reference_geom.intersection(candidate_geom).area
     iou = float(intersection_area / union_area)
-    logger.debug("Computed shape IoU: %.4f", iou)
+    logger.debug(f"Computed shape IoU: {iou:.4f}")
     return iou
 
 
@@ -322,9 +319,8 @@ def _coords_from_transform(affine_transform, grid_shape):
         [xy(affine_transform, row, 0, offset="center")[1] for row in row_indices]
     )
     logger.debug(
-        "Derived coordinate arrays from transform with lengths %d (x) and %d (y).",
-        len(x_coords),
-        len(y_coords),
+        f"Derived coordinate arrays from transform with lengths {len(x_coords)} "
+        f"(x) and {len(y_coords)} (y)."
     )
     return x_coords, y_coords
 
@@ -377,27 +373,25 @@ def _shape_bounds_from_folder(shape_folder, gauge_ids, latlon):
     try:
         import geopandas as gpd
     except Exception as exc:
-        logger.warning("geopandas missing; cannot use shapefile bounds: %s", exc)
+        logger.warning(f"geopandas missing; cannot use shapefile bounds: {exc}")
         return None
 
     gauge_id_list = [gauge_ids] if not isinstance(gauge_ids, list) else gauge_ids
 
     bounds_list = []
     logger.debug(
-        "Looking for shapefiles in %s for gauge_ids: %s", shape_folder, gauge_id_list
+        f"Looking for shapefiles in {shape_folder} for gauge_ids: {gauge_id_list}"
     )
     for gauge_id in gauge_id_list:
-        logger.info(
-            "Looking for shapefile for gauge_id %s in %s", gauge_id, shape_folder
-        )
+        logger.info(f"Looking for shapefile for gauge_id {gauge_id} in {shape_folder}")
         shape_path = _find_shape_file(shape_folder, gauge_id)
-        logger.debug("Found shapefile %s for gauge_id %s", shape_path, gauge_id)
+        logger.debug(f"Found shapefile {shape_path} for gauge_id {gauge_id}")
         if shape_path is None:
             continue
         try:
             gdf = gpd.read_file(shape_path)
         except Exception as exc:
-            logger.warning("Failed to read shapefile %s: %s", shape_path, exc)
+            logger.warning(f"Failed to read shapefile {shape_path}: {exc}")
             continue
         bounds_list.append(tuple(gdf.total_bounds))
 
@@ -405,7 +399,7 @@ def _shape_bounds_from_folder(shape_folder, gauge_ids, latlon):
     if combined_bounds is None:
         return None
     buffered_bounds = _buffer_bounds(combined_bounds, latlon)
-    logger.info("Using shapefile bounds with buffer for slicing: %s", buffered_bounds)
+    logger.info(f"Using shapefile bounds with buffer for slicing: {buffered_bounds}")
     return buffered_bounds
 
 
@@ -481,10 +475,8 @@ def _to_numeric_gauge_ids(raw_ids, context="output"):
             continue
         if numeric_id in used_numeric and used_numeric[numeric_id] != key:
             logger.warning(
-                "Gauge id '%s' collides with '%s' after int conversion for %s; using surrogate id.",
-                key,
-                used_numeric[numeric_id],
-                context,
+                f"Gauge id '{key}' collides with '{used_numeric[numeric_id]}' "
+                f"after int conversion for {context}; using surrogate id."
             )
             surrogate_candidates.append(key)
             continue
@@ -500,10 +492,8 @@ def _to_numeric_gauge_ids(raw_ids, context="output"):
         key_to_numeric[key] = next_surrogate
         used_numeric[next_surrogate] = key
         logger.warning(
-            "Gauge id '%s' is non-numeric for %s; using surrogate id %d.",
-            key if key else "<empty>",
-            context,
-            next_surrogate,
+            f"Gauge id '{key if key else '<empty>'}' is non-numeric for {context}; "
+            f"using surrogate id {next_surrogate}."
         )
         next_surrogate += 1
 
@@ -572,7 +562,7 @@ def write_gauges_to_csv(gauges, output_target, filename="gauges_info.csv"):
         writer = csv.DictWriter(fp, fieldnames=GAUGE_INFO_COLUMNS)
         writer.writeheader()
         writer.writerows(rows)
-    logger.info("Wrote gauge information for %d gauges to %s", len(rows), output_path)
+    logger.info(f"Wrote gauge information for {len(rows)} gauges to {output_path}")
 
 
 def write_gauges_to_nc(gauges, output_target, filename="gauges_info.nc"):
@@ -680,7 +670,7 @@ def write_gauges_to_nc(gauges, output_target, filename="gauges_info.nc"):
     ds = apply_output_provenance(ds)
     ds.to_netcdf(output_path, engine="netcdf4", format="NETCDF4", encoding=encoding)
     logger.info(
-        "Wrote gauge information for %d gauges to %s", len(station_ids), output_path
+        f"Wrote gauge information for {len(station_ids)} gauges to {output_path}"
     )
 
 
@@ -905,7 +895,7 @@ class Catchment:
                 -self.resolutions.l1,
             )
         logger.debug(
-            "Computed L1 coords: lon=%d, lat=%d", len(lon_coords), len(lat_coords)
+            f"Computed L1 coords: lon={len(lon_coords)}, lat={len(lat_coords)}"
         )
         return lon_coords, lat_coords
 
@@ -1035,7 +1025,7 @@ class Catchment:
                 -self.resolutions.l1,
             )
         logger.debug(
-            "Computed L1 coords: lon=%d, lat=%d", len(lon_coords), len(lat_coords)
+            f"Computed L1 coords: lon={len(lon_coords)}, lat={len(lat_coords)}"
         )
         return lon_coords, lat_coords
 
@@ -1047,12 +1037,12 @@ class Catchment:
             gauge_index = self.gauge_ids.index(gauge_id)
             self.gauge_lats[gauge_index] = gauge_lat
             self.gauge_lons[gauge_index] = gauge_lon
-            logger.debug("Updated gauge %s to %s/%s", gauge_id, gauge_lat, gauge_lon)
+            logger.debug(f"Updated gauge {gauge_id} to {gauge_lat}/{gauge_lon}")
         else:
             self.gauge_ids.append(gauge_id)
             self.gauge_lats.append(gauge_lat)
             self.gauge_lons.append(gauge_lon)
-            logger.debug("Added gauge %s at %s/%s", gauge_id, gauge_lat, gauge_lon)
+            logger.debug(f"Added gauge {gauge_id} at {gauge_lat}/{gauge_lon}")
 
     def correct_gauge_location_l1_from_shape(
         self,
@@ -1114,7 +1104,7 @@ class Catchment:
                 return _shape_iou(l0_shape_gdf, gdf)
             except Exception as exc:
                 logger.debug(
-                    "Could not compute L1 shape IoU for outlet candidate: %s", exc
+                    f"Could not compute L1 shape IoU for outlet candidate: {exc}"
                 )
                 return np.nan
 
@@ -1133,18 +1123,16 @@ class Catchment:
             and candidate_iou < naive_iou
         ):
             logger.info(
-                "L1 shape candidate IoU %.4f is worse than naive IoU %.4f; keeping naive L1 gauge location.",
-                candidate_iou,
-                naive_iou,
+                f"L1 shape candidate IoU {candidate_iou:.4f} is worse than naive "
+                f"IoU {naive_iou:.4f}; keeping naive L1 gauge location."
             )
             return float(lat_coords[gauge_row]), float(lon_coords[gauge_col])
 
         new_lat = float(lat_coords[int(best_candidate_index[0])])
         new_lon = float(lon_coords[int(best_candidate_index[1])])
         logger.info(
-            "L1 shape-based correction selected %.4f/%.4f using L0 shape reference.",
-            new_lat,
-            new_lon,
+            f"L1 shape-based correction selected {new_lat:.4f}/{new_lon:.4f} "
+            "using L0 shape reference."
         )
         return new_lat, new_lon
 
@@ -1171,21 +1159,19 @@ class Catchment:
             getattr(self._fdir, "transform", self.transform),
         )
         if shape_mask is None or not np.any(shape_mask):
-            logger.warning("Could not rasterize %s onto the active grid.", shape_label)
+            logger.warning(f"Could not rasterize {shape_label} onto the active grid.")
             return None
         candidates = shape_mask & np.isfinite(upstream_area)
         if not np.any(candidates):
-            logger.warning("No finite upstream-area cells inside %s.", shape_label)
+            logger.warning(f"No finite upstream-area cells inside {shape_label}.")
             return None
         values = np.where(candidates, upstream_area, -np.inf)
         row_idx, col_idx = np.unravel_index(np.nanargmax(values), values.shape)
         gauge_lat = float(lat_values[int(row_idx)])
         gauge_lon = float(lon_values[int(col_idx)])
         logger.info(
-            "Derived gauge location %.6f/%.6f from highest upstream area inside %s.",
-            gauge_lat,
-            gauge_lon,
-            shape_label,
+            f"Derived gauge location {gauge_lat:.6f}/{gauge_lon:.6f} from highest "
+            f"upstream area inside {shape_label}."
         )
         return gauge_lat, gauge_lon
 
@@ -1212,14 +1198,13 @@ class Catchment:
         )
         if shape_area is None:
             logger.warning(
-                "Could not calculate area covered by %s on the current grid.",
-                shape_label,
+                f"Could not calculate area covered by {shape_label} on the current "
+                "grid."
             )
             return None
         logger.info(
-            "Calculated %.2f km2 covered by %s on the current grid.",
-            shape_area,
-            shape_label,
+            f"Calculated {shape_area:.2f} km2 covered by {shape_label} on the "
+            "current grid."
         )
         return shape_area
 
@@ -1247,7 +1232,7 @@ class Catchment:
                 shape_folder, gauge_id, self.latlon
             )
             if reference_shape is None:
-                logger.debug("No reference shapefile found for gauge_id %s", gauge_id)
+                logger.debug(f"No reference shapefile found for gauge_id {gauge_id}")
                 return None
             shape_label = shape_path.name
             crs = _shape_crs(self.latlon)
@@ -1286,9 +1271,8 @@ class Catchment:
             )
         except ValueError:
             logger.warning(
-                "Gauge coordinates %s are outside the active domain; deriving gauge from %s.",
-                gauge_coords,
-                shape_label,
+                f"Gauge coordinates {gauge_coords} are outside the active domain; "
+                f"deriving gauge from {shape_label}."
             )
             started_from_shape = True
             gauge_coords = self.derive_gauge_coords_from_shape(
@@ -1336,8 +1320,7 @@ class Catchment:
             candidate_indices = np.where(np.isfinite(sub))
 
         logger.debug(
-            "Shape-based candidate count: %d",
-            len(candidate_indices[0]),
+            f"Shape-based candidate count: {len(candidate_indices[0])}",
         )
 
         best_candidate_index = None
@@ -1415,9 +1398,8 @@ class Catchment:
             )
             if derived_coords is None:
                 logger.warning(
-                    "No shape-overlap candidate found around %s and no shape-derived "
-                    "start could be computed.",
-                    gauge_coords,
+                    f"No shape-overlap candidate found around {gauge_coords} and no "
+                    "shape-derived start could be computed."
                 )
                 return None
             logger.warning(
@@ -1482,15 +1464,13 @@ class Catchment:
                 )
             except Exception as exc:
                 logger.warning(
-                    "Shape-based gauge correction failed for %s: %s",
-                    gauge_id,
-                    exc,
+                    f"Shape-based gauge correction failed for {gauge_id}: {exc}"
                 )
                 shape_result = None
         if gauge_coords is not None and not self._coords_in_domain(gauge_coords):
             logger.warning(
-                "Gauge coordinates %s are outside the active domain; skipping area-only correction.",
-                gauge_coords,
+                f"Gauge coordinates {gauge_coords} are outside the active domain; "
+                "skipping area-only correction."
             )
             gauge_coords = None
 
@@ -1501,10 +1481,8 @@ class Catchment:
             gauge_lat = new_lat
             gauge_lon = new_lon
             logger.info(
-                "Moved outlet to %s/%s using shape similarity (distance %.2fkm).",
-                new_lat,
-                new_lon,
-                distance_error / 10,
+                f"Moved outlet to {new_lat}/{new_lon} using shape similarity "
+                f"(distance {distance_error / 10:.2f}km)."
             )
         elif ref_catchment_area is not None and gauge_coords is not None:
             if method != "all":
@@ -1627,31 +1605,28 @@ class Catchment:
             )
 
             logger.info(
-                "Basin unique values: %s | cells in basin: %d | mean cell area: %.6f km2",
-                unique_vals,
-                cell_count,
-                mean_cell_area,
+                f"Basin unique values: {unique_vals} | cells in basin: {cell_count} "
+                f"| mean cell area: {mean_cell_area:.6f} km2"
             )
 
+            area_difference = delineated_area - uparea_at_outlet
+            area_difference_percent = (
+                area_difference / uparea_at_outlet * 100.0
+                if uparea_at_outlet != 0
+                else np.nan
+            )
             logger.info(
-                "Upstream area reported at selected outlet cell = %.2f km2. "
-                "Difference (sum_cells - upstream_at_outlet) = %.2f km2 (%.2f%%).",
-                uparea_at_outlet,
-                delineated_area - uparea_at_outlet,
-                (
-                    (delineated_area - uparea_at_outlet) / uparea_at_outlet * 100.0
-                    if uparea_at_outlet != 0
-                    else np.nan
-                ),
+                f"Upstream area reported at selected outlet cell = "
+                f"{uparea_at_outlet:.2f} km2. Difference (sum_cells - "
+                f"upstream_at_outlet) = {area_difference:.2f} km2 "
+                f"({area_difference_percent:.2f}%)."
             )
             if ref_catchment_area is not None:
                 area_error = (delineated_area - ref_catchment_area) / ref_catchment_area
                 logger.info(
-                    "Delineated basin area (sum of cell_area[basin>0]) = %.2f km2; "
-                    "reference area = %.2f km2; error = %.2f%%",
-                    delineated_area,
-                    ref_catchment_area,
-                    area_error * 100.0,
+                    f"Delineated basin area (sum of cell_area[basin>0]) = "
+                    f"{delineated_area:.2f} km2; reference area = "
+                    f"{ref_catchment_area:.2f} km2; error = {area_error * 100.0:.2f}%"
                 )
                 if abs(area_error) > max_error * 2:
                     with ErrorLogger(logger):
@@ -1812,7 +1787,7 @@ class Catchment:
                 basin_mask, self.transform, _shape_crs(self.latlon), value_name="basin"
             )
         except Exception as exc:
-            logger.warning("Could not write basin shapefile: %s", exc)
+            logger.warning(f"Could not write basin shapefile: {exc}")
             return
         output_dir = Path(out_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -1820,9 +1795,9 @@ class Catchment:
         out_path = output_dir / f"basin{suffix}.shp"
         try:
             gdf.to_file(out_path)
-            logger.info("Wrote basin shapefile to %s", out_path)
+            logger.info(f"Wrote basin shapefile to {out_path}")
         except Exception as exc:
-            logger.warning("Failed to write basin shapefile %s: %s", out_path, exc)
+            logger.warning(f"Failed to write basin shapefile {out_path}: {exc}")
 
     def get_upscaling_factor(self, max_resolution=False, l1=False, l2=True):
         """Create upscaling factor."""
@@ -2741,7 +2716,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                         value_name="basin",
                     )
                 except Exception as exc:
-                    logger.warning("Could not build L0 basin shape: %s", exc)
+                    logger.warning(f"Could not build L0 basin shape: {exc}")
             else:
                 write_gauges_out(gauge, id_gauges_out_path / gauge_info_file)
             c.write_basin_shape(
@@ -2892,7 +2867,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                         streams=streams_mask,
                     )
                 except Exception as exc:
-                    logger.exception("pyflwdir.basins(idxs=...) failed: %s", exc)
+                    logger.exception(f"pyflwdir.basins(idxs=...) failed: {exc}")
                     with ErrorLogger(logger):
                         raise exc
                 logger.info("Performing sanity checks for all delineated basins.")
@@ -2902,9 +2877,8 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                     basin_id = int(basins[outlet_idx])
                     if basin_id == 0:
                         logger.warning(
-                            "No basin id found for gauge_id %s at outlet %s",
-                            gi["gauge_id"],
-                            outlet_idx,
+                            f"No basin id found for gauge_id {gi['gauge_id']} at "
+                            f"outlet {outlet_idx}"
                         )
                         continue
                     catchment_mask = basins == basin_id
@@ -2934,9 +2908,8 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                             )
                         except Exception as exc:
                             logger.warning(
-                                "Could not build L0 basin shape for gauge %s: %s",
-                                gi["gauge_id"],
-                                exc,
+                                f"Could not build L0 basin shape for gauge "
+                                f"{gi['gauge_id']}: {exc}"
                             )
                             gi["l0_shape_gdf"] = None
                     c.save_coords(gi["gauge_id"], gi["gauge_lat"], gi["gauge_lon"])
@@ -2969,7 +2942,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
 
         _compute_requested_outputs(c)
         if upscale and c.is_upscaled and gauges:
-            logger.info("Applying L1 correction for %d gauges.", len(gauge_infos))
+            logger.info(f"Applying L1 correction for {len(gauge_infos)} gauges.")
             for gauge in gauges:
                 gi = next(
                     (
