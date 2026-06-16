@@ -4,6 +4,11 @@ Create files containing subsets of the river network based on the provided input
 The river network, provied as nc file containing basin ids, is split
 into subdomains based on the provided basin clusters. These subdomains
 of the global network are independent and can be run in parallel.
+
+Authors
+-------
+- Simon Lüdke
+- Robert Schweppe
 """
 
 

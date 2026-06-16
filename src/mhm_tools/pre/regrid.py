@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 
-"""
-Regrid an input NetCDF to an L2 grid that is an integer multiple of the L0 grid in mask.nc.
+"""Regrid NetCDF data to an L2 grid aligned with an L0 mask.
 
-Prefers keeping the L2 grid aligned to the L0 grid.
+The module derives a target grid from mask.nc and an L2 resolution, checks that
+the requested L2 cells are integer multiples of the L0 grid, interpolates the
+selected variable, and writes an aligned NetCDF output.
 
 USAGE:
   python regrid_to_L2.py --input in.nc --mask mask.nc --output out.nc \
@@ -22,6 +23,10 @@ Notes
 -----
 - Assumes regular lon/lat grids.
 - L2 must be an integer multiple of L0 in both x and y.
+
+Authors
+-------
+- Simon Lüdke
 """
 
 import logging

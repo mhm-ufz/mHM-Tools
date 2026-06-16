@@ -1,4 +1,10 @@
-"""Computes and stores long term mean for a given NetCDF file(s)."""
+"""
+Computes and stores long term mean for a given NetCDF file(s).
+
+Authors
+-------
+- Jeisson Leal
+"""
 
 import argparse
 

@@ -19,6 +19,10 @@ Within each type, rows are sorted by `file_name` and then `variable`.
 
 If multiple domains are configured using indexed paths (for example
 `dir_out(1)`, `dir_out(2)`), one CSV table per domain is written.
+
+Authors
+-------
+- Simon Lüdke
 """
 
 import logging

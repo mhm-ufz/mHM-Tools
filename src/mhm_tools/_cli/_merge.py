@@ -1,4 +1,13 @@
-"""Convert merge multiple nc files."""
+"""Merge multiple NetCDF files into combined output files.
+
+The command searches an input directory for files matching a name pattern and
+merges them into a single NetCDF output. It can also preserve the top-level
+folder structure and merge files recursively within each subfolder.
+
+Authors
+-------
+- Simon Lüdke
+"""
 
 from pathlib import Path
 

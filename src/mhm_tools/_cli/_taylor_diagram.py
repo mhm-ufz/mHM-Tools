@@ -4,6 +4,10 @@ Compute and plot a Taylor diagram comparing multiple model datasets against a re
 This script reads CF-compliant NetCDF files, computes normalized standard deviation,
 correlation, and centered root mean square error (CRMSE) for each model variable
 against a single reference field, and creates one or multiple Taylor diagrams.
+
+Authors
+-------
+- Jeisson Leal
 """
 
 

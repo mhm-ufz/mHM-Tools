@@ -1,4 +1,13 @@
-"""Compare a spatial variable between two datasets using the climatology of that variable."""
+"""Evaluate gridded model data against gridded reference data.
+
+The module loads one or more input and reference datasets, crops or masks them
+to a target domain, computes direct or bootstrap comparison metrics, and writes
+spatial diagnostics, seasonal summaries, and result tables.
+
+Authors
+-------
+- Simon Lüdke
+"""
 
 import array
 import logging

@@ -1,4 +1,8 @@
-"""Calculate the river discharge at bankfull conditions and the bankfull width.
+"""Estimate bankfull discharge and width from discharge time series.
+
+The module computes annual peak flows, selects the discharge closest to the
+requested return period as bankfull discharge, derives bankfull width, and
+writes the resulting gridded variables to NetCDF.
 
 Authors
 -------

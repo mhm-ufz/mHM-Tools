@@ -1,4 +1,13 @@
-"""File handling utils."""
+"""Read, write, and convert gridded setup files.
+
+The module provides shared helpers for NetCDF, ESRI ASCII, and GeoTIFF-style
+workflows, including coordinate normalization, header creation, encoding
+cleanup, grid metadata handling, and output provenance.
+
+Authors
+-------
+- Simon Lüdke
+"""
 
 import contextlib
 import logging

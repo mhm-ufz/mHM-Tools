@@ -1,4 +1,8 @@
-"""Create the catchment file for mRM.
+"""Create subdomain masks for parallel mRM routing domains.
+
+The module splits a basin ID river network into independent subdomains from a
+cluster definition, fills gaps by nearest-neighbor assignment, and writes mask
+files that can be used to run regional parts of a larger routing network.
 
 Authors
 -------
