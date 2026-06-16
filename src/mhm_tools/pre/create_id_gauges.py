@@ -1,4 +1,13 @@
-"""Create id gauges file."""
+"""Create mRM idgauges files from gauge coordinates.
+
+The module places one or more gauge IDs on a target grid, optionally snapping
+the location to the maximum flow-accumulation cell near the provided
+coordinates, and writes the result as an ASCII idgauges map.
+
+Authors
+-------
+- Simon Lüdke
+"""
 
 import logging
 from pathlib import Path

@@ -1,4 +1,15 @@
-"""Cut domains out of an existing mHM setup."""
+"""Crop an existing mHM setup or single setup file to a smaller domain.
+
+The target domain can be defined by a mask file, lon/lat box, or explicit
+coordinate bounds. The tool recreates the input folder structure, crops NetCDF
+files, copies non-cropped files, rewrites headers where needed, can apply masks
+to DEM or all variables, and can create a new latlon file when resolutions are
+provided.
+
+Authors
+-------
+- Simon Lüdke
+"""
 
 import logging
 

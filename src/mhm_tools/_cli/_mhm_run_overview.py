@@ -1,17 +1,14 @@
 #!/usr/bin/env python
-"""Generate run-overview variable statistics for an mHM run.
+"""Create a variable overview for an mHM run.
 
-This CLI reads an mHM namelist (`mhm.nml`), resolves configured input and
-output paths, and delegates processing to
-`mhm_tools.post.mhm_run_overview.create_mhm_run_overview`.
-It creates a CSV table with:
-- `file_name`
-- `variable`
-- `vartype` (`input` or `output`)
-- `min_value`, `mean_value`, `max_value`
-- `file_path`
+The tool reads an mHM namelist, resolves configured input and output files, and
+writes a CSV summary of variables, file paths, and basic statistics. It can
+search input folders recursively, compute temporal means before statistics, and
+convert time-based output units to the inferred meteo resolution.
 
-Rows are written with all input variables first, then output variables.
+Authors
+-------
+- Simon Lüdke
 """
 
 import argparse

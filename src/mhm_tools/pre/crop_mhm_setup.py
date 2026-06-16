@@ -1,4 +1,13 @@
-"""Crop an existing mhm-setup by providing a mask file."""
+"""Crop an existing mHM setup or setup file to a target domain.
+
+The module crops NetCDF inputs by mask or coordinate bounds, recreates the
+input folder structure, rewrites ESRI headers where needed, copies unsupported
+files, and can create a matching latlon file for the cropped setup.
+
+Authors
+-------
+- Simon Lüdke
+"""
 
 import logging
 import shutil

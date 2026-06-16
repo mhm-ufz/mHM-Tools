@@ -1,10 +1,12 @@
-"""Create the catchment file for mRM.
+"""Delineate catchments and basin maps for mHM/mRM setups.
+
+The module builds hydrologic grids from flow direction or DEM data, supports
+global and local domains, single- and multi-gauge delineation, outlet matching
+by area or shape, and writes basin ID, idgauges, mask, gauge metadata, and
+basin shape outputs.
 
 Authors
 -------
-- Robert Schweppe
-- Matthias Kelbling
-- Jeisson Leal
 - Simon Lüdke
 """
 
@@ -2482,7 +2484,12 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
     id_gauges_out_path=None,
     raise_on_fallback=True,
 ):
-    """Create file containing catchment ids, flowdirection and upstream area from dem or flow direction."""
+    """Delineate global or local catchments from flow direction/DEM data.
+
+    Supports full-domain basin mapping, single- or multi-gauge delineation from
+    coordinates and area, and optional shape-based outlet matching. Writes
+    basin IDs, gauge ID files, masks, and optional gauge metadata/shapes.
+    """
     logger.info(
         f"Creating catchment file for {var_name} using {var} and {ftype} from {input_file}"
     )

@@ -1,0 +1,64 @@
+
+{
+    "contributors": [
+        {
+            "orcid": "0009-0004-1543-2444",
+            "affiliation": "Helmholtz Centre for Environmental Research - UFZ",
+            "type": "ProjectMember",
+            "name": "Valentin Simon L\u00fcdke"
+        },
+        {
+            "orcid": "0000-0001-9060-4008",
+            "affiliation": "Helmholtz Centre for Environmental Research - UFZ",
+            "type": "ProjectMember",
+            "name": "Sebastian M\u00fcller"
+        },
+        {
+            "orcid": "0000-0003-1785-8866",
+            "affiliation": "Helmholtz Centre for Environmental Research - UFZ",
+            "type": "ProjectMember",
+            "name": "Jeisson Javier Leal Rojas"
+        },
+        {
+            "orcid": "0000-0001-9303-6712",
+            "affiliation": "Helmholtz Centre for Environmental Research - UFZ",
+            "type": "ProjectMember",
+            "name": "Matthias Kelbling"
+        },
+        {
+            "orcid": "0000-0003-3939-1523",
+            "affiliation": "Helmholtz Centre for Environmental Research - UFZ",
+            "type": "Supervisor",
+            "name": "Stephan Thober"
+        },
+        {
+            "orcid": "0000-0002-8449-4428",
+            "affiliation": "UFZ",
+            "type": "Supervisor",
+            "name": "Luis Samaniego"
+        },
+        {
+            "orcid": "0000-0002-7798-7080",
+            "affiliation": "Helmholtz Centre for Environmental Research - UFZ",
+            "type": "Supervisor",
+            "name": "Sabine Attinger"
+        }
+
+    ],
+    "license": "LGPL-3.0+",
+    "title": "mHM-Tools",
+    "language": "eng",
+    "keywords": [
+        "mHM",
+        "toolbox",
+        "preprocessing",
+        "evaluation",
+        "modelling"
+    ],
+    "creators": [
+        {
+            "affiliation": "Helmholtz Centre for Environmental Research - UFZ",
+            "name": "mHM-Tools Developers"
+        }
+    ]
+}

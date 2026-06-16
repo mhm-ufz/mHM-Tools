@@ -1,4 +1,14 @@
-"""Evaluation of spatially distributed data based on their climatology or timeseries."""
+"""Evaluate gridded model data against gridded reference data.
+
+The tool compares spatial fields and time series within an optional mask or
+lon/lat domain, supports unit conversion, temporal resampling, direct or
+bootstrap comparisons, and restricted year ranges. It writes evaluation
+metrics and plots for bias, seasonality, variability, and related diagnostics.
+
+Authors
+-------
+- Simon Lüdke
+"""
 
 import logging
 

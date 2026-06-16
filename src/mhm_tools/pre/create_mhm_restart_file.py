@@ -1,4 +1,14 @@
-"""Create the mHM restart file."""
+"""Create mHM restart files for configured model grids.
+
+The module assembles static restart variables from morphological data, land
+masks, and generated grid metadata. It supports tiled processing, optional mPR
+execution, and NetCDF restart output for one or multiple domains.
+
+Authors
+-------
+- Simon Lüdke
+- Robert Schweppe
+"""
 
 import logging
 import re

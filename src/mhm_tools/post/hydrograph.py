@@ -1,8 +1,12 @@
-"""Plot hydrographs at multiple time resolutions and compare simulated vs. observed discharge.
+"""Plot discharge diagnostics for one or more mHM/mRM simulations.
+
+The module reads simulated and optional observed discharge, derives catchment
+metadata, computes summary metrics, and creates time-series, yearly,
+seasonality, flow-duration, and scatter hydrograph plots.
 
 Authors
 -------
-- Simon Luedke
+- Simon Lüdke
 """
 
 import logging

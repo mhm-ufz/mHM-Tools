@@ -1,4 +1,15 @@
-"""Calculate PET with multiple different methods."""
+"""Calculate potential evapotranspiration from meteorological inputs.
+
+The module supports several PET methods, mainly temperature-based variants, and
+handles coordinate metadata, time-step detection, optional parallel processing,
+and NetCDF output on the original or requested grid.
+
+Authors
+-------
+- Matthias Kelbling
+- Simon Lüdke
+- Stephan Thober
+"""
 
 import contextlib
 import logging

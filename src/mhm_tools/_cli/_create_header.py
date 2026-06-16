@@ -1,4 +1,10 @@
-"""Create an ASCII header.txt from a NetCDF or ASCII input file."""
+"""
+Create an ASCII header.txt from a NetCDF or ASCII input file.
+
+Authors
+-------
+- Simon Lüdke
+"""
 
 from pathlib import Path
 

@@ -1,4 +1,14 @@
-"""Create a hydrograph showing the simulated and observed discharge."""
+"""Create hydrograph plots from mHM/mRM discharge output.
+
+The command reads one or more simulation output directories, optionally adds
+observed discharge and precipitation, and writes discharge diagnostics such as
+time series, yearly summaries, seasonality, flow-duration curves, and scatter
+plots.
+
+Authors
+-------
+- Simon Lüdke
+"""
 
 
 def add_args(parser):

@@ -5,6 +5,10 @@ Includes functions for plotting:
 - Constant data maps with a legend patch.
 - Discrete data maps with colorbars and extensions.
 - General wrapper `plot_map` that auto-selects plotting strategy.
+
+Authors
+-------
+- Jeisson Leal
 """
 
 from pathlib import Path

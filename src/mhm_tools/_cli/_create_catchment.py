@@ -1,4 +1,15 @@
-"""Create basin id file and deliniate catchments."""
+"""Create mHM/mRM catchment files from flow direction or DEM data.
+
+The tool delineates global or local domains, either as full-domain basin maps
+or as one or multiple gauge catchments. Gauge outlets can be selected from
+coordinates and reference area, from catchment shapes, or from both. It writes
+the basin ID file, optional idgauges files, a domain mask, and optional gauge
+metadata and basin shapes.
+
+Authors
+-------
+- Simon Lüdke
+"""
 
 import csv
 import logging

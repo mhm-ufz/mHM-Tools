@@ -9,6 +9,7 @@ This module provides functions to:
 Authors
 -------
 - Jeisson Leal
+- Simon Lüdke
 """
 
 import logging

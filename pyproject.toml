@@ -9,7 +9,7 @@ build-backend = "hatchling.build"
 requires-python = ">=3.8"
 name = "mhm_tools"
 description = "Tools for mHM."
-authors = [{name = "mHM Developers", email = "mhm-admin@ufz.de"}]
+authors = [{name = "mHM-Tools Developers", email = "mhm-admin@ufz.de"}]
 readme = "README.md"
 license = "LGPL-3.0"
 dynamic = ["version"]

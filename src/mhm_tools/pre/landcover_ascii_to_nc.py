@@ -1,4 +1,13 @@
-"""Convert mHM landcover ASCII files to CF-compliant NetCDF."""
+"""Convert mHM landcover ASCII maps to CF-compliant NetCDF files.
+
+The module reads land-cover periods from an mHM namelist, converts each ASCII
+grid to NetCDF, adds time metadata for the configured validity period, and
+writes files suitable for mHM v6 setup workflows.
+
+Authors
+-------
+- Jeisson Leal
+"""
 
 import logging
 import re
