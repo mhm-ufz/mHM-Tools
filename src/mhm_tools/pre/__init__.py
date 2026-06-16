@@ -32,6 +32,7 @@ _ATTR_EXPORTS = {
     "xy_to_latlon": ("latlon", "xy_to_latlon"),
     "link_folder_tree": ("link_folder_tree", "link_folder_tree"),
     "create_subdomain_masks": ("subdomain_masks", "create_subdomain_masks"),
+    "fill_nearest": ("fill_nearest", "fill_dataarray_with_nearest"),
 }
 
 __all__ = [

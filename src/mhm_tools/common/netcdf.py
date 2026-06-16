@@ -48,14 +48,14 @@ def _fallback_open(
         for cand in candidates:
             try:
                 kwargs["engine"] = cand
-                logger.debug("Retry opening dataset with fallback engine '%s'.", cand)
+                logger.debug(f"Retry opening dataset with fallback engine '{cand}'.")
                 return _fallback_open(
                     open_func, *args, _fallback_attempt=True, **kwargs
                 )
             except Exception:
                 continue
 
-        logger.error("Error opening dataset: %s", exc)
+        logger.error(f"Error opening dataset: {exc}")
         raise exc
 
 

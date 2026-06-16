@@ -1218,11 +1218,8 @@ def plot_map_global_climate2(
     mean_diff_1 = max(abs(vmin), abs(vmax))
     mean_diff_1, round_dec = round_sensibly(mean_diff_1)
     logger.debug(
-        "mean_diff_1=%s, vmin=%s, vmax=%s, round_dec=%s",
-        mean_diff_1,
-        vmin,
-        vmax,
-        round_dec,
+        f"mean_diff_1={mean_diff_1}, vmin={vmin}, vmax={vmax}, "
+        f"round_dec={round_dec}"
     )
     im0, bounds0, extend0, ticks0 = plot_single_map(
         ax_rel_mean, rel_mean, mean_diff_1, bounds_type="max", center=0
@@ -1240,11 +1237,8 @@ def plot_map_global_climate2(
     diff_diff_1 = max(abs(vmin), abs(vmax))
     diff_diff_1, round_dec = round_sensibly(diff_diff_1)
     logger.debug(
-        "diff_diff_1=%s, vmin=%s, vmax=%s, round_dec=%s",
-        diff_diff_1,
-        vmin,
-        vmax,
-        round_dec,
+        f"diff_diff_1={diff_diff_1}, vmin={vmin}, vmax={vmax}, "
+        f"round_dec={round_dec}"
     )
     im1, bounds1, extend1, ticks1 = plot_single_map(
         ax_diff, diff_mean, diff_diff_1, center=0, bounds_type="max"
@@ -1400,7 +1394,7 @@ def plot_map_local_climate(
         cbar.ax.tick_params(labelsize=8)
         fig.subplots_adjust(left=0.03, right=0.94, bottom=0.04, top=0.89)
         plt.savefig(output_path / output_file_name, dpi=400)
-        logger.info("created et_map %s", output_path / output_file_name)
+        logger.info(f"created et_map {output_path / output_file_name}")
 
     rel_file_name = f"et_map_local_climate_rel_{input_name}_{ref_name}.png".replace(
         " ", "_"

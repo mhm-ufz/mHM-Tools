@@ -486,8 +486,8 @@ def write_xarray_to_file(  # noqa: PLR0912, PLR0915
         elif var_name is None or var_name not in ds.data_vars:
             if var_name is not None and var_name not in ds.data_vars:
                 logger.warning(
-                    "Requested var_name %r not found in dataset. Using all data variables instead.",
-                    var_name,
+                    f"Requested var_name {var_name!r} not found in dataset. "
+                    "Using all data variables instead."
                 )
             logger.info(f"Taking data vars from list of ds.data_vars {ds.data_vars}")
             metadata_vars = _metadata_data_vars(ds)
@@ -542,10 +542,8 @@ def write_xarray_to_file(  # noqa: PLR0912, PLR0915
                         bmax = float(np.nanmax(np.abs(bnds_da.values)))
                         if tmax > 0 and bmax / tmax > 1e6:
                             logger.warning(
-                                "Time bounds look out of scale (max=%s vs time max=%s); "
-                                "regenerating bounds from time.",
-                                bmax,
-                                tmax,
+                                f"Time bounds look out of scale (max={bmax} vs time "
+                                f"max={tmax}); regenerating bounds from time."
                             )
                             ds = ds.copy(deep=False)
                             ds.coords[bounds_name] = generate_bounds(time_da)
@@ -772,8 +770,8 @@ def _apply_cf_baseline_metadata(ds: xr.Dataset, data_vars: Sequence[str]) -> Non
         ds.attrs["Conventions"] = CF_DEFAULT_CONVENTIONS
     elif not str(ds.attrs["Conventions"]).startswith("CF-"):
         logger.warning(
-            "Global attribute 'Conventions' is not CF-like (%r). Leaving it unchanged.",
-            ds.attrs["Conventions"],
+            f"Global attribute 'Conventions' is not CF-like "
+            f"({ds.attrs['Conventions']!r}). Leaving it unchanged."
         )
 
     lat_key = get_coord_key(ds, lat=True, raise_exception=False)
@@ -788,8 +786,7 @@ def _apply_cf_baseline_metadata(ds: xr.Dataset, data_vars: Sequence[str]) -> Non
         if _lacks_explicit_cf_axis_metadata(ds[lat_key]):
             logger.warning(
                 "Could not infer latitude coordinate from explicit metadata; "
-                "using inferred coordinate %r.",
-                lat_key,
+                f"using inferred coordinate {lat_key!r}."
             )
         lat = ds[lat_key]
         lat.attrs.setdefault("standard_name", "latitude")
@@ -804,8 +801,7 @@ def _apply_cf_baseline_metadata(ds: xr.Dataset, data_vars: Sequence[str]) -> Non
         if _lacks_explicit_cf_axis_metadata(ds[lon_key]):
             logger.warning(
                 "Could not infer longitude coordinate from explicit metadata; "
-                "using inferred coordinate %r.",
-                lon_key,
+                f"using inferred coordinate {lon_key!r}."
             )
         lon = ds[lon_key]
         lon.attrs.setdefault("standard_name", "longitude")
@@ -822,19 +818,19 @@ def _apply_cf_baseline_metadata(ds: xr.Dataset, data_vars: Sequence[str]) -> Non
     for name in data_vars:
         if name not in ds.data_vars:
             logger.warning(
-                "Requested data variable %r not in dataset; skipping CF checks for it.",
-                name,
+                f"Requested data variable {name!r} not in dataset; skipping CF "
+                "checks for it."
             )
             continue
         attrs = ds[name].attrs
         if "units" not in attrs:
             logger.warning(
-                "Data variable %r has no 'units' attribute (CF-recommended).", name
+                f"Data variable {name!r} has no 'units' attribute (CF-recommended)."
             )
         if "standard_name" not in attrs and "long_name" not in attrs:
             logger.warning(
-                "Data variable %r has neither 'standard_name' nor 'long_name' (CF-recommended).",
-                name,
+                f"Data variable {name!r} has neither 'standard_name' nor "
+                "'long_name' (CF-recommended)."
             )
 
 

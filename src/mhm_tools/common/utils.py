@@ -407,9 +407,8 @@ def align_bounds_to_l2(ds, resolutions, min_row, max_row, min_col, max_col):
         lower_target = lower_vals.max() if lower_vals.size else lower_edges.min()
         upper_target = upper_vals.min() if upper_vals.size else upper_edges.max()
         logger.debug(
-            '_bound_to_grid: "values" min: %.6f, max: %.6f',
-            lower_target,
-            upper_target,
+            f'_bound_to_grid: "values" min: {lower_target:.6f}, '
+            f"max: {upper_target:.6f}"
         )
         return lower_target, upper_target
 

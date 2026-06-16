@@ -11,8 +11,6 @@ from mhm_tools.post.gridded_data_evaluation import (
     regridd_to_higher_spatial_resolution,
 )
 
-# TODO: add a setup fixture to configure the logger to ERROR level to avoid cluttering test output with INFO logs also set propagate to True
-
 
 @pytest.fixture(autouse=True, scope="session")
 def _configure_test_logging():
