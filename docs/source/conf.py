@@ -9,8 +9,8 @@ import datetime
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
 project = "mhm_tools"
-copyright = f"2021 - {datetime.datetime.now().year}, mHM Developers"
-author = "mHM Developers"
+copyright = f"2021 - {datetime.datetime.now().year}, mHM-Tools Developers"
+author = "mHM-Tools Developers"
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration

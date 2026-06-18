@@ -1013,6 +1013,65 @@ class TestCatchment(unittest.TestCase):
             iou = catchment._shape_iou(l0_shape, candidate_gdf)
             self.assertGreaterEqual(iou, 0.7)
 
+    def test_shape_area_matches_delineated_area(self):
+        self._require_geospatial()
+        if (
+            not self.FDIR_PATH.exists()
+            or self.GAUGE_LAT is None
+            or self.GAUGE_LON is None
+            or self.REF_AREA is None
+        ):
+            self.skipTest(
+                "Set FDIR_PATH, GAUGE_LAT, GAUGE_LON and REF_AREA in this test file to run this integration test."
+            )
+
+        import geopandas as gpd
+
+        with get_xarray_ds_from_file(str(self.FDIR_PATH)) as ds:
+            var_name = (
+                self.FDIR_VAR
+                if self.FDIR_VAR in ds.data_vars
+                else list(ds.data_vars)[0]
+            )
+            transform = catchment.get_transformation_matrix_nc(ds, var_name)
+            c = catchment.Catchment(
+                ds,
+                var_name,
+                var="fdir",
+                ftype="d8",
+                transform=transform,
+                latlon=True,
+            )
+            gauge = catchment.Gauge(
+                gauge_id=101,
+                lat=float(self.GAUGE_LAT[0]),
+                lon=float(self.GAUGE_LON[0]),
+                area=float(self.REF_AREA[0]),
+            )
+            c.delineate_basin(
+                gauge,
+                max_distance_cells=10,
+                max_error=0.25,
+                raise_on_sanity_check=True,
+            )
+            self.assertIsNotNone(c.catchment_mask)
+            self.assertTrue(np.any(c.catchment_mask))
+
+            c.compute_cell_area()
+            delineated_area = float(np.sum(c.cell_area[c.catchment_mask]))
+
+            shapes_dir = self.tmp_path / "shape_area"
+            c.write_basin_shape(shapes_dir, gauge_id=gauge.gauge_id)
+            basin_shape = gpd.read_file(shapes_dir / f"basin_{gauge.gauge_id}.shp")
+            shape_area = c.calculate_shape_area_on_current_grid(
+                basin_shape,
+                shape_label="written basin shape",
+            )
+
+            self.assertIsNotNone(shape_area)
+            self.assertGreater(shape_area, 0.0)
+            self.assertAlmostEqual(shape_area, delineated_area, places=6)
+
     def test_shape_correction_after_upscale(self):
         self._require_geospatial()
         if (
@@ -1061,6 +1120,8 @@ class TestCatchment(unittest.TestCase):
             corrected_coords = c.correct_gauge_location_l1_from_shape(
                 l0_shape,
                 (self.GAUGE_LAT[0], self.GAUGE_LON[0]),
+                max_distance_cells=10,
+                max_error=0.3,
                 reference_upstream_area=self.REF_AREA[0],
             )
             self.assertIsNotNone(corrected_coords)
@@ -1089,3 +1150,34 @@ class TestCatchment(unittest.TestCase):
                 naive_iou,
                 "L1 shape correction did not improve shape agreement.",
             )
+
+    def test_merge_catchment_only_replaces_dateline_basins(self):
+        lat = np.array([1.0, 0.0])
+        lon = np.array([-179.0, -177.0, -100.0, 0.0, 100.0, 177.0, 179.0])
+        basin1 = np.array(
+            [
+                [1, 1, 2, 2, 2, 3, 3],
+                [1, 1, 2, 2, 2, 3, 3],
+            ]
+        )
+        basin2 = basin1 + 10
+        ds1 = xr.Dataset(
+            {"basin": (["lat", "lon"], basin1)},
+            coords={"lat": lat, "lon": lon},
+        )
+        ds2 = xr.Dataset(
+            {"basin": (["lat", "lon"], basin2)},
+            coords={"lat": lat, "lon": lon + 180},
+        )
+        path1 = self.tmp_path / "merge_hydro1.nc"
+        path2 = self.tmp_path / "merge_hydro2.nc"
+        out_path = self.tmp_path / "merge_out.nc"
+        ds1.to_netcdf(path1)
+        ds2.to_netcdf(path2)
+
+        catchment.merge_catchment(path1, path2, out_path)
+
+        with xr.open_dataset(out_path) as merged:
+            self.assertEqual(int(merged["basin"].sel(lat=1.0, lon=0.0)), 2)
+            self.assertGreater(int(merged["basin"].sel(lat=1.0, lon=-179.0)), 3)
+            self.assertGreater(int(merged["basin"].sel(lat=1.0, lon=179.0)), 3)

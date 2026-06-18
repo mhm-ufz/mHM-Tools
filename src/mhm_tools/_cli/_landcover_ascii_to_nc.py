@@ -1,4 +1,10 @@
-"""CLI for converting mHM landcover ASCII files to CF-compliant NetCDF."""
+"""
+CLI for converting mHM landcover ASCII files to CF-compliant NetCDF.
+
+Authors
+-------
+- Jeisson Leal
+"""
 
 from __future__ import annotations
 

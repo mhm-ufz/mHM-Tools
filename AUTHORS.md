@@ -1,4 +1,4 @@
-# mHM developers
+# mHM-Tools developers
 
 The mHM-Tools project was created by the following people.
 
@@ -10,6 +10,7 @@ The mHM-Tools project was created by the following people.
 ## Working Group members
 
 - Jeisson Javier Leal Rojas (E-mail: <jeisson-javier.leal-rojas@ufz.de>)
+- Matthias Kelbling (E-mail <matthias.kelbling@ufz.de>)
 - Lennart Schüler (E-mail: <lennart.schueler@ufz.de>)
 
 ## Supervisors

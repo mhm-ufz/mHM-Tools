@@ -9,7 +9,7 @@ build-backend = "hatchling.build"
 requires-python = ">=3.8"
 name = "mhm_tools"
 description = "Tools for mHM."
-authors = [{name = "mHM Developers", email = "mhm-admin@ufz.de"}]
+authors = [{name = "mHM-Tools Developers", email = "mhm-admin@ufz.de"}]
 readme = "README.md"
 license = "LGPL-3.0"
 dynamic = ["version"]
@@ -37,13 +37,13 @@ classifiers = [
 dependencies = [
   "click>=8.1",
   "numpy>=1.17.3,<2.4",
+  "geopandas>=1.1.3,< 2",
   "xarray",
   "rioxarray",
   "matplotlib>=3.6.1",
   "pandas<2; python_version=='3.8'",
   "pyproj",
   "pyflwdir",
-  "matplotlib",
   "scipy",
   "joblib",
   "crick",
@@ -51,7 +51,7 @@ dependencies = [
   "seaborn",
   "netCDF4",
   "easy_mpl",
-  "cdo",
+  "cdo>=1.6.1",
   "h5netcdf",
   "h5py",
   "trogon>=0.6.0"

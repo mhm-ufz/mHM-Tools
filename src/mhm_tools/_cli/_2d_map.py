@@ -5,6 +5,10 @@ Compute and plot a 2D map for a given NetCDF dataset.
 This CLI reads a CF-compliant NetCDF file, extracts a specified variable, and
 invokes mhm_tools.common.plotter.plot_map to generate and save a geo-aware
 2D map plot with customizable labels, colormap, and spatial or data limits.
+
+Authors
+-------
+- Jeisson Leal
 """
 
 import argparse

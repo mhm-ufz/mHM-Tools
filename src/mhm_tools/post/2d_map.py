@@ -1,4 +1,8 @@
-"""Call function to plot a 2D map.
+"""Create a geospatial 2D map from a NetCDF variable.
+
+The module reads a gridded NetCDF dataset, extracts the requested variable, and
+delegates to the shared plotting utilities to create a map with configurable
+title, colorbar label, colormap, spatial extent, and value limits.
 
 Authors
 -------
