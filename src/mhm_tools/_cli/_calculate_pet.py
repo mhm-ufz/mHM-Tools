@@ -1,4 +1,13 @@
-"""Calculating pet from tavg."""
+"""Calculating pet.
+
+Contains multiple different pet methods mainly temperature based.
+
+Authors
+-------
+- Matthias Kelbling
+- Simon Lüdke
+- Stephan Thober
+"""
 
 import logging
 

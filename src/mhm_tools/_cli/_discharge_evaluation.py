@@ -1,4 +1,14 @@
-"""Discharge Validation."""
+"""Evaluate simulated discharge against observed gauge discharge.
+
+The tool matches model and observation time series, optionally optimizes gauge
+locations with flow-accumulation data, filters by domain, date range, or gauge
+list, and computes discharge metrics with optional bootstrap sampling. It can
+write processed hydrographs, metric tables, and diagnostic hydrograph plots.
+
+Authors
+-------
+- Simon Lüdke
+"""
 
 
 def add_args(parser):

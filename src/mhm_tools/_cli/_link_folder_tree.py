@@ -1,4 +1,14 @@
-"""Link all files in a folder tree to another folder tree creating symlinks for each file."""
+"""Create a symlinked copy of a folder tree.
+
+The tool recreates the input directory structure under a new output directory
+and links matching files instead of copying their contents. Existing links can
+optionally be overwritten, and the linked files can be restricted by a filename
+pattern.
+
+Authors
+-------
+- Simon Lüdke
+"""
 
 import logging
 from pathlib import Path

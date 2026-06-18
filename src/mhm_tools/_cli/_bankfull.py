@@ -9,6 +9,10 @@ This routine will simply use the closest flood event in terms of its
 recurrence interval. Also, any input time-stepping is accepted but daily
 or sub-daily data is preferred. Ouput variables in the created NetCDF
 file are called "Q_bkfl" and "P_bkfl".
+
+Authors
+-------
+- Sebastian Müller
 """
 
 

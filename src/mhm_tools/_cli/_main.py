@@ -1,4 +1,13 @@
+<<<<<<< HEAD
 """Click-based command line interface for mhm-tools."""
+=======
+"""
+Click-based command line interface for mhm-tools.
+
+Authors
+- Simon Lüdke
+"""
+>>>>>>> origin/develop
 
 import argparse
 import difflib
@@ -55,7 +64,11 @@ def _patch_trogon_command_tree_order() -> None:
 
 _COMMAND_GROUPS: List[Tuple[str, str, List[Tuple[str, object]]]] = [
     (
+<<<<<<< HEAD
         "setup_creation",
+=======
+        "setup-creation",
+>>>>>>> origin/develop
         "Create and prepare mHM/mRM setup files.",
         [
             ("create-catchment", "mhm_tools._cli._create_catchment"),
@@ -66,12 +79,20 @@ _COMMAND_GROUPS: List[Tuple[str, str, List[Tuple[str, object]]]] = [
         ],
     ),
     (
+<<<<<<< HEAD
         "data_processing",
+=======
+        "data-processing",
+>>>>>>> origin/develop
         "Convert, regrid, merge, and derive gridded data products.",
         [
             ("converter-nc-ascii", "mhm_tools._cli._file_converter"),
             ("latlon", "mhm_tools._cli._latlon"),
             ("merge-files", "mhm_tools._cli._merge"),
+<<<<<<< HEAD
+=======
+            ("fill-nearest", "mhm_tools._cli._fill_nearest"),
+>>>>>>> origin/develop
             ("regrid-file", "mhm_tools._cli._regrid"),
             ("long-term-mean", "mhm_tools._cli._long_term_mean"),
             ("difference", "mhm_tools._cli._difference"),
@@ -106,7 +127,11 @@ _COMMAND_GROUPS: List[Tuple[str, str, List[Tuple[str, object]]]] = [
         ],
     ),
     (
+<<<<<<< HEAD
         "mHMv5-to-mHMv6-setup-conversion",
+=======
+        "mHMv5-to-mHMv6-converter",
+>>>>>>> origin/develop
         "Convert mHM5 setup files to mHMv6 format.",
         [
             ("landcover-ascii-to-nc", "mhm_tools._cli._landcover_ascii_to_nc"),

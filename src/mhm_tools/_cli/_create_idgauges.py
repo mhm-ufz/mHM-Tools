@@ -1,4 +1,9 @@
-"""Create an id gauges file."""
+"""Create an id gauges file.
+
+Authors
+-------
+- Simon Lüdke
+"""
 
 import logging
 

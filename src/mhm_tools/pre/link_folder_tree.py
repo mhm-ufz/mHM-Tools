@@ -1,4 +1,13 @@
-"""Functions to link folder trees with symlinks."""
+"""Create symlinked copies of folder trees.
+
+The module recreates an input directory layout under a target directory and
+creates symbolic links for files matching a configurable name pattern. Existing
+links can be kept or overwritten.
+
+Authors
+-------
+- Simon Lüdke
+"""
 
 import logging
 from pathlib import Path

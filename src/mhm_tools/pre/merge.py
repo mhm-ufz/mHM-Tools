@@ -1,4 +1,13 @@
-"""Utilities to merge NetCDF files using CDO."""
+"""Merge time-split NetCDF files with CDO.
+
+The module groups matching input files, merges them along time, and can repeat
+the merge within subfolders while preserving a top-level directory structure.
+Large file lists are processed in chunks before creating the final output.
+
+Authors
+-------
+- Simon Lüdke
+"""
 
 import logging
 import math

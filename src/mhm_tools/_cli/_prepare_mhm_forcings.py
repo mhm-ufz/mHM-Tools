@@ -1,4 +1,11 @@
-"""mHM processing netCDF precipitation and temperature forcings."""
+"""
+mHM processing netCDF precipitation and temperature forcings.
+
+Authors
+-------
+- Jeisson Leal
+- Simon Lüdke
+"""
 
 
 def add_args(parser):

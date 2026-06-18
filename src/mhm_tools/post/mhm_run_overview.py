@@ -19,6 +19,10 @@ Within each type, rows are sorted by `file_name` and then `variable`.
 
 If multiple domains are configured using indexed paths (for example
 `dir_out(1)`, `dir_out(2)`), one CSV table per domain is written.
+
+Authors
+-------
+- Simon Lüdke
 """
 
 import logging
@@ -257,9 +261,8 @@ def collect_output_flux_files(
                 found_in_dir = True
         if not found_in_dir:
             logger.warning(
-                "No known output files (%s) found in %s",
-                ", ".join(_OUTPUT_FILENAME),
-                out_dir,
+                f"No known output files ({', '.join(_OUTPUT_FILENAME)}) found in "
+                f"{out_dir}"
             )
     return _unique_paths(output_files)
 
@@ -485,18 +488,15 @@ def collect_stats_rows(
             for var_name, da in ds.data_vars.items():
                 if _is_coordinate_like_variable(da):
                     logger.debug(
-                        "Skipping coordinate-like variable %s:%s.",
-                        dataset_path.name,
-                        var_name,
+                        f"Skipping coordinate-like variable {dataset_path.name}:"
+                        f"{var_name}."
                     )
                     continue
                 stats = compute_variable_stats(da, temporal_mean=temporal_mean)
                 if stats is None:
                     logger.debug(
-                        "Skipping %s:%s because dtype %s is non-numeric.",
-                        dataset_path.name,
-                        var_name,
-                        da.dtype,
+                        f"Skipping {dataset_path.name}:{var_name} because dtype "
+                        f"{da.dtype} is non-numeric."
                     )
                     continue
                 if (
@@ -575,7 +575,7 @@ def _drop_duplicate_rows(table: pd.DataFrame) -> pd.DataFrame:
     deduped = table.drop_duplicates(ignore_index=True)
     removed = before - len(deduped)
     if removed > 0:
-        logger.info("Removed %d duplicate rows from overview table.", removed)
+        logger.info(f"Removed {removed} duplicate rows from overview table.")
     return deduped
 
 
@@ -598,9 +598,7 @@ def create_mhm_run_overview(
 
     if n_domains is not None:
         logger.info(
-            "Using nDomains=%d to select active domains: %s",
-            n_domains,
-            domain_indices,
+            f"Using nDomains={n_domains} to select active domains: {domain_indices}"
         )
 
     def _build_table_for_domain(domain_idx: Optional[int]) -> pd.DataFrame:
@@ -619,14 +617,12 @@ def create_mhm_run_overview(
         )
 
         if domain_idx is None:
-            logger.info("Found %d input NetCDF files.", len(input_files))
-            logger.info("Found %d output flux files.", len(output_files))
+            logger.info(f"Found {len(input_files)} input NetCDF files.")
+            logger.info(f"Found {len(output_files)} output flux files.")
         else:
             logger.info(
-                "Domain %d: found %d input NetCDF files and %d output flux files.",
-                domain_idx,
-                len(input_files),
-                len(output_files),
+                f"Domain {domain_idx}: found {len(input_files)} input NetCDF files "
+                f"and {len(output_files)} output flux files."
             )
 
         rows_input = collect_stats_rows(
@@ -648,9 +644,8 @@ def create_mhm_run_overview(
         target_time_seconds = _infer_time_resolution_seconds(input_time_reference_files)
         if convert_units and target_time_seconds is not None:
             logger.info(
-                "Inferred input temporal resolution: %.3f seconds (closest: %s).",
-                target_time_seconds,
-                _closest_time_unit_code(target_time_seconds),
+                f"Inferred input temporal resolution: {target_time_seconds:.3f} "
+                f"seconds (closest: {_closest_time_unit_code(target_time_seconds)})."
             )
         if convert_units and target_time_seconds is None:
             logger.warning(
@@ -673,9 +668,7 @@ def create_mhm_run_overview(
             output_csv = _resolve_output_csv_path_for_domain(output_dir, domain_idx)
             pretty_print_df(table, 70)
             table.to_csv(output_csv, index=False)
-            logger.info(
-                "Domain %d: wrote %d rows to %s", domain_idx, len(table), output_csv
-            )
+            logger.info(f"Domain {domain_idx}: wrote {len(table)} rows to {output_csv}")
         return
 
     if len(domain_indices) == 1:
@@ -685,4 +678,4 @@ def create_mhm_run_overview(
     output_csv = _resolve_output_csv_path(output_dir)
     pretty_print_df(table, 70)
     table.to_csv(output_csv, index=False)
-    logger.info("Wrote %d rows to %s", len(table), output_csv)
+    logger.info(f"Wrote {len(table)} rows to {output_csv}")

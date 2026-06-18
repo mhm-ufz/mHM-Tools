@@ -1,7 +1,12 @@
-"""Create the latlon file for mHM.
+"""Create the latlon.nc grid description required by mHM.
+
+The module builds compatible L0, L1, L11, and L2 grid definitions from headers,
+cell sizes, or existing files, checks grid alignment, and writes the combined
+latlon NetCDF file used by mHM/mRM setups.
 
 Authors
 -------
+- Jeisson Leal
 - Sebastian Müller
 """
 

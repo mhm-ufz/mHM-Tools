@@ -2,6 +2,11 @@
 
 A restart file contains all the static information to run mHM on a
 specific grid.
+
+Authors
+-------
+- Simon Lüdke
+- Robert Schweppe
 """
 
 import logging

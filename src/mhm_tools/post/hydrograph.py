@@ -1,8 +1,12 @@
-"""Plot hydrographs at multiple time resolutions and compare simulated vs. observed discharge.
+"""Plot discharge diagnostics for one or more mHM/mRM simulations.
+
+The module reads simulated and optional observed discharge, derives catchment
+metadata, computes summary metrics, and creates time-series, yearly,
+seasonality, flow-duration, and scatter hydrograph plots.
 
 Authors
 -------
-- Simon Luedke
+- Simon Lüdke
 """
 
 import logging
@@ -18,7 +22,7 @@ from matplotlib import gridspec
 
 from mhm_tools.common.file_handler import get_xarray_ds_from_file
 from mhm_tools.common.logger import ErrorLogger, log_arguments
-from mhm_tools.common.spatial_metrics import create_csv_from_dict
+from mhm_tools.common.metrics.metrics_handler import create_csv_from_dict
 from mhm_tools.common.utils import dict_to_multiline_string
 
 logger = logging.getLogger(__name__)
@@ -34,7 +38,7 @@ def _ensure_non_interactive_backend(show):
     try:
         plt.switch_backend("Agg")
     except Exception as exc:
-        logger.debug("Failed to switch matplotlib backend to Agg: %s", exc)
+        logger.debug(f"Failed to switch matplotlib backend to Agg: {exc}")
 
 
 class Catchment:
@@ -1383,9 +1387,8 @@ def get_hydrograph_from_path(  # noqa: PLR0912, PLR0915
     named_multi = bool(multi_input and sim_names and len(sim_names) == len(input_paths))
     if multi_input and sim_names and not named_multi:
         logger.warning(
-            "Provided %d names but %d input paths; ignoring names.",
-            len(sim_names),
-            len(input_paths),
+            f"Provided {len(sim_names)} names but {len(input_paths)} input paths; "
+            "ignoring names."
         )
         sim_names = None
 
