@@ -433,6 +433,20 @@ def _convert_callback(action: argparse.Action) -> Callable:
     return _callback
 
 
+def _contiguous_int_choices(choices):
+    """Return integer range bounds when choices are contiguous integers."""
+    try:
+        int_choices = sorted(int(choice) for choice in choices)
+    except (TypeError, ValueError):
+        return None
+    if not int_choices:
+        return None
+    expected = list(range(int_choices[0], int_choices[-1] + 1))
+    if int_choices != expected:
+        return None
+    return int_choices[0], int_choices[-1]
+
+
 def _action_to_click_option(action: argparse.Action, option_group: str = "options"):
     """Convert one parser action to a Click option."""
     option_strings = tuple(_canonical_option_strings(action.option_strings))
@@ -469,7 +483,18 @@ def _action_to_click_option(action: argparse.Action, option_group: str = "option
         else:
             kwargs["type"] = str
         if action.choices is not None:
-            kwargs["type"] = click.Choice([str(choice) for choice in action.choices])
+            if action.type is int:
+                choice_range = _contiguous_int_choices(action.choices)
+                if choice_range is not None:
+                    kwargs["type"] = click.IntRange(*choice_range)
+                else:
+                    kwargs["type"] = int
+            elif action.type is float:
+                kwargs["type"] = float
+            else:
+                kwargs["type"] = click.Choice(
+                    [str(choice) for choice in action.choices]
+                )
         kwargs["callback"] = _convert_callback(action)
 
     param_decls = [*list(option_strings), action.dest]
