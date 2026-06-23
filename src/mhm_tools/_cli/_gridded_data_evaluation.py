@@ -181,13 +181,13 @@ def add_args(parser):
     optional.add_argument(
         "--input-file-name",
         required=False,
-        default="*.*",
+        default="*.nc",
         help="Input file name. E.g. '*.nc' to copy only nc files or 'pre*' to copy only precipitation files. If the file has a header in it's folder the header is reproduced regardless of wether nor not it fits the filename.",
     )
     optional.add_argument(
         "--ref-file-name",
         required=False,
-        default="*.*",
+        default="*.nc",
         help="Ref file name. E.g. '*.nc' to copy only nc files or 'pre*' to copy only precipitation files. If the file has a header in it's folder the header is reproduced regardless of wether nor not it fits the filename.",
     )
     optional.add_argument(
