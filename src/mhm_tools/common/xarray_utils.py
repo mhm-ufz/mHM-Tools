@@ -19,7 +19,10 @@ def normalize_lat_lon(
     ds: xr.Dataset,
     lat: Optional[str] = None,
     lon: Optional[str] = None,
+    new_lat: str = "lat",
+    new_lon: str = "lon",
     raise_exceptions: bool = False,
+    log_warning: bool = False,
 ) -> xr.Dataset:
     """
     Normalize latitude and longitude dimension and coordinate names to 'lat' and 'lon'.
@@ -29,17 +32,28 @@ def normalize_lat_lon(
     try:
         rename_dict = {}
         if lat is None:
-            lat = get_coord_key(ds, lon=True)
+            lat = get_coord_key(ds, lat=True)
         if lon is None:
             lon = get_coord_key(ds, lon=True)
 
         coords_and_dims = list(ds.coords) + list(ds.dims)
-
+        if log_warning and (lat != new_lat or lon != new_lon):
+            logger.warning(
+                f"The coordinates were normalised from {lon}->{new_lon} and {lat}->{new_lat}"
+            )
         # Rename coordinate variables if needed
-        if lat is not None and "lat" not in coords_and_dims and lat in coords_and_dims:
-            rename_dict[lat] = "lat"
-        if lon is not None and "lon" not in coords_and_dims and lon in coords_and_dims:
-            rename_dict[lon] = "lon"
+        if (
+            lat is not None
+            and new_lat not in coords_and_dims
+            and lat in coords_and_dims
+        ):
+            rename_dict[lat] = new_lat
+        if (
+            lon is not None
+            and new_lon not in coords_and_dims
+            and lon in coords_and_dims
+        ):
+            rename_dict[lon] = new_lon
 
         return ds.rename(rename_dict)
     except Exception as e:
@@ -402,7 +416,7 @@ def get_dtype(ds):
         return "f4"
 
 
-def get_ds_extend(ds, var=None, recursive_search=True):
+def get_ds_extend(ds, var=None, recursive_search=True, resolutions=None):
     """Get the spatial extent of a dataset as (lon_min, lon_max, lat_min, lat_max) from its bounds."""
     from mhm_tools.common.resolution_handler import get_file_res
 
@@ -423,9 +437,6 @@ def get_ds_extend(ds, var=None, recursive_search=True):
         lat_min = float(ds[lat_bnds_key].values.min())
         lat_max = float(ds[lat_bnds_key].values.max())
         return lon_min, lon_max, lat_min, lat_max
-    if recursive_search:
-        ds = generate_bounds_for_all_coords(ds)
-        return get_ds_extend(ds, var=var, recursive_search=False)
     logger.warning(
         "Could not find coordinate bounds for dataset; estimating spatial extent from coordinate values."
     )
@@ -434,8 +445,13 @@ def get_ds_extend(ds, var=None, recursive_search=True):
     res = (
         ds.attrs.get("spatial_resolution")
         if "spatial_resolution" in ds.attrs
-        else (get_file_res(ds[lon_key], ds[lat_key], None))
+        else (get_file_res(ds[lon_key], ds[lat_key], resolutions=resolutions))
     )
+    if recursive_search:
+        ds = generate_bounds_for_all_coords(ds, res=res)
+        return get_ds_extend(
+            ds, var=var, recursive_search=False, resolutions=resolutions
+        )
     return (
         float(np.nanmin(lon_vals)) - float(res) / 2,
         float(np.nanmax(lon_vals)) + float(res) / 2,

@@ -50,7 +50,7 @@ def get_available_mem_in_unit(available_mem):
     return int(mem_str) * 1_000_000_000
 
 
-def get_coords_from_mask(mask, mask_key=None):
+def get_coords_from_mask(mask, mask_key=None, resolutions=None):
     """Get the coordinate extents from a mask NetCDF file.
 
     Parameters
@@ -77,7 +77,7 @@ def get_coords_from_mask(mask, mask_key=None):
             lon_max_target_grid,
             lat_min_target_grid,
             lat_max_target_grid,
-        ) = get_ds_extend(mask_ds, mask_key)
+        ) = get_ds_extend(mask_ds, mask_key, resolutions=resolutions)
 
         resolution = np.median(np.diff(mask_ds[get_coord_key(mask_ds, lon=True)]))
 
@@ -114,6 +114,7 @@ def get_coords(
     lat_max=None,
     raise_exception=True,
     mask_var=None,
+    resolutions=None,
 ):
     """Get coordinate bounds from a lonlatbox string, mask file, or explicit values.
 
@@ -142,7 +143,7 @@ def get_coords(
         mask = None
     elif mask_file is not None:
         lon_min_val, lon_max_val, lat_min_val, lat_max_val, mask = get_coords_from_mask(
-            mask_file, mask_key=mask_var
+            mask_file, mask_key=mask_var, resolutions=resolutions
         )
     elif None not in (lon_min, lon_max, lat_min, lat_max):
         lon_min_val, lon_max_val, lat_min_val, lat_max_val = (

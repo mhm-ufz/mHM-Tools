@@ -32,6 +32,7 @@ from mhm_tools.common.xarray_utils import (
     get_dtype,
     get_single_data_var,
     induce_data_var_from_file_name,
+    normalize_lat_lon,
 )
 from mhm_tools.pre.latlon import create_latlon
 
@@ -109,6 +110,8 @@ def regrid_mask(
     mask_key=None,
     lon_key_target=None,
     lat_key_target=None,
+    target_res=None,
+    mask_res=None,
 ):
     """Regrid a xarray mask dataset mask_ds to the resolution of a second dataset ds2."""
 
@@ -404,7 +407,6 @@ def crop_file(  # noqa: PLR0912 PLR0915 PLR0913
     lat_order="decreasing",
     output_suffix=None,
     mask_all=False,
-    mask_var="mask",
     resolutions=None,
 ):
     """Crops one file by lat and lon slice and may mask it with the mask dataarray."""
@@ -423,7 +425,7 @@ def crop_file(  # noqa: PLR0912 PLR0915 PLR0913
     if output_file.is_file() and not overwrite:
         logger.info("Target file already exists. Cropping is skipped.")
         return latlon_files
-        # 1. latlon file: The latlon file is not croped but its relative location is saved and the latlon file is newly created after all files are croped
+    # 1. latlon file: The latlon file is not croped but its relative location is saved and the latlon file is newly created after all files are croped
     if "latlon" in input_file.name.lower():
         logger.info(
             "Latlon cropping depreciated will implement new latlon creation using the mhm-tools latlon functionality."
@@ -436,6 +438,7 @@ def crop_file(  # noqa: PLR0912 PLR0915 PLR0913
             f"Restart file {input_file} could not be copied as that is not yet implemented."
         )
         return latlon_files
+    has_header = bool(list(input_file.parent.glob("header.txt")))
     if input_file.suffix in [".asc", ".nc"]:
         try:
             ds = get_xarray_ds_from_file(
@@ -443,8 +446,8 @@ def crop_file(  # noqa: PLR0912 PLR0915 PLR0913
                 chunking=chunking,
                 available_mem_gib=available_mem_gib // 3,
                 normalize_latlon_coords=True,
-                force_decending_y=(lat_order == "decreasing"),
-                force_ascending_y=(lat_order == "increasing"),
+                force_decending_y=(lat_order == "decreasing" and not has_header),
+                force_ascending_y=(lat_order == "increasing" and not has_header),
                 chunk_type=ChunkType.TIME,
             )
         except ValueError as ve:
@@ -469,7 +472,7 @@ def crop_file(  # noqa: PLR0912 PLR0915 PLR0913
     ds_cropped = None
     if not no_cropping:
         # 3. Files that are in the same folder as a header file. Typical examples are meteo datasets such as temperature or precipitation, here the header is used as they might not have lat, lon coords
-        if list(input_file.parent.glob("header.txt")):
+        if has_header:
             logger.debug("Cropping and writing new header file...")
             ds_cropped, header_path = crop_file_with_header(
                 ds,
@@ -516,33 +519,53 @@ def crop_file(  # noqa: PLR0912 PLR0915 PLR0913
     if "dem" in input_file.name.lower() or mask_all:  # or "mhm" in f.name.lower()
         if mask_ds is not None:
             file_res = get_file_res(ds[lon_key], ds[lat_key], resolutions)
+            logger.info(f"Preparing mask for masking of {input_file.name.lower()}")
+            selected_mask_var = None
+            selected_lon_key_mask = None
+            selected_lat_key_mask = None
             for var in mask_ds.data_vars:
                 mask_da = mask_ds[var]
+                # if resolution of mask matches target file use this maks var and do not regrid
                 lon_key_mask = get_coord_key(mask_da, lon=True)
                 lat_key_mask = get_coord_key(mask_da, lat=True)
-                # if resolution of mask matches target file use this maks var and do not regrid
                 mask_res = get_file_res(
-                    mask_ds[lon_key_mask], mask_ds[lat_key_mask], resolutions
+                    lon=mask_ds[lon_key_mask],
+                    lat=mask_ds[lat_key_mask],
+                    resolutions=resolutions,
                 )
                 if abs(mask_res - file_res) <= 1e-5:
                     logger.debug(
                         f"Mask resolution {mask_res} matches file resolution {file_res} (within tolerance). Using mask without regridding."
                     )
-                    mask_var = var
+                    selected_mask_var = var
                     break
+                if mask_res < file_res:
+                    logger.debug(f"Prelim mask res {mask_res} < file res {file_res}")
+                    selected_lon_key_mask = lon_key_mask
+                    selected_lat_key_mask = lat_key_mask
+                    selected_mask_var = var
+            mask_da = normalize_lat_lon(
+                mask_ds[selected_mask_var],
+                lon=selected_lon_key_mask,
+                lat=selected_lat_key_mask,
+                new_lat=lat_key,
+                new_lon=lon_key,
+                log_warning=True,
+            )
             if "dem" in input_file.name.lower():
                 latlon_files.set_dem_output_file(output_file)
             logger.info("Masking dem file")
             logger.debug(f"dem ds before masking: {ds_cropped}")
             mask_regridded = regrid_mask(
                 mask_ds=mask_da,
-                lon_key_mask=lon_key_mask,
-                lat_key_mask=lat_key_mask,
+                lon_key_mask=lon_key,
+                lat_key_mask=lat_key,
                 target_lon=ds_cropped[lon_key].data,
                 target_lat=ds_cropped[lat_key].data,
-                mask_key=mask_var,
                 lon_key_target=lon_key,
                 lat_key_target=lat_key,
+                target_res=file_res,
+                mask_res=mask_res,
             )
             # apply mask only to data variables that share both spatial dims
             for var in ds_cropped.data_vars:
@@ -634,7 +657,6 @@ def crop_mhm_setup(  # noqa: PLR0913
     lat_order="decreasing",
     output_suffix=None,
     mask_all=False,
-    mask_var="mask",
 ):
     """Cut out an existing mhm domain setup using a mask file."""
     # check if the input is correct
@@ -671,7 +693,6 @@ def crop_mhm_setup(  # noqa: PLR0913
             lat_order=lat_order,
             output_suffix=output_suffix,
             mask_all=mask_all,
-            mask_var=mask_var,
             resolutions=resolutions,
         )
         for f in files
