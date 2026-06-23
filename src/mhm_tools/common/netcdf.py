@@ -386,23 +386,23 @@ def sanitize_nc_encoding(ds: "xr.Dataset", encoding: dict) -> dict:  # noqa: PLR
 
 
 def generate_bounds(
-    da: xr.DataArray,
-    bounds_dim: str = "bnds",
+    da: xr.DataArray, bounds_dim: str = "bnds", res=None
 ) -> xr.DataArray:
     """Generate CF-compliant bounds for a coordinate DataArray."""
     (dim,) = da.dims
-    diff = da.diff(dim)
-    lower = da - diff / 2
-    upper = da + diff / 2
+    if res is None:
+        res = da.diff(dim)
+    lower = da - res / 2
+    upper = da + res / 2
     bounds = xr.concat([lower, upper], dim=bounds_dim)
-    first_lower = bounds.isel({dim: 0}) - diff.isel({dim: 0})
+    first_lower = bounds.isel({dim: 0}) - res.isel({dim: 0})
     first = first_lower.assign_coords({dim: da[dim][0]})
     all_bounds = xr.concat([first, bounds], dim=dim)
     return all_bounds.transpose()
 
 
 def generate_bounds_for_all_coords(
-    ds: xr.Dataset, bounds_dim: str = "bnds"
+    ds: xr.Dataset, bounds_dim: str = "bnds", res: Optional[float] = None
 ) -> xr.Dataset:
     """Generate bounds for all 1D coordinate DataArrays in the dataset."""
     ds_out = ds.copy(deep=False)
@@ -410,7 +410,7 @@ def generate_bounds_for_all_coords(
         da = ds[coord]
         if da.ndim == 1 and da.sizes[da.dims[0]] >= 2:
             try:
-                ds_out.coords[f"{coord}_bnds"] = generate_bounds(da, bounds_dim)
+                ds_out.coords[f"{coord}_bnds"] = generate_bounds(da, bounds_dim, res)
                 if "bounds" not in da.attrs:
                     da.attrs["bounds"] = f"{coord}_bnds"
             except Exception:

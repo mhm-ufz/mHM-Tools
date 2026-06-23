@@ -170,7 +170,7 @@ def add_args(parser):
         default=False,
         action="store_true",
         help=(
-            """Apply the mask to all cropped files (not only DEM). Useful with --mask-var mask_l2 for meteo files."""
+            """Apply the mask to all cropped files (not only DEM). Useful with tool will automaitcally select the mask aligning with the file resolution or upscale a higher resolution mask."""
         ),
     )
     optional.add_argument(
@@ -178,9 +178,6 @@ def add_args(parser):
         required=False,
         default=None,
         help=("""Output variable name for single data var"""),
-    )
-    optional.add_argument(
-        "--mask-var", required=False, default="mask", help=("""Mask variable name.""")
     )
     optional.add_argument(
         "--lat-order",
@@ -210,6 +207,11 @@ def run(args):
     from mhm_tools.common.logger import ErrorLogger
     from mhm_tools.pre.crop_mhm_setup import crop_mhm_setup
 
+    resolutions = Resolution(
+        l1=args.l1_resolution,
+        l2=args.l2_resolution,
+        l11=args.l11_resolution,
+    )
     (
         lon_min_target_grid,
         lon_max_target_grid,
@@ -224,6 +226,7 @@ def run(args):
         args.lat_min,
         args.lat_max,
         mask_var=args.mask_var,
+        resolutions=resolutions,
     )
     if args.lat_order == "decreasing":
         latslice = slice(lat_max_target_grid, lat_min_target_grid)
@@ -237,11 +240,6 @@ def run(args):
     mask_ds = get_xarray_ds_from_file(args.mask_file)
 
     available_mem = get_available_mem_in_unit(args.available_mem)
-    resolutions = Resolution(
-        l1=args.l1_resolution,
-        l2=args.l2_resolution,
-        l11=args.l11_resolution,
-    )
     logger.info(
         f"Using resolutions: l0={resolutions.l0}, l1={resolutions.l1}, l2={resolutions.l2}, l11={resolutions.l11}"
     )
@@ -263,5 +261,4 @@ def run(args):
         lat_order=args.lat_order,
         output_suffix=args.output_suffix,
         mask_all=args.mask_all,
-        mask_var=args.mask_var,
     )
