@@ -468,7 +468,7 @@ def write_xarray_to_file(  # noqa: PLR0912, PLR0915
 
     file_path = Path(file_path)
     if create_folder and not file_path.parent.is_dir():
-        file_path.parent.mkdir(parents=True)
+        file_path.parent.mkdir(parents=True, exist_ok=True)
     if file_path.is_file():
         file_path.unlink()
     logger.info(f"Writing file to {file_path}")

@@ -897,8 +897,7 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
 
     # creating saving path
     saving_path = Path(saving_path)
-    if not saving_path.is_dir():
-        saving_path.mkdir(parents=True)
+    saving_path.mkdir(parents=True, exist_ok=True)
 
     # Load data and get gauge info for multiple different cases:
     # 1. discharge.nc files with Qsim/Qobs_<id> variables available (e.g. mRM v5+ output)

@@ -1405,7 +1405,7 @@ def get_hydrograph_from_path(  # noqa: PLR0912, PLR0915
         output_file.parent.mkdir(parents=True, exist_ok=True)
         hydro.output_file = output_file
     else:  # is non existing directory
-        output_file.mkdir(parents=True)
+        output_file.mkdir(parents=True, exist_ok=True)
         hydro.output_file = output_file / "hydrograph.png"
 
     hydro.title = title

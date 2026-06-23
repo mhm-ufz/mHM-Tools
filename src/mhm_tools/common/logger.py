@@ -46,7 +46,7 @@ def configure_mhm_tools_logger(
         else:
             if not log_file.parent.is_dir():
                 logger.info(f"Creating folder for log_files {log_file.parent}")
-                log_file.parent.mkdir(parents=True)
+                log_file.parent.mkdir(parents=True, exist_ok=True)
             if log_file.exists():
                 logger.debug("Deleting existing log file.")
                 log_file.unlink()

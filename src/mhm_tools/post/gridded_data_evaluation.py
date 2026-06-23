@@ -2215,8 +2215,7 @@ def gridded_data_evaluation(  # noqa: PLR0913
     input_path = input.path
     ref_path = ref.path
 
-    if not output_path.is_dir():
-        output_path.mkdir(parents=True)
+    output_path.mkdir(parents=True, exist_ok=True)
 
     if only_plot and get_rel_stat_file(output_path, input.name, ref.name).is_file():
         create_map_from_output(
