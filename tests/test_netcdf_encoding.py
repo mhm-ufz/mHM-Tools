@@ -101,6 +101,23 @@ def test_write_xarray_to_file_bool_drops_fillvalue(tmp_path):
     assert ds_read["v"].dtype in (bool, np.uint8)
 
 
+def test_write_xarray_to_file_scrubs_data_var_bounds_encoding(tmp_path):
+    ds = _make_ds(dtype=np.float32)
+    ds["lon"].attrs["bounds"] = "lon_bnds"
+    ds["lat"].attrs["bounds"] = "lat_bnds"
+    ds["lon_bnds"] = (("lon", "bnds"), np.array([[99.5, 100.5], [100.5, 101.5]]))
+    ds["lat_bnds"] = (("lat", "bnds"), np.array([[9.5, 10.5], [10.5, 11.5]]))
+    ds["lon_bnds"].encoding.update({"zlib": True, "complevel": 4, "chunksizes": (1, 1)})
+    ds["lat_bnds"].encoding.update({"zlib": True, "complevel": 4, "chunksizes": (1, 1)})
+
+    out = tmp_path / "data_var_bounds.nc"
+    write_xarray_to_file(ds, out)
+
+    ds_read = xr.open_dataset(out, engine="netcdf4")
+    assert "lon_bnds" in ds_read
+    assert "lat_bnds" in ds_read
+
+
 def test_write_xarray_to_file_strips_time_bnds_units_attrs(tmp_path):
     time = np.array(["2017-01-01T00:00", "2017-01-01T01:00"], dtype="datetime64[ns]")
     time_bnds = np.stack(

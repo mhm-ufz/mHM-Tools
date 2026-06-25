@@ -79,6 +79,7 @@ _COMMAND_GROUPS: List[Tuple[str, str, List[Tuple[str, object]]]] = [
             ("merge-files", "mhm_tools._cli._merge"),
             ("fill-nearest", "mhm_tools._cli._fill_nearest"),
             ("regrid-file", "mhm_tools._cli._regrid"),
+            ("fill-nearest", "mhm_tools._cli._fill_nearest"),
             ("long-term-mean", "mhm_tools._cli._long_term_mean"),
             ("difference", "mhm_tools._cli._difference"),
             ("relative-difference", "mhm_tools._cli._relative_difference"),
@@ -125,6 +126,10 @@ _COMMAND_GROUPS: List[Tuple[str, str, List[Tuple[str, object]]]] = [
             ("create-id-gauges", "mhm_tools._cli._create_idgauges"),
             ("create-subdomain-masks", "mhm_tools._cli._create_subdomain_masks"),
             ("create-mhm-restart-file", "mhm_tools._cli._create_mhm_restart_file"),
+            (
+                "create-mhm-restart-from-setup",
+                "mhm_tools._cli._create_mhm_restart_from_setup",
+            ),
         ],
     ),
 ]

@@ -14,6 +14,7 @@ from mhm_tools.common.xarray_utils import (
     get_single_data_var,
     induce_data_var_from_file_name,
     normalize_lat_lon,
+    snap_to_target,
     timedelta_to_alias,
 )
 
@@ -78,12 +79,39 @@ class TestNormalizeLatLon(XarrayUtilsBase):
             coords={"latitude": [10, 20], "longitude": [100, 110]},
             data_vars={"z": (("latitude", "longitude"), np.ones((2, 2)))},
         )
-        out = normalize_lat_lon(ds, lat="latitude", lon="longitude")
+        out = normalize_lat_lon(ds, lat_key="latitude", lon_key="longitude")
         self.assertIn("lat", out.coords)
         self.assertIn("lon", out.coords)
         self.assertNotIn("latitude", out.coords)
         self.assertNotIn("longitude", out.coords)
         self.assertEqual(out["z"].dims, ("lat", "lon"))
+
+    def test_snap_to_target_renames_and_assigns_exact_coords(self):
+        target_lat = np.array([3.0, 2.0, 1.0])
+        target_lon = np.array([0.0, 1.0, 2.0])
+        da = xr.DataArray(
+            np.ones((3, 3)),
+            dims=("latitude", "longitude"),
+            coords={
+                "latitude": target_lat + 1e-4,
+                "longitude": target_lon + 1e-4,
+            },
+            name="mask",
+        )
+
+        out = snap_to_target(
+            da,
+            lat_key="latitude",
+            lon_key="longitude",
+            target_lat_array=target_lat,
+            target_lon_array=target_lon,
+            new_lat_key="lat",
+            new_lon_key="lon",
+        )
+
+        self.assertEqual(out.dims, ("lat", "lon"))
+        np.testing.assert_array_equal(out["lat"].values, target_lat)
+        np.testing.assert_array_equal(out["lon"].values, target_lon)
 
 
 class TestGetCoordKey(XarrayUtilsBase):

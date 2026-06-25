@@ -65,14 +65,7 @@ def add_args(parser):
 
 
 def run(args):
-    """Execute nearest-neighbour filling from parsed CLI arguments.
-
-    Parameters
-    ----------
-    args : argparse.Namespace
-        Parsed arguments created by the CLI parser configured in
-        :func:`add_args`.
-    """
+    """Fill missing NetCDF values using nearest valid neighbours."""
     from mhm_tools.pre.fill_nearest import fill_nearest
 
     fill_nearest(
@@ -82,5 +75,6 @@ def run(args):
         mask_file=Path(args.mask_file) if args.mask_file else None,
         mask_var=args.mask_var,
         fill_value=float(args.fill_value),
+        default_value=args.default_value,
         n_cpus=args.n_cpus,
     )

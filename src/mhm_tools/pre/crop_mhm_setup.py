@@ -33,6 +33,7 @@ from mhm_tools.common.xarray_utils import (
     get_single_data_var,
     induce_data_var_from_file_name,
     normalize_lat_lon,
+    snap_to_target,
 )
 from mhm_tools.pre.latlon import create_latlon
 
@@ -74,16 +75,13 @@ class LatlonFiles:
         return self.meteo_header_path
 
     def are_set(self):
-        """Check if all three files  are set and if not which one isn't."""
+        """Check if all files needed for latlon creation are set."""
         all_set = True
         if self.latlon_output_file is None:
             logger.info("latlon_output_file not set")
             all_set = False
         if self.dem_output_file is None:
             logger.info("dem_output_file not set")
-            all_set = False
-        if self.meteo_header_path is None:
-            logger.info("meteo_header_path not set")
             all_set = False
         return all_set
 
@@ -166,23 +164,30 @@ def regrid_mask(
         )
     if abs(target_res - mask_res) <= 1e-5:
         logger.debug("Target resolution equals mask resolution (within tolerance).")
-        # If coords differ only by floating error, snap mask grid to target grid
-        # so alignment in subsequent operations does not fail.
+
         try:
-            # quick path: if coords already almost equal, reuse mask as-is
+            # quick path: if coords are almost equal, reuse data but snap labels
             if (
                 len(mask_lon) == len(target_lon)
                 and len(mask_lat) == len(target_lat)
                 and np.allclose(mask_lon, target_lon, rtol=0, atol=1e-9)
                 and np.allclose(mask_lat, target_lat, rtol=0, atol=1e-9)
             ):
-                return _select_mask_var(mask_ds)
+                return snap_to_target(
+                    _select_mask_var(mask_ds),
+                    lat_key=lat_key_mask,
+                    lon_key=lon_key_mask,
+                    target_lat_array=target_lat,
+                    target_lon_array=target_lon,
+                    new_lat_key=lat_key_target,
+                    new_lon_key=lon_key_target,
+                )
 
             tol = max(mask_res, target_res) * 1e-3  # generous but safe snapping tol
             reindexed = mask_ds.reindex(
                 {
-                    lat_key_target: xr.DataArray(target_lat, dims=[lat_key_target]),
-                    lon_key_target: xr.DataArray(target_lon, dims=[lon_key_target]),
+                    lat_key_mask: np.asarray(target_lat),
+                    lon_key_mask: np.asarray(target_lon),
                 },
                 method="nearest",
                 tolerance=tol,
@@ -194,7 +199,15 @@ def regrid_mask(
                 f"delta lon={float(np.nanmax(np.abs(mask_lon[:min_lon] - target_lon[:min_lon]))):.3g}, "
                 f"delta lat={float(np.nanmax(np.abs(mask_lat[:min_lat] - target_lat[:min_lat]))):.3g}"
             )
-            return _select_mask_var(reindexed)
+            return snap_to_target(
+                _select_mask_var(reindexed),
+                lat_key=lat_key_mask,
+                lon_key=lon_key_mask,
+                target_lat_array=target_lat,
+                target_lon_array=target_lon,
+                new_lat_key=lat_key_target,
+                new_lon_key=lon_key_target,
+            )
         except Exception:
             logger.debug(
                 "Mask reindex to target grid failed; using original mask", exc_info=True
@@ -357,35 +370,23 @@ def call_create_latlon(
     ) as ds_dem:
         l0 = create_header(ds_dem)
     logger.debug(f"L0: {l0}")
-    l1 = l0.copy()
-    l1["cellsize"] = l1_resolution
-    l1["ncols"] = int(
-        float(l0["cellsize"]) / float(l1["cellsize"]) * int(l0["ncols"]) + 0.5
-    )
-    l1["nrows"] = int(
-        float(l0["cellsize"]) / float(l1["cellsize"]) * int(l0["nrows"]) + 0.5
-    )
-    l11 = l1.copy()
-    if l11_resolution is not None:
-        l11["cellsize"] = l11_resolution
-        l11["ncols"] = int(
-            float(l0["cellsize"]) / float(l11["cellsize"]) * int(l0["ncols"]) + 0.5
-        )
-        l11["nrows"] = int(
-            float(l0["cellsize"]) / float(l11["cellsize"]) * int(l0["nrows"]) + 0.5
-        )
+    l1 = l1_resolution
+    l11 = l11_resolution
     logger.debug(latlon_output_file)
     logger.debug(l0)
     logger.debug(l1)
     logger.debug(l11)
-    logger.debug(Path(meteo_header_path))
+    if meteo_header_path is not None:
+        meteo_header_path = Path(meteo_header_path)
+    logger.debug(meteo_header_path)
     logger.debug(crs)
+    Path(latlon_output_file).parent.mkdir(parents=True, exist_ok=True)
     create_latlon(
         out_file=latlon_output_file,
-        level0=l0,
-        level1=l1,
+        level0=dem_output_file,
+        level1=l1_resolution,
         level11=l11,
-        level2=Path(meteo_header_path),
+        level2=meteo_header_path,
         crs=crs,
     )
     logger.info(f"Latlon file written to {latlon_output_file}")
@@ -516,6 +517,8 @@ def crop_file(  # noqa: PLR0912 PLR0915 PLR0913
             raise ValueError(msg)
 
     # only the dem file or and eventual mHM restart file are masked using the provided mask file
+    if "dem" in input_file.name.lower():
+        latlon_files.set_dem_output_file(output_file)
     if "dem" in input_file.name.lower() or mask_all:  # or "mhm" in f.name.lower()
         if mask_ds is not None:
             file_res = get_file_res(ds[lon_key], ds[lat_key], resolutions)
@@ -546,10 +549,10 @@ def crop_file(  # noqa: PLR0912 PLR0915 PLR0913
                     selected_mask_var = var
             mask_da = normalize_lat_lon(
                 mask_ds[selected_mask_var],
-                lon=selected_lon_key_mask,
-                lat=selected_lat_key_mask,
-                new_lat=lat_key,
-                new_lon=lon_key,
+                lon_key=selected_lon_key_mask,
+                lat_key=selected_lat_key_mask,
+                new_lat_key=lat_key,
+                new_lon_key=lon_key,
                 log_warning=True,
             )
             if "dem" in input_file.name.lower():
@@ -699,6 +702,12 @@ def crop_mhm_setup(  # noqa: PLR0913
     )
     latlon_files = LatlonFiles()
     latlon_files.set_by_list_of_objects(list_latlon_files)
+    if (
+        resolutions.l1 is not None
+        and latlon_files.get_latlon_output_file() is None
+        and latlon_files.get_dem_output_file() is not None
+    ):
+        latlon_files.set_latlon_output_file(output_path / "latlon" / "latlon.nc")
     if resolutions.l1 is not None and latlon_files.are_set():
         logger.info("Creating latlon")
         call_create_latlon(

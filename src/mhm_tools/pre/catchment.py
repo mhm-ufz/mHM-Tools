@@ -842,7 +842,7 @@ class Catchment:
     def _revert_data(self, data):
         # correct circumspanning data
         if self.do_shift:
-            return np.roll(data, int(len(self.ds.lon) / 2), axis=1)
+            return np.roll(data, int(data.shape[1] / 2), axis=1)
         return data
 
     def add_dem(self, latlon):

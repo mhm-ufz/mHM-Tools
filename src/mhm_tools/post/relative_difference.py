@@ -59,12 +59,12 @@ def calc_rel_diff(  # noqa: PLR0913
     mod_lon = get_coord_key(ds_mod, lon=True)
 
     # Sets lon and lat names and lat and lon and returns the da
-    da_ref = normalize_lat_lon(ds_ref, lat=ref_lat, lon=ref_lon)[ref_var].squeeze(
-        "time"
-    )
-    da_mod = normalize_lat_lon(ds_mod, lat=mod_lat, lon=mod_lon)[mod_var].squeeze(
-        "time"
-    )
+    da_ref = normalize_lat_lon(ds_ref, lat_key=ref_lat, lon_key=ref_lon)[
+        ref_var
+    ].squeeze("time")
+    da_mod = normalize_lat_lon(ds_mod, lat_key=mod_lat, lon_key=mod_lon)[
+        mod_var
+    ].squeeze("time")
 
     # Interpolate model to reference grid to avoid alignment errors
     da_mod_interp = da_mod.interp_like(da_ref)

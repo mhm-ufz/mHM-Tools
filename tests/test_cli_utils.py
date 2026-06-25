@@ -34,3 +34,35 @@ def test_get_coords_from_mask_with_bounds(tmp_path):
 
     # returned DataArray should equal the dataset variable
     xr.testing.assert_equal(mask_da, ds["mask"])
+
+
+def test_get_coords_from_mask_snaps_bound_roundoff(tmp_path):
+    resolution = 1.0 / 240.0
+    lon = np.array([4.0 + resolution / 2])
+    lat = np.array([-60.0 + resolution / 2])
+    ds = xr.Dataset(
+        data_vars={"mask": (("lat", "lon"), np.ones((1, 1), dtype=float))},
+        coords={
+            "lon": ("lon", lon, {"bounds": "lon_bnds"}),
+            "lat": ("lat", lat, {"bounds": "lat_bnds"}),
+            "lon_bnds": (
+                ("lon", "bnds"),
+                np.array([[4.0, 4.0 + resolution]]),
+            ),
+            "lat_bnds": (
+                ("lat", "bnds"),
+                np.array([[-60.0, -55.99999999999193]]),
+            ),
+        },
+        attrs={"spatial_resolution": resolution},
+    )
+
+    fn = tmp_path / "mask.nc"
+    ds.to_netcdf(fn)
+
+    lon_min, lon_max, lat_min, lat_max, _mask_da = get_coords_from_mask(str(fn))
+
+    assert lon_min == 4.0
+    assert lon_max == 4.0 + resolution
+    assert lat_min == -60.0
+    assert lat_max == -56.0

@@ -113,6 +113,16 @@ class TestCatchment(unittest.TestCase):
         modified_data = c._modify_data(self.ds[self.var_name])
         self.assertEqual(modified_data.shape, self.ds[self.var_name].shape)
 
+    def test_revert_data_uses_current_data_width_after_upscaling(self):
+        c = catchment.Catchment.__new__(catchment.Catchment)
+        c.do_shift = True
+        c.ds = xr.Dataset(coords={"lon": np.arange(8)})
+        data = np.array([[1, 2, 3, 4]])
+
+        reverted = c._revert_data(data)
+
+        np.testing.assert_array_equal(reverted, np.array([[3, 4, 1, 2]]))
+
     def test_add_fdir(self):
         c = catchment.Catchment(
             self.ds,
@@ -255,6 +265,37 @@ class TestCatchment(unittest.TestCase):
 
         catchment.merge_catchment(path1, path2, out_path)
         self.assertTrue(out_path.is_file())
+
+    def test_merge_catchment_only_replaces_dateline_basins(self):
+        lat = np.array([1.0, 0.0])
+        lon = np.array([-179.0, -177.0, -100.0, 0.0, 100.0, 177.0, 179.0])
+        basin1 = np.array(
+            [
+                [1, 1, 2, 2, 2, 3, 3],
+                [1, 1, 2, 2, 2, 3, 3],
+            ]
+        )
+        basin2 = basin1 + 10
+        ds1 = xr.Dataset(
+            {"basin": (["lat", "lon"], basin1)},
+            coords={"lat": lat, "lon": lon},
+        )
+        ds2 = xr.Dataset(
+            {"basin": (["lat", "lon"], basin2)},
+            coords={"lat": lat, "lon": lon},
+        )
+        path1 = self.tmp_path / "merge_hydro1.nc"
+        path2 = self.tmp_path / "merge_hydro2.nc"
+        out_path = self.tmp_path / "merge_out.nc"
+        ds1.to_netcdf(path1)
+        ds2.to_netcdf(path2)
+
+        catchment.merge_catchment(path1, path2, out_path)
+
+        with xr.open_dataset(out_path) as merged:
+            self.assertEqual(int(merged["basin"].sel(lat=1.0, lon=0.0)), 2)
+            self.assertGreater(int(merged["basin"].sel(lat=1.0, lon=-179.0)), 3)
+            self.assertGreater(int(merged["basin"].sel(lat=1.0, lon=179.0)), 3)
 
     def test_resolution_l2_file_resolution_matches(self):
         lon = np.array([0.0, 0.5, 1.0])
