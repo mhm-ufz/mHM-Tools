@@ -58,7 +58,7 @@ def prepare_da(input_dir: str, pattern: str, var_name: str) -> xr.DataArray:
     ds = read_dataset(str(path))
     lat = get_coord_key(ds, lat=True)
     lon = get_coord_key(ds, lon=True)
-    ds = normalize_lat_lon(ds, lat, lon)
+    ds = normalize_lat_lon(ds, lat_key=lat, lon_key=lon)
     return ds[var_name]
 
 

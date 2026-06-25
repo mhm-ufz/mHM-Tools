@@ -414,7 +414,9 @@ def get_xarray_ds_from_file(  # noqa: PLR0912
     logger.debug(lon_key)
     if normalize_latlon_coords:
         # re-name input coords to lat and lon
-        ds_out = normalize_lat_lon(ds_out, lat_key, lon_key, raise_exceptions=False)
+        ds_out = normalize_lat_lon(
+            ds_out, lat_key=lat_key, lon_key=lon_key, raise_exceptions=False
+        )
     if create_bounds:
         ds_out = generate_bounds_for_all_coords(ds_out)
     if lon_key is None and lat_key is None:
@@ -733,6 +735,17 @@ def write_xarray_to_file(  # noqa: PLR0912, PLR0915
                 if coord in ds_clean.dims:
                     enc["_FillValue"] = None
                 ds_clean[coord].encoding = enc
+            for name in _metadata_data_vars(ds_clean):
+                if name not in ds_clean or name in ds_clean.coords:
+                    continue
+                enc = dict(ds_clean[name].encoding) if ds_clean[name].encoding else {}
+                for key in coord_drop_encoding:
+                    enc.pop(key, None)
+                enc = {k: v for k, v in enc.items() if k in coord_allowed_encoding}
+                enc["_FillValue"] = None
+                ds_clean[name].encoding = enc
+                ds_clean[name].attrs.pop("_FillValue", None)
+                ds_clean[name].attrs.pop("missing_value", None)
             ds_clean.to_netcdf(
                 file_path, engine=engine, format="NETCDF4", encoding=encoding
             )
@@ -1114,7 +1127,9 @@ def get_dataset_from_path(
         logger.debug(lon_key)
 
         if normalize_latlon_coords:
-            ds_out = normalize_lat_lon(ds_out, lat_key, lon_key, raise_exceptions=False)
+            ds_out = normalize_lat_lon(
+                ds_out, lat_key=lat_key, lon_key=lon_key, raise_exceptions=False
+            )
 
         if lon_key is None and lat_key is None:
             logger.warning("Dataset does not have lon and lat key.")

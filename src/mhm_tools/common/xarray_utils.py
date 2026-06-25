@@ -1,7 +1,7 @@
 """Provides basic xarray utils."""
 
 import logging
-from typing import Optional
+from typing import Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -16,14 +16,14 @@ logger = logging.getLogger(__name__)
 
 
 def normalize_lat_lon(
-    ds: xr.Dataset,
-    lat: Optional[str] = None,
-    lon: Optional[str] = None,
-    new_lat: str = "lat",
-    new_lon: str = "lon",
+    ds: Union[xr.Dataset, xr.DataArray],
+    lat_key: Optional[str] = None,
+    lon_key: Optional[str] = None,
+    new_lat_key: str = "lat",
+    new_lon_key: str = "lon",
     raise_exceptions: bool = False,
     log_warning: bool = False,
-) -> xr.Dataset:
+) -> Union[xr.Dataset, xr.DataArray]:
     """
     Normalize latitude and longitude dimension and coordinate names to 'lat' and 'lon'.
 
@@ -31,29 +31,29 @@ def normalize_lat_lon(
     """
     try:
         rename_dict = {}
-        if lat is None:
-            lat = get_coord_key(ds, lat=True)
-        if lon is None:
-            lon = get_coord_key(ds, lon=True)
+        if lat_key is None:
+            lat_key = get_coord_key(ds, lat=True)
+        if lon_key is None:
+            lon_key = get_coord_key(ds, lon=True)
 
         coords_and_dims = list(ds.coords) + list(ds.dims)
-        if log_warning and (lat != new_lat or lon != new_lon):
+        if log_warning and (lat_key != new_lat_key or lon_key != new_lon_key):
             logger.warning(
-                f"The coordinates were normalised from {lon}->{new_lon} and {lat}->{new_lat}"
+                f"The coordinates were normalised from {lon_key}->{new_lon_key} and {lat_key}->{new_lat_key}"
             )
         # Rename coordinate variables if needed
         if (
-            lat is not None
-            and new_lat not in coords_and_dims
-            and lat in coords_and_dims
+            lat_key is not None
+            and new_lat_key not in coords_and_dims
+            and lat_key in coords_and_dims
         ):
-            rename_dict[lat] = new_lat
+            rename_dict[lat_key] = new_lat_key
         if (
-            lon is not None
-            and new_lon not in coords_and_dims
-            and lon in coords_and_dims
+            lon_key is not None
+            and new_lon_key not in coords_and_dims
+            and lon_key in coords_and_dims
         ):
-            rename_dict[lon] = new_lon
+            rename_dict[lon_key] = new_lon_key
 
         return ds.rename(rename_dict)
     except Exception as e:
@@ -63,6 +63,38 @@ def normalize_lat_lon(
         else:
             logger.warning(f"Exception in normalize lat lon: {e}")
             return ds
+
+
+def snap_to_target(
+    ds: Union[xr.Dataset, xr.DataArray],
+    lat_key: str,
+    lon_key: str,
+    target_lat_array,
+    target_lon_array,
+    new_lat_key: str = "lat",
+    new_lon_key: str = "lon",
+) -> Union[xr.Dataset, xr.DataArray]:
+    """
+    Rename latitude/longitude dimensions and assign exact target coordinates.
+
+    This is useful after nearest-neighbor grid matching, where selected values
+    are correct by position but coordinate labels still need to match exactly
+    for xarray alignment.
+    """
+    ds = normalize_lat_lon(
+        ds,
+        lat_key=lat_key,
+        lon_key=lon_key,
+        new_lat_key=new_lat_key,
+        new_lon_key=new_lon_key,
+        raise_exceptions=True,
+    )
+    return ds.assign_coords(
+        {
+            new_lat_key: np.asarray(target_lat_array),
+            new_lon_key: np.asarray(target_lon_array),
+        }
+    )
 
 
 def get_coord_key(
@@ -416,6 +448,49 @@ def get_dtype(ds):
         return "f4"
 
 
+def _snap_coord_bound(value, resolution=None):
+    """Snap coordinate bounds that only differ from the grid by roundoff."""
+    value = float(value)
+    if not np.isfinite(value):
+        return value
+    scale = max(abs(value), 1.0)
+    tolerance = np.finfo(float).eps * scale * 4096
+    if resolution is not None:
+        resolution = abs(float(resolution))
+        if np.isfinite(resolution) and resolution > 0:
+            snapped = round(value / resolution) * resolution
+            if abs(value - snapped) <= tolerance:
+                value = float(snapped)
+    nearest_integer = round(value)
+    if abs(value - nearest_integer) <= tolerance:
+        return float(nearest_integer)
+    return value
+
+
+def _snap_coord_bounds(bounds, resolution=None):
+    return tuple(_snap_coord_bound(bound, resolution) for bound in bounds)
+
+
+def _coord_bound_resolution(ds, lon_key, lat_key, lon_bnds_key=None, lat_bnds_key=None):
+    if "spatial_resolution" in ds.attrs:
+        return ds.attrs["spatial_resolution"]
+    try:
+        from mhm_tools.common.resolution_handler import get_file_res
+
+        return get_file_res(ds[lon_key], ds[lat_key], None)
+    except ValueError:
+        pass
+    for bounds_key in (lon_bnds_key, lat_bnds_key):
+        if bounds_key is None or bounds_key not in ds:
+            continue
+        bounds = np.asarray(ds[bounds_key].values, dtype=float)
+        widths = np.abs(bounds[..., 1] - bounds[..., 0])
+        widths = widths[np.isfinite(widths) & (widths > 0)]
+        if widths.size:
+            return float(np.nanmedian(widths))
+    return None
+
+
 def get_ds_extend(ds, var=None, recursive_search=True, resolutions=None):
     """Get the spatial extent of a dataset as (lon_min, lon_max, lat_min, lat_max) from its bounds."""
     from mhm_tools.common.resolution_handler import get_file_res
@@ -431,12 +506,16 @@ def get_ds_extend(ds, var=None, recursive_search=True, resolutions=None):
     lat = ds[lat_key]
     lon_bnds_key = lon.attrs.get("bounds", None)
     lat_bnds_key = lat.attrs.get("bounds", None)
+    res = _coord_bound_resolution(ds, lon_key, lat_key, lon_bnds_key, lat_bnds_key)
     if lon_bnds_key is not None and lat_bnds_key is not None:
         lon_min = float(ds[lon_bnds_key].values.min())
         lon_max = float(ds[lon_bnds_key].values.max())
         lat_min = float(ds[lat_bnds_key].values.min())
         lat_max = float(ds[lat_bnds_key].values.max())
-        return lon_min, lon_max, lat_min, lat_max
+        return _snap_coord_bounds((lon_min, lon_max, lat_min, lat_max), res)
+    if recursive_search:
+        ds = generate_bounds_for_all_coords(ds)
+        return get_ds_extend(ds, var=var, recursive_search=False)
     logger.warning(
         "Could not find coordinate bounds for dataset; estimating spatial extent from coordinate values."
     )
@@ -452,9 +531,12 @@ def get_ds_extend(ds, var=None, recursive_search=True, resolutions=None):
         return get_ds_extend(
             ds, var=var, recursive_search=False, resolutions=resolutions
         )
-    return (
-        float(np.nanmin(lon_vals)) - float(res) / 2,
-        float(np.nanmax(lon_vals)) + float(res) / 2,
-        float(np.nanmin(lat_vals)) - float(res) / 2,
-        float(np.nanmax(lat_vals)) + float(res) / 2,
+    return _snap_coord_bounds(
+        (
+            float(np.nanmin(lon_vals)) - float(res) / 2,
+            float(np.nanmax(lon_vals)) + float(res) / 2,
+            float(np.nanmin(lat_vals)) - float(res) / 2,
+            float(np.nanmax(lat_vals)) + float(res) / 2,
+        ),
+        res,
     )

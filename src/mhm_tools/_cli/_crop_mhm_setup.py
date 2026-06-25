@@ -225,7 +225,6 @@ def run(args):
         args.lon_max,
         args.lat_min,
         args.lat_max,
-        mask_var=args.mask_var,
         resolutions=resolutions,
     )
     if args.lat_order == "decreasing":

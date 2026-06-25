@@ -124,16 +124,37 @@ class Resolution:
             if r is not None
         )
 
+    def only_one_resolution(self):
+        """Return the resolution if there is only one otherwise None."""
+        n = 0
+        res = None
+        for r in [
+            self.l0,
+            self.l1,
+            self.l11,
+            self.l2,
+        ]:
+            if r is not None and r != res:
+                n += 1
+                res = r
+        if n == 1:
+            return res
+        return None
+
 
 def get_file_res(lon=None, lat=None, resolutions=None):
     """Get resolution from coordinates and match it to provided resolutions if close enough."""
     if resolutions is None:
         resolutions = Resolution()
-
     if lon is not None and len(lon) > 1:
         file_res = np.diff(lon.data).mean()
     elif lat is not None and len(lat) > 1:
         file_res = np.diff(lat.data).mean()
+    elif resolutions.only_one_resolution() is not None:
+        file_res = resolutions.only_one_resolution()
+        logger.warning(
+            "Taken resolution from provided resolutions as ds was to small to derive it."
+        )
     else:
         with ErrorLogger(logger):
             error_msg = "Cannot determine file resolution: no valid lon or lat coordinates provided (need len > 1)."

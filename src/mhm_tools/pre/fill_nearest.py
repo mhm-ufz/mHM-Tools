@@ -100,12 +100,39 @@ def _valid_mask(array, along_time, missing_value):
     return valid
 
 
-def fill_dataarray_with_nearest(
+def _valid_values(values, missing_value):
+    valid = ~np.isnan(values)
+    if missing_value is not None and not np.isnan(missing_value):
+        valid &= ~np.isclose(values, missing_value)
+    return valid
+
+
+def _fill_diagnostics(array, along_time, missing_value, mask):
+    values = array.transpose("time", ...).data if along_time else array.data
+    valid = _valid_values(values, missing_value)
+    missing = ~valid
+    target = missing.copy()
+    masked_count = 0
+    if mask is not None:
+        mask_for_values = np.broadcast_to(mask, values.shape) if along_time else mask
+        masked_count = int(np.sum(mask_for_values))
+        target &= ~mask_for_values
+    return {
+        "total": int(valid.size),
+        "valid": int(np.sum(valid)),
+        "missing": int(np.sum(missing)),
+        "target": int(np.sum(target)),
+        "masked": masked_count,
+    }
+
+
+def fill_dataarray_with_nearest(  # noqa: PLR0915, PLR0912
     array,
     along_time=None,
     missing_value=None,
     mask=None,
     fill_value=-9999.0,
+    default_value=None,
     source_file=None,
 ):
     """Fill missing values in a data array with nearest valid neighbours.
@@ -139,32 +166,124 @@ def fill_dataarray_with_nearest(
     if along_time:
         coord_names = tuple(name for name in coord_names if name != "time")
 
+    diagnostics = _fill_diagnostics(
+        array,
+        along_time=along_time,
+        missing_value=missing_value,
+        mask=mask,
+    )
     valid = _valid_mask(array, along_time=along_time, missing_value=missing_value)
     target = ~valid
     if mask is not None:
         target &= ~mask
 
-    if not np.any(target):
+    replacement_mode = "nearest"
+    if diagnostics["target"] == 0:
+        replacement_mode = "none"
+    elif diagnostics["valid"] == 0:
+        replacement_mode = (
+            "default_value" if default_value is not None else "fill_value"
+        )
+    logger.info(
+        f"Fill classification for variable {array.name}"
+        f"{f' in {source_file}' if source_file is not None else ''}: "
+        f"total spatial cells={diagnostics['total']}, "
+        f"valid cells={diagnostics['valid']}, "
+        f"missing cells={diagnostics['missing']}, "
+        f"target cells={diagnostics['target']}, "
+        f"masked cells={diagnostics['masked']}, "
+        f"along_time={along_time}, replacement mode={replacement_mode}, "
+        f"missing_value={missing_value}, fill_value={fill_value}, "
+        f"default_value={default_value}."
+    )
+
+    if diagnostics["target"] == 0:
+        if mask is not None:
+            values = array.transpose("time", ...).data if along_time else array.data
+            if along_time:
+                values[:, mask] = fill_value
+            else:
+                values[mask] = fill_value
         logger.debug(f"No cells require nearest-neighbour filling for {array.name}.")
         return 0
+
+    if along_time:
+        replacement_value = fill_value if default_value is None else default_value
+        positions = _coordinate_mesh(array.coords, coord_names)
+        values = array.transpose("time", ...).data
+        total_filled_count = 0
+        nearest_filled_count = 0
+        fallback_filled_count = 0
+        for time_index in range(values.shape[0]):
+            valid_at_time = _valid_values(values[time_index], missing_value)
+            target_at_time = ~valid_at_time
+            if mask is not None:
+                target_at_time &= ~mask
+            if not np.any(target_at_time):
+                if mask is not None:
+                    values[time_index][mask] = fill_value
+                continue
+            target_count = int(np.sum(target_at_time))
+            valid_count = int(np.sum(valid_at_time))
+            total_filled_count += target_count
+            if valid_count == 0:
+                fallback_filled_count += target_count
+                context = f" in {source_file}" if source_file is not None else ""
+                logger.warning(
+                    f"Cannot nearest-neighbour fill {target_count} cells in "
+                    f"variable {array.name}{context} at time index {time_index}: "
+                    "no valid source cells are available. Setting target cells "
+                    f"to {replacement_value} using "
+                    f"{'default_value' if default_value is not None else 'fill_value'}. "
+                    f"dims={array.dims} shape={array.shape} "
+                    f"missing_value={missing_value} mask={mask is not None}"
+                )
+                values[time_index][target_at_time] = replacement_value
+                if mask is not None:
+                    values[time_index][mask] = fill_value
+                continue
+            valid_positions = np.array(
+                [position[valid_at_time] for position in positions]
+            ).T
+            target_positions = np.array(
+                [position[target_at_time] for position in positions]
+            ).T
+            target_indices = nearest_indices(valid_positions, target_positions)
+            values[time_index][target_at_time] = values[time_index][valid_at_time][
+                target_indices
+            ]
+            if mask is not None:
+                values[time_index][mask] = fill_value
+            nearest_filled_count += target_count
+        logger.info(
+            f"Filled {total_filled_count} cells in {array.name}"
+            f"{f' from {source_file}' if source_file is not None else ''} "
+            f"across {values.shape[0]} timesteps "
+            f"(nearest={nearest_filled_count}, fallback={fallback_filled_count})."
+        )
+        if mask is not None:
+            return int(np.sum(target))
+        return nearest_filled_count
 
     filled_count = int(np.sum(target))
     valid_count = int(np.sum(valid))
     if valid_count == 0:
+        replacement_value = fill_value if default_value is None else default_value
         context = f" in {source_file}" if source_file is not None else ""
         logger.warning(
             f"Cannot nearest-neighbour fill {filled_count} cells in variable "
-            f"{array.name}{context}: no valid source cells are available. Setting "
-            f"target cells to {fill_value}. dims={array.dims} shape={array.shape} "
-            f"missing_value={missing_value} mask={mask is not None}"
+            f"{array.name}{context}: no valid source cells are available. "
+            f"Setting target cells to {replacement_value} using {replacement_mode}. "
+            f"dims={array.dims} shape={array.shape} missing_value={missing_value} "
+            f"mask={mask is not None}"
         )
         values = array.transpose("time", ...).data if along_time else array.data
         if along_time:
-            values[:, target] = fill_value
+            values[:, target] = replacement_value
             if mask is not None:
                 values[:, mask] = fill_value
         else:
-            values[target] = fill_value
+            values[target] = replacement_value
             if mask is not None:
                 values[mask] = fill_value
         return 0
@@ -184,10 +303,10 @@ def fill_dataarray_with_nearest(
         if mask is not None:
             values[mask] = fill_value
 
-    source_context = f" from {source_file}" if source_file is not None else ""
     logger.info(
-        f"Filled {filled_count} cells in {array.name}{source_context} using "
-        f"{valid_count} valid source cells."
+        f"Filled {filled_count} cells in {array.name}"
+        f"{f' from {source_file}' if source_file is not None else ''} "
+        f"using {valid_count} valid source cells."
     )
     return filled_count
 
@@ -286,7 +405,7 @@ def _output_encoding(dataset):
     }
 
 
-def fill_one_file(input_file, input_dir, fill_value, mask, output_dir):
+def fill_one_file(input_file, input_dir, fill_value, default_value, mask, output_dir):
     """Fill all data variables in one NetCDF file and write the result.
 
     Parameters
@@ -297,6 +416,8 @@ def fill_one_file(input_file, input_dir, fill_value, mask, output_dir):
         Base input directory used for relative log messages.
     fill_value : float
         Fill value written to output metadata and masked cells.
+    default_value : float
+        Value to fill masked area if the whole domain is empty and nearest interpolation not possible.
     mask : numpy.ndarray or None
         Optional fixed output mask shared by all data variables.
     output_dir : pathlib.Path
@@ -311,6 +432,7 @@ def fill_one_file(input_file, input_dir, fill_value, mask, output_dir):
     with xr.open_dataset(input_file, engine="netcdf4", mask_and_scale=False) as ds:
         dataset = ds.load()
 
+    variable_diagnostics = {}
     for var_name in list(dataset.data_vars) + list(dataset.coords):
         data_array = dataset[var_name]
         if var_name in dataset.coords:
@@ -318,6 +440,12 @@ def fill_one_file(input_file, input_dir, fill_value, mask, output_dir):
             continue
 
         missing_value = float(_missing_value(data_array))
+        logger.info(
+            f"Preparing to fill {input_file} variable {var_name}: "
+            f"dims={data_array.dims}, shape={data_array.shape}, "
+            f"detected missing_value={missing_value}, fill_value={fill_value}, "
+            f"default_value={default_value}, mask active={mask is not None}."
+        )
         data_array.attrs["_FillValue"] = fill_value
         data_array.attrs["missing_value"] = fill_value
         try:
@@ -326,6 +454,7 @@ def fill_one_file(input_file, input_dir, fill_value, mask, output_dir):
                 missing_value=missing_value,
                 mask=mask,
                 fill_value=fill_value,
+                default_value=default_value,
                 source_file=input_file,
             )
         except Exception as exc:
@@ -336,12 +465,33 @@ def fill_one_file(input_file, input_dir, fill_value, mask, output_dir):
             )
             with ErrorLogger(logger):
                 raise RuntimeError(msg) from exc
+        along_time = "time" in data_array.dims
+        variable_diagnostics[var_name] = (
+            data_array,
+            along_time,
+            missing_value,
+            _fill_diagnostics(
+                data_array,
+                along_time=along_time,
+                missing_value=missing_value,
+                mask=mask,
+            ),
+        )
 
     output_file = output_dir / input_file.name
     with tempfile.TemporaryDirectory(dir=output_dir) as tmp_dir:
         tmp_file = Path(tmp_dir) / "tmp.nc"
         dataset.to_netcdf(tmp_file, encoding=_output_encoding(dataset))
         shutil.move(tmp_file, output_file)
+    logger.info(f"Wrote filled NetCDF file to {output_file}.")
+    for var_name, (_, _, _, diagnostics) in variable_diagnostics.items():
+        logger.info(
+            f"Post-fill diagnostics for {output_file} variable {var_name}: "
+            f"remaining missing cells={diagnostics['missing']}, "
+            f"remaining target cells={diagnostics['target']}, "
+            f"valid cells={diagnostics['valid']}, "
+            f"masked cells={diagnostics['masked']}."
+        )
     return output_file
 
 
@@ -353,6 +503,7 @@ def fill_nearest(
     mask_file=None,
     mask_var=None,
     fill_value=-9999.0,
+    default_value=None,
     n_cpus=1,
 ):
     """Fill missing values in matching NetCDF files with nearest neighbours.
@@ -396,11 +547,25 @@ def fill_nearest(
     if n_cpus == 1:
         for input_file in input_files:
             output_files.append(
-                fill_one_file(input_file, input_dir, fill_value, mask, output_dir)
+                fill_one_file(
+                    input_file,
+                    input_dir,
+                    fill_value,
+                    default_value,
+                    mask,
+                    output_dir,
+                )
             )
     else:
         output_files = Parallel(n_jobs=n_cpus, backend="loky")(
-            delayed(fill_one_file)(input_file, input_dir, fill_value, mask, output_dir)
+            delayed(fill_one_file)(
+                input_file,
+                input_dir,
+                fill_value,
+                default_value,
+                mask,
+                output_dir,
+            )
             for input_file in input_files
         )
     return output_files
