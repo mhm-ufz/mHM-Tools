@@ -3,6 +3,7 @@ import argparse
 import click
 from click.testing import CliRunner
 
+from mhm_tools._cli import _gridded_data_evaluation
 from mhm_tools._cli._main import _build_click_command
 
 
@@ -52,3 +53,23 @@ def test_int_choices_reject_invalid_explicit_value():
 
     assert result.exit_code != 0
     assert "Invalid value for '-x' / '--compression'" in result.output
+
+
+def test_gridded_data_evaluation_parses_mask_var():
+    parser = argparse.ArgumentParser()
+    _gridded_data_evaluation.add_args(parser)
+
+    args = parser.parse_args(
+        [
+            "--input-path",
+            "input.nc",
+            "--output-dir",
+            "out",
+            "--mask-file",
+            "mask.nc",
+            "--mask-var",
+            "mask_l2",
+        ]
+    )
+
+    assert args.mask_var == "mask_l2"

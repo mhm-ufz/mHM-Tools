@@ -33,7 +33,7 @@ from mhm_tools.common.file_handler import (
 from mhm_tools.common.logger import ErrorLogger, log_arguments, log_errors
 from mhm_tools.common.metrics.metrics_handler import create_results_csv
 from mhm_tools.common.netcdf import generate_bounds_for_all_coords
-from mhm_tools.common.resolution_handler import Resolution
+from mhm_tools.common.resolution_handler import Resolution, get_file_res
 from mhm_tools.common.utils import cut_to_filled_area
 from mhm_tools.common.xarray_utils import (
     crop_ds,
@@ -270,12 +270,23 @@ def get_file_stats(
         )
     if avaiable_years is not None:
         ds_croped = ds_croped.sel(time=ds_croped.time.dt.year.isin(avaiable_years))
+    logger.debug(
+        f"After cropping/year selection {input_var} is all nan: "
+        f"{bool(ds_croped[input_var].isnull().all().compute().item())}; "
+        f"shape={ds_croped[input_var].shape}"
+    )
 
     # Calculate climatology and standard deviation along the time dimension
     clim = get_clim_from_ds(ds_croped, input_var, factor)
     std = get_std_from_ds(ds_croped, input_var, clim, factor)
 
     mean = ds_croped[input_var].mean(dim="time", skipna=True) * factor
+    logger.debug(
+        f"After stats calculation {input_var} is all nan: "
+        f"clim={bool(clim.isnull().all().compute().item())}, "
+        f"std={bool(std.isnull().all().compute().item())}, "
+        f"mean={bool(mean.isnull().all().compute().item())}"
+    )
 
     # Construct the output dataset with lazy evaluations
     output = xr.Dataset(
@@ -296,36 +307,189 @@ def get_file_stats(
     return output
 
 
-def apply_spatial_mask(ds, mask_da):
-    """Mask all spatial data variables in a dataset with a 2D mask DataArray."""
+def _spatial_resolution(obj, lon_key, lat_key):
+    """Return the absolute spatial resolution for a dataset or data array."""
+    return abs(
+        get_file_res(lon=obj[lon_key], lat=obj[lat_key], resolutions=Resolution())
+    )
+
+
+def _first_2d_spatial_slice(mask_da, lat_key, lon_key):
+    """Reduce non-spatial mask dimensions by selecting the first slice."""
+    mask_2d = mask_da
+    extra_dims = [d for d in mask_2d.dims if d not in [lat_key, lon_key]]
+    for dim in extra_dims:
+        mask_2d = mask_2d.isel({dim: 0}, drop=True)
+    return mask_2d
+
+
+def _select_mask_for_grid(mask_ds, target_ds, mask_var=None):
+    """Select the mask variable matching the target grid resolution."""
+    lat_key_ds = get_coord_key(target_ds, lat=True)
+    lon_key_ds = get_coord_key(target_ds, lon=True)
+    target_res = _spatial_resolution(target_ds, lon_key_ds, lat_key_ds)
+
+    if mask_var is not None:
+        if mask_var not in mask_ds.data_vars:
+            msg = f"Mask variable {mask_var!r} not found in mask dataset."
+            with ErrorLogger(logger):
+                raise ValueError(msg)
+        mask_da = mask_ds[mask_var]
+        lat_key_mask = get_coord_key(mask_da, lat=True)
+        lon_key_mask = get_coord_key(mask_da, lon=True)
+        mask_res = _spatial_resolution(mask_da, lon_key_mask, lat_key_mask)
+        logger.info(
+            f"Using explicitly selected mask variable {mask_var!r} "
+            f"with resolution {mask_res} for target resolution {target_res}."
+        )
+        return (
+            _first_2d_spatial_slice(mask_da, lat_key_mask, lon_key_mask),
+            mask_var,
+            lat_key_mask,
+            lon_key_mask,
+            mask_res,
+            target_res,
+        )
+
+    exact_match = None
+    finer_matches = []
+    coarser_matches = []
+    for var_name in mask_ds.data_vars:
+        mask_da = mask_ds[var_name]
+        try:
+            lat_key_mask = get_coord_key(mask_da, lat=True)
+            lon_key_mask = get_coord_key(mask_da, lon=True)
+            mask_res = _spatial_resolution(mask_da, lon_key_mask, lat_key_mask)
+        except Exception:
+            logger.debug(
+                f"Skipping mask variable {var_name!r}; no usable spatial resolution.",
+                exc_info=True,
+            )
+            continue
+        candidate = (
+            mask_da,
+            var_name,
+            lat_key_mask,
+            lon_key_mask,
+            mask_res,
+            target_res,
+        )
+        if abs(mask_res - target_res) <= 1e-5:
+            exact_match = candidate
+            break
+        if mask_res < target_res:
+            finer_matches.append(candidate)
+        else:
+            coarser_matches.append(candidate)
+
+    selected = exact_match
+    if selected is None and finer_matches:
+        selected = min(finer_matches, key=lambda item: item[4])
+    if selected is None:
+        available = [item[4] for item in coarser_matches]
+        msg = (
+            "Could not select a mask variable for gridded data evaluation: "
+            f"target resolution is {target_res}, and only coarser mask "
+            f"resolutions are available: {available}."
+        )
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+
+    mask_da, var_name, lat_key_mask, lon_key_mask, mask_res, target_res = selected
+    logger.info(
+        f"Selected mask variable {var_name!r} with resolution {mask_res} "
+        f"for target resolution {target_res}."
+    )
+    return (
+        _first_2d_spatial_slice(mask_da, lat_key_mask, lon_key_mask),
+        var_name,
+        lat_key_mask,
+        lon_key_mask,
+        mask_res,
+        target_res,
+    )
+
+
+def apply_spatial_mask(ds, mask_da, mask_var=None):
+    """Mask all spatial data variables in a dataset with a spatial mask."""
     if mask_da is None:
         return ds
     lat_key_ds = get_coord_key(ds, lat=True)
     lon_key_ds = get_coord_key(ds, lon=True)
-    lat_key_mask = get_coord_key(mask_da, lat=True)
-    lon_key_mask = get_coord_key(mask_da, lon=True)
 
-    # Reduce to a 2D mask over lat/lon if extra dims exist.
-    mask_2d = mask_da
-    extra_dims = [d for d in mask_2d.dims if d not in [lat_key_mask, lon_key_mask]]
-    for dim in extra_dims:
-        mask_2d = mask_2d.isel({dim: 0}, drop=True)
+    if isinstance(mask_da, xr.Dataset):
+        (
+            mask_2d,
+            selected_mask_var,
+            lat_key_mask,
+            lon_key_mask,
+            mask_res,
+            target_res,
+        ) = _select_mask_for_grid(mask_da, ds, mask_var=mask_var)
+        from mhm_tools.pre.crop_mhm_setup import regrid_mask
 
-    target_coords = {lat_key_mask: ds[lat_key_ds], lon_key_mask: ds[lon_key_ds]}
-    if (
-        mask_2d.sizes.get(lat_key_mask, 0) == 0
-        or mask_2d.sizes.get(lon_key_mask, 0) == 0
-    ):
-        return ds
-    mask_on_ds = mask_2d.interp(target_coords, method="nearest")
-    mask_on_ds = mask_on_ds.rename({lat_key_mask: lat_key_ds, lon_key_mask: lon_key_ds})
+        mask_on_ds = regrid_mask(
+            mask_ds=mask_2d,
+            lon_key_mask=lon_key_mask,
+            lat_key_mask=lat_key_mask,
+            target_lon=ds[lon_key_ds].data,
+            target_lat=ds[lat_key_ds].data,
+            lon_key_target=lon_key_ds,
+            lat_key_target=lat_key_ds,
+            target_res=target_res,
+            mask_res=mask_res,
+        )
+        logger.debug(
+            f"Applied mask variable {selected_mask_var!r} to target grid "
+            f"with shape {mask_on_ds.shape}."
+        )
+    else:
+        lat_key_mask = get_coord_key(mask_da, lat=True)
+        lon_key_mask = get_coord_key(mask_da, lon=True)
+        mask_2d = _first_2d_spatial_slice(mask_da, lat_key_mask, lon_key_mask)
+
+        if (
+            mask_2d.sizes.get(lat_key_mask, 0) == 0
+            or mask_2d.sizes.get(lon_key_mask, 0) == 0
+        ):
+            return ds
+        target_coords = {
+            lat_key_mask: ds[lat_key_ds].values,
+            lon_key_mask: ds[lon_key_ds].values,
+        }
+        mask_on_ds = mask_2d.interp(target_coords, method="nearest")
+        mask_on_ds = mask_on_ds.rename(
+            {lat_key_mask: lat_key_ds, lon_key_mask: lon_key_ds}
+        )
+
     valid_mask = np.isfinite(mask_on_ds) & (mask_on_ds > 0)
+    logger.info(
+        f"Spatial mask has {int(np.count_nonzero(valid_mask.values))} valid cells "
+        f"on target grid with shape {valid_mask.shape}."
+    )
+    logger.debug(
+        f"Mask after regrid is all nan: "
+        f"{bool(mask_on_ds.isnull().all().compute().item())}; "
+        f"valid cells={int(np.count_nonzero(valid_mask.values))}"
+    )
+    logger.debug(
+        f"Before spatial mask stats are all nan: "
+        f"clim={bool(ds['clim'].isnull().all().compute().item()) if 'clim' in ds else None}, "
+        f"std={bool(ds['std'].isnull().all().compute().item()) if 'std' in ds else None}, "
+        f"mean={bool(ds['mean'].isnull().all().compute().item()) if 'mean' in ds else None}"
+    )
 
     out = ds.copy()
     for var_name in out.data_vars:
         da = out[var_name]
         if lat_key_ds in da.dims and lon_key_ds in da.dims:
             out[var_name] = da.where(valid_mask)
+    logger.debug(
+        f"After spatial mask stats are all nan: "
+        f"clim={bool(out['clim'].isnull().all().compute().item()) if 'clim' in out else None}, "
+        f"std={bool(out['std'].isnull().all().compute().item()) if 'std' in out else None}, "
+        f"mean={bool(out['mean'].isnull().all().compute().item()) if 'mean' in out else None}"
+    )
 
     # Crop to the bounding box of the filled mask area.
     mask_np = np.asarray(valid_mask.values)
@@ -344,7 +508,20 @@ def apply_spatial_mask(ds, mask_da):
             catchment_mask=mask_np,
             buffer=buffer,
         )
+        lat_slice_idx = slice(
+            lat_slice_idx.start, min(lat_slice_idx.stop + 1, out[lat_key_ds].size)
+        )
+        lon_slice_idx = slice(
+            lon_slice_idx.start, min(lon_slice_idx.stop + 1, out[lon_key_ds].size)
+        )
         out = out.isel({lat_key_ds: lat_slice_idx, lon_key_ds: lon_slice_idx})
+        logger.debug(
+            f"After mask crop stats are all nan: "
+            f"clim={bool(out['clim'].isnull().all().compute().item()) if 'clim' in out else None}, "
+            f"std={bool(out['std'].isnull().all().compute().item()) if 'std' in out else None}, "
+            f"mean={bool(out['mean'].isnull().all().compute().item()) if 'mean' in out else None}; "
+            f"shape={out.sizes}"
+        )
 
     return out
 
@@ -1014,9 +1191,11 @@ def plot_map_bias_only(
     im0, bounds0, extend0, ticks0 = plot_single_map(
         ax_rel_mean, rel_mean, mean_diff_1, bounds_type="fixed"
     )
-    ax_rel_mean.set_title(
-        f"a) Relative Mean (median={np.nanmedian(rel_mean):.2f}, mean={total_rel_mean:.2f})"
-    )
+    title_rel_mean = f"a) Relative Mean (median={np.nanmedian(rel_mean):.2f}"
+    if total_rel_mean is not None:
+        title_rel_mean += f", mean={total_rel_mean:.2f}"
+    title_rel_mean += ")"
+    ax_rel_mean.set_title(title_rel_mean)
 
     # diff_abs_max = int(round(np.nanmax(np.abs(diff_mean)) + 0.5))
     # if not np.isfinite(diff_abs_max) or diff_abs_max == 0:
@@ -1502,6 +1681,7 @@ def get_stats(
     direct_comp=False,
     available_mem=None,
     mask_da=None,
+    mask_var=None,
     file_name="*.*",
 ):
     """Get statistics dataset from a path to a file or directory with files."""
@@ -1579,7 +1759,7 @@ def get_stats(
                 with ErrorLogger(logger):
                     msg = "Wrong statisitcs file. If you want to create new statistics you have to provide a var."
                     raise KeyError(msg)
-    masked_ds = apply_spatial_mask(stats_ds, mask_da)
+    masked_ds = apply_spatial_mask(stats_ds, mask_da, mask_var=mask_var)
     return generate_bounds_for_all_coords(masked_ds)
 
 
@@ -1605,6 +1785,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
     bias_only=False,
     global_climate=False,
     mask_da=None,
+    mask_var=None,
     input_file_name=None,
     ref_file_name=None,
     result_metric="all",
@@ -1631,6 +1812,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
         direct_comp=direct_comp,
         available_mem=available_mem,
         mask_da=mask_da,
+        mask_var=mask_var,
         file_name=input_file_name,
     )
     logger.debug(f"input ds: {input}")
@@ -1648,9 +1830,17 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
         direct_comp=direct_comp,
         available_mem=available_mem,
         mask_da=mask_da,
+        mask_var=mask_var,
         file_name=ref_file_name,
     )
     logger.debug(f"ref ds: {ref}")
+    logger.debug(
+        f"After get_stats input/ref are all nan: "
+        f"input_mean={bool(input['mean'].isnull().all().compute().item())}, "
+        f"input_clim={bool(input['clim'].isnull().all().compute().item())}, "
+        f"ref_mean={bool(ref['mean'].isnull().all().compute().item())}, "
+        f"ref_clim={bool(ref['clim'].isnull().all().compute().item())}"
+    )
     # regrid spatial resoution
     # regridd to same spatial resolution
     if len(input["lat"].data) < 1 or len(input["lon"].data) < 1:
@@ -1660,6 +1850,13 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
 
     input, ref = crop_datasets_to_spatial_overlap(input, ref)
     input, ref = regridd_to_higher_spatial_resolution(input, ref)
+    logger.debug(
+        f"After spatial overlap/regrid input/ref are all nan: "
+        f"input_mean={bool(input['mean'].isnull().all().compute().item())}, "
+        f"input_clim={bool(input['clim'].isnull().all().compute().item())}, "
+        f"ref_mean={bool(ref['mean'].isnull().all().compute().item())}, "
+        f"ref_clim={bool(ref['clim'].isnull().all().compute().item())}"
+    )
     output_name = f"{input_name}-{ref_name}".replace(" ", "_")
     # compare and save statistics
     full_metrics = not bias_only and not global_climate
@@ -1737,6 +1934,12 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
         & np.isfinite(ref["mean"].values)
         & (ref["mean"].values != 0)
     )
+    logger.debug(
+        f"Mean comparison valid cells: "
+        f"{int(np.count_nonzero(mean_valid))}/{mean_valid.size}; "
+        f"input_mean_all_nan={bool(input['mean'].isnull().all().compute().item())}; "
+        f"ref_mean_all_nan={bool(ref['mean'].isnull().all().compute().item())}"
+    )
     rel_mean_values = np.full(input["mean"].shape, np.nan, dtype=np.float64)
     np.divide(
         input["mean"].values,
@@ -1783,6 +1986,12 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
         with ErrorLogger(logger):
             raise ValueError(msg)
     clim_valid = np.isfinite(input["clim"].values) & np.isfinite(ref["clim"].values)
+    logger.debug(
+        f"Climatology comparison valid cells: "
+        f"{int(np.count_nonzero(clim_valid))}/{clim_valid.size}; "
+        f"input_clim_all_nan={bool(input['clim'].isnull().all().compute().item())}; "
+        f"ref_clim_all_nan={bool(ref['clim'].isnull().all().compute().item())}"
+    )
     input_clim = xr.DataArray(
         np.where(clim_valid, input["clim"].values, np.nan),
         coords={
@@ -1829,6 +2038,12 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
         output[f"{ref_name}_clim"] = ref_clim
     else:
         output["ref_clim"] = ref_clim
+    logger.debug(
+        f"Before writing relative output is all nan: "
+        f"rel_mean={bool(output['rel_mean'].isnull().all().compute().item())}; "
+        f"input_clim={bool(input_clim.isnull().all().compute().item())}; "
+        f"ref_clim={bool(ref_clim.isnull().all().compute().item())}"
+    )
     file_name = file_name.replace(" ", "_")
     if bootstrap_index is not None:
         file_name = output_path / f"{file_name}_{bootstrap_index}.nc"
@@ -1883,6 +2098,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
                 ref_name=ref_name,
                 output_path=output_path,
                 overlapping_years=overlapping_years,
+                total_rel_mean=np.nanmean(input_clim) / np.nanmean(ref_clim),
             )
     return file_name
 
@@ -2199,6 +2415,7 @@ def gridded_data_evaluation(  # noqa: PLR0913
     coordinate_slice=None,
     year_slice=None,
     mask_da=None,
+    mask_var=None,
     direct_comp=True,
     n_bootstrap_years=None,
     n_bootstrap_selections=None,
@@ -2214,6 +2431,11 @@ def gridded_data_evaluation(  # noqa: PLR0913
     output_path = Path(output_path)
     input_path = input.path
     ref_path = ref.path
+    logger.debug(
+        f"gridded_data_evaluation received mask as {type(mask_da).__name__}; "
+        f"data_vars={list(mask_da.data_vars) if hasattr(mask_da, 'data_vars') else None}; "
+        f"name={getattr(mask_da, 'name', None)}; mask_var={mask_var}"
+    )
 
     output_path.mkdir(parents=True, exist_ok=True)
 
@@ -2365,6 +2587,7 @@ def gridded_data_evaluation(  # noqa: PLR0913
                     bias_only=bias_only,
                     global_climate=global_climate,
                     mask_da=mask_da,
+                    mask_var=mask_var,
                     result_metric=result_metric,
                 )
                 for bootstrap_index in range(n_bootstrap_selections)
@@ -2447,5 +2670,6 @@ def gridded_data_evaluation(  # noqa: PLR0913
             bias_only=bias_only,
             global_climate=global_climate,
             mask_da=mask_da,
+            mask_var=mask_var,
             result_metric=result_metric,
         )

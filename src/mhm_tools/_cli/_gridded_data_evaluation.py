@@ -133,6 +133,12 @@ def add_args(parser):
         ),
     )
     optional.add_argument(
+        "--mask-var",
+        required=False,
+        default=None,
+        help="Variable in --mask-file to use for masking. If omitted, the mask variable is selected by resolution.",
+    )
+    optional.add_argument(
         "--ncpus",
         default=1,
         type=int,
@@ -264,6 +270,7 @@ def run(args):
         parsed command line arguments
     """
     from mhm_tools.common.cli_utils import get_available_mem_in_unit, get_coords
+    from mhm_tools.common.file_handler import get_xarray_ds_from_file
     from mhm_tools.post.gridded_data_evaluation import (
         EvalDataset,
         gridded_data_evaluation,
@@ -283,7 +290,18 @@ def run(args):
         args.lat_min,
         args.lat_max,
         raise_exception=False,
+        mask_var=args.mask_var,
     )
+    if args.mask_file is not None:
+        with get_xarray_ds_from_file(
+            args.mask_file, normalize_latlon_coords=True
+        ) as mask_ds:
+            mask_da = mask_ds.load()
+        logger.debug(
+            f"Passing mask to gridded_data_evaluation as {type(mask_da).__name__}; "
+            f"data_vars={list(mask_da.data_vars) if hasattr(mask_da, 'data_vars') else None}; "
+            f"mask_var={args.mask_var}"
+        )
     coordinate_slice = None
     if (
         lon_min is not None
@@ -335,5 +353,6 @@ def run(args):
         bias_only=args.bias_only,
         global_climate=args.global_climate,
         target_time_freq=target_freq,
+        mask_var=args.mask_var,
         result_metric=args.metric,
     )
