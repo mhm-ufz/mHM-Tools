@@ -1,74 +1,74 @@
-# name: Continuous Integration
+name: Continuous Integration
 
-# on:
-#   push:
-#     branches:
-#       - "main"
-#     tags:
-#       - "*"
-#   pull_request:
-#     branches:
-#       - "main"
-#   # Allows you to run this workflow manually from the Actions tab
-#   workflow_dispatch:
+on:
+  push:
+    branches:
+      - "main"
+    tags:
+      - "*"
+  pull_request:
+    branches:
+      - "main"
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
 
-# jobs:
-#   build:
-#     name: build wheel
-#     runs-on: ubuntu-latest
-#     strategy:
-#       fail-fast: false
+jobs:
+  build:
+    name: build wheel
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
 
-#     steps:
-#       - uses: actions/checkout@v4
-#         with:
-#           fetch-depth: "0"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: "0"
 
-#       - name: Set up Python
-#         uses: actions/setup-python@v5
-#         with:
-#           python-version: 3.12
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.12
 
-#       - name: Install dependencies
-#         run: |
-#           python -m pip install --upgrade pip
-#           pip install build
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install build
 
-#       - name: Build dist
-#         run: |
-#           # PEP 517 package builder from pypa
-#           python -m build .
+      - name: Build dist
+        run: |
+          # PEP 517 package builder from pypa
+          python -m build .
 
-#       - uses: actions/upload-artifact@v4
-#         with:
-#           name: dist
-#           path: dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*
 
-#   upload_to_pypi:
-#     needs: [build]
-#     runs-on: ubuntu-latest
+  upload_to_pypi:
+    needs: [build]
+    runs-on: ubuntu-latest
 
-#     steps:
-#       - uses: actions/download-artifact@v4
-#         with:
-#           name: dist
-#           path: dist
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
 
-#       - name: Publish to Test PyPI
-#         # only if working on main
-#         if: github.ref == 'refs/heads/main'
-#         uses: pypa/gh-action-pypi-publish@release/v1
-#         with:
-#           user: __token__
-#           password: ${{ secrets.test_pypi_api_token }}
-#           repository_url: https://test.pypi.org/legacy/
-#           skip_existing: true
+      - name: Publish to Test PyPI
+        # only if working on main
+        if: github.ref == 'refs/heads/main'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          user: __token__
+          password: ${{ secrets.test_pypi_api_token }}
+          repository_url: https://test.pypi.org/legacy/
+          skip_existing: true
 
-#       - name: Publish to PyPI
-#         # only if tagged
-#         if: startsWith(github.ref, 'refs/tags')
-#         uses: pypa/gh-action-pypi-publish@release/v1
-#         with:
-#           user: __token__
-#           password: ${{ secrets.pypi_api_token }}
+      - name: Publish to PyPI
+        # only if tagged
+        if: startsWith(github.ref, 'refs/tags')
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          user: __token__
+          password: ${{ secrets.pypi_api_token }}
           
