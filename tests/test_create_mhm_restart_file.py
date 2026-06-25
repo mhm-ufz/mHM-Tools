@@ -1,6 +1,8 @@
 from pathlib import Path
 
+import numpy as np
 import pytest
+import xarray as xr
 
 import mhm_tools as mt
 from mhm_tools.common.file_handler import get_xarray_ds_from_file
@@ -15,6 +17,7 @@ class TestCreateRestart:
     def _tmp_dirs(self, tmp_path):
         # setup read_morph_files test
         configure_mhm_tools_logger("ERROR")
+        self.tmp_path = tmp_path
         self.tmp_work = tmp_path / "work"
         self.tmp_out = tmp_path / "out"
         self.tmp_work.mkdir(parents=True, exist_ok=True)
@@ -36,6 +39,45 @@ class TestCreateRestart:
         ]
         for n in self.file_names:
             (self.morph_dir / f"{n}.nc").touch()
+
+    def _write_split_fixture(
+        self,
+        lon_min,
+        lon_max,
+        lat_min,
+        lat_max,
+        l0_resolution=0.02,
+        l1_resolution=0.1,
+    ):
+        morph = self.tmp_path / "split_morph"
+        morph.mkdir(parents=True, exist_ok=True)
+
+        lon_l0 = _cell_centers(lon_min, lon_max, l0_resolution)
+        lat_l0 = _cell_centers(lat_min, lat_max, l0_resolution)[::-1]
+        geology = xr.Dataset(
+            data_vars={
+                "geology": (
+                    ("latitude", "longitude"),
+                    np.ones((lat_l0.size, lon_l0.size), dtype=np.float32),
+                )
+            },
+            coords={"latitude": lat_l0, "longitude": lon_l0},
+        )
+        geology.to_netcdf(morph / f"geology_{l0_resolution:g}.nc", engine="netcdf4")
+
+        lon_l1 = _cell_centers(lon_min, lon_max, l1_resolution)
+        lat_l1 = _cell_centers(lat_min, lat_max, l1_resolution)[::-1]
+        land_mask = xr.Dataset(
+            data_vars={
+                "land_mask": (
+                    ("lat", "lon"),
+                    np.ones((lat_l1.size, lon_l1.size), dtype=np.float32),
+                )
+            },
+            coords={"lat": lat_l1, "lon": lon_l1},
+        )
+        land_mask.to_netcdf(morph / "land_mask.nc", engine="netcdf4")
+        return morph
 
     def test_read_morph_files(self):
         mf = mt.pre.MorphFiles(self.morph_dir)
@@ -66,15 +108,22 @@ class TestCreateRestart:
         assert d.l1.resolution - 0.0625 < 1e-6
 
     def test_split_grid(self):
-        morph = Path(HERE / "files" / "test_create_restart")
-        land_mask_file = morph / "land_mask_remapped_03min.nc"
-        lon_min_target_grid = -10
-        lon_max_target_grid = 10
-        lat_min_target_grid = -10
-        lat_max_target_grid = 10
-        l0_resolution = 0.002
+        lon_min_target_grid = -0.2
+        lon_max_target_grid = 0.2
+        lat_min_target_grid = -0.2
+        lat_max_target_grid = 0.2
+        l0_resolution = 0.02
         l1_resolution = 0.1
-        increment_l1 = 20  # thats 2 degree
+        increment_l1 = 2
+        morph = self._write_split_fixture(
+            lon_min_target_grid,
+            lon_max_target_grid,
+            lat_min_target_grid,
+            lat_max_target_grid,
+            l0_resolution=l0_resolution,
+            l1_resolution=l1_resolution,
+        )
+        land_mask_file = morph / "land_mask.nc"
         mpr_runner = MPRRunner(
             "path_to_mpr_exe"
         )  # dummy path because it is not used in the test
@@ -114,21 +163,21 @@ class TestCreateRestart:
             merge_only=False,
         )
         # test setup successful
-        assert m.grid.l0.lon_min - -10 < 1e-3
-        assert m.grid.l0.lon_max - 10 < 1e-3
-        assert m.grid.l0.lat_max - 10 < 1e-3
-        assert m.grid.l0.lat_min - -10 < 1e-3
-        assert m.grid.l0.resolution - 0.002 < 1e-6
-        assert m.grid.l1.lon_min - -10 < 1e-3
-        assert m.grid.l1.lon_max - 10 < 1e-3
-        assert m.grid.l1.lat_max - 10 < 1e-3
-        assert m.grid.l1.lat_min - -10 < 1e-3
+        assert m.grid.l0.lon_min - lon_min_target_grid < 1e-3
+        assert m.grid.l0.lon_max - lon_max_target_grid < 1e-3
+        assert m.grid.l0.lat_max - lat_max_target_grid < 1e-3
+        assert m.grid.l0.lat_min - lat_min_target_grid < 1e-3
+        assert m.grid.l0.resolution - l0_resolution < 1e-6
+        assert m.grid.l1.lon_min - lon_min_target_grid < 1e-3
+        assert m.grid.l1.lon_max - lon_max_target_grid < 1e-3
+        assert m.grid.l1.lat_max - lat_max_target_grid < 1e-3
+        assert m.grid.l1.lat_min - lat_min_target_grid < 1e-3
         assert m.grid.l1.resolution - 0.1 < 1e-6
-        assert m.grid.morph_files.geology == morph / "geology_0.002.nc"
+        assert m.grid.morph_files.geology == morph / "geology_0.02.nc"
 
         # split grid
         m._split_grid()
-        assert len(m.subgrids) == 100
+        assert len(m.subgrids) == 4
 
         for sd in reversed(m.subgrids):
             # print(sd.morph_files.geology, flush=True)
@@ -150,22 +199,29 @@ class TestCreateRestart:
                     abs(ds["latitude"].max() - sd.l0.lat_max) - sd.l0.resolution / 2
                     < 1e-6
                 )
-            assert sd.l1.get_n_lon() == 20
-            assert sd.l1.get_n_lat() == 20
-            assert sd.l0.get_n_lon() == 1000
-            assert sd.l0.get_n_lat() == 1000
+            assert sd.l1.get_n_lon() == 2
+            assert sd.l1.get_n_lat() == 2
+            assert sd.l0.get_n_lon() == 10
+            assert sd.l0.get_n_lat() == 10
 
     def test_not_perfect_grid(self):
         # use an increment that does not fit the grid
-        morph = Path(HERE / "files" / "test_create_restart")
-        land_mask_file = morph / "land_mask_remapped_03min.nc"
-        lon_min_target_grid = -10
-        lon_max_target_grid = 3
-        lat_min_target_grid = -9
-        lat_max_target_grid = 10
-        l0_resolution = 0.002
+        lon_min_target_grid = -0.2
+        lon_max_target_grid = 0.1
+        lat_min_target_grid = -0.2
+        lat_max_target_grid = 0.1
+        l0_resolution = 0.02
         l1_resolution = 0.1
-        increment_l1 = 20
+        increment_l1 = 2
+        morph = self._write_split_fixture(
+            lon_min_target_grid,
+            lon_max_target_grid,
+            lat_min_target_grid,
+            lat_max_target_grid,
+            l0_resolution=l0_resolution,
+            l1_resolution=l1_resolution,
+        )
+        land_mask_file = morph / "land_mask.nc"
         mpr_runner = MPRRunner(
             "path_to_mpr_exe"
         )  # dummy path because it is not used in the test
@@ -207,6 +263,7 @@ class TestCreateRestart:
         )
         # test setup successful
         m._split_grid()
+        assert len(m.subgrids) == 4
         for sd in reversed(m.subgrids):
             with get_xarray_ds_from_file(sd.morph_files.geology) as ds:
                 assert (
@@ -227,28 +284,34 @@ class TestCreateRestart:
                     < 1e-6
                 )
 
-            if (
-                "slice_6" in sd.name and "_9" not in sd.name
-            ):  # the last slice in lon direction but not in lat direction
-                assert sd.l1.get_n_lon() == 10
-                assert sd.l1.get_n_lat() == 20
-                assert sd.l0.get_n_lon() == 500
-                assert sd.l0.get_n_lat() == 1000
-            elif "slice_6" not in sd.name and "_9" in sd.name:
-                assert sd.l1.get_n_lon() == 20
-                assert sd.l1.get_n_lat() == 10
-                assert sd.l0.get_n_lon() == 1000
-                assert sd.l0.get_n_lat() == 500
-            elif "slice_6" in sd.name and "_9" in sd.name:
-                assert sd.l1.get_n_lon() == 10
-                assert sd.l1.get_n_lat() == 10
-                assert sd.l0.get_n_lon() == 500
-                assert sd.l0.get_n_lat() == 500
+            _, i_str, j_str = sd.name.split("_")
+            i = int(i_str)
+            j = int(j_str)
+            if i == 1 and j != 1:
+                assert sd.l1.get_n_lon() == 1
+                assert sd.l1.get_n_lat() == 2
+                assert sd.l0.get_n_lon() == 5
+                assert sd.l0.get_n_lat() == 10
+            elif i != 1 and j == 1:
+                assert sd.l1.get_n_lon() == 2
+                assert sd.l1.get_n_lat() == 1
+                assert sd.l0.get_n_lon() == 10
+                assert sd.l0.get_n_lat() == 5
+            elif i == 1 and j == 1:
+                assert sd.l1.get_n_lon() == 1
+                assert sd.l1.get_n_lat() == 1
+                assert sd.l0.get_n_lon() == 5
+                assert sd.l0.get_n_lat() == 5
             else:
-                assert sd.l1.get_n_lon() == 20
-                assert sd.l1.get_n_lat() == 20
-                assert sd.l0.get_n_lon() == 1000
-                assert sd.l0.get_n_lat() == 1000
+                assert sd.l1.get_n_lon() == 2
+                assert sd.l1.get_n_lat() == 2
+                assert sd.l0.get_n_lon() == 10
+                assert sd.l0.get_n_lat() == 10
 
     def test_write_namelists(self):
         pass
+
+
+def _cell_centers(lower, upper, resolution):
+    n_cells = int(round((upper - lower) / resolution))
+    return lower + resolution / 2 + np.arange(n_cells) * resolution

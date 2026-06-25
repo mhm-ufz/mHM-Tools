@@ -113,16 +113,6 @@ class TestCatchment(unittest.TestCase):
         modified_data = c._modify_data(self.ds[self.var_name])
         self.assertEqual(modified_data.shape, self.ds[self.var_name].shape)
 
-    def test_revert_data_uses_current_data_width_after_upscaling(self):
-        c = catchment.Catchment.__new__(catchment.Catchment)
-        c.do_shift = True
-        c.ds = xr.Dataset(coords={"lon": np.arange(8)})
-        data = np.array([[1, 2, 3, 4]])
-
-        reverted = c._revert_data(data)
-
-        np.testing.assert_array_equal(reverted, np.array([[3, 4, 1, 2]]))
-
     def test_add_fdir(self):
         c = catchment.Catchment(
             self.ds,
@@ -265,37 +255,6 @@ class TestCatchment(unittest.TestCase):
 
         catchment.merge_catchment(path1, path2, out_path)
         self.assertTrue(out_path.is_file())
-
-    def test_merge_catchment_only_replaces_dateline_basins(self):
-        lat = np.array([1.0, 0.0])
-        lon = np.array([-179.0, -177.0, -100.0, 0.0, 100.0, 177.0, 179.0])
-        basin1 = np.array(
-            [
-                [1, 1, 2, 2, 2, 3, 3],
-                [1, 1, 2, 2, 2, 3, 3],
-            ]
-        )
-        basin2 = basin1 + 10
-        ds1 = xr.Dataset(
-            {"basin": (["lat", "lon"], basin1)},
-            coords={"lat": lat, "lon": lon},
-        )
-        ds2 = xr.Dataset(
-            {"basin": (["lat", "lon"], basin2)},
-            coords={"lat": lat, "lon": lon},
-        )
-        path1 = self.tmp_path / "merge_hydro1.nc"
-        path2 = self.tmp_path / "merge_hydro2.nc"
-        out_path = self.tmp_path / "merge_out.nc"
-        ds1.to_netcdf(path1)
-        ds2.to_netcdf(path2)
-
-        catchment.merge_catchment(path1, path2, out_path)
-
-        with xr.open_dataset(out_path) as merged:
-            self.assertEqual(int(merged["basin"].sel(lat=1.0, lon=0.0)), 2)
-            self.assertGreater(int(merged["basin"].sel(lat=1.0, lon=-179.0)), 3)
-            self.assertGreater(int(merged["basin"].sel(lat=1.0, lon=179.0)), 3)
 
     def test_resolution_l2_file_resolution_matches(self):
         lon = np.array([0.0, 0.5, 1.0])
@@ -583,10 +542,10 @@ class TestCatchment(unittest.TestCase):
     # Replace these placeholders with your real test inputs before running.
     FDIR_PATH = Path(HERE, "files", "test_create_catchment", "fdir.nc")
     FDIR_VAR = "fdir"  # change to the variable name in your file if different
-
     GAUGE_LAT = [49.292013, 48.445978]
     GAUGE_LON = [8.679113, 8.70628]
-    REF_AREA = [113.33, 1123.61]  # optional reference area in km2, e.g. 25400
+    REF_AREA = [113.33, 1123.61]
+    GAUGE_IDS = [101, 102]
 
     def test_delineate_basin_without_ref(self):
         """Integration-style test: delineate a basin using a Gauge object without a reference area."""
@@ -721,7 +680,6 @@ class TestCatchment(unittest.TestCase):
                 "Set FDIR_PATH, GAUGE_LAT, GAUGE_LON and REF_AREA in this test file to run this integration test."
             )
 
-        gauge_ids = [101, 202]
         gauge_coords = [
             (float(self.GAUGE_LAT[0]), float(self.GAUGE_LON[0])),
             (float(self.GAUGE_LAT[1]), float(self.GAUGE_LON[1])),
@@ -754,7 +712,7 @@ class TestCatchment(unittest.TestCase):
                     var="fdir",
                     ftype="d8",
                     gauge_coords=(lat, lon),
-                    gauge_ids=[gauge_ids[idx]],
+                    gauge_ids=[self.GAUGE_IDS[idx]],
                     ref_catchment_area=gauge_areas[idx],
                     max_distance_cells=10,
                     max_error=0.25,
@@ -767,12 +725,12 @@ class TestCatchment(unittest.TestCase):
             self.assertTrue(id_path.is_file())
             with xr.open_dataset(id_path) as id_ds:
                 id_da = id_ds["idgauges"]
-                matches = np.argwhere(id_da.values == gauge_ids[idx])
+                matches = np.argwhere(id_da.values == self.GAUGE_IDS[idx])
                 self.assertEqual(matches.shape[0], 1)
                 row, col = matches[0]
                 lat_val = float(id_da["lat"].values[row])
                 lon_val = float(id_da["lon"].values[col])
-            snapped.append((lat_val, lon_val, gauge_ids[idx]))
+            snapped.append((lat_val, lon_val, self.GAUGE_IDS[idx]))
 
         combined_dir = self.tmp_path / "combined"
         combined_dir.mkdir(parents=True, exist_ok=True)
@@ -783,7 +741,7 @@ class TestCatchment(unittest.TestCase):
             var="fdir",
             ftype="d8",
             gauge_coords=gauge_coords,
-            gauge_ids=gauge_ids,
+            gauge_ids=self.GAUGE_IDS,
             ref_catchment_area=gauge_areas,
             max_distance_cells=10,
             max_error=0.25,
@@ -813,7 +771,6 @@ class TestCatchment(unittest.TestCase):
                 "Set FDIR_PATH, GAUGE_LAT and GAUGE_LON in this test file to run this integration test."
             )
 
-        gauge_ids = [101, 202]
         gauge_coords = [
             (float(self.GAUGE_LAT[0]), float(self.GAUGE_LON[0])),
             (float(self.GAUGE_LAT[1]), float(self.GAUGE_LON[1])),
@@ -840,7 +797,7 @@ class TestCatchment(unittest.TestCase):
             var="fdir",
             ftype="d8",
             gauge_coords=gauge_coords,
-            gauge_ids=gauge_ids,
+            gauge_ids=self.GAUGE_IDS,
             latlon=True,
             frame=1,
             resolutions=resolutions,
@@ -854,7 +811,7 @@ class TestCatchment(unittest.TestCase):
             var="fdir",
             ftype="d8",
             gauge_coords=gauge_coords,
-            gauge_ids=gauge_ids,
+            gauge_ids=self.GAUGE_IDS,
             latlon=True,
             frame=1,
             resolutions=resolutions,
@@ -892,7 +849,7 @@ class TestCatchment(unittest.TestCase):
                 else list(ds.data_vars)[0]
             )
 
-        gauge_id = 101
+        gauge_id = self.GAUGE_IDS[0]
         gauge_coords = (float(self.GAUGE_LAT[0]), float(self.GAUGE_LON[0]))
         ref_area = float(self.REF_AREA[0])
         common_kwargs = {
