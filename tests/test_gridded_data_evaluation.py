@@ -4,6 +4,7 @@ import xarray as xr
 
 from mhm_tools.common.logger import configure_mhm_tools_logger
 from mhm_tools.post.gridded_data_evaluation import (
+    apply_spatial_mask,
     compare_input_with_ref,
     crop_datasets_to_spatial_overlap,
     infer_time_resolution_hours_from_files,
@@ -43,6 +44,121 @@ def _write_timeseries_nc(path, times):
         {"v": ("time", np.arange(len(times), dtype=float))}, coords={"time": times}
     )
     ds.to_netcdf(path)
+
+
+def _stats_dataset(lat, lon):
+    values = np.ones((len(lat), len(lon)), dtype=float)
+    clim = np.ones((12, len(lat), len(lon)), dtype=float)
+    return xr.Dataset(
+        {
+            "mean": (("lat", "lon"), values.copy()),
+            "std": (("lat", "lon"), values.copy()),
+            "clim": (("month", "lat", "lon"), clim),
+        },
+        coords={"month": np.arange(1, 13), "lat": lat, "lon": lon},
+    )
+
+
+def test_apply_spatial_mask_selects_matching_resolution_mask_variable(caplog):
+    lat = np.array([3.0, 2.0, 1.0])
+    lon = np.array([0.0, 1.0, 2.0])
+    stats = _stats_dataset(lat, lon)
+    wrong_fine_mask = np.full((6, 6), np.nan)
+    matching_mask = np.ones((3, 3), dtype=float)
+    matching_mask[1, 1] = 0.0
+    mask_ds = xr.Dataset(
+        {
+            "mask": (("lat", "lon"), wrong_fine_mask),
+            "mask_l2": (("lat_l2", "lon_l2"), matching_mask),
+        },
+        coords={
+            "lat": np.array([3.25, 2.75, 2.25, 1.75, 1.25, 0.75]),
+            "lon": np.array([-0.25, 0.25, 0.75, 1.25, 1.75, 2.25]),
+            "lat_l2": lat,
+            "lon_l2": lon,
+        },
+    )
+
+    caplog.set_level("INFO")
+    masked = apply_spatial_mask(stats, mask_ds)
+
+    assert "Selected mask variable 'mask_l2'" in caplog.text
+    assert masked["mean"].sel(lat=3.0, lon=0.0).item() == 1.0
+    assert np.isnan(masked["mean"].sel(lat=2.0, lon=1.0).item())
+    assert np.isfinite(masked["clim"].values).any()
+
+
+def test_apply_spatial_mask_uses_finest_finer_mask_when_no_exact_match():
+    lat = np.array([2.0, 1.0])
+    lon = np.array([0.0, 1.0])
+    stats = _stats_dataset(lat, lon)
+    coarse_mask = np.zeros((2, 2), dtype=float)
+    fine_mask = np.ones((4, 4), dtype=float)
+    mask_ds = xr.Dataset(
+        {
+            "coarse_mask": (("lat_l2", "lon_l2"), coarse_mask),
+            "fine_mask": (("lat", "lon"), fine_mask),
+        },
+        coords={
+            "lat_l2": np.array([2.5, 0.5]),
+            "lon_l2": np.array([0.5, 2.5]),
+            "lat": np.array([2.25, 1.75, 1.25, 0.75]),
+            "lon": np.array([-0.25, 0.25, 0.75, 1.25]),
+        },
+    )
+
+    masked = apply_spatial_mask(stats, mask_ds)
+
+    assert np.isfinite(masked["mean"].values).all()
+    assert np.isfinite(masked["clim"].values).all()
+
+
+def test_apply_spatial_mask_respects_explicit_mask_var():
+    lat = np.array([3.0, 2.0, 1.0])
+    lon = np.array([0.0, 1.0, 2.0])
+    stats = _stats_dataset(lat, lon)
+    mask_ds = xr.Dataset(
+        {
+            "mask": (("lat", "lon"), np.zeros((3, 3), dtype=float)),
+            "mask_l2": (("lat_l2", "lon_l2"), np.ones((3, 3), dtype=float)),
+        },
+        coords={"lat": lat, "lon": lon, "lat_l2": lat, "lon_l2": lon},
+    )
+
+    masked = apply_spatial_mask(stats, mask_ds, mask_var="mask_l2")
+
+    assert np.isfinite(masked["mean"].values).all()
+
+
+def test_apply_spatial_mask_keeps_single_valid_crop_row():
+    lat = np.array([52.15, 52.05, 51.95, 51.85])
+    lon = np.array([8.05, 8.15, 8.25, 8.35, 8.45, 8.55, 8.65, 8.75])
+    stats = _stats_dataset(lat, lon)
+    mask = np.full((4, 8), np.nan)
+    mask[1, 2:4] = 1.0
+    mask_da = xr.DataArray(mask, coords={"lat": lat, "lon": lon}, dims=("lat", "lon"))
+
+    masked = apply_spatial_mask(stats, mask_da)
+
+    assert masked.sizes["lat"] == 1
+    assert masked.sizes["lon"] == 2
+    assert np.isfinite(masked["mean"].values).any()
+
+
+def test_apply_spatial_mask_fails_when_only_coarser_masks_exist():
+    lat = np.array([2.0, 1.0])
+    lon = np.array([0.0, 1.0])
+    stats = _stats_dataset(lat, lon)
+    mask_ds = xr.Dataset(
+        {"coarse_mask": (("lat_l2", "lon_l2"), np.ones((2, 2), dtype=float))},
+        coords={
+            "lat_l2": np.array([2.5, 0.5]),
+            "lon_l2": np.array([0.5, 2.5]),
+        },
+    )
+
+    with pytest.raises(ValueError, match="only coarser mask resolutions"):
+        apply_spatial_mask(stats, mask_ds)
 
 
 def test_infer_time_resolution_hours_from_files_prefers_intra_file(tmp_path):
