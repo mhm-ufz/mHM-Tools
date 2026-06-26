@@ -266,6 +266,20 @@ def get_overlapping_time_slice(input_ds, ref_ds):
     input_non_nan_time = input_ds.dropna(dim="time", how="all").time.data
     reference_non_nan_time = ref_ds.dropna(dim="time", how="all").time.data
 
+    if input_non_nan_time.size == 0 or reference_non_nan_time.size == 0:
+        msg = (
+            "Cannot determine temporal overlap because one dataset has no valid "
+            "non-NaN timesteps after preprocessing. "
+            f"Input valid timesteps: {input_non_nan_time.size}; "
+            f"Reference valid timesteps: {reference_non_nan_time.size}. "
+            "This usually means the selected variable, mask, spatial crop, "
+            "regridding, or time resampling removed all usable data. Check the "
+            "input/ref variable names, mask coverage, coordinate slice, and target "
+            "time frequency."
+        )
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+
     logger.debug(f"input {input_non_nan_time[0]} till {input_non_nan_time[-1]}")
     logger.debug(f"ref {reference_non_nan_time[0]} till {reference_non_nan_time[-1]}")
 
@@ -298,7 +312,6 @@ def get_overlapping_time_slice(input_ds, ref_ds):
     )
 
     # Find overlapping range between both available periods.
-    only_nan_msg = "No non nan value data."
     if input_non_nan_time.any() and reference_non_nan_time.any():
         if bucket is None:
             # Sub-daily case: use exact timestamps.
@@ -331,6 +344,7 @@ def get_overlapping_time_slice(input_ds, ref_ds):
             + (f" using {bucket} buckets." if bucket is not None else ".")
         )
     else:
+        only_nan_msg = "No non nan value data."
         with ErrorLogger(logger):
             raise ValueError(only_nan_msg)
     return slice(overlap_start, overlap_end)

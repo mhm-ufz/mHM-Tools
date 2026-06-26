@@ -252,8 +252,6 @@ class TestGetOverlappingTimeSlice(XarrayUtilsBase):
         self.assertGreaterEqual(sl.start, sl.stop)
 
     def test_all_nan_raises(self):
-        # Note: the implementation path uses a context manager; if it is misused,
-        # any Exception is acceptable here.
         t = np.array(np.arange("2021-01-01", "2021-01-04", dtype="datetime64[D]"))
         ds1 = xr.Dataset(
             {"a": ("time", np.array([np.nan, np.nan, np.nan]))}, coords={"time": t}
@@ -261,7 +259,24 @@ class TestGetOverlappingTimeSlice(XarrayUtilsBase):
         ds2 = xr.Dataset(
             {"b": ("time", np.array([np.nan, np.nan, np.nan]))}, coords={"time": t}
         )
-        with self.assertRaises(Exception):
+        with self.assertRaisesRegex(
+            ValueError,
+            "Cannot determine temporal overlap.*Input valid timesteps: 0; "
+            "Reference valid timesteps: 0",
+        ):
+            get_overlapping_time_slice(ds1, ds2)
+
+    def test_input_all_nan_reports_valid_timestep_counts(self):
+        t = np.array(np.arange("2021-01-01", "2021-01-04", dtype="datetime64[D]"))
+        ds1 = xr.Dataset(
+            {"a": ("time", np.array([np.nan, np.nan, np.nan]))}, coords={"time": t}
+        )
+        ds2 = xr.Dataset({"b": ("time", np.ones(t.size))}, coords={"time": t})
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "Input valid timesteps: 0; Reference valid timesteps: 3",
+        ):
             get_overlapping_time_slice(ds1, ds2)
 
     def test_daily_bucket_ignores_intraday_offsets(self):
