@@ -414,8 +414,11 @@ def run(args):  # noqa: PLR0912,PLR0915
         mask_file = str(Path(args.output_path) / Path(args.mask_file))
     else:
         mask_file = args.mask_file
+    l0_resolution = args.l0_resolution
+    if l0_resolution is None and args.lonlatbox is not None:
+        l0_resolution = resl0
     coarse_resolutions = Resolution(
-        l0=args.l0_resolution if args.l0_resolution is not None else None,
+        l0=l0_resolution if l0_resolution is not None else None,
         l1=args.l1_resolution,
         l11=args.l11_resolution,
         l2=args.l2_resolution,
