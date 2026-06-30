@@ -158,14 +158,12 @@ def create_header(
     header_dict = standardize_header(header_dict)
 
     if output_path is not None:
-        if output_path.is_dir():
+        output_path = Path(output_path)
+        if output_path.is_dir() or not output_path.suffix:
             header_out_path = output_path / "header.txt"
-        elif output_path.is_file():
-            header_out_path = output_path
         else:
-            msg = f"Header output path {output_path} is neither file nor directory."
-            with ErrorLogger(logger):
-                raise ValueError(msg)
+            header_out_path = output_path
+        header_out_path.parent.mkdir(parents=True, exist_ok=True)
         header_str = write_header(header_out_path, header_dict, dtype)
         logger.info(
             f"Writing header file to {header_out_path} with header str: \n{header_str}"
