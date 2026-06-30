@@ -467,6 +467,13 @@ def write_xarray_to_file(  # noqa: PLR0912, PLR0915
         return metadata_vars
 
     file_path = Path(file_path)
+    if file_path.suffix not in {".asc", ".nc"}:
+        msg = (
+            "Writing to file types other than asci and netcdf is not implemented. "
+            f"The suffix of the file was: {file_path.suffix}"
+        )
+        with ErrorLogger(logger):
+            raise NotImplementedError(msg)
     if create_folder and not file_path.parent.is_dir():
         file_path.parent.mkdir(parents=True, exist_ok=True)
     if file_path.is_file():
@@ -765,10 +772,6 @@ def write_xarray_to_file(  # noqa: PLR0912, PLR0915
         except Exception as e:
             with ErrorLogger(logger):
                 raise e
-    else:
-        msg = f"Writing to file types other than asci and netcdf is not implemented. The suffix of the file was: {file_path.suffix}"
-        with ErrorLogger(logger):
-            raise NotImplementedError(msg)
 
 
 def _apply_cf_baseline_metadata(ds: xr.Dataset, data_vars: Sequence[str]) -> None:

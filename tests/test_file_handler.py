@@ -268,6 +268,19 @@ class TestWriteXarrayToFile(unittest.TestCase, BaseDatasetMixin):
             with self.assertRaises(NotImplementedError):
                 fh.write_xarray_to_file(ds, out)
 
+    def test_write_xarray_to_file_unsupported_suffix_preserves_existing_file(self):
+        """Preserve existing files when suffix validation fails."""
+        ds = self.make_simple_ds()
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td) / "file.xyz"
+            out.write_text("keep me", encoding="utf-8")
+
+            with self.assertRaises(NotImplementedError):
+                fh.write_xarray_to_file(ds, out)
+
+            self.assertTrue(out.is_file())
+            self.assertEqual(out.read_text(encoding="utf-8"), "keep me")
+
     def test_set_grid_ignores_incompatible_coords(self):
         time = np.array(["2017-01-01", "2017-01-02"], dtype="datetime64[ns]")
         da = xr.DataArray(
