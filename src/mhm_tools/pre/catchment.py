@@ -525,9 +525,11 @@ def write_gauges_to_csv(gauges, output_target, filename="gauges_info.csv"):
         gauges = [gauges]
 
     output_target = Path(output_target)
-    output_path = (
-        output_target if output_target.suffix else output_target / str(filename)
-    )
+    if output_target.is_dir() or not output_target.suffix:
+        output_path = output_target / str(filename)
+    else:
+        output_path = output_target
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     rows = []
@@ -584,9 +586,11 @@ def write_gauges_to_nc(gauges, output_target, filename="gauges_info.nc"):
         gauges = [gauges]
 
     output_target = Path(output_target)
-    output_path = (
-        output_target if output_target.suffix else output_target / str(filename)
-    )
+    if output_target.is_dir() or not output_target.suffix:
+        output_path = output_target / str(filename)
+    else:
+        output_path = output_target
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     station_ids_raw = []
