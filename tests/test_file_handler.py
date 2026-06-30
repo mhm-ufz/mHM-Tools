@@ -46,21 +46,24 @@ class BaseDatasetMixin:
 
 
 class TestCreateHeader(unittest.TestCase, BaseDatasetMixin):
+    def assert_header_matches_simple_ds(self, header_dict, ds):
+        """Assert header values match the simple test grid."""
+        self.assertEqual(header_dict["ncols"], ds.sizes["lon"])
+        self.assertEqual(header_dict["nrows"], ds.sizes["lat"])
+        self.assertAlmostEqual(float(header_dict["cellsize"]), 1.0)
+        self.assertAlmostEqual(
+            float(header_dict["xllcorner"]), ds["lon"].values.min() - 0.5
+        )
+        self.assertAlmostEqual(
+            float(header_dict["yllcorner"]), ds["lat"].values.min() - 0.5
+        )
 
     def test_create_header_returns_dir_without_write(self):
         for dtype in [np.float32, np.int32, np.uint16]:
             with self.subTest(dtype=dtype):
                 ds = self.make_simple_ds(dtype=dtype)
                 header_dict = fh.create_header(ds, no_data_value="-9999")
-                self.assertEqual(header_dict["ncols"], ds.sizes["lon"])
-                self.assertEqual(header_dict["nrows"], ds.sizes["lat"])
-                self.assertAlmostEqual(float(header_dict["cellsize"]), 1.0)
-                self.assertAlmostEqual(
-                    float(header_dict["xllcorner"]), ds["lon"].values.min() - 0.5
-                )
-                self.assertAlmostEqual(
-                    float(header_dict["yllcorner"]), ds["lat"].values.min() - 0.5
-                )
+                self.assert_header_matches_simple_ds(header_dict, ds)
                 if dtype in [np.int32, np.uint16]:
                     self.assertEqual(header_dict["nodata_value"], -9999)
                 else:
@@ -76,6 +79,48 @@ class TestCreateHeader(unittest.TestCase, BaseDatasetMixin):
             self.assertEqual(header_dict["ncols"], ds.sizes["lon"])
             self.assertEqual(header_dict["nrows"], ds.sizes["lat"])
             self.assertEqual(header_dict["nodata_value"], 2245)
+
+    def test_create_header_writes_to_new_file_path(self):
+        """Write a header to an explicit file path that does not exist yet."""
+        ds = self.make_simple_ds()
+        with tempfile.TemporaryDirectory() as td:
+            output_path = Path(td) / "custom_header.txt"
+            default_path = Path(td) / "header.txt"
+            self.assertFalse(output_path.exists())
+            self.assertFalse(default_path.exists())
+
+            header_dict = fh.create_header(ds, output_path=output_path)
+
+            self.assertTrue(output_path.is_file())
+            self.assertFalse(default_path.exists())
+            self.assert_header_matches_simple_ds(header_dict, ds)
+
+    def test_create_header_creates_parent_directory_for_file_path(self):
+        """Create missing parent directories for explicit header file paths."""
+        ds = self.make_simple_ds()
+        with tempfile.TemporaryDirectory() as td:
+            output_path = Path(td) / "nested" / "custom_header.txt"
+            self.assertFalse(output_path.parent.exists())
+
+            header_dict = fh.create_header(ds, output_path=output_path)
+
+            self.assertTrue(output_path.parent.is_dir())
+            self.assertTrue(output_path.is_file())
+            self.assert_header_matches_simple_ds(header_dict, ds)
+
+    def test_create_header_existing_dotted_directory_writes_default_header(self):
+        """Treat existing dotted directories as directories, not output files."""
+        ds = self.make_simple_ds()
+        with tempfile.TemporaryDirectory() as td:
+            output_path = Path(td) / "headers.v1"
+            output_path.mkdir()
+            expected_path = output_path / "header.txt"
+
+            header_dict = fh.create_header(ds, output_path=output_path)
+
+            self.assertTrue(output_path.is_dir())
+            self.assertTrue(expected_path.is_file())
+            self.assert_header_matches_simple_ds(header_dict, ds)
 
 
 class TestChunkHelpers(unittest.TestCase, BaseDatasetMixin):
