@@ -2,6 +2,8 @@
 Calculate the SPAtial EFficiency metric.
 
 Based on:
+Demirel, M.C., Koch, J., Stisen, S., 2018. SPAEF: SPAtial EFficiency. GitHub. https://doi.org/10.5281/ZENODO.1158890
+
 Julian Koch, Mehmet Cüneyd Demirel, and Simon Stisen:
 The SPAtial EFficiency metric (SPAEF): multiple-component evaluation of
 spatial patterns for optimization of hydrological models,
