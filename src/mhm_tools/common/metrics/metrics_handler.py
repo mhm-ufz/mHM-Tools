@@ -2,6 +2,7 @@
 
 import logging
 
+import numpy as np
 import pandas as pd
 
 from mhm_tools.common.metrics.esp import ESP
@@ -42,7 +43,14 @@ def normalize_results_metric(metric):
 
 def calculate_spaef_for_gridded_data(map1, map2, ds1_name, ds2_name):
     """Calculate SPAEF metrics for two gridded datasets."""
-    spaef, alpha, beta, gamma = SPAEF(map1, map2)
+    metrics_per_timestep = np.asarray(
+        [SPAEF(simulated, observed) for simulated, observed in zip(map1, map2)],
+        dtype=float,
+    )
+    spaef, alpha, beta, gamma = np.nanmean(
+        metrics_per_timestep,
+        axis=0,
+    )
     return {
         "name": ds1_name + "-" + ds2_name,
         "spaef": spaef,
@@ -54,13 +62,20 @@ def calculate_spaef_for_gridded_data(map1, map2, ds1_name, ds2_name):
 
 def calculate_esp_for_gridded_data(map1, map2, ds1_name, ds2_name):
     """Calculate ESP metrics for two gridded datasets."""
-    esp, rs, gamma, alpha = ESP(map1, map2)
+    metrics_per_timestep = np.asarray(
+        [ESP(simulated, observed) for simulated, observed in zip(map1, map2)],
+        dtype=float,
+    )
+    esp, mean_rs, mean_gamma, mean_alpha = np.nanmean(
+        metrics_per_timestep,
+        axis=0,
+    )
     return {
         "name": ds1_name + "-" + ds2_name,
         "esp": esp,
-        "rs": rs,
-        "gamma": gamma,
-        "alpha": alpha,
+        "rs": mean_rs,
+        "gamma": mean_gamma,
+        "alpha": mean_alpha,
     }
 
 
