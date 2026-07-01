@@ -14,20 +14,21 @@ import logging
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Dict, Optional, Sequence, Set, Tuple, Union
+from typing import Dict, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import xarray as xr
 
 from mhm_tools.common.constants import NC_ENCODE_DEFAULTS, NO_DATA
 from mhm_tools.common.esri_grid import standardize_header, write_grid, write_header
-from mhm_tools.common.logger import ErrorLogger, log_arguments, log_errors
+from mhm_tools.common.logger import ErrorLogger, log_arguments
 from mhm_tools.common.netcdf import (
-    generate_bounds,
+    apply_cf_baseline_metadata,
     generate_bounds_for_all_coords,
+    get_netcdf_metadata_data_vars,
+    prepare_dataset_for_netcdf_write,
+    prepare_time_bounds_encoding,
     read_dataset,
-    sanitize_nc_encoding,
-    set_netcdf_encoding,
 )
 from mhm_tools.common.provenance import apply_output_provenance
 from mhm_tools.common.xarray_utils import (
@@ -38,8 +39,6 @@ from mhm_tools.common.xarray_utils import (
 )
 
 logger = logging.getLogger(__name__)
-
-CF_DEFAULT_CONVENTIONS = "CF-1.12"
 
 
 @dataclass
@@ -323,6 +322,109 @@ def chunk_dataset(ds, chunk_type, available_mem_gib, var_name=None):
             raise e
 
 
+def write_xarray_to_netcdf(
+    ds,
+    file_path,
+    var_name=None,
+    encoding=None,
+    engine="netcdf4",
+):
+    """Write an xarray Dataset or DataArray to a NetCDF file.
+
+    Parameters
+    ----------
+    ds : xr.Dataset or xr.DataArray
+        Dataset or data array to write.
+    file_path : str or pathlib.Path
+        Target NetCDF file path.
+    var_name : str, optional
+        Data variable to write or DataArray name override.
+    encoding : dict, optional
+        Per-variable NetCDF encoding.
+    engine : str, default "netcdf4"
+        Xarray NetCDF backend engine.
+
+    Returns
+    -------
+    None
+    """
+    ds, data_vars = _get_netcdf_write_dataset_and_data_vars(ds, var_name)
+    ds = apply_output_provenance(ds)
+    apply_cf_baseline_metadata(ds, data_vars)
+    if encoding is None:
+        encoding = {
+            var: {
+                "zlib": True,
+                "complevel": 4,
+                "shuffle": True,
+                **NC_ENCODE_DEFAULTS,
+            }
+            for var in data_vars
+        }
+    else:
+        encoding = {key: value for key, value in encoding.items() if key in data_vars}
+
+    ds = prepare_time_bounds_encoding(ds)
+    try:
+        ds_clean, safe_encoding = prepare_dataset_for_netcdf_write(
+            ds, data_vars, encoding
+        )
+        ds_clean.to_netcdf(
+            file_path, engine=engine, format="NETCDF4", encoding=safe_encoding
+        )
+    except ValueError:
+        logger.error(f"Error while writing to {file_path}")
+        logger.error(ds)
+        logger.info(f"Trying to write without encoding {encoding}")
+        ds = prepare_time_bounds_encoding(ds, strip_time_attrs=True)
+        ds.to_netcdf(file_path, engine=engine, format="NETCDF4")
+    except Exception as e:
+        with ErrorLogger(logger):
+            raise e
+
+
+def _get_netcdf_write_dataset_and_data_vars(ds, var_name=None):
+    """Return a Dataset and payload variable names for NetCDF writing.
+
+    Parameters
+    ----------
+    ds : xr.Dataset or xr.DataArray
+        Object to prepare for NetCDF writing.
+    var_name : str, optional
+        Requested data variable name.
+
+    Returns
+    -------
+    tuple
+        ``(dataset, data_vars)`` where data_vars excludes bounds/grid mappings.
+    """
+    if isinstance(ds, xr.DataArray):
+        var_name = ds.name if var_name is None else var_name
+        logger.debug(f"var {var_name}")
+        ds = ds.to_dataset(name=var_name)
+        data_vars = [var_name]
+        logger.debug(f"Creating data vars from dataarray name: {data_vars}")
+    elif var_name is None or var_name not in ds.data_vars:
+        if var_name is not None and var_name not in ds.data_vars:
+            logger.warning(
+                f"Requested var_name {var_name!r} not found in dataset. "
+                "Using all data variables instead."
+            )
+        logger.info(f"Taking data vars from list of ds.data_vars {ds.data_vars}")
+        metadata_vars = get_netcdf_metadata_data_vars(ds)
+        data_vars = [var for var in ds.data_vars if var not in metadata_vars]
+    else:
+        data_vars = [var_name]
+        logger.info(f"Setting data vars as input varname [var_name]: {data_vars}")
+
+    if not data_vars:
+        logger.warning(
+            "Dataset has no data variables. Writing coordinate-only dataset."
+        )
+    logger.debug(f"data vars: {data_vars}")
+    return ds, data_vars
+
+
 @log_arguments()
 def get_xarray_ds_from_file(  # noqa: PLR0912
     file_path,
@@ -440,32 +542,16 @@ def get_xarray_ds_from_file(  # noqa: PLR0912
     return ds_out
 
 
-def write_xarray_to_file(  # noqa: PLR0912, PLR0915
+def write_xarray_to_file(
     ds,
     file_path,
     var_name=None,
-    # fmt=None,
     create_folder=True,
     encoding=None,
     engine="netcdf4",
-    # available_mem_gib=None,
-    # compute_kwargs=None,
     resolution=None,
 ):
     """Write xarray Datasets to file with file type depending on the file suffix."""
-
-    def _metadata_data_vars(dataset):
-        metadata_vars = set()
-        for coord in dataset.coords.values():
-            bounds = coord.attrs.get("bounds")
-            if bounds in dataset:
-                metadata_vars.add(bounds)
-        for var in dataset.data_vars.values():
-            grid_mapping = var.attrs.get("grid_mapping")
-            if grid_mapping in dataset:
-                metadata_vars.add(grid_mapping)
-        return metadata_vars
-
     file_path = Path(file_path)
     if file_path.suffix not in {".asc", ".nc"}:
         msg = (
@@ -484,373 +570,7 @@ def write_xarray_to_file(  # noqa: PLR0912, PLR0915
     if file_path.suffix == ".asc":
         write_xarray_to_ascii(ds, file_path, var_name, resolution=resolution)
     elif file_path.suffix == ".nc":
-        if isinstance(ds, xr.DataArray):
-            var_name = ds.name
-            logger.debug(f"var {var_name}")
-            ds = ds.to_dataset(name=var_name)
-            data_vars = [var_name]
-            logger.debug(f"Creating data vars from dataarray name: {data_vars}")
-        elif var_name is None or var_name not in ds.data_vars:
-            if var_name is not None and var_name not in ds.data_vars:
-                logger.warning(
-                    f"Requested var_name {var_name!r} not found in dataset. "
-                    "Using all data variables instead."
-                )
-            logger.info(f"Taking data vars from list of ds.data_vars {ds.data_vars}")
-            metadata_vars = _metadata_data_vars(ds)
-            data_vars = [v for v in ds.data_vars if v not in metadata_vars]
-        else:
-            data_vars = [var_name]
-            logger.info(f"Setting data vars as input varname [var_name]: {data_vars}")
-
-        if not data_vars:
-            logger.warning(
-                "Dataset has no data variables. Writing coordinate-only dataset."
-            )
-        logger.debug(f"data vars: {data_vars}")
-        ds = apply_output_provenance(ds)
-        _apply_cf_baseline_metadata(ds, data_vars)
-        if encoding is None:
-            encoding = {
-                v: {
-                    "zlib": True,
-                    "complevel": 4,
-                    "shuffle": True,
-                    **NC_ENCODE_DEFAULTS,
-                }
-                for v in data_vars
-            }
-        else:
-            # Ensure encoding only targets data variables (avoid coords/bounds)
-            encoding = {k: v for k, v in encoding.items() if k in data_vars}
-        # Ensure time and its bounds have consistent encoding to avoid decode issues
-        time_key = get_coord_key(ds, time=True, raise_exception=False)
-        if time_key is not None:
-            time_da = ds[time_key]
-            bounds_name = time_da.attrs.get("bounds")
-            if bounds_name in ds:
-                bnds_da = ds[bounds_name]
-                # If bounds are numeric but time is datetime, regenerate bounds
-                if np.issubdtype(time_da.dtype, np.datetime64) and not np.issubdtype(
-                    bnds_da.dtype, np.datetime64
-                ):
-                    try:
-                        ds = ds.copy(deep=False)
-                        ds.coords[bounds_name] = generate_bounds(time_da)
-                        bnds_da = ds[bounds_name]
-                    except Exception:
-                        logger.debug("Could not regenerate time bounds", exc_info=True)
-                # If both are numeric but bounds look wildly out of scale, rebuild.
-                if np.issubdtype(time_da.dtype, np.number) and np.issubdtype(
-                    bnds_da.dtype, np.number
-                ):
-                    try:
-                        tmax = float(np.nanmax(np.abs(time_da.values)))
-                        bmax = float(np.nanmax(np.abs(bnds_da.values)))
-                        if tmax > 0 and bmax / tmax > 1e6:
-                            logger.warning(
-                                f"Time bounds look out of scale (max={bmax} vs time "
-                                f"max={tmax}); regenerating bounds from time."
-                            )
-                            ds = ds.copy(deep=False)
-                            ds.coords[bounds_name] = generate_bounds(time_da)
-                            bnds_da = ds[bounds_name]
-                    except Exception:
-                        logger.debug(
-                            "Could not validate/regenerate numeric time bounds",
-                            exc_info=True,
-                        )
-                if "units" not in time_da.encoding:
-                    if "units" in time_da.attrs:
-                        time_da.encoding["units"] = time_da.attrs["units"]
-                    else:
-                        time_da.encoding["units"] = "days since 1970-01-01 00:00:00"
-                if "calendar" not in time_da.encoding and "calendar" in time_da.attrs:
-                    time_da.encoding["calendar"] = time_da.attrs["calendar"]
-                if "units" not in bnds_da.encoding:
-                    bnds_da.encoding["units"] = time_da.encoding.get("units")
-                if (
-                    "calendar" in time_da.encoding
-                    and "calendar" not in bnds_da.encoding
-                ):
-                    bnds_da.encoding["calendar"] = time_da.encoding["calendar"]
-                # Avoid units/calendar in bounds attrs; xarray will set these during encoding.
-                for key in ("units", "calendar"):
-                    if key in bnds_da.attrs:
-                        bnds_da.attrs.pop(key, None)
-        try:
-
-            # Ensure variable attrs do not contain encoding-only keys that
-            # xarray/netCDF4 will reject when encoding is also provided.
-            # Do a forceful, best-effort clean of both attrs and any
-            # inconsistent encoding entries to avoid the
-            # "failed to prevent overwriting existing key _FillValue" error.
-            for name in list(ds.variables):
-                try:
-                    # operate on the underlying Variable.attrs dict to ensure
-                    # we modify in-place for both DataArray and Dataset views
-                    vattrs = ds.variables[name].attrs
-                    if "_FillValue" in vattrs:
-                        del vattrs["_FillValue"]
-                    if "missing_value" in vattrs:
-                        del vattrs["missing_value"]
-                except Exception:
-                    # best-effort: ignore failures popping attrs
-                    logger.debug(
-                        f"Could not pop reserved attrs for variable {name}",
-                        exc_info=True,
-                    )
-
-                # Also ensure any encoding present is consistent with the variable dtype.
-                try:
-                    venc = ds.variables[name].encoding
-                    if "_FillValue" in venc:
-                        # try to cast to the variable dtype, otherwise drop
-                        try:
-                            venc["_FillValue"] = (
-                                np.array(venc["_FillValue"])
-                                .astype(get_dtype(ds.variables[name]))
-                                .item()
-                            )
-                        except Exception:
-                            venc.pop("_FillValue", None)
-                    if "missing_value" in venc:
-                        try:
-                            venc["missing_value"] = (
-                                np.array(venc["missing_value"])
-                                .astype(get_dtype(ds.variables[name]))
-                                .item()
-                            )
-                        except Exception:
-                            venc.pop("missing_value", None)
-                except Exception:
-                    logger.debug(
-                        f"Could not normalize encoding for variable {name}",
-                        exc_info=True,
-                    )
-
-            # Move any reserved attrs into encoding (this returns a shallow
-            # copy of the dataset with those attrs removed and a per-variable
-            # encoding dict). This is more robust than trying to pop attrs
-            # in-place because xarray may hold multiple views/copies.
-            try:
-                ds_clean, moved_encoding = move_reserved_attrs_to_encoding(
-                    ds, include_coords=True, encoding_in=encoding or {}
-                )
-                logger.debug(
-                    f"Moved reserved attrs into encoding for variables: {list(moved_encoding.keys())}"
-                )
-            except Exception:
-                # Fall back to the original ds if something goes wrong.
-                logger.debug(
-                    "move_reserved_attrs_to_encoding failed; falling back",
-                    exc_info=True,
-                )
-                ds_clean = ds
-                moved_encoding = encoding or {}
-
-            # Merge moved_encoding (from attrs) with provided encoding, giving
-            # precedence to values already present in moved_encoding.
-            merged_encoding = {}
-            for name in set(
-                list(moved_encoding.keys()) + list((encoding or {}).keys())
-            ):
-                merged_encoding[name] = {}
-                # start from provided encoding (lowest precedence)
-                if encoding and name in encoding:
-                    merged_encoding[name].update(encoding[name])
-                # then overlay moved encoding (higher precedence)
-                if name in moved_encoding:
-                    merged_encoding[name].update(moved_encoding[name])
-
-            # Drop encoding for non-data variables and ensure data variables are safe
-            merged_encoding = {
-                k: v for k, v in merged_encoding.items() if k in data_vars
-            }
-
-            # Fill NaNs for integer data vars and cast bools to uint8
-            for name in data_vars:
-                da = ds_clean[name]
-                dtype = get_dtype(da)
-                if np.issubdtype(dtype, np.bool_):
-                    ds_clean[name] = da.astype("uint8")
-                    merged_encoding.pop(name, None)
-                    continue
-                if np.issubdtype(dtype, np.integer) and np.any(np.isnan(da)):
-                    fillv = da.attrs.get("_FillValue", NO_DATA)
-                    ds_clean[name] = da.fillna(fillv).astype(dtype)
-
-            encoding = sanitize_nc_encoding(ds_clean, merged_encoding)
-            logger.info(f"Using encoding: {encoding}")
-            set_netcdf_encoding(ds_clean, encoding)
-            # Ensure time/bounds attrs do not contain units/calendar before encode
-            time_key_clean = get_coord_key(ds_clean, time=True, raise_exception=False)
-            if time_key_clean is not None:
-                time_var = ds_clean[time_key_clean]
-                bounds_name_clean = time_var.attrs.get("bounds")
-                # ensure time encoding has units/calendar
-                if "units" not in time_var.encoding:
-                    if "units" in time_var.attrs:
-                        time_var.encoding["units"] = time_var.attrs["units"]
-                    else:
-                        time_var.encoding["units"] = "days since 1970-01-01 00:00:00"
-                if "calendar" not in time_var.encoding and "calendar" in time_var.attrs:
-                    time_var.encoding["calendar"] = time_var.attrs["calendar"]
-                # remove units/calendar from time attrs to avoid xarray overwrite error
-                for key in ("units", "calendar"):
-                    time_var.attrs.pop(key, None)
-                if bounds_name_clean in ds_clean:
-                    bnds_var = ds_clean[bounds_name_clean]
-                    if "units" not in bnds_var.encoding:
-                        bnds_var.encoding["units"] = time_var.encoding.get("units")
-                    if (
-                        "calendar" in time_var.encoding
-                        and "calendar" not in bnds_var.encoding
-                    ):
-                        bnds_var.encoding["calendar"] = time_var.encoding["calendar"]
-                    for key in ("units", "calendar"):
-                        bnds_var.attrs.pop(key, None)
-            # Coordinates must not carry stale chunk/compression/backend metadata.
-            # Keep only safe coord encoding keys and force fill-disabled coords.
-            coord_allowed_encoding = {"dtype", "_FillValue", "units", "calendar"}
-            coord_drop_encoding = {
-                "zlib",
-                "szip",
-                "zstd",
-                "bzip2",
-                "blosc",
-                "shuffle",
-                "complevel",
-                "fletcher32",
-                "contiguous",
-                "chunksizes",
-                "preferred_chunks",
-                "source",
-                "original_shape",
-                "_ChunkSizes",
-                "chunks",
-                "compression",
-                "chunking",
-            }
-            for coord in ds_clean.coords:
-                enc = dict(ds_clean[coord].encoding) if ds_clean[coord].encoding else {}
-                for key in coord_drop_encoding:
-                    enc.pop(key, None)
-                enc = {k: v for k, v in enc.items() if k in coord_allowed_encoding}
-                if coord in ds_clean.dims:
-                    enc["_FillValue"] = None
-                ds_clean[coord].encoding = enc
-            for name in _metadata_data_vars(ds_clean):
-                if name not in ds_clean or name in ds_clean.coords:
-                    continue
-                enc = dict(ds_clean[name].encoding) if ds_clean[name].encoding else {}
-                for key in coord_drop_encoding:
-                    enc.pop(key, None)
-                enc = {k: v for k, v in enc.items() if k in coord_allowed_encoding}
-                enc["_FillValue"] = None
-                ds_clean[name].encoding = enc
-                ds_clean[name].attrs.pop("_FillValue", None)
-                ds_clean[name].attrs.pop("missing_value", None)
-            ds_clean.to_netcdf(
-                file_path, engine=engine, format="NETCDF4", encoding=encoding
-            )
-        except ValueError:
-            logger.error(f"Error while writing to {file_path}")
-            logger.error(ds)
-            logger.info(f"Trying to write without encoding {encoding}")
-            # also scrub time/bounds attrs on fallback
-            time_key_raw = get_coord_key(ds, time=True, raise_exception=False)
-            if time_key_raw is not None:
-                time_var = ds[time_key_raw]
-                bounds_name_raw = time_var.attrs.get("bounds")
-                for key in ("units", "calendar"):
-                    time_var.attrs.pop(key, None)
-                if bounds_name_raw in ds:
-                    for key in ("units", "calendar"):
-                        ds[bounds_name_raw].attrs.pop(key, None)
-            ds.to_netcdf(file_path, engine=engine, format="NETCDF4")
-        except Exception as e:
-            with ErrorLogger(logger):
-                raise e
-
-
-def _apply_cf_baseline_metadata(ds: xr.Dataset, data_vars: Sequence[str]) -> None:
-    """Best-effort CF baseline metadata enrichment for NetCDF output.
-
-    This function intentionally does not raise on missing metadata. It logs
-    warnings and leaves the dataset writeable.
-    """
-    if "Conventions" not in ds.attrs:
-        ds.attrs["Conventions"] = CF_DEFAULT_CONVENTIONS
-    elif not str(ds.attrs["Conventions"]).startswith("CF-"):
-        logger.warning(
-            f"Global attribute 'Conventions' is not CF-like "
-            f"({ds.attrs['Conventions']!r}). Leaving it unchanged."
-        )
-
-    lat_key = get_coord_key(ds, lat=True, raise_exception=False)
-    lon_key = get_coord_key(ds, lon=True, raise_exception=False)
-    time_key = get_coord_key(ds, time=True, raise_exception=False)
-
-    if lat_key is None:
-        logger.warning(
-            "Could not infer latitude coordinate; skipping CF latitude attrs."
-        )
-    else:
-        if _lacks_explicit_cf_axis_metadata(ds[lat_key]):
-            logger.warning(
-                "Could not infer latitude coordinate from explicit metadata; "
-                f"using inferred coordinate {lat_key!r}."
-            )
-        lat = ds[lat_key]
-        lat.attrs.setdefault("standard_name", "latitude")
-        lat.attrs.setdefault("units", "degrees_north")
-        lat.attrs.setdefault("axis", "Y")
-
-    if lon_key is None:
-        logger.warning(
-            "Could not infer longitude coordinate; skipping CF longitude attrs."
-        )
-    else:
-        if _lacks_explicit_cf_axis_metadata(ds[lon_key]):
-            logger.warning(
-                "Could not infer longitude coordinate from explicit metadata; "
-                f"using inferred coordinate {lon_key!r}."
-            )
-        lon = ds[lon_key]
-        lon.attrs.setdefault("standard_name", "longitude")
-        lon.attrs.setdefault("units", "degrees_east")
-        lon.attrs.setdefault("axis", "X")
-
-    if time_key is None:
-        logger.warning("Could not infer time coordinate; skipping CF time attrs.")
-    else:
-        time = ds[time_key]
-        time.attrs.setdefault("standard_name", "time")
-        time.attrs.setdefault("axis", "T")
-
-    for name in data_vars:
-        if name not in ds.data_vars:
-            logger.warning(
-                f"Requested data variable {name!r} not in dataset; skipping CF "
-                "checks for it."
-            )
-            continue
-        attrs = ds[name].attrs
-        if "units" not in attrs:
-            logger.warning(
-                f"Data variable {name!r} has no 'units' attribute (CF-recommended)."
-            )
-        if "standard_name" not in attrs and "long_name" not in attrs:
-            logger.warning(
-                f"Data variable {name!r} has neither 'standard_name' nor "
-                "'long_name' (CF-recommended)."
-            )
-
-
-def _lacks_explicit_cf_axis_metadata(coord: xr.DataArray) -> bool:
-    attrs = coord.attrs
-    return not any(key in attrs for key in ("axis", "standard_name", "units"))
+        write_xarray_to_netcdf(ds, file_path, var_name, encoding, engine)
 
 
 def write_xarray_to_ascii(
@@ -975,108 +695,6 @@ def get_coord_values(ds, lat=False, lon=False):
     """Get latitude or longitude values from DataSet."""
     key = get_coord_key(ds, lat=lat, lon=lon)
     return ds[key].values
-
-
-RESERVED_FOR_ENCODING = {
-    "_FillValue",
-    "scale_factor",
-    "add_offset",
-    "dtype",
-    "zlib",
-    "complevel",
-    "shuffle",
-    "fletcher32",
-    "contiguous",
-    "chunksizes",
-    "endian",
-    "least_significant_digit",
-}
-
-
-def move_reserved_attrs_to_encoding(
-    obj: Union[xr.Dataset, xr.DataArray],
-    include_coords: bool = True,
-    extra_reserved: Optional[Set[str]] = None,
-    encoding_in: Optional[dict] = None,
-):
-    """
-    Move reserved serialization keys from .attrs to .encoding and return.
-
-    Return:
-      - a (shallow-copied) xarray object with cleaned attrs
-      - an `encoding` dict suitable for xarray.to_netcdf(encoding=encoding)
-
-    Parameters
-    ----------
-    obj : xr.Dataset or xr.DataArray
-        The object to clean.
-    include_coords : bool, default True
-        If True, also process coordinate variables.
-    extra_reserved : set[str] or None
-        Additional keys to treat as reserved (moved to encoding).
-    encoding_in : dict or None
-        Initial encoding dict to update. If None, starts empty.
-
-    Returns
-    -------
-    cleaned_obj : same type as `obj`
-    encoding : dict
-        Mapping var_name -> per-variable encoding dict.
-    """
-    reserved = set(RESERVED_FOR_ENCODING)
-    if extra_reserved:
-        reserved |= set(extra_reserved)
-
-    @log_errors(raise_exceptions=False)
-    def _process_var(var):
-        # Move reserved keys from attrs -> encoding
-        for k in list(var.attrs.keys()):
-            if k in reserved:
-                var.encoding[k] = var.attrs.pop(k)
-
-    if isinstance(obj, xr.Dataset):
-        ds = obj.copy(deep=False)
-        names = list(ds.variables) if include_coords else list(ds.data_vars)
-        for name in names:
-            _process_var(ds.variables[name])
-
-        # Build the global encoding dict (only include non-empty encodings)
-        encoding = {
-            name: {
-                k: v for k, v in ds.variables[name].encoding.items() if k in reserved
-            }
-            for name in names
-            if ds.variables[name].encoding
-        }
-        for name, env in encoding.items():
-            for key, val in encoding_in.items():
-                if key not in env:
-                    encoding[name][key] = val
-        return ds, encoding
-
-    if not isinstance(obj, xr.DataArray):
-        msg = f"wrong type {obj}"
-        raise ValueError(msg)
-    # DataArray
-    da = obj.copy(deep=False)
-    _process_var(da)
-
-    coord_encoding = {}
-    if include_coords:
-        for cname, cvar in da.coords.variables.items():
-            _process_var(cvar)
-            if cvar.encoding:
-                coord_encoding[cname] = {
-                    k: v for k, v in cvar.encoding.items() if k in reserved
-                }
-
-    data_encoding = {}
-    # Only include the data variable if it has a name (required by xarray)
-    if da.name is not None and da.encoding:
-        data_encoding[da.name] = {k: v for k, v in da.encoding.items() if k in reserved}
-
-    encoding = {**coord_encoding, **data_encoding}
-    return da, encoding
 
 
 def get_dataset_from_path(

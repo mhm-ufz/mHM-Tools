@@ -154,11 +154,11 @@ class TestChunkHelpers(unittest.TestCase, BaseDatasetMixin):
         ds = self.make_ds_with_time()
         flags = {"space": False, "space_time": False}
 
-        def _space_only(_ds, _mem, *args):
+        def _space_only(_ds, _mem, *_args):
             flags["space"] = True
             return {"lat": 2, "lon": 2, "time": -1}
 
-        def _space_time(_ds, _mem, *args):
+        def _space_time(_ds, _mem, *_args):
             flags["space_time"] = True
             return {"lat": 1, "lon": 2, "time": 1}
 
@@ -207,19 +207,6 @@ class TestAsciiReadWrite(unittest.TestCase, BaseDatasetMixin):
             self.assertEqual(ds_back["var"].max(), ds["var"].max())
             self.assertEqual(ds_back["var"].min(), ds["var"].min())
 
-    # def test_write_xarray_to_ascii_formats_strings(self):
-    #     lat = np.array([2, 1])
-    #     lon = np.array([0, 1, 2])
-    #     data = np.array([["a", "b", "c"], ["d", "e", "f"]], dtype="U1")
-    #     ds = xr.Dataset(
-    #         {"cats": (("lat", "lon"), data)}, coords={"lat": lat, "lon": lon}
-    #     )
-
-    #     with tempfile.TemporaryDirectory() as td:
-    #         asc_path = Path(td) / "strings.asc"
-    #         fh.write_xarray_to_ascii(ds, asc_path, data_var="cats")
-    #         s = asc_path.read_text()
-    #         self.assertIn("a b c", s)
     def test_get_xarray_ds_from_file_ascii_preserves_dtype_kind(self):
         lat = np.array([52.0, 51.0, 50.0])
         lon = np.array([10.0, 11.0, 12.0, 13.0])
@@ -391,7 +378,7 @@ class TestGetXarrayDsFromFile(unittest.TestCase, BaseDatasetMixin):
                 ), patch.object(
                     fh,
                     "chunk_dataset",
-                    side_effect=lambda ds, ctype, mem, *args: ds.chunk(
+                    side_effect=lambda ds, _ctype, _mem, *_args: ds.chunk(
                         {"time": -1, "lat": 2, "lon": 2}
                     ),
                 ):
@@ -427,7 +414,7 @@ class TestGetXarrayDsFromFile(unittest.TestCase, BaseDatasetMixin):
                 ), patch.object(
                     fh,
                     "chunk_dataset",
-                    side_effect=lambda ds, ctype, mem, *args: ds.chunk(
+                    side_effect=lambda ds, _ctype, _mem, *_args: ds.chunk(
                         {"time": -1, "lat": 2, "lon": 2}
                     ),
                 ):
@@ -564,13 +551,6 @@ class TestGetDatasetFromPath(unittest.TestCase, BaseDatasetMixin):
 
 
 class TestCropAndCoords(unittest.TestCase, BaseDatasetMixin):
-    # def setUp(self):
-    #     self.patcher_coord = patch.object(fh, "get_coord_key", side_effect=fh.get_coord_key)
-    #     self.patcher_coord.start()
-
-    # def tearDown(self):
-    #     self.patcher_coord.stop()
-
     def test_crop_file_by_mask(self):
         ds = self.make_ds_with_time()
         mask_lat = np.array([51.5, 50.5])  # max=51.5, min=50.5

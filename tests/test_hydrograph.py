@@ -34,8 +34,6 @@ class TestHydrograph(unittest.TestCase):
         self.hydro = Hydrograph()
         self.hydro.load_data_from_discharge_nc(self.path)
 
-    #    def test_file_readin(self):
-    #         self.hydro.discharge_data
     def test_read_area(self):
         """
         Test case for the `get_catchment_area` method in the `hydro` object.
