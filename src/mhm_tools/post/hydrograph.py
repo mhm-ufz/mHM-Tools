@@ -137,6 +137,10 @@ class Hydrograph:
     def __init__(self, simulation=None, observation=None, calc_stats=True):
         self.plots = [0, 0, 0, 0, 0]
         self.calc_stats = calc_stats
+        self.objectives = Objectives()
+        self.catchment = Catchment()
+        self.sim_discharge_data_clean = None
+        self.obs_discharge_data_clean = None
         self.sim_discharge_data_list = None
         self.sim_discharge_data_median = None
         self.sim_name = None
@@ -228,12 +232,8 @@ class Hydrograph:
             or self.obs_discharge_data_nonan.time.size == 0
         ):
             return False
-        if simulation is not None and observation is not None and self.calc_stats:
-            self.sim_discharge_data_clean, self.obs_discharge_data_clean = (
-                self.remove_empty_values(
-                    self.sim_discharge_data, self.obs_discharge_data
-                )
-            )
+        self.sim_discharge_data_clean = None
+        self.obs_discharge_data_clean = None
         return True
 
     def remove_empty_values(self, arr1, arr2, recursive=True):
@@ -329,13 +329,9 @@ class Hydrograph:
                     np.array(self.sim_discharge_data_list), axis=0
                 )
             simulated = self.sim_discharge_data_median
-        if (
-            self.obs_discharge_data_clean is None
-            or self.sim_discharge_data_clean is None
-        ):
-            self.obs_discharge_data_clean, self.sim_discharge_data_clean = (
-                self.remove_empty_values(observed, simulated)
-            )
+        self.obs_discharge_data_clean, self.sim_discharge_data_clean = (
+            self.remove_empty_values(observed, simulated)
+        )
         if np.all(np.isnan(self.obs_discharge_data_clean)) or np.all(
             np.isnan(self.sim_discharge_data_clean)
         ):

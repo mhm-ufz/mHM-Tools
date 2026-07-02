@@ -17,6 +17,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import xarray as xr
 
 from mhm_tools.common.logger import configure_mhm_tools_logger
 from mhm_tools.post.hydrograph import Hydrograph, get_hydrograph_from_path
@@ -150,6 +151,37 @@ class TestHydrograph(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_calc_objectives_uses_cropped_overlap_for_kge():
+    """Regression test for KGE calculation after cropping to overlapping time."""
+    observation_time = np.array(
+        ["2000-01-01", "2000-01-02", "2000-01-03", "2000-01-04"],
+        dtype="datetime64[D]",
+    )
+    simulation_time = np.array(
+        ["2000-01-03", "2000-01-04", "2000-01-05", "2000-01-06"],
+        dtype="datetime64[D]",
+    )
+    observation = xr.DataArray(
+        [10.0, 10.0, 2.0, 3.0],
+        coords={"time": observation_time},
+        dims="time",
+    )
+    simulation = xr.DataArray(
+        [2.0, 3.0, 100.0, 100.0],
+        coords={"time": simulation_time},
+        dims="time",
+    )
+    hydrograph = Hydrograph(simulation=simulation, observation=observation)
+
+    assert hydrograph.crop_data_to_overlapping_time()
+    hydrograph.calc_objectives(
+        observed=hydrograph.obs_discharge_data,
+        simulated=hydrograph.sim_discharge_data,
+    )
+
+    assert np.isclose(hydrograph.objectives.kge, 1.0)
 
 
 def test_get_hydrograph_from_path_single_input_creates_csv(tmp_path):
