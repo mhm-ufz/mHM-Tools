@@ -10,6 +10,19 @@ All features are then provided as sub-commands as documented here.
 
 The CLI is based on Click and supports shell autocompletion.
 
+CLI pages
+---------
+
+The command reference is generated automatically from the Click command tree.
+Manual pages can be added next to it for workflows, examples, and background
+information.
+
+.. toctree::
+   :maxdepth: 2
+
+   cli/reference
+   cli/examples
+
 Autocompletion
 --------------
 

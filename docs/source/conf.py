@@ -25,7 +25,7 @@ extensions = [
     "sphinx.ext.viewcode",
     "sphinx.ext.napoleon",  # parameters look better than with numpydoc only
     "numpydoc",
-    "sphinx_argparse_cli",  # documentation of the CLI
+    "sphinx_click",
 ]
 
 # autosummaries from source-files
@@ -67,7 +67,7 @@ exclude_patterns = []
 html_theme = "pydata_sphinx_theme"
 html_logo = "_static/logo_large.png"
 html_favicon = "_static/logo.png"
-html_sidebars = {"**": ["sidebar-nav-bs", "sidebar-ethical-ads"], "cli": []}
+html_sidebars = {"**": ["sidebar-nav-bs", "sidebar-ethical-ads"]}
 html_theme_options = {
     "secondary_sidebar_items": ["page-toc"],
     "footer_start": ["copyright"],
@@ -103,3 +103,63 @@ intersphinx_mapping = {
     "xarray": ("https://docs.xarray.dev/en/stable/", None),
     "pytest": ("https://docs.pytest.org/en/7.1.x/", None),
 }
+
+
+def _patch_sphinx_click_command_order(_app):
+    """Patch sphinx-click to keep Click's command order.
+
+    Parameters
+    ----------
+    _app : sphinx.application.Sphinx
+        Active Sphinx application.
+
+    Returns
+    -------
+    None
+    """
+    import sphinx_click.ext as sphinx_click_ext
+
+    def _filter_commands(ctx, commands=None):
+        """Return commands in the order provided by the Click group.
+
+        Parameters
+        ----------
+        ctx : click.Context
+            Active Click context.
+        commands : list[str] | None
+            Optional explicit command filter from the sphinx-click directive.
+
+        Returns
+        -------
+        list[click.Command]
+            Commands in configured CLI order.
+        """
+        lookup = getattr(ctx.command, "commands", {})
+        if not lookup:
+            return []
+        if commands is None:
+            command_names = ctx.command.list_commands(ctx)
+        else:
+            command_names = commands
+        return [
+            lookup[command_name]
+            for command_name in command_names
+            if command_name in lookup and lookup[command_name] is not None
+        ]
+
+    sphinx_click_ext._filter_commands = _filter_commands
+
+
+def setup(app):
+    """Configure Sphinx build hooks.
+
+    Parameters
+    ----------
+    app : sphinx.application.Sphinx
+        Active Sphinx application.
+
+    Returns
+    -------
+    None
+    """
+    _patch_sphinx_click_command_order(app)
