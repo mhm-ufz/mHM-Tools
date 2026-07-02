@@ -103,7 +103,7 @@ def test_create_results_csv_accepts_spaef(tmp_path):
     assert "avg_alpha" in df.columns
     assert "avg_beta" in df.columns
     assert "avg_gamma" in df.columns
-    assert np.isclose(df.loc[0, "spaef"], 1.0)
+    assert np.isclose(df.loc[0, "avg_spaef"], 1.0)
 
 
 def test_create_results_csv_accepts_esp(tmp_path):
@@ -128,7 +128,7 @@ def test_create_results_csv_accepts_esp(tmp_path):
     assert np.isclose(df.loc[0, "avg_esp"], 1.0)
     assert np.isclose(df.loc[0, "avg_rs"], 1.0)
     assert np.isclose(df.loc[0, "avg_gamma"], 1.0)
-    assert np.isclose(df.loc[0, "avg_alpha"], 0.0)
+    assert np.isclose(df.loc[0, "avg_alpha"], 1.0)
 
 
 def test_create_results_csv_accepts_WASPAEF(tmp_path):

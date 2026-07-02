@@ -40,6 +40,7 @@ def normalize_results_metric(metric):
         raise ValueError(msg)
     return normalized
 
+
 def calculate_metric_per_timestep_and_average(map1, map2, func, *args, **kwargs):
     """Apply `func` to matching 2D timesteps of two 3D arrays,then average the per-timestep results.
 
@@ -61,15 +62,21 @@ def calculate_metric_per_timestep_and_average(map1, map2, func, *args, **kwargs)
     numpy.ndarray
         Mean metric values over all timesteps.
     """
-    results_per_timestep = np.asarray([
-        func(simulated, observed, *args, **kwargs) for simulated, observed in zip(map1, map2)
-    ])
+    results_per_timestep = np.asarray(
+        [
+            func(simulated, observed, *args, **kwargs)
+            for simulated, observed in zip(map1, map2)
+        ]
+    )
 
     return np.nanmean(results_per_timestep, axis=0)
 
+
 def calculate_spaef_for_gridded_data(map1, map2, ds1_name, ds2_name):
     """Calculate SPAEF metrics for two gridded datasets."""
-    spaef, alpha, beta, gamma = calculate_metric_per_timestep_and_average(map1, map2, SPAEF)
+    spaef, alpha, beta, gamma = calculate_metric_per_timestep_and_average(
+        map1, map2, SPAEF
+    )
     return {
         "name": ds1_name + "-" + ds2_name,
         "avg_spaef": spaef,
@@ -93,7 +100,9 @@ def calculate_esp_for_gridded_data(map1, map2, ds1_name, ds2_name):
 
 def calculate_waspaef_for_gridded_data(map1, map2, ds1_name, ds2_name):
     """Calculate WASPAEF metrics for two gridded datasets."""
-    waspaef, rho, sigma, wd = calculate_metric_per_timestep_and_average(map1, map2, WASPAEF)
+    waspaef, rho, sigma, wd = calculate_metric_per_timestep_and_average(
+        map1, map2, WASPAEF
+    )
     return {
         "name": ds1_name + "-" + ds2_name,
         "avg_waspaef": waspaef,
@@ -105,7 +114,9 @@ def calculate_waspaef_for_gridded_data(map1, map2, ds1_name, ds2_name):
 
 def calculate_mspaef_for_gridded_data(map1, map2, ds1_name, ds2_name):
     """Calculate MSPAEF metrics for two gridded datasets."""
-    mspaef, nrmse, sigma, sigma_error, mean_bias, rho = calculate_metric_per_timestep_and_average(map1, map2, MSPAEF)
+    mspaef, nrmse, sigma, sigma_error, mean_bias, rho = (
+        calculate_metric_per_timestep_and_average(map1, map2, MSPAEF)
+    )
     return {
         "name": ds1_name + "-" + ds2_name,
         "avg_mspaef": mspaef,

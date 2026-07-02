@@ -25,6 +25,6 @@ def ESP(s, o):
     observed = zscore(o)
     simulated = zscore(s)
     alpha = 1 - np.sqrt(np.mean((simulated - observed) ** 2))
-    esp = 1 - np.sqrt((rs - 1) ** 2 + (gamma - 1) ** 2 + (alpha-1)**2)
+    esp = 1 - np.sqrt((rs - 1) ** 2 + (gamma - 1) ** 2 + (alpha - 1) ** 2)
 
     return esp, rs, gamma, alpha
