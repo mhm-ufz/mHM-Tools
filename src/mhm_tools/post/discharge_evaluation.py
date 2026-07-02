@@ -113,6 +113,7 @@ def _find_node_xy_vars(ds):
         ("node_x", "node_y"),
         ("x", "y"),
         ("lon", "lat"),
+        ("longitude", "latitude"),
     ]
     for x_name, y_name in candidates:
         if x_name in ds and y_name in ds:
