@@ -19,12 +19,12 @@ def ESP(s, o):
     """Calculate ESP and its rank, variability, and location components."""
     s, o = filter_nan(s, o)
 
-    rs = spearmanr(s, o)[0]
+    rs = spearmanr(o, s)[0]
     gamma = variation(s) / variation(o)
 
     observed = zscore(o)
     simulated = zscore(s)
-    alpha = np.sqrt(np.mean((simulated - observed) ** 2))
-    esp = 1 - np.sqrt((rs - 1) ** 2 + (gamma - 1) ** 2 + alpha**2)
+    alpha = 1 - np.sqrt(np.mean((simulated - observed) ** 2))
+    esp = 1 - np.sqrt((rs - 1) ** 2 + (gamma - 1) ** 2 + (alpha - 1) ** 2)
 
     return esp, rs, gamma, alpha

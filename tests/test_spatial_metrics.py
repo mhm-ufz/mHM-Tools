@@ -69,18 +69,18 @@ def test_create_results_csv_defaults_to_all(tmp_path):
 
     df1 = pd.read_csv(tmp_path / "tsm.csv", index_col=0)
     assert "comb" in df1.columns
-    assert "spaef" not in df1.columns
+    assert "avg_spaef" not in df1.columns
     df2 = pd.read_csv(tmp_path / "spaef.csv", index_col=0)
-    assert "spaef" in df2.columns
+    assert "avg_spaef" in df2.columns
     assert "comb" not in df2.columns
     df3 = pd.read_csv(tmp_path / "esp.csv", index_col=0)
-    assert "esp" in df3.columns
+    assert "avg_esp" in df3.columns
     assert "comb" not in df3.columns
     df4 = pd.read_csv(tmp_path / "waspaef.csv", index_col=0)
-    assert "waspaef" in df4.columns
+    assert "avg_waspaef" in df4.columns
     assert "comb" not in df4.columns
     df5 = pd.read_csv(tmp_path / "mspaef.csv", index_col=0)
-    assert "mspaef" in df5.columns
+    assert "avg_mspaef" in df5.columns
     assert "comb" not in df5.columns
 
 
@@ -99,11 +99,11 @@ def test_create_results_csv_accepts_spaef(tmp_path):
     )
 
     df = pd.read_csv(tmp_path / "spaef.csv", index_col=0)
-    assert "spaef" in df.columns
-    assert "alpha" in df.columns
-    assert "beta" in df.columns
-    assert "gamma" in df.columns
-    assert np.isclose(df.loc[0, "spaef"], 1.0)
+    assert "avg_spaef" in df.columns
+    assert "avg_alpha" in df.columns
+    assert "avg_beta" in df.columns
+    assert "avg_gamma" in df.columns
+    assert np.isclose(df.loc[0, "avg_spaef"], 1.0)
 
 
 def test_create_results_csv_accepts_esp(tmp_path):
@@ -121,14 +121,14 @@ def test_create_results_csv_accepts_esp(tmp_path):
     )
 
     df = pd.read_csv(tmp_path / "esp.csv", index_col=0)
-    assert "esp" in df.columns
-    assert "rs" in df.columns
-    assert "gamma" in df.columns
-    assert "alpha" in df.columns
-    assert np.isclose(df.loc[0, "esp"], 1.0)
-    assert np.isclose(df.loc[0, "rs"], 1.0)
-    assert np.isclose(df.loc[0, "gamma"], 1.0)
-    assert np.isclose(df.loc[0, "alpha"], 0.0)
+    assert "avg_esp" in df.columns
+    assert "avg_rs" in df.columns
+    assert "avg_gamma" in df.columns
+    assert "avg_alpha" in df.columns
+    assert np.isclose(df.loc[0, "avg_esp"], 1.0)
+    assert np.isclose(df.loc[0, "avg_rs"], 1.0)
+    assert np.isclose(df.loc[0, "avg_gamma"], 1.0)
+    assert np.isclose(df.loc[0, "avg_alpha"], 1.0)
 
 
 def test_create_results_csv_accepts_WASPAEF(tmp_path):
@@ -146,14 +146,14 @@ def test_create_results_csv_accepts_WASPAEF(tmp_path):
     )
 
     df = pd.read_csv(tmp_path / "waspaef.csv", index_col=0)
-    assert "waspaef" in df.columns
-    assert "rho" in df.columns
-    assert "sigma" in df.columns
-    assert "wd" in df.columns
-    assert np.isclose(df.loc[0, "waspaef"], 0.0)
-    assert np.isclose(df.loc[0, "rho"], 1.0)
-    assert np.isclose(df.loc[0, "sigma"], 1.0)
-    assert np.isclose(df.loc[0, "wd"], 0.0)
+    assert "avg_waspaef" in df.columns
+    assert "avg_rho" in df.columns
+    assert "avg_sigma" in df.columns
+    assert "avg_wd" in df.columns
+    assert np.isclose(df.loc[0, "avg_waspaef"], 0.0)
+    assert np.isclose(df.loc[0, "avg_rho"], 1.0)
+    assert np.isclose(df.loc[0, "avg_sigma"], 1.0)
+    assert np.isclose(df.loc[0, "avg_wd"], 0.0)
 
 
 def test_waspaef_uses_original_values_for_wasserstein_distance():
@@ -184,18 +184,18 @@ def test_create_results_csv_accepts_mspaef(tmp_path):
     )
 
     df = pd.read_csv(tmp_path / "mspaef.csv", index_col=0)
-    assert "mspaef" in df.columns
-    assert "nrmse" in df.columns
-    assert "sigma" in df.columns
-    assert "sigma_error" in df.columns
-    assert "mean_bias" in df.columns
-    assert "rho" in df.columns
-    assert np.isclose(df.loc[0, "mspaef"], 1.0)
-    assert np.isclose(df.loc[0, "nrmse"], 0.0)
-    assert np.isclose(df.loc[0, "sigma"], 1.0)
-    assert np.isclose(df.loc[0, "sigma_error"], 0.0)
-    assert np.isclose(df.loc[0, "mean_bias"], 0.0)
-    assert np.isclose(df.loc[0, "rho"], 1.0)
+    assert "avg_mspaef" in df.columns
+    assert "avg_nrmse" in df.columns
+    assert "avg_sigma" in df.columns
+    assert "avg_sigma_error" in df.columns
+    assert "avg_mean_bias" in df.columns
+    assert "avg_rho" in df.columns
+    assert np.isclose(df.loc[0, "avg_mspaef"], 1.0)
+    assert np.isclose(df.loc[0, "avg_nrmse"], 0.0)
+    assert np.isclose(df.loc[0, "avg_sigma"], 1.0)
+    assert np.isclose(df.loc[0, "avg_sigma_error"], 0.0)
+    assert np.isclose(df.loc[0, "avg_mean_bias"], 0.0)
+    assert np.isclose(df.loc[0, "avg_rho"], 1.0)
 
 
 def test_mspaef_uses_observed_iqr_for_bias_terms():

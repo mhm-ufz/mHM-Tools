@@ -2,6 +2,7 @@
 
 import logging
 
+import numpy as np
 import pandas as pd
 
 from mhm_tools.common.metrics.esp import ESP
@@ -40,53 +41,90 @@ def normalize_results_metric(metric):
     return normalized
 
 
+def calculate_metric_per_timestep_and_average(map1, map2, func, *args, **kwargs):
+    """Apply `func` to matching 2D timesteps of two 3D arrays,then average the per-timestep results.
+
+    Parameters
+    ----------
+    func: callable
+        Function applied to matching 2D timestep slices from both arrays.
+    map1: numpy.ndarray
+        observed data 3D array with shape ``(time, lat, lon)``.
+    map2: numpy.ndarray
+        simulated data 3D array with shape ``(time, lat, lon)``.
+    *args
+        Additional positional arguments passed to ``func``.
+    **kwargs
+        Additional keyword arguments passed to ``func``.
+
+    Returns
+    -------
+    numpy.ndarray
+        Mean metric values over all timesteps.
+    """
+    results_per_timestep = np.asarray(
+        [
+            func(simulated, observed, *args, **kwargs)
+            for simulated, observed in zip(map1, map2)
+        ]
+    )
+
+    return np.nanmean(results_per_timestep, axis=0)
+
+
 def calculate_spaef_for_gridded_data(map1, map2, ds1_name, ds2_name):
     """Calculate SPAEF metrics for two gridded datasets."""
-    spaef, alpha, beta, gamma = SPAEF(map1, map2)
+    spaef, alpha, beta, gamma = calculate_metric_per_timestep_and_average(
+        map1, map2, SPAEF
+    )
     return {
         "name": ds1_name + "-" + ds2_name,
-        "spaef": spaef,
-        "alpha": alpha,
-        "beta": beta,
-        "gamma": gamma,
+        "avg_spaef": spaef,
+        "avg_alpha": alpha,
+        "avg_beta": beta,
+        "avg_gamma": gamma,
     }
 
 
 def calculate_esp_for_gridded_data(map1, map2, ds1_name, ds2_name):
     """Calculate ESP metrics for two gridded datasets."""
-    esp, rs, gamma, alpha = ESP(map1, map2)
+    esp, rs, gamma, alpha = calculate_metric_per_timestep_and_average(map1, map2, ESP)
     return {
         "name": ds1_name + "-" + ds2_name,
-        "esp": esp,
-        "rs": rs,
-        "gamma": gamma,
-        "alpha": alpha,
+        "avg_esp": esp,
+        "avg_rs": rs,
+        "avg_gamma": gamma,
+        "avg_alpha": alpha,
     }
 
 
 def calculate_waspaef_for_gridded_data(map1, map2, ds1_name, ds2_name):
     """Calculate WASPAEF metrics for two gridded datasets."""
-    waspaef, rho, sigma, wd = WASPAEF(map1, map2)
+    waspaef, rho, sigma, wd = calculate_metric_per_timestep_and_average(
+        map1, map2, WASPAEF
+    )
     return {
         "name": ds1_name + "-" + ds2_name,
-        "waspaef": waspaef,
-        "rho": rho,
-        "sigma": sigma,
-        "wd": wd,
+        "avg_waspaef": waspaef,
+        "avg_rho": rho,
+        "avg_sigma": sigma,
+        "avg_wd": wd,
     }
 
 
 def calculate_mspaef_for_gridded_data(map1, map2, ds1_name, ds2_name):
     """Calculate MSPAEF metrics for two gridded datasets."""
-    mspaef, nrmse, sigma, sigma_error, mean_bias, rho = MSPAEF(map1, map2)
+    mspaef, nrmse, sigma, sigma_error, mean_bias, rho = (
+        calculate_metric_per_timestep_and_average(map1, map2, MSPAEF)
+    )
     return {
         "name": ds1_name + "-" + ds2_name,
-        "mspaef": mspaef,
-        "nrmse": nrmse,
-        "sigma": sigma,
-        "sigma_error": sigma_error,
-        "mean_bias": mean_bias,
-        "rho": rho,
+        "avg_mspaef": mspaef,
+        "avg_nrmse": nrmse,
+        "avg_sigma": sigma,
+        "avg_sigma_error": sigma_error,
+        "avg_mean_bias": mean_bias,
+        "avg_rho": rho,
     }
 
 
