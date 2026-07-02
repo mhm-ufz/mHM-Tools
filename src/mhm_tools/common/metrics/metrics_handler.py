@@ -1,4 +1,11 @@
-"""Dispatch metric calculations and write metric CSV files."""
+"""
+Dispatch metric calculations and write metric CSV files.
+
+Authors
+-------
+- Simon Lüdke
+- Carla Peter
+"""
 
 import logging
 

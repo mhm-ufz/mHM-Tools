@@ -8,6 +8,10 @@ Julian Koch, Mehmet Cüneyd Demirel, and Simon Stisen:
 The SPAtial EFficiency metric (SPAEF): multiple-component evaluation of
 spatial patterns for optimization of hydrological models,
 Geoscientific Model Development 11, https://doi.org/10.5194/gmd-11-1873-2018, 2018
+
+Authors
+-------
+- Simon Lüdke
 """
 
 import math

@@ -8,6 +8,10 @@ Geoscientific Model Development 19, https://doi.org/10.5194/gmd-19-345-2026, 202
 
 Implementation based on:
 Karpasitis, A.: Code for the MSPAEF metric, Zenodo [code], https://doi.org/10.5281/zenodo.15094921, 2025. a
+
+Authors
+-------
+- Simon Lüdke
 """
 
 import numpy as np

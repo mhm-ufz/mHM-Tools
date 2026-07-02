@@ -7,6 +7,11 @@ Schaefli, B.: Improving the predictive skill of a distributed hy-
 drological model by calibration on spatial patterns with multi-
 ple satellite datasets, Water Resour. Res., 56, e2019WR026085,
 https://doi.org/10.1029/2019WR026085, 2020b.
+
+Authors
+-------
+- Simon Lüdke
+- Carla Peter
 """
 
 import numpy as np

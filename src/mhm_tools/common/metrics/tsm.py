@@ -1,4 +1,10 @@
-"""Calculate the temporal-spatial metric used by mhm-tools."""
+"""
+Calculate the temporal-spatial metric currently under developement.
+
+Authors
+-------
+- Simon Lüdke
+"""
 
 import numpy as np
 import pandas as pd
