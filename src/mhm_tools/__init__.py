@@ -14,9 +14,9 @@ Built-in processing and tool functions.
    :toctree: api
    :caption: Subpackages
 
-   common
-   post
-   pre
+   ~mhm_tools.common
+   ~mhm_tools.post
+   ~mhm_tools.pre
 """
 
 try:
