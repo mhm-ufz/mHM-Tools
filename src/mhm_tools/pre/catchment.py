@@ -60,6 +60,9 @@ GAUGE_INFO_COLUMNS = (
     "area",
     "old_area",
     "area_error",
+    "score",
+    "shape_error",
+    "method",
 )
 # use d8 for basinex, ldd for mRM version in Ulysses
 OUTPUT_FTYPE = "ldd"
@@ -545,6 +548,9 @@ def write_gauges_to_csv(gauges, output_target, filename="gauges_info.csv"):
                 "area": gauge.get("area"),
                 "old_area": gauge.get("old_area", gauge.get("area_old")),
                 "area_error": gauge.get("area_error", gauge.get("error")),
+                "score": gauge.get("score"),
+                "shape_error": gauge.get("shape_error"),
+                "method": gauge.get("method", gauge.get("used_method")),
             }
         else:
             row = {
@@ -557,6 +563,9 @@ def write_gauges_to_csv(gauges, output_target, filename="gauges_info.csv"):
                 "area": gauge.area,
                 "old_area": gauge.area_old,
                 "area_error": gauge.area_error,
+                "score": gauge.score,
+                "shape_error": gauge.shape_error,
+                "method": gauge.method,
             }
         rows.append(row)
 
@@ -698,9 +707,20 @@ class Gauge:
         self.lon_old = None
         self.distance_error = None
         self.area_error = None
+        self.score = None
+        self.shape_error = None
+        self.method = None
 
     def update(
-        self, area=None, lat=None, lon=None, distance_error=None, area_error=None
+        self,
+        area=None,
+        lat=None,
+        lon=None,
+        distance_error=None,
+        area_error=None,
+        score=None,
+        shape_error=None,
+        method=None,
     ):
         """Update gauge information, preserving old values."""
         if area is not None:
@@ -716,6 +736,12 @@ class Gauge:
             self.distance_error = distance_error
         if area_error is not None:
             self.area_error = area_error
+        if score is not None:
+            self.score = score
+        if shape_error is not None:
+            self.shape_error = shape_error
+        if method is not None:
+            self.method = method
 
 
 class Catchment:
@@ -1112,7 +1138,7 @@ class Catchment:
                 )
                 return np.nan
 
-        best_candidate_index, _, _ = l1_result
+        best_candidate_index = l1_result[0]
         candidate_iou = _iou_for_index(
             int(best_candidate_index[0]), int(best_candidate_index[1])
         )
@@ -1249,6 +1275,7 @@ class Catchment:
             lat_values = self.ds.lat.data
             lon_values = self.ds.lon.data
 
+        has_reference_area = ref_catchment_area is not None
         if ref_catchment_area is None:
             ref_catchment_area = self.calculate_shape_area_on_current_grid(
                 reference_shape,
@@ -1439,7 +1466,15 @@ class Catchment:
         logger.info(
             f"Shape-based gauge correction used {shape_label} with IoU {best_candidate_shape_iou:.3f}; area error {area_error:.3f} and distance {best_candidate_distance_100m/10:.2f}km.",
         )
-        return best_candidate_index, area_error, best_candidate_distance_100m
+        used_method = "shape-area" if has_reference_area else "shape"
+        return (
+            best_candidate_index,
+            area_error,
+            best_candidate_distance_100m,
+            best_candidate_score,
+            1 - best_candidate_shape_iou,
+            used_method,
+        )
 
     def get_best_gauge_coordinate(
         self,
@@ -1455,6 +1490,9 @@ class Catchment:
     ):
         """Get best gauge coordinates given target catchment area."""
         shape_result = None
+        score = np.nan
+        shape_error = np.nan
+        used_method = None
         if shape_folder and gauge_id is not None:
             try:
                 shape_result = self.find_best_gauge_location_shape(
@@ -1479,7 +1517,14 @@ class Catchment:
             gauge_coords = None
 
         if shape_result is not None:
-            outlet_idx, error, distance_error = shape_result
+            (
+                outlet_idx,
+                error,
+                distance_error,
+                score,
+                shape_error,
+                used_method,
+            ) = shape_result
             new_lat = float(self.ds.lat.data[outlet_idx[0]])
             new_lon = float(self.ds.lon.data[outlet_idx[1]])
             gauge_lat = new_lat
@@ -1501,6 +1546,8 @@ class Catchment:
                     method=method,
                     raise_on_fallback=raise_on_fallback,
                 )
+                used_method = f"area-{method}"
+                score = error * 100 + 2 * distance_error if method == "burek" else error
             else:
                 outlet_idx_bx, error_bx, distance_error_bx = (
                     find_best_gauge_location_by_area(
@@ -1521,7 +1568,7 @@ class Catchment:
                         upstream_area=upstream_area,
                         gauge_coords=gauge_coords,
                         ref_catchment_area=ref_catchment_area,
-                        resolultion=self.resolutions,
+                        resolutions=self.resolutions,
                         max_distance_cells=max_distance_cells,
                         max_error=max_error,
                         method="burek",
@@ -1547,16 +1594,22 @@ class Catchment:
                 logger.info(f"BasinEx: error {error_bx}")
                 logger.info(f"BasinEx: distance change {distance_error_bx/10}km")
             if method == "all":
+                score_bx = error_bx
+                score_bu = error_bu * 100 + 2 * distance_error_bu
                 if error_bx < error_bu:
                     logger.info("using BasinEx location")
                     outlet_idx = outlet_idx_bx
                     error = error_bx
                     distance_error = distance_error_bx
+                    score = score_bx
+                    used_method = "area-basinex"
                 else:
                     logger.info("Using Burek location")
                     outlet_idx = outlet_idx_bu
                     error = error_bu
                     distance_error = distance_error_bu
+                    score = score_bu
+                    used_method = "area-burek"
             new_lat = float(self.ds.lat.data[outlet_idx[0]])
             new_lon = float(self.ds.lon.data[outlet_idx[1]])
             gauge_lat = new_lat
@@ -1581,7 +1634,16 @@ class Catchment:
             gauge_lon = float(gauge_coords[1])
             error = None
             distance_error = 0.0
-        return outlet_idx, error, gauge_lat, gauge_lon, distance_error / 10
+        return (
+            outlet_idx,
+            error,
+            gauge_lat,
+            gauge_lon,
+            distance_error / 10,
+            score,
+            shape_error,
+            used_method,
+        )
 
     def delineation_sanity_check(
         self,
@@ -1700,18 +1762,25 @@ class Catchment:
         logger.info(
             f"Delineating basin {gauge_str} for gauge coordinates {gauge_coords} and reference catchment area {ref_catchment_area} km2."
         )
-        outlet_idx, error, gauge_lat, gauge_lon, distance_error = (
-            self.get_best_gauge_coordinate(
-                upstream_area=upstream_area,
-                gauge_coords=gauge_coords,
-                ref_catchment_area=ref_catchment_area,
-                max_distance_cells=max_distance_cells,
-                max_error=max_error,
-                method=gauge_opti_method,
-                shape_folder=shape_folder,
-                gauge_id=gauge_id,
-                raise_on_fallback=raise_on_fallback,
-            )
+        (
+            outlet_idx,
+            error,
+            gauge_lat,
+            gauge_lon,
+            distance_error,
+            score,
+            shape_error,
+            used_method,
+        ) = self.get_best_gauge_coordinate(
+            upstream_area=upstream_area,
+            gauge_coords=gauge_coords,
+            ref_catchment_area=ref_catchment_area,
+            max_distance_cells=max_distance_cells,
+            max_error=max_error,
+            method=gauge_opti_method,
+            shape_folder=shape_folder,
+            gauge_id=gauge_id,
+            raise_on_fallback=raise_on_fallback,
         )
         outlet_linear_idx = np.ravel_multi_index(outlet_idx, self._fdir.shape)
 
@@ -1770,6 +1839,9 @@ class Catchment:
                 area=uparea_at_outlet,
                 distance_error=distance_error,
                 area_error=error,
+                score=score,
+                shape_error=shape_error,
+                method=used_method,
             )
         return gauge
 
@@ -2808,18 +2880,25 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                         return None
                     gc = None
 
-                outlet_idx, error, gauge_lat, gauge_lon, distance_error = (
-                    c.get_best_gauge_coordinate(
-                        upstream_area=upstream_area,
-                        gauge_coords=gc,
-                        ref_catchment_area=ref_area,
-                        max_distance_cells=max_distance_cells,
-                        max_error=max_error,
-                        method=gauge_opti_method,
-                        shape_folder=shape_folder,
-                        gauge_id=gauge_ids[i],
-                        raise_on_fallback=raise_on_fallback,
-                    )
+                (
+                    outlet_idx,
+                    error,
+                    gauge_lat,
+                    gauge_lon,
+                    distance_error,
+                    score,
+                    shape_error,
+                    used_method,
+                ) = c.get_best_gauge_coordinate(
+                    upstream_area=upstream_area,
+                    gauge_coords=gc,
+                    ref_catchment_area=ref_area,
+                    max_distance_cells=max_distance_cells,
+                    max_error=max_error,
+                    method=gauge_opti_method,
+                    shape_folder=shape_folder,
+                    gauge_id=gauge_ids[i],
+                    raise_on_fallback=raise_on_fallback,
                 )
                 return {
                     "gauge_id": gauge_ids[i],
@@ -2831,6 +2910,9 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                     "outlet_idx": outlet_idx,
                     "error": error,
                     "distance_error": distance_error,
+                    "score": score,
+                    "shape_error": shape_error,
+                    "method": used_method,
                     "ref_area": ref_area,
                 }
 
@@ -2929,6 +3011,9 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                         area=uparea_at_outlet,
                         distance_error=gi["distance_error"],
                         area_error=gi["error"],
+                        score=gi["score"],
+                        shape_error=gi["shape_error"],
+                        method=gi["method"],
                     )
                     gauges.append(gauge)
                     c.write_basin_shape(

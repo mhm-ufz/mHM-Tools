@@ -1284,7 +1284,7 @@ def _nearest_global_coord_labels(dim, tile_values, global_values):
 def _tile_mask_file_for_restart(restart_file):
     """Find the mask section written for the tile that produced a restart file."""
     restart_file = Path(restart_file)
-    for directory in (restart_file.parent, *restart_file.parents):
+    for directory in (restart_file.parent, restart_file.parent.parent):
         mask_file = directory / "mask_tile.nc"
         if mask_file.is_file():
             return mask_file

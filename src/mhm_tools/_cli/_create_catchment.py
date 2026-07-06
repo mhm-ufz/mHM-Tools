@@ -210,7 +210,8 @@ def add_args(parser):
         default="gauges_info.csv",
         help=(
             "Output gauge info csv (default: gauges_info.csv). "
-            "Columns: id, lon, lat, lon_old, lat_old, distance, area, old_area, area_error."
+            "Columns: id, lon, lat, lon_old, lat_old, distance, area, old_area, "
+            "area_error, score, shape_error, method."
         ),
     )
     optional_args.add_argument(

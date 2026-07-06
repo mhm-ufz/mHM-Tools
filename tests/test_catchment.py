@@ -199,11 +199,21 @@ class TestCatchment(unittest.TestCase):
                 "area": 1000.0,
                 "old_area": 980.0,
                 "area_error": 0.02,
+                "score": 0.45,
+                "shape_error": 0.25,
+                "used_method": "area-basinex",
             }
         ]
         gauge = catchment.Gauge(gauge_id=101, lat=50.0, lon=10.0, area=1000.0)
         gauge.update(
-            lon=10.1, lat=50.1, distance_error=1.25, area=980.0, area_error=0.02
+            lon=10.1,
+            lat=50.1,
+            distance_error=1.25,
+            area=980.0,
+            area_error=0.02,
+            score=0.12,
+            shape_error=0.34,
+            method="shape-area",
         )
         catchment.write_gauges_to_csv([gauge], out_dir, "gauges_info.csv")
 
@@ -216,6 +226,19 @@ class TestCatchment(unittest.TestCase):
         self.assertEqual(len(written_rows), 1)
         self.assertEqual(written_rows[0]["id"], "101")
         self.assertAlmostEqual(float(written_rows[0]["distance"]), 1.25)
+        self.assertAlmostEqual(float(written_rows[0]["score"]), 0.12)
+        self.assertAlmostEqual(float(written_rows[0]["shape_error"]), 0.34)
+        self.assertEqual(written_rows[0]["method"], "shape-area")
+
+        catchment.write_gauges_to_csv(rows, out_dir, "gauges_info_dict.csv")
+        dict_out_file = out_dir / "gauges_info_dict.csv"
+        with dict_out_file.open("r", encoding="utf-8", newline="") as csv_file:
+            dict_rows = list(csv.DictReader(csv_file))
+        self.assertEqual(len(dict_rows), 1)
+        self.assertAlmostEqual(float(dict_rows[0]["score"]), 0.45)
+        self.assertAlmostEqual(float(dict_rows[0]["shape_error"]), 0.25)
+        self.assertEqual(dict_rows[0]["method"], "area-basinex")
+
         catchment.write_gauges_to_nc([gauge], out_dir, "gauges_info.nc")
         nc_file = out_dir / "gauges_info.nc"
         self.assertTrue(nc_file.exists())
@@ -1001,7 +1024,19 @@ class TestCatchment(unittest.TestCase):
             )
             self.assertIsNotNone(result)
 
-            candidate_idx, _, _ = result
+            (
+                candidate_idx,
+                _area_error,
+                _distance_error,
+                score,
+                shape_error,
+                method,
+            ) = result
+            self.assertTrue(np.isfinite(score))
+            self.assertTrue(np.isfinite(shape_error))
+            self.assertGreaterEqual(shape_error, 0.0)
+            self.assertLessEqual(shape_error, 1.0)
+            self.assertEqual(method, "shape-area")
             linear = np.ravel_multi_index(candidate_idx, c._fdir.shape)
             basin = c._fdir.basins(idxs=np.array([linear], dtype=np.int64))
             candidate_mask = basin > 0
