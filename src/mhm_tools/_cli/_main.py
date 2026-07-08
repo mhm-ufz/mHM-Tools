@@ -109,6 +109,7 @@ _COMMAND_GROUPS: List[Tuple[str, str, List[Tuple[str, object]]]] = [
         "Create diagnostic plots and run summaries.",
         [
             ("2d-map", "mhm_tools._cli._2d_map"),
+            ("metric-plots", "mhm_tools._cli._metric_plots"),
             ("taylor-diagram", "mhm_tools._cli._taylor_diagram"),
         ],
     ),
