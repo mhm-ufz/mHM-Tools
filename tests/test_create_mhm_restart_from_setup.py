@@ -76,8 +76,6 @@ def test_create_mhm_restart_from_setup_cli_parses_mhm_ncpus():
             "output",
             "--mask-file",
             "mask.nc",
-            "--mhm",
-            "mhm",
             "--l1-resolution",
             "1.0",
             "--n-cpus",
@@ -106,8 +104,6 @@ def test_create_mhm_restart_from_setup_cli_parses_no_tile_creation():
             "output",
             "--mask-file",
             "mask.nc",
-            "--mhm",
-            "mhm",
             "--l1-resolution",
             "1.0",
             "--no-tile-creation",
@@ -129,8 +125,6 @@ def test_create_mhm_restart_from_setup_cli_parses_no_mhm_run():
             "output",
             "--mask-file",
             "mask.nc",
-            "--mhm",
-            "mhm",
             "--l1-resolution",
             "1.0",
             "--no-mhm-run",
@@ -152,8 +146,6 @@ def test_create_mhm_restart_from_setup_cli_parses_recreate_restart():
             "output",
             "--mask-file",
             "mask.nc",
-            "--mhm",
-            "mhm",
             "--l1-resolution",
             "1.0",
             "--recreate-restart",
@@ -176,8 +168,6 @@ def test_create_mhm_restart_from_setup_cli_parses_multiple_masks_and_parameters(
             "--mask-file",
             "mask_a.nc",
             "mask_b.nc",
-            "--mhm",
-            "mhm",
             "--l1-resolution",
             "1.0",
             "--parameter-file",
@@ -202,8 +192,6 @@ def test_create_mhm_restart_from_setup_cli_splits_quoted_multi_values():
             "output",
             "--mask-file",
             "mask_a.nc mask_b.nc",
-            "--mhm",
-            "mhm",
             "--l1-resolution",
             "1.0",
             "--parameter-file",
@@ -279,7 +267,6 @@ def test_create_mhm_restart_from_setup_cli_loops_masks_and_parameters(
         input_path="input",
         output_path=tmp_path / "out",
         mask_file=["mask_a.nc mask_b.nc"],
-        mhm="mhm",
         l1_resolution=1.0,
         l1_increment=1,
         l11_resolution=None,
@@ -396,7 +383,6 @@ def test_create_mhm_restart_from_setup_crops_runs_tiles_and_finds_restarts(
         lon_max=2.0,
         lat_min=0.0,
         lat_max=2.0,
-        mhm_executable="mhm",
         l1_resolution=1.0,
         l1_increment=1,
         merge=False,
@@ -473,7 +459,6 @@ def test_create_mhm_restart_from_setup_uses_status_for_merge_and_reports_failure
         lon_max=2.0,
         lat_min=0.0,
         lat_max=1.0,
-        mhm_executable="mhm",
         l1_resolution=1.0,
         l1_increment=1,
         merge=True,
@@ -526,7 +511,6 @@ def test_create_mhm_restart_from_setup_prepares_all_tiles_before_mhm_runs(
         lon_max=2.0,
         lat_min=0.0,
         lat_max=2.0,
-        mhm_executable="mhm",
         l1_resolution=1.0,
         l1_increment=1,
         merge=False,
@@ -567,7 +551,6 @@ def test_create_mhm_restart_from_setup_can_skip_tile_creation(tmp_path, monkeypa
         lon_max=2.0,
         lat_min=0.0,
         lat_max=2.0,
-        mhm_executable="mhm",
         l1_resolution=1.0,
         l1_increment=1,
         merge=False,
@@ -604,7 +587,6 @@ def test_create_mhm_restart_from_setup_can_skip_mhm_run(tmp_path, monkeypatch):
         lon_max=2.0,
         lat_min=0.0,
         lat_max=2.0,
-        mhm_executable="mhm",
         l1_resolution=1.0,
         l1_increment=1,
         merge=False,
@@ -769,7 +751,6 @@ def test_create_mhm_restart_from_setup_reports_missing_restarts_separately(
         lon_max=2.0,
         lat_min=0.0,
         lat_max=1.0,
-        mhm_executable="mhm",
         l1_resolution=1.0,
         l1_increment=1,
         merge=False,
@@ -876,7 +857,6 @@ def test_create_mhm_restart_from_setup_recreates_missing_restarts(
         lon_max=2.0,
         lat_min=0.0,
         lat_max=1.0,
-        mhm_executable="mhm",
         l1_resolution=1.0,
         l1_increment=1,
         merge=False,
@@ -1099,7 +1079,6 @@ def test_create_mhm_restart_from_setup_skip_tile_creation_prepares_missing_tiles
         lon_max=1.0,
         lat_min=0.0,
         lat_max=1.0,
-        mhm_executable="mhm",
         l1_resolution=1.0,
         l1_increment=1,
         merge=False,
@@ -1155,7 +1134,6 @@ def test_create_mhm_restart_from_setup_uses_mask_only_to_select_tiles(
         lon_max=2.0,
         lat_min=0.0,
         lat_max=2.0,
-        mhm_executable="mhm",
         l1_resolution=1.0,
         l1_increment=1,
         merge=False,
@@ -1214,7 +1192,6 @@ def test_create_mhm_restart_from_setup_fills_files_before_mhm(tmp_path, monkeypa
         lon_max=1.0,
         lat_min=0.0,
         lat_max=1.0,
-        mhm_executable="mhm",
         l1_resolution=1.0,
         l1_increment=1,
         merge=False,
@@ -1296,7 +1273,6 @@ def test_create_mhm_restart_from_setup_masks_dem_with_l0_mask_files(
         lon_max=2.0,
         lat_min=0.0,
         lat_max=2.0,
-        mhm_executable="mhm",
         l1_resolution=1.0,
         l1_increment=2,
         merge=False,
@@ -1354,7 +1330,6 @@ def test_create_mhm_restart_from_setup_fills_meteo_files_without_mask(
         lon_max=1.0,
         lat_min=0.0,
         lat_max=1.0,
-        mhm_executable="mhm",
         l1_resolution=1.0,
         l1_increment=1,
         merge=False,
@@ -1462,7 +1437,6 @@ def test_create_mhm_restart_from_setup_considers_all_positive_mask_tiles(
         lon_max=5.0,
         lat_min=0.0,
         lat_max=5.0,
-        mhm_executable="mhm",
         l1_resolution=1.0,
         l1_increment=1,
         merge=False,
@@ -1522,7 +1496,7 @@ def test_crop_mhm_setup_creates_default_latlon_from_cropped_dem(tmp_path, monkey
 
 
 def test_mhm_runner_uses_python_bindings():
-    runner = MHMRunner("mhm")
+    runner = MHMRunner()
     command = runner.get_command()
 
     assert command.startswith("python -c ")
@@ -1534,7 +1508,6 @@ def test_mhm_runner_uses_python_bindings():
 
 def test_mhm_runner_uses_module_paths_before_loading_modules():
     runner = MHMRunner(
-        "/home/luedke/mhm/mhm",
         mhm_packages=(
             "/global/apps/modulefiles python_env_mpr iomkl/2020b "
             "netCDF-Fortran/4.5.3 CMake pFUnit/4.2.2_iomkl2020b"
@@ -1550,7 +1523,6 @@ def test_mhm_runner_uses_module_paths_before_loading_modules():
     ) in command
     assert "python -c " in command
     assert 'namelist_mhm_param="FinalParam.nml"' in command
-    assert "/home/luedke/mhm/mhm" not in command
 
 
 def test_merge_mhm_restart_files_reindexes_to_global_domain(tmp_path):

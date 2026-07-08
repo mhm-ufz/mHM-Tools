@@ -287,11 +287,10 @@ def _filter_tiles_by_mask(tiles, mask_ds, mask_var):
 
 
 class MHMRunner:
-    """Run the mHM executable in the base directory of a setup."""
+    """Run mHM through its Python bindings in the base directory of a setup."""
 
-    def __init__(self, mhm_executable="mhm", mhm_packages=None, mhm_args=None):
+    def __init__(self, mhm_packages=None, mhm_args=None):
         """Initialize the mHM runner."""
-        self.mhm_executable = str(mhm_executable)
         self.mhm_packages = mhm_packages
         self.mhm_args = mhm_args
 
@@ -1665,7 +1664,6 @@ def _prepare_tile_setup(  # noqa: PLR0913
 
 def _run_mhm_for_tile(
     tile,
-    mhm_executable,
     mhm_packages,
     mhm_args,
     restart_pattern,
@@ -1679,7 +1677,6 @@ def _run_mhm_for_tile(
     status = 0
     run_started_at = time.time() - 1.0
     runner = MHMRunner(
-        mhm_executable=mhm_executable,
         mhm_packages=mhm_packages,
         mhm_args=mhm_args,
     )
@@ -1869,7 +1866,6 @@ def _prepare_tiles_for_mhm(  # noqa: PLR0913
 def _run_mhm_for_tiles(
     prepared_tiles,
     mhm_n_jobs,
-    mhm_executable,
     mhm_packages,
     mhm_args,
     restart_pattern,
@@ -1880,7 +1876,6 @@ def _run_mhm_for_tiles(
         return [
             _run_mhm_for_tile(
                 tile=tile,
-                mhm_executable=mhm_executable,
                 mhm_packages=mhm_packages,
                 mhm_args=mhm_args,
                 restart_pattern=restart_pattern,
@@ -1893,7 +1888,6 @@ def _run_mhm_for_tiles(
     return Parallel(n_jobs=mhm_n_jobs, backend="loky")(
         delayed(_run_mhm_for_tile)(
             tile=tile,
-            mhm_executable=mhm_executable,
             mhm_packages=mhm_packages,
             mhm_args=mhm_args,
             restart_pattern=restart_pattern,
@@ -2023,7 +2017,7 @@ def _restart_result_needs_recreation(result):
     )
 
 
-def _recreate_restart_for_tile(  # noqa: PLR0913
+def _recreate_restart_for_tile(
     tile,
     tile_number,
     input_path,
@@ -2035,7 +2029,6 @@ def _recreate_restart_for_tile(  # noqa: PLR0913
     chunking,
     lat_order,
     fill_nearest_files,
-    mhm_executable,
     mhm_packages,
     mhm_args,
     restart_pattern,
@@ -2070,7 +2063,6 @@ def _recreate_restart_for_tile(  # noqa: PLR0913
     _fill_recreated_restart_inputs(tile, fill_nearest_files)
     return _run_mhm_for_tile(
         tile=tile,
-        mhm_executable=mhm_executable,
         mhm_packages=mhm_packages,
         mhm_args=mhm_args,
         restart_pattern=restart_pattern,
@@ -2091,7 +2083,6 @@ def _recreate_missing_restart_results(  # noqa: PLR0913
     chunking,
     lat_order,
     fill_nearest_files,
-    mhm_executable,
     mhm_packages,
     mhm_args,
     restart_pattern,
@@ -2125,7 +2116,6 @@ def _recreate_missing_restart_results(  # noqa: PLR0913
             chunking=chunking,
             lat_order=lat_order,
             fill_nearest_files=fill_nearest_files,
-            mhm_executable=mhm_executable,
             mhm_packages=mhm_packages,
             mhm_args=mhm_args,
             restart_pattern=restart_pattern,
@@ -2154,7 +2144,6 @@ def create_mhm_restart_from_setup(  # noqa: PLR0913
     lon_max,
     lat_min,
     lat_max,
-    mhm_executable,
     l1_resolution,
     l1_increment=20,
     l11_resolution=None,
@@ -2250,7 +2239,6 @@ def create_mhm_restart_from_setup(  # noqa: PLR0913
         restart_files_by_tile = _run_mhm_for_tiles(
             prepared_tiles=prepared_tiles,
             mhm_n_jobs=mhm_n_jobs,
-            mhm_executable=mhm_executable,
             mhm_packages=mhm_packages,
             mhm_args=mhm_args,
             restart_pattern=restart_pattern,
@@ -2270,7 +2258,6 @@ def create_mhm_restart_from_setup(  # noqa: PLR0913
             chunking=chunking,
             lat_order=lat_order,
             fill_nearest_files=fill_nearest_files,
-            mhm_executable=mhm_executable,
             mhm_packages=mhm_packages,
             mhm_args=mhm_args,
             restart_pattern=restart_pattern,

@@ -68,12 +68,6 @@ def add_args(parser):
         help="Path to the mask file used to derive the crop extent.",
     )
     required_args.add_argument(
-        "--mhm",
-        required=True,
-        default="mhm",
-        help="Path to the mHM executable.",
-    )
-    required_args.add_argument(
         "--l1-resolution",
         type=float,
         required=True,
@@ -179,7 +173,7 @@ def add_args(parser):
     optional.add_argument(
         "--mhm-args",
         default=None,
-        help="Additional arguments passed to the mHM executable.",
+        help="Additional arguments passed to the mHM Python runner.",
     )
     optional.add_argument(
         "-p",
@@ -398,7 +392,6 @@ def run(args):
             lon_max=lon_max_target_grid,
             lat_min=lat_min_target_grid,
             lat_max=lat_max_target_grid,
-            mhm_executable=args.mhm,
             l1_resolution=args.l1_resolution,
             l1_increment=args.l1_increment,
             l11_resolution=args.l11_resolution,
