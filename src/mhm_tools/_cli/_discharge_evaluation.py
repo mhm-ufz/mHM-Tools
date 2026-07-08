@@ -97,6 +97,39 @@ def add_args(parser):
         ),
     )
     optional.add_argument(
+        "--shape-folder",
+        required=False,
+        default=None,
+        help="Folder with catchment shapefiles matched by gauge ID.",
+    )
+    optional.add_argument(
+        "--mask-folder",
+        required=False,
+        default=None,
+        help="Folder with catchment mask NetCDF files matched by gauge ID.",
+    )
+    optional.add_argument(
+        "--mask-var",
+        required=False,
+        default=None,
+        help="Variable in catchment mask files used for median maps.",
+    )
+    optional.add_argument(
+        "--catchment-map-variables",
+        nargs="+",
+        required=False,
+        default=None,
+        help="Metric columns to plot on catchment median maps.",
+    )
+    optional.add_argument(
+        "--metric-plot-types",
+        nargs="+",
+        required=False,
+        default=["cdf", "violin", "map", "catchment-map"],
+        choices=["cdf", "violin", "map", "catchment-map"],
+        help="Metric plot types to create.",
+    )
+    optional.add_argument(
         "--n-boostrap-years",
         required=False,
         default=None,
@@ -236,4 +269,9 @@ def run(args):
         gauge_max_distance_cells=args.gauge_max_distance_cells,
         gauge_max_error=args.gauge_max_error,
         hydrograph_plots=args.hydrograph_plots,
+        shape_folder=args.shape_folder,
+        mask_folder=args.mask_folder,
+        mask_var=args.mask_var,
+        catchment_map_variables=args.catchment_map_variables,
+        metric_plot_types=args.metric_plot_types,
     )

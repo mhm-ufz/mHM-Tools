@@ -24,11 +24,19 @@ from joblib import Parallel, delayed
 from matplotlib import colors as mcolors
 from scipy.spatial import cKDTree
 
+from mhm_tools.common.catchment_maps import write_catchment_median_maps
 from mhm_tools.common.file_handler import (
     get_dataset_from_path,
     write_xarray_to_file,
 )
 from mhm_tools.common.logger import ErrorLogger, log_arguments, log_errors
+from mhm_tools.common.plotter import (
+    create_metric_summary_rows,
+    plot_cdf_values,
+    plot_metric_cdf_comparison,
+    plot_metric_violin_comparison,
+    write_metric_plot_overview_pdf,
+)
 from mhm_tools.common.utils import coord_to_index, find_best_gauge_location_by_area
 from mhm_tools.common.xarray_utils import (
     get_clim_from_ds,
@@ -1662,6 +1670,11 @@ def evaludate_discharge_data(  # noqa: PLR0913
     gauge_max_distance_cells=3,
     gauge_max_error=0.1,
     hydrograph_plots=None,
+    shape_folder=None,
+    mask_folder=None,
+    mask_var=None,
+    catchment_map_variables=None,
+    metric_plot_types=None,
 ):
     """Compare simulated with observed discharge directly or via bootstrapping.
 
@@ -1670,6 +1683,9 @@ def evaludate_discharge_data(  # noqa: PLR0913
     """
     output_path = Path(output_path)
     stats_output_file = output_path / "results.csv"
+    if metric_plot_types is None:
+        metric_plot_types = ["cdf", "violin", "map", "catchment-map"]
+    metric_plot_types = list(metric_plot_types)
     if not only_plot or not stats_output_file.is_file():
         observed_ds, model_ds = Q_data_to_xarray(
             model_data_path=model_data_path,
@@ -1769,12 +1785,55 @@ def evaludate_discharge_data(  # noqa: PLR0913
     else:
         logger.info(f"Reading results from {stats_output_file}...")
         results_df = pd.read_csv(stats_output_file, index_col=0)
+    metric_plot_files = []
     # only plot cdf if more than 5 results to avoid plots without enough data points
-    if len(results_df) > 5:
-        plot_cdf(results_df, output_path, boostrap_iterations=n_boostrap_selections)
-    else:
+    if "cdf" in metric_plot_types and len(results_df) > 5:
+        metric_plot_files.extend(
+            plot_cdf(
+                results_df,
+                output_path,
+                boostrap_iterations=n_boostrap_selections,
+            )
+            or []
+        )
+    elif "cdf" in metric_plot_types:
         logger.info("Too few gauges for CDF plots.")
-    plot_map(results_df, output_path)
+    if "violin" in metric_plot_types:
+        metric_plot_files.extend(plot_metric_violins(results_df, output_path) or [])
+    if "map" in metric_plot_types:
+        metric_plot_files.extend(plot_map(results_df, output_path) or [])
+    if "catchment-map" in metric_plot_types and (
+        shape_folder is not None or mask_folder is not None
+    ):
+        metric_plot_files.extend(
+            write_catchment_median_maps(
+                metric_df=results_df,
+                output_dir=output_path,
+                variables=catchment_map_variables,
+                shape_folder=shape_folder,
+                mask_folder=mask_folder,
+                mask_var=mask_var,
+            )
+            or []
+        )
+    values_by_variable = get_discharge_metric_values_by_variable(
+        results_df,
+        variables=catchment_map_variables,
+    )
+    hydrograph_files = get_hydrograph_pdf_files(output_path)
+    if _should_write_discharge_overview_pdf(
+        variables=list(values_by_variable),
+        metric_plot_types=metric_plot_types,
+        plot_files=metric_plot_files,
+    ):
+        overview_file = write_metric_plot_overview_pdf(
+            output_file=output_path / "metric_plots_overview.pdf",
+            plot_files=metric_plot_files,
+            summary_rows=create_metric_summary_rows(values_by_variable),
+            append_pdf_files=hydrograph_files,
+            title="Discharge metric plots overview",
+        )
+        logger.info(f"Wrote discharge metric overview PDF to {overview_file}.")
 
 
 def plot_kde(results_df, output_path):
@@ -1890,7 +1949,7 @@ def plot_map(  # noqa: PLR0915
     df = df.replace([np.inf, -np.inf], np.nan)
     if df.empty:
         logger.warning("No valid gauge coordinates available for map plotting.")
-        return
+        return []
 
     # Determine variables to plot
     if variables is None:
@@ -1905,7 +1964,7 @@ def plot_map(  # noqa: PLR0915
 
     if not variables:
         logger.warning("No numeric variables found for map plotting.")
-        return
+        return []
 
     lons = df[lon_col].astype(float).values
     lats = df[lat_col].astype(float).values
@@ -1921,6 +1980,7 @@ def plot_map(  # noqa: PLR0915
         size_scale = (200 / len(df)) ** 0.5
     point_size = max(4, point_size * size_scale)
 
+    output_files = []
     for var in variables:
         vals = df[var].astype(float).values
         if np.all(np.isnan(vals)):
@@ -1980,22 +2040,201 @@ def plot_map(  # noqa: PLR0915
             linewidth=0.25,
             transform=ccrs.PlateCarree(),
         )
-        cb = plt.colorbar(sc, ax=ax, orientation="vertical", shrink=0.8, extend=extend)
+        cb = plt.colorbar(
+            sc,
+            ax=ax,
+            orientation="vertical",
+            shrink=0.8,
+            extend=extend,
+        )
         cb.set_label(var)
         ax.set_title(f"{var} by gauge")
         fig.tight_layout()
-        fig.savefig(output_path / f"map_{var}.png", dpi=dpi)
+        output_file = output_path / f"map_{var}.png"
+        fig.savefig(output_file, dpi=dpi)
         plt.close(fig)
+        output_files.append(output_file)
+    return output_files
+
+
+def _get_discharge_cdf_x_limits(variable, values):
+    """Get discharge CDF x-axis limits.
+
+    Parameters
+    ----------
+    variable : str
+        Metric variable name.
+    values : Sequence[float]
+        Numeric metric values.
+
+    Returns
+    -------
+    tuple[float, float]
+        Lower and upper x-axis limits.
+    """
+    if variable in ["kge", "nse"]:
+        return -0.5, 1.0
+    values = np.asarray(values, dtype=float)
+    xmin = values.min() if values.min() > -2 else np.quantile(values, 0.05)
+    xmax = values.max() if values.max() < 3 else np.quantile(values, 0.95)
+    if xmax - xmin > 6:
+        median_val = float(np.median(values))
+        xmin = max(xmin, median_val - 3)
+        xmax = min(xmax, median_val + 3)
+    return xmin, xmax
+
+
+@log_errors()
+def get_discharge_metric_values_by_variable(df, variables=None):
+    """Get finite discharge metric values grouped for summary tables.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Discharge metric rows.
+    variables : Sequence[str], optional
+        Metric columns to collect.
+
+    Returns
+    -------
+    dict[str, dict[str, np.ndarray]]
+        Metric values grouped by variable and realisation label.
+    """
+    if variables is None:
+        variables = ["alpha", "beta", "gamma", "kge", "nse"]
+    values_by_variable = {}
+    for variable in variables:
+        if variable not in df.columns:
+            logger.warning(f"Column {variable!r} missing. Skipping summary values.")
+            continue
+        values = pd.to_numeric(df[variable], errors="coerce")
+        values = values.replace([np.inf, -np.inf], np.nan).dropna()
+        if values.empty:
+            logger.warning(f"No finite values for {variable}. Skipping summary.")
+            continue
+        values_by_variable[variable] = {
+            "all stations": values.to_numpy(dtype=float),
+        }
+    return values_by_variable
+
+
+def _should_write_discharge_overview_pdf(variables, metric_plot_types, plot_files):
+    """Check whether a discharge overview PDF should be written.
+
+    Parameters
+    ----------
+    variables : Sequence[str]
+        Metric variables with finite values.
+    metric_plot_types : Sequence[str]
+        Selected metric plot types.
+    plot_files : Sequence[str or Path]
+        Plot files returned by plot writers.
+
+    Returns
+    -------
+    bool
+        True when an overview PDF should be written.
+    """
+    if len(variables) <= 1 and len(metric_plot_types) <= 1:
+        return False
+    return any(Path(plot_file).is_file() for plot_file in plot_files)
+
+
+def get_hydrograph_pdf_files(output_dir):
+    """Get saved hydrograph PDF files in stable gauge order.
+
+    Parameters
+    ----------
+    output_dir : str or Path
+        Directory containing discharge evaluation outputs.
+
+    Returns
+    -------
+    list[Path]
+        Existing hydrograph PDF files.
+    """
+    output_dir = Path(output_dir)
+    if not output_dir.is_dir():
+        return []
+    return sorted(
+        output_dir.glob("hydrograph_*.pdf"),
+        key=_get_hydrograph_sort_key,
+    )
+
+
+def _get_hydrograph_sort_key(hydrograph_file):
+    """Get a stable sort key for one hydrograph PDF.
+
+    Parameters
+    ----------
+    hydrograph_file : str or Path
+        Hydrograph PDF file.
+
+    Returns
+    -------
+    tuple[int, object]
+        Sort key based on numeric gauge ID when possible.
+    """
+    stem = Path(hydrograph_file).stem
+    gauge_id = stem[len("hydrograph_") :]
+    try:
+        return 0, int(gauge_id)
+    except ValueError:
+        return 1, gauge_id
+
+
+@log_errors()
+def plot_metric_violins(df, output_path, variables=None, dpi=450):
+    """Create violin plots for finite discharge metric rows.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Discharge metric rows.
+    output_path : str or Path
+        Directory for PNG output files.
+    variables : Sequence[str], optional
+        Metric columns to plot.
+    dpi : int, optional
+        Output image resolution.
+
+    Returns
+    -------
+    list[Path]
+        Written PNG files.
+    """
+    if variables is None:
+        variables = ["alpha", "beta", "gamma", "kge", "nse"]
+    output_path = Path(output_path)
+    output_files = []
+    for variable in variables:
+        if variable not in df.columns:
+            logger.warning(f"Column {variable!r} missing. Skipping violin plot.")
+            continue
+        values = pd.to_numeric(df[variable], errors="coerce")
+        values = values.replace([np.inf, -np.inf], np.nan).dropna()
+        if values.empty:
+            logger.warning(f"No finite values for {variable}. Skipping violin plot.")
+            continue
+        output_file = output_path / f"violin_{variable}.png"
+        plot_metric_violin_comparison(
+            values_by_label={"all stations": values.to_numpy(dtype=float)},
+            variable_name=variable,
+            output_file=output_file,
+            dpi=dpi,
+        )
+        output_files.append(output_file)
+        logger.info(f"Wrote violin plot to {output_file}.")
+    return output_files
 
 
 @log_errors()
 def plot_cdf(df, output_path, boostrap_iterations=None):
-    """Create CDF plots for alpha, beta, and gamma.
+    """Create CDF plots for alpha, beta, gamma, KGE, and NSE.
 
-    The plots are generated for different subselections
-    (by catchment, bootstrap-mean, or all results).
+    The plots are generated for global values, global values colored by region,
+    and per-region values.
     """
-    # The variables to plot
     logger.info(f"In total there are {len(df['id'].unique())} catchments of which ")
     logger.info(
         f"   {len(df.dropna(subset=['alpha'], how='any')['id'].unique())} have all alpha values"
@@ -2033,15 +2272,27 @@ def plot_cdf(df, output_path, boostrap_iterations=None):
 
     unique_ids = df["id"].unique()
     logger.info(f"Creating a cdf plot with {len(unique_ids)} stations")
-
     logger.info("All values")
     plot_modes = ["global", "global_color_by_region", "regions"]
     region_colors = {
         region: cb_colors[i % len(cb_colors)]
         for i, region in enumerate(regions.values())
     }
+    output_files = []
 
     def _region_from_id(gauge_id):
+        """Get the discharge region name from a gauge id.
+
+        Parameters
+        ----------
+        gauge_id : int or str
+            Gauge identifier with the region prefix.
+
+        Returns
+        -------
+        str
+            Region name.
+        """
         gauge_id_str = str(gauge_id)
         for region_id, region_name in regions.items():
             if gauge_id_str.startswith(str(region_id)):
@@ -2057,73 +2308,8 @@ def plot_cdf(df, output_path, boostrap_iterations=None):
 
             var_df["region"] = var_df["id"].apply(_region_from_id)
             global_sorted = var_df.sort_values(by=var).reset_index(drop=True)
-            global_sorted["cdf"] = np.arange(1, len(global_sorted) + 1) / len(
-                global_sorted
-            )
-
-            fig, ax = plt.subplots(figsize=(6, 4))
-            med = float(np.nanmedian(global_sorted[var].values))
-
-            if plot == "global":
-                ax.plot(
-                    global_sorted[var].values,
-                    global_sorted["cdf"].values,
-                    color="lightgray",
-                    linewidth=1.0,
-                )
-                ax.scatter(
-                    global_sorted[var].values,
-                    global_sorted["cdf"].values,
-                    s=16,
-                    label=f"all stations (n={len(global_sorted)})",
-                )
-            elif plot == "global_color_by_region":
-                ax.plot(
-                    global_sorted[var].values,
-                    global_sorted["cdf"].values,
-                    color="lightgray",
-                    linewidth=1.0,
-                )
-                for region_name in regions.values():
-                    region_df = global_sorted[global_sorted["region"] == region_name]
-                    if region_df.empty:
-                        continue
-                    ax.scatter(
-                        region_df[var].values,
-                        region_df["cdf"].values,
-                        s=16,
-                        color=region_colors[region_name],
-                        label=f"{region_name} (n={len(region_df)})",
-                    )
-            elif plot == "regions":
-                for region_name in regions.values():
-                    region_df = var_df[var_df["region"] == region_name].sort_values(
-                        by=var
-                    )
-                    if region_df.empty:
-                        continue
-                    region_cdf = np.arange(1, len(region_df) + 1) / len(region_df)
-                    ax.plot(
-                        region_df[var].values,
-                        region_cdf,
-                        color=region_colors[region_name],
-                        linewidth=1.0,
-                    )
-                    ax.scatter(
-                        region_df[var].values,
-                        region_cdf,
-                        s=16,
-                        color=region_colors[region_name],
-                        label=f"{region_name} (n={len(region_df)})",
-                    )
-
-            ax.axvline(
-                med,
-                color="red",
-                linestyle="dotted",
-                linewidth=1,
-                label=f"median = {med:.3f}",
-            )
+            values = global_sorted[var].values
+            x_limits = _get_discharge_cdf_x_limits(var, values)
             title = f"CDF of {var} "
             if plot == "global_color_by_region":
                 title += " (global, points colored by region)"
@@ -2131,29 +2317,88 @@ def plot_cdf(df, output_path, boostrap_iterations=None):
                 title += " (per-region CDFs)"
             if boostrap_iterations is not None and boostrap_iterations > 0:
                 title += f" and {boostrap_iterations} bootstrap iterations"
+            output_file = (
+                output_path / f"cdf_{var}_{plot.strip().lower().replace(' ', '_')}.png"
+            )
+
+            if plot == "global":
+                plot_metric_cdf_comparison(
+                    values_by_label={"all stations": values},
+                    variable_name=var,
+                    output_file=output_file,
+                    title=title,
+                    x_limits=x_limits,
+                    dpi=450,
+                    show_median_line=True,
+                )
+                output_files.append(output_file)
+                continue
+
+            if plot == "regions":
+                region_values = {}
+                for region_name in regions.values():
+                    region_df = var_df[var_df["region"] == region_name]
+                    if not region_df.empty:
+                        region_values[region_name] = region_df[var].values
+                if not region_values:
+                    logger.warning(
+                        f"No regional values for {var}. Skipping regions plot."
+                    )
+                    continue
+                plot_metric_cdf_comparison(
+                    values_by_label=region_values,
+                    variable_name=var,
+                    output_file=output_file,
+                    title=title,
+                    x_limits=x_limits,
+                    dpi=450,
+                    colors=region_colors,
+                    show_median_line=False,
+                )
+                output_files.append(output_file)
+                continue
+
+            global_cdf = np.arange(1, len(global_sorted) + 1) / len(global_sorted)
+            global_sorted["cdf"] = global_cdf
+            fig, ax = plt.subplots(figsize=(6, 4))
+            plot_cdf_values(
+                ax,
+                values,
+                label="all stations",
+                color="lightgray",
+                cdf_values=global_cdf,
+                draw_points=False,
+            )
+            for region_name in regions.values():
+                region_df = global_sorted[global_sorted["region"] == region_name]
+                if region_df.empty:
+                    continue
+                plot_cdf_values(
+                    ax,
+                    region_df[var].values,
+                    label=f"{region_name} (n={len(region_df)})",
+                    color=region_colors[region_name],
+                    cdf_values=region_df["cdf"].values,
+                    draw_line=False,
+                )
+            med = float(np.nanmedian(values))
+            ax.axvline(
+                med,
+                color="red",
+                linestyle="dotted",
+                linewidth=1,
+                label=f"median = {med:.3f}",
+            )
             ax.set_title(title)
             ax.set_xlabel(var)
             ax.set_ylabel("CDF")
+            ax.set_ylim(0.0, 1.01)
+            ax.set_xlim(x_limits[0], x_limits[1])
             ax.legend()
-            if var in ["kge", "nse"]:
-                ax.set_xlim(-0.5, 1.0)
-                ax.set_ylim(0.0, 1.01)
-            else:
-                ax.set_ylim(0.0, 1.01)
-                values = global_sorted[var].values
-                xmin = values.min() if values.min() > -2 else np.quantile(values, 0.05)
-                xmax = values.max() if values.max() < 3 else np.quantile(values, 0.95)
-                if xmax - xmin > 6:
-                    median_val = float(np.median(values))
-                    xmin = max(xmin, median_val - 3)
-                    xmax = min(xmax, median_val + 3)
-                ax.set_xlim(xmin, xmax)
-
             plt.tight_layout()
-            plt.savefig(
-                output_path / f"cdf_{var}_{plot.strip().lower().replace(' ', '_')}.png",
-                dpi=450,
-            )
-            plt.close()
+            plt.savefig(output_file, dpi=450)
+            plt.close(fig)
+            output_files.append(output_file)
 
     logger.info("Done! Check the saved PNG files for your CDF plots.")
+    return output_files
