@@ -7,10 +7,11 @@ import numpy as np
 import pytest
 import rasterio
 from click.testing import CliRunner
+from shapely import geometry as shapely_geometry
+
 from mhm_tools._cli._main import cli
 from mhm_tools.pre import rasterize_map as rasterize_map_module
 from mhm_tools.pre.rasterize_map import rasterize_map_data
-from shapely import geometry as shapely_geometry
 
 
 def _write_dem(path: Path) -> None:

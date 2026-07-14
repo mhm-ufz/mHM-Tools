@@ -8,6 +8,8 @@ import pytest
 import rasterio
 import xarray as xr
 from click.testing import CliRunner
+from shapely import geometry as shapely_geometry
+
 from mhm_tools import pre
 from mhm_tools._cli._main import cli
 from mhm_tools.common.file_handler import get_xarray_ds_from_file
@@ -16,7 +18,6 @@ from mhm_tools.pre.format_soil import (
     format_soil_data,
     write_soil_classdefinition,
 )
-from shapely import geometry as shapely_geometry
 
 
 def _write_category_raster(path: Path) -> None:
