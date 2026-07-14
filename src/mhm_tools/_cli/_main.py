@@ -93,6 +93,7 @@ _COMMAND_GROUPS: List[Tuple[str, str, List[Tuple[str, object]]]] = [
         [
             ("rasterize-map", "mhm_tools._cli._rasterize_map"),
             ("format-soil-data", "mhm_tools._cli._format_soil_data"),
+            ("format-geology-data", "mhm_tools._cli._format_geology_data"),
         ],
     ),
     (

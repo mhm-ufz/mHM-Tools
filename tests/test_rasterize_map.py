@@ -84,9 +84,9 @@ def test_rasterize_map_does_not_prevalidate_geometry(tmp_path: Path):
         ]
     )
     assert not geometry.is_valid
-    gpd.GeoDataFrame(
-        {"map_code": [7]}, geometry=[geometry], crs="EPSG:32632"
-    ).to_file(vector_file, driver="GPKG")
+    gpd.GeoDataFrame({"map_code": [7]}, geometry=[geometry], crs="EPSG:32632").to_file(
+        vector_file, driver="GPKG"
+    )
 
     rasterize_map_data(vector_file, dem_file, output_file, "map_code")
 
@@ -203,7 +203,7 @@ def test_rasterize_map_cli_registration_and_short_options(monkeypatch):
             "dem.tif",
             "-o",
             "soil.tif",
-            "-m",
+            "-b",
             "map_code",
         ],
     )
@@ -217,3 +217,96 @@ def test_rasterize_map_cli_registration_and_short_options(monkeypatch):
     }
     alias_result = runner.invoke(cli, ["data-converter", "rasterize_map", "--help"])
     assert alias_result.exit_code == 0
+
+
+def test_rasterize_map_cli_lookup_options(monkeypatch):
+    """The CLI maps category fields through the requested lookup burn field."""
+    captured = {}
+
+    def fake_rasterize_map_data(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(
+        rasterize_map_module,
+        "rasterize_map_data",
+        fake_rasterize_map_data,
+    )
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "data-converter",
+            "rasterize-map",
+            "-i",
+            "soil.gpkg",
+            "-d",
+            "dem.tif",
+            "-o",
+            "soil.tif",
+            "-l",
+            "lookup.csv",
+            "-m",
+            "map_code",
+            "-b",
+            "SOIL_CLASS",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured == {
+        "input_file": Path("soil.gpkg"),
+        "dem_file": Path("dem.tif"),
+        "output_file": Path("soil.tif"),
+        "mapping_field": "map_code",
+        "lookup_table": Path("lookup.csv"),
+        "lookup_mapping_field": "map_code",
+        "lookup_value_field": "SOIL_CLASS",
+    }
+
+
+@pytest.mark.parametrize(
+    "lookup_options",
+    [
+        ["--lookup-table", "lookup.csv"],
+        ["--mapping-field", "map_code"],
+    ],
+)
+def test_rasterize_map_cli_rejects_incomplete_lookup_options(lookup_options):
+    """Lookup table and category field must always be supplied together."""
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "data-converter",
+            "rasterize-map",
+            "-i",
+            "soil.gpkg",
+            "-d",
+            "dem.tif",
+            "-o",
+            "soil.tif",
+            "-b",
+            "SOIL_CLASS",
+            *lookup_options,
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert (
+        "Options --lookup-table and --mapping-field must be provided together."
+        in result.output
+    )
+
+
+def test_rasterize_map_cli_help_describes_both_modes():
+    """Command help exposes burn, lookup, and mapping options under aliases."""
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        ["data-converter", "rasterize_map", "--help"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "-b, --burn-field" in result.output
+    assert "-l, --lookup-table" in result.output
+    assert "-m, --mapping-field" in result.output

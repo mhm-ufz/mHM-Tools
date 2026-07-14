@@ -12,6 +12,7 @@ Files
    ~mhm_tools.pre.create_mhm_restart_from_setup
    ~mhm_tools.pre.crop_mhm_setup
    ~mhm_tools.pre.fill_nearest
+   ~mhm_tools.pre.format_geology
    ~mhm_tools.pre.format_soil
    ~mhm_tools.pre.landcover_ascii_to_nc
    ~mhm_tools.pre.latlon
@@ -31,6 +32,7 @@ _MODULE_EXPORTS = {
     "create_mhm_restart_from_setup": "create_mhm_restart_from_setup",
     "create_mhm_restart_file": "create_mhm_restart_file",
     "fill_nearest": "fill_nearest",
+    "format_geology": "format_geology",
     "format_soil": "format_soil",
     "latlon": "latlon",
     "rasterize_map": "rasterize_map",
@@ -52,6 +54,11 @@ _ATTR_EXPORTS = {
     "link_folder_tree": ("link_folder_tree", "link_folder_tree"),
     "create_subdomain_masks": ("subdomain_masks", "create_subdomain_masks"),
     "fill_nearest": ("fill_nearest", "fill_dataarray_with_nearest"),
+    "format_geology_data": ("format_geology", "format_geology_data"),
+    "write_geology_classdefinition": (
+        "format_geology",
+        "write_geology_classdefinition",
+    ),
     "format_soil_data": ("format_soil", "format_soil_data"),
     "write_soil_classdefinition": (
         "format_soil",
@@ -75,6 +82,8 @@ __all__ = [
     "create_subdomain_masks",
     "crop_mhm_setup",
     "fill_nearest",
+    "format_geology",
+    "format_geology_data",
     "format_soil",
     "format_soil_data",
     "latlon",
@@ -83,6 +92,7 @@ __all__ = [
     "rasterize_map",
     "rasterize_map_data",
     "subdomain_masks",
+    "write_geology_classdefinition",
     "write_soil_classdefinition",
     "xy_to_latlon",
 ]
