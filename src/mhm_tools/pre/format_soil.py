@@ -626,7 +626,7 @@ def format_soil_data(
                     raster_output,
                     var_name="soil_class",
                     encoding=(
-                        encoding if raster_output.suffix.lower() == ".nc" else None
+                    encoding if raster_output.suffix.lower() == ".nc" else None
                     ),
                 )
         finally:
