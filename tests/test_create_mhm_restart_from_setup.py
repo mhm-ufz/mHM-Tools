@@ -1485,13 +1485,11 @@ def test_crop_mhm_setup_creates_default_latlon_from_cropped_dem(tmp_path, monkey
 
     assert len(calls) == 1
     args, kwargs = calls[0]
-    assert args[:5] == (
-        output_path / "morph" / "dem.nc",
-        1.0,
-        None,
-        output_path / "latlon" / "latlon.nc",
-        None,
-    )
+    assert args == ()
+    assert kwargs["dem_output_file"] == output_path / "morph" / "dem.nc"
+    assert kwargs["resolutions"] is resolutions
+    assert kwargs["latlon_output_file"] == output_path / "latlon" / "latlon.nc"
+    assert kwargs["meteo_header_path"] is None
     assert kwargs["lat_order"] == "decreasing"
 
 

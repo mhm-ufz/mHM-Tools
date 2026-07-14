@@ -153,7 +153,16 @@ def regrid_mask(
                             results[i][j] += mask_ds[mask_key].data[n, m]
                         else:
                             results[i][j] += mask_ds.data[n, m]
-        results /= np.nanmax(results)
+        results = np.where(np.isfinite(results), results, 0.0)
+        max_result = np.max(results) if results.size else 0.0
+        if max_result <= 0:
+            logger.warning("Regridded mask has no positive cells on target grid.")
+            return xr.DataArray(
+                results,
+                dims=[lat_key_target, lon_key_target],
+                coords={lat_key_target: target_lat, lon_key_target: target_lon},
+            )
+        results /= max_result
         mask = results > 1e-3
         results[mask] = 1
         results[~mask] = 0
@@ -346,8 +355,7 @@ def crop_file_with_header(ds_in, file_path, output_path, lonslice, latslice):
 @log_arguments()
 def call_create_latlon(
     dem_output_file,
-    l1_resolution,
-    l11_resolution,
+    resolutions,
     latlon_output_file,
     meteo_header_path,
     crs,
@@ -370,12 +378,10 @@ def call_create_latlon(
     ) as ds_dem:
         l0 = create_header(ds_dem)
     logger.debug(f"L0: {l0}")
-    l1 = l1_resolution
-    l11 = l11_resolution
     logger.debug(latlon_output_file)
     logger.debug(l0)
-    logger.debug(l1)
-    logger.debug(l11)
+    logger.debug(resolutions.l1)
+    logger.debug(resolutions.l11)
     if meteo_header_path is not None:
         meteo_header_path = Path(meteo_header_path)
     logger.debug(meteo_header_path)
@@ -384,9 +390,9 @@ def call_create_latlon(
     create_latlon(
         out_file=latlon_output_file,
         level0=dem_output_file,
-        level1=l1_resolution,
-        level11=l11,
-        level2=meteo_header_path,
+        level1=resolutions.l1,
+        level11=resolutions.l11,
+        level2=resolutions.l2 if resolutions.l2 is not None else meteo_header_path,
         crs=crs,
     )
     logger.info(f"Latlon file written to {latlon_output_file}")
@@ -711,12 +717,11 @@ def crop_mhm_setup(  # noqa: PLR0913
     if resolutions.l1 is not None and latlon_files.are_set():
         logger.info("Creating latlon")
         call_create_latlon(
-            latlon_files.dem_output_file,
-            resolutions.l1,
-            resolutions.l11,
-            latlon_files.latlon_output_file,
-            latlon_files.meteo_header_path,
-            crs,
+            dem_output_file=latlon_files.dem_output_file,
+            resolutions=resolutions,
+            latlon_output_file=latlon_files.latlon_output_file,
+            meteo_header_path=latlon_files.meteo_header_path,
+            crs=crs,
             chunking=chunking,
             lat_order=lat_order,
         )

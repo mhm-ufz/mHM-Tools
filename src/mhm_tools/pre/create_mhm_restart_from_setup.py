@@ -726,7 +726,6 @@ def _crop_tile_meteo_from_original(
         lat_order=lat_order,
         output_suffix=None,
         mask_all=False,
-        mask_var="mask",
     )
 
 
@@ -815,7 +814,6 @@ def _restore_recreated_fill_file_from_original(
         lat_order=lat_order,
         output_suffix=None,
         mask_all=False,
-        mask_var="mask",
     )
     return input_file
 
@@ -1645,7 +1643,6 @@ def _prepare_tile_setup(  # noqa: PLR0913
         lat_order=lat_order,
         output_suffix=output_suffix,
         mask_all=False,
-        mask_var=mask_var,
     )
     logger.info(f"Write mask for tile {tile.name} - {tile_number}")
     _write_tile_mask_section(tile, mask_ds, mask_var)

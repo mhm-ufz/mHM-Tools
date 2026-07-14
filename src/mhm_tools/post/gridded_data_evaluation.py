@@ -467,6 +467,14 @@ def apply_spatial_mask(ds, mask_da, mask_var=None):
         f"Spatial mask has {int(np.count_nonzero(valid_mask.values))} valid cells "
         f"on target grid with shape {valid_mask.shape}."
     )
+    if not np.any(valid_mask.values):
+        msg = (
+            "Spatial mask does not select any valid cells on the target grid. "
+            "Check the mask extent, selected mask variable, and target dataset "
+            "resolution."
+        )
+        with ErrorLogger(logger):
+            raise ValueError(msg)
     logger.debug(
         f"Mask after regrid is all nan: "
         f"{bool(mask_on_ds.isnull().all().compute().item())}; "
@@ -1887,6 +1895,13 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
             msg = "No overlapping time steps after alignment; cannot compare input and reference."
             logger.error(msg)
             raise ValueError(msg)
+        if not np.any(pairwise_valid):
+            msg = (
+                "Input and reference data have no paired finite values after "
+                "time alignment, spatial overlap, regridding, and masking."
+            )
+            with ErrorLogger(logger):
+                raise ValueError(msg)
         try:
             if full_metrics:
                 input_ts_np = np.asarray(input_ts.values)
@@ -1912,6 +1927,13 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
         logger.info("Calculating spearman correlation from seasonalities.")
         input_clim_np = np.asarray(input["clim"].values)
         ref_clim_np = np.asarray(ref["clim"].values)
+        if not np.any(np.isfinite(input_clim_np) & np.isfinite(ref_clim_np)):
+            msg = (
+                "Input and reference climatologies have no paired finite values "
+                "after spatial overlap, regridding, and masking."
+            )
+            with ErrorLogger(logger):
+                raise ValueError(msg)
         spearman, spearman_pval = spearman_spatial_joblib(
             input_clim_np, ref_clim_np, spearman_correlation, ncpus
         )

@@ -30,6 +30,8 @@ def filter_nan(s, o):
 def SPAEF(s, o):
     """Calculate SPAEF and its alpha, beta, and gamma components."""
     s, o = filter_nan(s, o)
+    if len(o) == 0:
+        return np.nan, np.nan, np.nan, np.nan
 
     bins = int(np.around(math.sqrt(len(o)), 0))
     alpha = np.corrcoef(s, o)[0, 1]

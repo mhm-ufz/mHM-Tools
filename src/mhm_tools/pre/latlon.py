@@ -109,9 +109,9 @@ def add_optional_level(
         level_header = get_header_from_file(level)
     level_header = standardize_header(level_header)
     # check L0/level compatibility
-    check_grid_compatibility(level_header, level0_header, "L0", level_name)
+    check_grid_compatibility(level_header, level0_header, level_name, "L0")
     # check L1/level compatibility
-    check_grid_compatibility(level_header, level1_header, "L1", level_name)
+    check_grid_compatibility(level_header, level1_header, level_name, "L1")
     # create grids
     x_level, y_level, lons_level, lats_level = _create_grid(level_header, crs, dtype)
     coords[f"yc_{level_name}"] = y_level
