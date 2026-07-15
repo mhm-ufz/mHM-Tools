@@ -20,6 +20,12 @@ def add_args(parser: ArgumentParser) -> None:
         help="Path to the categorical soil raster.",
     )
     required.add_argument(
+        "-d",
+        "--dem-file",
+        required=True,
+        help="DEM providing the output grid and coordinate reference system.",
+    )
+    required.add_argument(
         "-o",
         "--output-path",
         required=True,
@@ -47,6 +53,16 @@ def add_args(parser: ArgumentParser) -> None:
         default="nc",
         help="Output file type. Default: nc.",
     )
+    optional.add_argument(
+        "-s",
+        "--input-crs",
+        help="CRS to assign when the input raster has no CRS metadata.",
+    )
+    optional.add_argument(
+        "-r",
+        "--dem-crs",
+        help="CRS to assign when the DEM has no CRS metadata.",
+    )
 
 
 def run(args: Namespace) -> None:
@@ -55,8 +71,11 @@ def run(args: Namespace) -> None:
 
     format_soil_data(
         input_file=Path(args.input_file),
+        dem_file=Path(args.dem_file),
         output_path=Path(args.output_path),
         lookup_table=Path(args.lookup_table),
         mapping_field=args.mapping_field,
         output_type=args.output_type,
+        input_crs=args.input_crs,
+        dem_crs=args.dem_crs,
     )

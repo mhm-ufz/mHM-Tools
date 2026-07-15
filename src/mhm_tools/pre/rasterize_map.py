@@ -6,7 +6,16 @@ import numpy as np
 import pandas as pd
 
 from mhm_tools.common.constants import NO_DATA
+from mhm_tools.common.file_handler import (
+    get_grid,
+    get_raster_data,
+    set_grid,
+    write_xarray_to_file,
+)
 from mhm_tools.common.rasterize import rasterize_vector
+
+_OUTPUT_SUFFIXES = {".asc", ".nc", ".tif", ".tiff"}
+_OUTPUT_VARIABLE = "rasterized_map"
 
 
 def _normalise_field_name(field_name: object) -> str:
@@ -149,6 +158,42 @@ def _map_vector_values(frame, mapping_field, lookup):
     return np.asarray(targets, dtype=np.int32)
 
 
+def _assign_vector_crs(frame, input_crs, input_path):
+    """Assign a missing vector CRS or reject an explicit conflict."""
+    from pyproj import CRS
+
+    explicit = CRS.from_user_input(input_crs) if input_crs is not None else None
+    if frame.crs is None:
+        if explicit is None:
+            msg = f"Input vector has no coordinate reference system: {input_path}"
+            raise ValueError(msg)
+        return frame.set_crs(explicit)
+    if explicit is not None and frame.crs != explicit:
+        msg = f"Explicit CRS {explicit} conflicts with vector CRS {frame.crs}."
+        raise ValueError(msg)
+    return frame
+
+
+def _validate_output_collisions(output_path: Path, sources) -> None:
+    """Prevent raster or ASCII sidecar outputs from replacing inputs."""
+    protected = {path.resolve() for path in sources}
+    output_targets = {output_path.resolve()}
+    if output_path.suffix.lower() == ".asc":
+        output_targets.update(
+            output_path.with_suffix(suffix).resolve() for suffix in (".prj", ".PRJ")
+        )
+        for source in sources:
+            if source.suffix.lower() in {".asc", ".shp"}:
+                protected.update(
+                    source.with_suffix(suffix).resolve() for suffix in (".prj", ".PRJ")
+                )
+    collisions = output_targets & protected
+    if collisions:
+        paths = ", ".join(str(path) for path in sorted(collisions))
+        msg = f"Output file or sidecar must differ from all input files: {paths}"
+        raise ValueError(msg)
+
+
 def rasterize_map_data(
     input_file,
     dem_file,
@@ -158,6 +203,8 @@ def rasterize_map_data(
     lookup_table=None,
     lookup_mapping_field=None,
     lookup_value_field="SOIL_CLASS",
+    input_crs=None,
+    dem_crs=None,
 ) -> Path:
     """Rasterize a vector attribute using a DEM as the exact target grid.
 
@@ -168,7 +215,8 @@ def rasterize_map_data(
     dem_file : path-like
         DEM providing the target CRS, transform, extent, and dimensions.
     output_file : path-like
-        Destination GeoTIFF file.
+        Destination ASCII, NetCDF, or GeoTIFF file. The suffix selects the
+        output format.
     mapping_field : str
         Vector attribute to burn directly, or to map through ``lookup_table``.
     lookup_table : path-like, optional
@@ -177,18 +225,22 @@ def rasterize_map_data(
         Lookup category column. Defaults to ``mapping_field``.
     lookup_value_field : str, default "SOIL_CLASS"
         Lookup column containing finite integral int32 burn values.
+    input_crs : str or CRS, optional
+        CRS to assign when the vector has no embedded CRS metadata.
+    dem_crs : str or CRS, optional
+        CRS to assign when the DEM has no embedded or sidecar CRS metadata.
 
     Returns
     -------
     pathlib.Path
-        Path to the created GeoTIFF.
+        Path to the created raster.
     """
     import geopandas as gpd
-    import rasterio
 
     input_path = Path(input_file)
     dem_path = Path(dem_file)
     output_path = Path(output_file)
+    output_suffix = output_path.suffix.lower()
 
     if not input_path.is_file():
         msg = f"Input vector file does not exist: {input_path}"
@@ -196,88 +248,106 @@ def rasterize_map_data(
     if not dem_path.is_file():
         msg = f"DEM file does not exist: {dem_path}"
         raise FileNotFoundError(msg)
-    if output_path.suffix.lower() not in {".tif", ".tiff"}:
-        msg = f"Output file must be a GeoTIFF: {output_path}"
+    if output_suffix not in _OUTPUT_SUFFIXES:
+        msg = "Output file must use an .asc, .nc, .tif, or .tiff suffix."
         raise ValueError(msg)
     if not isinstance(mapping_field, str) or not mapping_field.strip():
         msg = "Mapping field must be a non-empty column name."
         raise ValueError(msg)
-    if output_path.resolve() in {input_path.resolve(), dem_path.resolve()}:
-        msg = "Output file must differ from the input vector and DEM files."
-        raise ValueError(msg)
-
     lookup_path = None
     if lookup_table is not None:
         lookup_path = Path(lookup_table)
         if not lookup_path.is_file():
             msg = f"Lookup table does not exist: {lookup_path}"
             raise FileNotFoundError(msg)
-        if output_path.resolve() == lookup_path.resolve():
-            msg = "Output file must differ from the lookup table."
-            raise ValueError(msg)
     elif lookup_mapping_field is not None or lookup_value_field != "SOIL_CLASS":
         msg = "Lookup field options require lookup_table."
         raise ValueError(msg)
 
-    with rasterio.open(dem_path) as dem:
-        if dem.count < 1 or dem.width < 1 or dem.height < 1:
+    sources = [input_path, dem_path]
+    if lookup_path is not None:
+        sources.append(lookup_path)
+    _validate_output_collisions(output_path, sources)
+
+    reference = get_raster_data(dem_path, crs=dem_crs)
+    try:
+        y_dim, x_dim = reference.rio.y_dim, reference.rio.x_dim
+        dem = reference.transpose(y_dim, x_dim).rio.set_spatial_dims(
+            x_dim=x_dim, y_dim=y_dim
+        )
+        if dem.rio.width < 1 or dem.rio.height < 1:
             msg = f"DEM does not define a non-empty raster grid: {dem_path}"
             raise ValueError(msg)
-        if dem.crs is None:
+        if dem.rio.crs is None:
             msg = f"DEM has no coordinate reference system: {dem_path}"
             raise ValueError(msg)
-        transform_values = np.asarray(tuple(dem.transform)[:6], dtype=float)
-        if not np.all(np.isfinite(transform_values)) or dem.transform.is_degenerate:
+        transform = dem.rio.transform()
+        transform_values = np.asarray(tuple(transform)[:6], dtype=float)
+        if not np.all(np.isfinite(transform_values)) or transform.is_degenerate:
             msg = f"DEM has an invalid affine transform: {dem_path}"
             raise ValueError(msg)
-        if not np.all(np.isfinite(tuple(dem.bounds))):
+        if not np.all(np.isfinite(dem.rio.bounds())):
             msg = f"DEM has invalid spatial bounds: {dem_path}"
             raise ValueError(msg)
 
-        out_shape = (dem.height, dem.width)
-        transform = dem.transform
-        target_crs = dem.crs
+        out_shape = (dem.rio.height, dem.rio.width)
+        target_crs = dem.rio.crs
+        grid = get_grid(dem.to_dataset(name="_dem"), "_dem")
 
-    frame = gpd.read_file(input_path)
-    if frame.crs is None:
-        msg = f"Input vector has no coordinate reference system: {input_path}"
-        raise ValueError(msg)
-    if frame.crs != target_crs:
-        frame = frame.to_crs(target_crs)
+        frame = _assign_vector_crs(gpd.read_file(input_path), input_crs, input_path)
+        if frame.crs != target_crs:
+            frame = frame.to_crs(target_crs)
 
-    vector_field = _resolve_field(frame.columns, mapping_field, "input vector")
-    output_field = vector_field
-    if lookup_path is not None:
-        lookup_mapping_field = lookup_mapping_field or mapping_field
-        lookup = _read_lookup_mapping(
-            lookup_path, lookup_mapping_field, lookup_value_field
+        vector_field = _resolve_field(frame.columns, mapping_field, "input vector")
+        output_field = vector_field
+        if lookup_path is not None:
+            lookup_mapping_field = lookup_mapping_field or mapping_field
+            lookup = _read_lookup_mapping(
+                lookup_path, lookup_mapping_field, lookup_value_field
+            )
+            burn_field = "__mhm_tools_raster_value__"
+            while burn_field in frame.columns:
+                burn_field = f"_{burn_field}"
+            frame = frame.copy()
+            frame[burn_field] = _map_vector_values(frame, vector_field, lookup)
+            output_field = burn_field
+
+        data = rasterize_vector(frame, output_field, out_shape, transform)
+        description = (
+            lookup_value_field if lookup_path is not None else str(vector_field)
         )
-        burn_field = "__mhm_tools_raster_value__"
-        while burn_field in frame.columns:
-            burn_field = f"_{burn_field}"
-        frame = frame.copy()
-        frame[burn_field] = _map_vector_values(frame, vector_field, lookup)
-        output_field = burn_field
-
-    data = rasterize_vector(frame, output_field, out_shape, transform)
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with rasterio.open(
-        output_path,
-        "w",
-        driver="GTiff",
-        height=out_shape[0],
-        width=out_shape[1],
-        count=1,
-        dtype="int32",
-        crs=target_crs,
-        transform=transform,
-        nodata=int(NO_DATA),
-        compress="deflate",
-    ) as output:
-        output.write(data, 1)
-        output.set_band_description(
-            1, lookup_value_field if lookup_path is not None else str(vector_field)
+        output = set_grid(
+            data,
+            grid,
+            _OUTPUT_VARIABLE,
+            data_attrs={
+                "long_name": description,
+                "nodata_value": int(NO_DATA),
+            },
         )
+        encoding = {
+            _OUTPUT_VARIABLE: {
+                "zlib": True,
+                "complevel": 4,
+                "shuffle": True,
+                "_FillValue": int(NO_DATA),
+                "dtype": "int32",
+            }
+        }
+        if output_suffix in {".tif", ".tiff"}:
+            raster = output[_OUTPUT_VARIABLE].rio.write_crs(target_crs)
+            raster = raster.rio.write_nodata(int(NO_DATA), encoded=True)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            raster.rio.to_raster(output_path, dtype="int32", compress="deflate")
+        else:
+            write_xarray_to_file(
+                output,
+                output_path,
+                var_name=_OUTPUT_VARIABLE,
+                encoding=encoding if output_suffix == ".nc" else None,
+                crs=target_crs,
+            )
+    finally:
+        reference.close()
 
     return output_path

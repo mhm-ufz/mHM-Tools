@@ -14,12 +14,12 @@ import xarray as xr
 
 from mhm_tools.common.constants import NO_DATA
 from mhm_tools.common.file_handler import (
+    align_raster_to_reference,
     get_grid,
-    get_xarray_ds_from_file,
+    get_raster_data,
     set_grid,
     write_xarray_to_file,
 )
-from mhm_tools.common.xarray_utils import get_single_data_var
 
 logger = logging.getLogger(__name__)
 
@@ -199,7 +199,6 @@ def _classdefinition_rows(table) -> list:
     geology_class_field = _required_field(field_lookup, "GEOLOGY_CLASS")
     geo_class_field = _required_field(field_lookup, "GEO_CLASS")
     karstic_field = _required_field(field_lookup, "KARSTIC")
-    parameter_value_field = _required_field(field_lookup, "PARAMETER_VALUE")
 
     rows = []
     for row_number, (_, row) in enumerate(table.iterrows(), start=2):
@@ -213,9 +212,6 @@ def _classdefinition_rows(table) -> list:
                 ),
                 "karstic": _required_bool_int(
                     row[karstic_field], row_number, karstic_field
-                ),
-                "parameter_value": _required_int(
-                    row[parameter_value_field], row_number, parameter_value_field
                 ),
             }
         )
@@ -358,13 +354,18 @@ def _reclassify(data: xr.DataArray, mapping: dict) -> np.ndarray:
 
 def format_geology_data(
     input_file: PathLike,
+    dem_file: PathLike,
     output_path: PathLike,
     lookup_table: PathLike,
     mapping_field: str,
     output_type: str = "nc",
+    *,
+    input_crs: str | None = None,
+    dem_crs: str | None = None,
 ) -> Path:
     """Map a categorical raster and write its mHM geology definition."""
     input_file = Path(input_file)
+    dem_file = Path(dem_file)
     output_path = Path(output_path)
     lookup_table = Path(lookup_table)
     output_type = str(output_type).lower().lstrip(".")
@@ -380,6 +381,15 @@ def format_geology_data(
             f"{', '.join(sorted(_RASTER_SUFFIXES))}."
         )
         raise ValueError(msg)
+    if not dem_file.is_file():
+        msg = f"DEM raster does not exist: {dem_file}"
+        raise ValueError(msg)
+    if dem_file.suffix.lower() not in _RASTER_SUFFIXES:
+        msg = (
+            "DEM must be a raster with one of these suffixes: "
+            f"{', '.join(sorted(_RASTER_SUFFIXES))}."
+        )
+        raise ValueError(msg)
     if not lookup_table.is_file():
         msg = f"Lookup table does not exist: {lookup_table}"
         raise ValueError(msg)
@@ -389,10 +399,15 @@ def format_geology_data(
     if output_type not in _OUTPUT_TYPES:
         msg = "output_type must be either 'nc' or 'asc'."
         raise ValueError(msg)
-    if raster_output.resolve() in {input_file.resolve(), lookup_table.resolve()}:
+    protected_inputs = {
+        input_file.resolve(),
+        dem_file.resolve(),
+        lookup_table.resolve(),
+    }
+    if raster_output.resolve() in protected_inputs:
         msg = f"Raster output must differ from all input files: {raster_output}"
         raise ValueError(msg)
-    if definition_output.resolve() in {input_file.resolve(), lookup_table.resolve()}:
+    if definition_output.resolve() in protected_inputs:
         msg = (
             "Classdefinition output must differ from all input files: "
             f"{definition_output}"
@@ -403,48 +418,43 @@ def format_geology_data(
     mapping = _lookup_mapping(table, lookup_table, mapping_field)
     definition_text = _classdefinition_text(table)
 
-    dataset = get_xarray_ds_from_file(input_file)
+    source = get_raster_data(input_file, crs=input_crs)
     try:
-        variable = get_single_data_var(dataset)
-        if variable is None:
-            msg = "Input raster must contain exactly one data variable."
-            raise ValueError(msg)
-        data = dataset[variable]
-        if data.ndim != 2:
-            msg = (
-                f"Input raster variable {variable!r} must be two-dimensional; "
-                f"found dimensions {data.dims}."
-            )
-            raise ValueError(msg)
-
-        geology_classes = _reclassify(data, mapping)
-        attrs = {
-            "long_name": "mHM geology class",
-            "nodata_value": int(_NODATA),
-        }
-        output_dataset = set_grid(
-            geology_classes,
-            get_grid(dataset, variable),
-            "geology_class",
-            data_attrs=attrs,
-        )
-        encoding = {
-            "geology_class": {
-                "zlib": True,
-                "complevel": 4,
-                "shuffle": True,
-                "_FillValue": int(_NODATA),
-                "dtype": "int32",
+        reference = get_raster_data(dem_file, crs=dem_crs)
+        try:
+            aligned = align_raster_to_reference(source, reference, nodata=int(_NODATA))
+            geology_classes = _reclassify(aligned, mapping)
+            attrs = {
+                "long_name": "mHM geology class",
+                "nodata_value": int(_NODATA),
             }
-        }
-        write_xarray_to_file(
-            output_dataset,
-            raster_output,
-            var_name="geology_class",
-            encoding=encoding if output_type == "nc" else None,
-        )
+            reference_dataset = reference.to_dataset(name="_dem")
+            output_dataset = set_grid(
+                geology_classes,
+                get_grid(reference_dataset, "_dem"),
+                "geology_class",
+                data_attrs=attrs,
+            )
+            encoding = {
+                "geology_class": {
+                    "zlib": True,
+                    "complevel": 4,
+                    "shuffle": True,
+                    "_FillValue": int(_NODATA),
+                    "dtype": "int32",
+                }
+            }
+            write_xarray_to_file(
+                output_dataset,
+                raster_output,
+                var_name="geology_class",
+                encoding=encoding if output_type == "nc" else None,
+                crs=reference.rio.crs,
+            )
+        finally:
+            reference.close()
     finally:
-        dataset.close()
+        source.close()
 
     if not raster_output.is_file():
         msg = f"Geology-class raster was not created: {raster_output}"

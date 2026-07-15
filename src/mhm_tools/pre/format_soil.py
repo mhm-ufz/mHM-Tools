@@ -14,18 +14,17 @@ import xarray as xr
 
 from mhm_tools.common.constants import NO_DATA
 from mhm_tools.common.file_handler import (
+    align_raster_to_reference,
     get_grid,
-    get_xarray_ds_from_file,
+    get_raster_data,
     set_grid,
     write_xarray_to_file,
 )
-from mhm_tools.common.xarray_utils import get_single_data_var
 
 logger = logging.getLogger(__name__)
 
 PathLike = Union[str, Path]
 _RASTER_SUFFIXES = {".asc", ".nc", ".tif", ".tiff"}
-_OUTPUT_SUFFIXES = {".asc", ".nc", ".tif", ".tiff"}
 _OUTPUT_TYPES = {"asc", "nc"}
 _NODATA = np.int32(NO_DATA)
 _CLASSDEFINITION_HEADER = (
@@ -461,14 +460,14 @@ def _reclassify(data: xr.DataArray, mapping: dict) -> np.ndarray:
 
 def format_soil_data(
     input_file: PathLike,
+    dem_file: PathLike,
     output_path: PathLike,
     lookup_table: PathLike,
     mapping_field: str,
     output_type: str = "nc",
     *,
-    output_file: PathLike = None,
-    classdefinition_file: PathLike = None,
-    reference_file: PathLike = None,
+    input_crs: str | None = None,
+    dem_crs: str | None = None,
 ) -> Path:
     """Map a categorical raster and write its mHM soil definition.
 
@@ -476,6 +475,8 @@ def format_soil_data(
     ----------
     input_file : path-like
         Single-variable, two-dimensional ASCII, NetCDF, or GeoTIFF raster.
+    dem_file : path-like
+        ASCII, NetCDF, or GeoTIFF DEM providing the exact output grid.
     output_path : path-like
         Directory in which ``soil_class.nc`` or ``soil_class.asc`` is written.
     lookup_table : path-like
@@ -485,16 +486,8 @@ def format_soil_data(
     output_type : {"nc", "asc"}, default "nc"
         Default output raster format. The CLI restricts this to NetCDF or
         ASCII.
-    output_file : path-like, optional
-        Explicit raster destination. Its suffix may be ``.nc``, ``.asc``,
-        ``.tif``, or ``.tiff``. By default the raster is named
-        ``soil_class.<output_type>`` below ``output_path``.
-    classdefinition_file : path-like, optional
-        Explicit classdefinition destination. By default
-        ``soil_classdefinition.txt`` is written below ``output_path``.
-    reference_file : path-like, optional
-        Raster whose exact CRS, extent, transform, and dimensions are used.
-        Input categories are aligned with nearest-neighbour resampling.
+    input_crs, dem_crs : str, optional
+        CRS to assign only when the corresponding raster has no CRS metadata.
 
     Returns
     -------
@@ -502,20 +495,12 @@ def format_soil_data(
         Path to the created soil-class raster.
     """
     input_file = Path(input_file)
+    dem_file = Path(dem_file)
     lookup_table = Path(lookup_table)
     output_path = Path(output_path)
     output_type = str(output_type).lower().lstrip(".")
-    raster_output = (
-        output_path / f"soil_class.{output_type}"
-        if output_file is None
-        else Path(output_file)
-    )
-    definition_output = (
-        output_path / "soil_classdefinition.txt"
-        if classdefinition_file is None
-        else Path(classdefinition_file)
-    )
-    reference_path = None if reference_file is None else Path(reference_file)
+    raster_output = output_path / f"soil_class.{output_type}"
+    definition_output = output_path / "soil_classdefinition.txt"
 
     if not input_file.is_file():
         msg = f"Input raster does not exist: {input_file}"
@@ -526,28 +511,30 @@ def format_soil_data(
             f"{', '.join(sorted(_RASTER_SUFFIXES))}."
         )
         raise ValueError(msg)
+    if not dem_file.is_file():
+        msg = f"DEM raster does not exist: {dem_file}"
+        raise ValueError(msg)
+    if dem_file.suffix.lower() not in _RASTER_SUFFIXES:
+        msg = (
+            "DEM must be a raster with one of these suffixes: "
+            f"{', '.join(sorted(_RASTER_SUFFIXES))}."
+        )
+        raise ValueError(msg)
     if not lookup_table.is_file():
         msg = f"Lookup table does not exist: {lookup_table}"
         raise ValueError(msg)
     if output_path.exists() and not output_path.is_dir():
         msg = f"Output path must be a directory: {output_path}"
         raise ValueError(msg)
-    if output_file is None and output_type not in _OUTPUT_TYPES:
+    if output_type not in _OUTPUT_TYPES:
         msg = "output_type must be either 'nc' or 'asc'."
         raise ValueError(msg)
-    if raster_output.suffix.lower() not in _OUTPUT_SUFFIXES:
-        msg = (
-            "Output file must have one of these suffixes: "
-            f"{', '.join(sorted(_OUTPUT_SUFFIXES))}."
-        )
-        raise ValueError(msg)
-    if reference_path is not None and not reference_path.is_file():
-        msg = f"Reference raster does not exist: {reference_path}"
-        raise ValueError(msg)
 
-    protected_inputs = {input_file.resolve(), lookup_table.resolve()}
-    if reference_path is not None:
-        protected_inputs.add(reference_path.resolve())
+    protected_inputs = {
+        input_file.resolve(),
+        dem_file.resolve(),
+        lookup_table.resolve(),
+    }
     for label, path in (
         ("Raster output", raster_output),
         ("Classdefinition output", definition_output),
@@ -563,74 +550,43 @@ def format_soil_data(
     mapping = _lookup_mapping(table, lookup_table, mapping_field)
     definition_text = _soil_classdefinition_text(table)
 
-    from tempfile import TemporaryDirectory
-
-    from mhm_tools.common.rasterize import (
-        align_raster_to_reference,
-        write_array_to_reference_geotiff,
-    )
-
-    with TemporaryDirectory(prefix="mhm_tools_soil_") as temporary_directory:
-        raster_input = input_file
-        if reference_path is not None:
-            raster_input = Path(temporary_directory) / "aligned_categories.tif"
-            align_raster_to_reference(input_file, reference_path, raster_input)
-
-        dataset = get_xarray_ds_from_file(raster_input)
+    source = get_raster_data(input_file, crs=input_crs)
+    try:
+        reference = get_raster_data(dem_file, crs=dem_crs)
         try:
-            variable = get_single_data_var(dataset)
-            if variable is None:
-                msg = "Input raster must contain exactly one data variable."
-                raise ValueError(msg)
-            data = dataset[variable]
-            if data.ndim != 2:
-                msg = (
-                    f"Input raster variable {variable!r} must be two-dimensional; "
-                    f"found dimensions {data.dims}."
-                )
-                raise ValueError(msg)
-
-            soil_classes = _reclassify(data, mapping)
-            if raster_output.suffix.lower() in {".tif", ".tiff"}:
-                geotiff_reference = (
-                    input_file if reference_path is None else reference_path
-                )
-                write_array_to_reference_geotiff(
-                    soil_classes,
-                    geotiff_reference,
-                    raster_output,
-                    nodata=int(_NODATA),
-                )
-            else:
-                attrs = {
-                    "long_name": "mHM soil class",
-                    "nodata_value": int(_NODATA),
+            aligned = align_raster_to_reference(source, reference, nodata=int(_NODATA))
+            soil_classes = _reclassify(aligned, mapping)
+            attrs = {
+                "long_name": "mHM soil class",
+                "nodata_value": int(_NODATA),
+            }
+            reference_dataset = reference.to_dataset(name="_dem")
+            output_dataset = set_grid(
+                soil_classes,
+                get_grid(reference_dataset, "_dem"),
+                "soil_class",
+                data_attrs=attrs,
+            )
+            encoding = {
+                "soil_class": {
+                    "zlib": True,
+                    "complevel": 4,
+                    "shuffle": True,
+                    "_FillValue": int(_NODATA),
+                    "dtype": "int32",
                 }
-                output_dataset = set_grid(
-                    soil_classes,
-                    get_grid(dataset, variable),
-                    "soil_class",
-                    data_attrs=attrs,
-                )
-                encoding = {
-                    "soil_class": {
-                        "zlib": True,
-                        "complevel": 4,
-                        "shuffle": True,
-                        "_FillValue": int(_NODATA),
-                        "dtype": "int32",
-                    }
-                }
-                write_xarray_to_file(
-                    output_dataset,
-                    raster_output,
-                    var_name="soil_class",
-                    encoding=(
-                        encoding if raster_output.suffix.lower() == ".nc" else None
-                    ),
-                )
+            }
+            write_xarray_to_file(
+                output_dataset,
+                raster_output,
+                var_name="soil_class",
+                encoding=encoding if output_type == "nc" else None,
+                crs=reference.rio.crs,
+            )
         finally:
-            dataset.close()
+            reference.close()
+    finally:
+        source.close()
 
     if not raster_output.is_file():
         msg = f"Soil-class raster was not created: {raster_output}"

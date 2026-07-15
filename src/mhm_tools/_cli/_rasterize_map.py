@@ -31,7 +31,7 @@ def add_args(parser: ArgumentParser) -> None:
         "-o",
         "--output-file",
         required=True,
-        help="Path to the output GeoTIFF.",
+        help="Output raster path; .asc, .nc, .tif, or .tiff selects the file format.",
     )
     required.add_argument(
         "-b",
@@ -55,6 +55,16 @@ def add_args(parser: ArgumentParser) -> None:
             "Required with --lookup-table."
         ),
     )
+    optional.add_argument(
+        "-s",
+        "--input-crs",
+        help="CRS to assign when the input vector has no CRS metadata.",
+    )
+    optional.add_argument(
+        "-r",
+        "--dem-crs",
+        help="CRS to assign when the reference DEM has no CRS metadata.",
+    )
 
 
 def run(args: Namespace) -> None:
@@ -77,4 +87,8 @@ def run(args: Namespace) -> None:
             lookup_mapping_field=args.mapping_field,
             lookup_value_field=args.burn_field,
         )
+    if args.input_crs is not None:
+        kwargs["input_crs"] = args.input_crs
+    if args.dem_crs is not None:
+        kwargs["dem_crs"] = args.dem_crs
     rasterize_map_data(**kwargs)

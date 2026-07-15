@@ -12,12 +12,13 @@ from shapely import geometry as shapely_geometry
 
 from mhm_tools import pre
 from mhm_tools._cli._main import cli
-from mhm_tools.common.file_handler import get_xarray_ds_from_file
-from mhm_tools.pre import format_soil as format_soil_module
-from mhm_tools.pre.format_soil import (
-    format_soil_data,
-    write_soil_classdefinition,
+from mhm_tools.common.file_handler import (
+    get_raster_data,
+    get_xarray_ds_from_file,
+    write_xarray_to_file,
 )
+from mhm_tools.pre import format_soil as format_soil_module
+from mhm_tools.pre.format_soil import format_soil_data, write_soil_classdefinition
 
 
 def _write_category_raster(path: Path) -> None:
@@ -38,6 +39,31 @@ def _write_category_raster(path: Path) -> None:
         nodata=-9999,
     ) as dataset:
         dataset.write(values, 1)
+
+
+def _write_dem(path: Path, *, width: int = 3, height: int = 2, cellsize=10) -> None:
+    """Write a DEM grid used as the formatter reference."""
+    with rasterio.open(
+        path,
+        "w",
+        driver="GTiff",
+        width=width,
+        height=height,
+        count=1,
+        dtype="float32",
+        crs="EPSG:32632",
+        transform=rasterio.transform.from_origin(100.0, 220.0, cellsize, cellsize),
+        nodata=-9999,
+    ) as dataset:
+        dataset.write(np.ones((height, width), dtype=np.float32), 1)
+
+
+def _convert_raster(source: Path, output: Path) -> None:
+    data = get_raster_data(source)
+    try:
+        write_xarray_to_file(data, output, var_name=data.name, crs=data.rio.crs)
+    finally:
+        data.close()
 
 
 def _write_lookup(path: Path) -> None:
@@ -63,8 +89,10 @@ def _write_lookup(path: Path) -> None:
 def test_format_soil_data_writes_nc_and_asc(tmp_path: Path):
     """Lookup fields are normalized and the source grid and nodata are kept."""
     input_file = tmp_path / "soil_raw.tif"
+    dem_file = tmp_path / "dem.tif"
     lookup_file = tmp_path / "soil_lookup.gpkg"
     _write_category_raster(input_file)
+    _write_dem(dem_file)
     _write_lookup(lookup_file)
     expected = np.array(
         [[1, 2, -9999], [3, 1, -9999]],
@@ -73,6 +101,7 @@ def test_format_soil_data_writes_nc_and_asc(tmp_path: Path):
 
     nc_file = format_soil_data(
         input_file,
+        dem_file,
         tmp_path / "nc",
         lookup_file,
         "map code",
@@ -100,12 +129,14 @@ def test_format_soil_data_writes_nc_and_asc(tmp_path: Path):
 
     asc_file = format_soil_data(
         input_file,
+        dem_file,
         tmp_path / "asc",
         lookup_file,
         "map code",
         output_type="asc",
     )
     assert asc_file == tmp_path / "asc" / "soil_class.asc"
+    assert asc_file.with_suffix(".prj").is_file()
     assert (tmp_path / "asc" / "soil_classdefinition.txt").is_file()
     asc_dataset = get_xarray_ds_from_file(asc_file)
     try:
@@ -114,6 +145,40 @@ def test_format_soil_data_writes_nc_and_asc(tmp_path: Path):
         np.testing.assert_allclose(asc_dataset["lat"].values, [215, 205])
     finally:
         asc_dataset.close()
+
+
+@pytest.mark.parametrize(
+    ("input_suffix", "dem_suffix"),
+    [(".asc", ".nc"), (".nc", ".asc")],
+)
+def test_format_soil_data_accepts_mixed_raster_formats(
+    tmp_path: Path, input_suffix: str, dem_suffix: str
+):
+    """Mixed supported raster formats use the DEM grid and CRS."""
+    input_tif = tmp_path / "soil_raw.tif"
+    dem_tif = tmp_path / "dem.tif"
+    input_file = tmp_path / f"soil_raw{input_suffix}"
+    dem_file = tmp_path / f"dem{dem_suffix}"
+    lookup_file = tmp_path / "soil_lookup.gpkg"
+    _write_category_raster(input_tif)
+    _write_dem(dem_tif)
+    _convert_raster(input_tif, input_file)
+    _convert_raster(dem_tif, dem_file)
+    _write_lookup(lookup_file)
+
+    output = format_soil_data(
+        input_file,
+        dem_file,
+        tmp_path / "output",
+        lookup_file,
+        "map code",
+    )
+
+    with xr.open_dataset(output, decode_cf=False) as dataset:
+        np.testing.assert_array_equal(
+            dataset["soil_class"].values,
+            [[1, 2, -9999], [3, 1, -9999]],
+        )
 
 
 def test_format_soil_data_requires_at_least_one_mapping(tmp_path: Path):
@@ -141,6 +206,7 @@ def test_format_soil_data_requires_at_least_one_mapping(tmp_path: Path):
 
     with pytest.raises(ValueError, match="No valid raster category matched"):
         format_soil_data(
+            input_file,
             input_file,
             tmp_path / "output",
             lookup_file,
@@ -172,6 +238,8 @@ def test_format_soil_cli_short_options_and_pre_exports(monkeypatch):
             "format-soil-data",
             "-i",
             "soil.tif",
+            "-d",
+            "dem.nc",
             "-o",
             "output",
             "-l",
@@ -180,16 +248,23 @@ def test_format_soil_cli_short_options_and_pre_exports(monkeypatch):
             "source",
             "-t",
             "asc",
+            "-s",
+            "EPSG:32632",
+            "-r",
+            "EPSG:32633",
         ],
     )
 
     assert result.exit_code == 0, result.output
     assert captured == {
         "input_file": Path("soil.tif"),
+        "dem_file": Path("dem.nc"),
         "output_path": Path("output"),
         "lookup_table": Path("lookup.gpkg"),
         "mapping_field": "source",
         "output_type": "asc",
+        "input_crs": "EPSG:32632",
+        "dem_crs": "EPSG:32633",
     }
     alias_result = runner.invoke(cli, ["data-converter", "format_soil_data", "--help"])
     assert alias_result.exit_code == 0
@@ -268,15 +343,15 @@ def test_write_soil_classdefinition_wide_exact_output(tmp_path: Path):
     )
 
 
-def test_format_soil_data_explicit_tif_uses_reference_grid(tmp_path: Path):
-    """Python callers can request an exact DEM-grid GeoTIFF and custom definition."""
+def test_format_soil_data_uses_exact_dem_grid(tmp_path: Path):
+    """Input categories are aligned to the exact DEM grid before mapping."""
     input_file = tmp_path / "soil_raw.tif"
     lookup_file = tmp_path / "soil_lookup.gpkg"
-    reference_file = tmp_path / "dem.tif"
+    dem_file = tmp_path / "dem.tif"
     _write_category_raster(input_file)
     _write_lookup(lookup_file)
     with rasterio.open(
-        reference_file,
+        dem_file,
         "w",
         driver="GTiff",
         width=6,
@@ -289,20 +364,16 @@ def test_format_soil_data_explicit_tif_uses_reference_grid(tmp_path: Path):
     ) as dataset:
         dataset.write(np.ones((4, 6), dtype=np.float32), 1)
 
-    output_file = tmp_path / "geometry" / "3_soil.tif"
-    definition_file = tmp_path / "static" / "soil_classdefinition.txt"
     result = format_soil_data(
         input_file,
-        tmp_path / "unused-defaults",
+        dem_file,
+        tmp_path / "output",
         lookup_file,
         "map code",
-        output_file=output_file,
-        classdefinition_file=definition_file,
-        reference_file=reference_file,
     )
 
-    assert result == output_file
-    assert definition_file.is_file()
+    assert result == tmp_path / "output" / "soil_class.nc"
+    assert (tmp_path / "output" / "soil_classdefinition.txt").is_file()
     expected = np.repeat(
         np.repeat(
             np.array([[1, 2, -9999], [3, 1, -9999]], dtype=np.int32),
@@ -312,15 +383,16 @@ def test_format_soil_data_explicit_tif_uses_reference_grid(tmp_path: Path):
         2,
         axis=1,
     )
-    with rasterio.open(reference_file) as reference, rasterio.open(
-        output_file
-    ) as output:
-        assert output.crs == reference.crs
-        assert output.transform == reference.transform
-        assert (output.width, output.height) == (reference.width, reference.height)
-        assert output.dtypes == ("int32",)
-        assert output.nodata == -9999
-        np.testing.assert_array_equal(output.read(1), expected)
+    output = get_raster_data(result)
+    reference = get_raster_data(dem_file)
+    try:
+        assert output.rio.crs == reference.rio.crs
+        assert output.rio.transform() == reference.rio.transform()
+        assert output.shape == reference.shape
+        np.testing.assert_array_equal(output.fillna(-9999).values, expected)
+    finally:
+        output.close()
+        reference.close()
 
 
 def test_definition_is_validated_before_raster_is_written(tmp_path: Path):
@@ -337,7 +409,7 @@ def test_definition_is_validated_before_raster_is_written(tmp_path: Path):
     output_path = tmp_path / "output"
 
     with pytest.raises(ValueError, match="row-per-horizon layout"):
-        format_soil_data(input_file, output_path, lookup_file, "source")
+        format_soil_data(input_file, input_file, output_path, lookup_file, "source")
 
     assert not (output_path / "soil_class.nc").exists()
     assert not (output_path / "soil_classdefinition.txt").exists()

@@ -11,7 +11,11 @@ from click.testing import CliRunner
 
 from mhm_tools import pre
 from mhm_tools._cli._main import cli
-from mhm_tools.common.file_handler import get_xarray_ds_from_file
+from mhm_tools.common.file_handler import (
+    get_raster_data,
+    get_xarray_ds_from_file,
+    write_xarray_to_file,
+)
 from mhm_tools.pre import format_geology as format_geology_module
 from mhm_tools.pre.format_geology import (
     format_geology_data,
@@ -39,6 +43,31 @@ def _write_category_raster(path: Path) -> None:
         dataset.write(values, 1)
 
 
+def _write_dem(path: Path, *, width: int = 3, height: int = 2, cellsize=10) -> None:
+    """Write a DEM grid used as the formatter reference."""
+    with rasterio.open(
+        path,
+        "w",
+        driver="GTiff",
+        width=width,
+        height=height,
+        count=1,
+        dtype="float32",
+        crs="EPSG:32632",
+        transform=rasterio.transform.from_origin(100.0, 220.0, cellsize, cellsize),
+        nodata=-9999,
+    ) as dataset:
+        dataset.write(np.ones((height, width), dtype=np.float32), 1)
+
+
+def _convert_raster(source: Path, output: Path) -> None:
+    data = get_raster_data(source)
+    try:
+        write_xarray_to_file(data, output, var_name=data.name, crs=data.rio.crs)
+    finally:
+        data.close()
+
+
 def _write_lookup(path: Path) -> None:
     table = gpd.GeoDataFrame(
         {
@@ -46,7 +75,6 @@ def _write_lookup(path: Path) -> None:
             "*Geology Class [id]": [3, 1, 2],
             "Geo Class [count]": [2, 1, 2],
             "Karstic [flag]": ["yes", "0", "TRUE"],
-            "Parameter Value [default]": [30, 10, 20],
         }
     )
     table.to_file(path, driver="GPKG")
@@ -77,8 +105,10 @@ def _expected_classdefinition() -> str:
 def test_format_geology_data_writes_nc_and_asc(tmp_path: Path):
     """Both output formats preserve the grid, classes, and nodata."""
     input_file = tmp_path / "geology_raw.tif"
+    dem_file = tmp_path / "dem.tif"
     lookup_file = tmp_path / "geology_lookup.gpkg"
     _write_category_raster(input_file)
+    _write_dem(dem_file)
     _write_lookup(lookup_file)
     expected = np.array(
         [[3, 1, -9999], [2, 3, -9999]],
@@ -87,6 +117,7 @@ def test_format_geology_data_writes_nc_and_asc(tmp_path: Path):
 
     nc_file = format_geology_data(
         input_file,
+        dem_file,
         tmp_path / "nc",
         lookup_file,
         "map code",
@@ -108,6 +139,7 @@ def test_format_geology_data_writes_nc_and_asc(tmp_path: Path):
 
     asc_file = format_geology_data(
         input_file,
+        dem_file,
         tmp_path / "asc",
         lookup_file,
         "map code",
@@ -115,6 +147,7 @@ def test_format_geology_data_writes_nc_and_asc(tmp_path: Path):
     )
 
     assert asc_file == tmp_path / "asc" / "geology_class.asc"
+    assert asc_file.with_suffix(".prj").is_file()
     assert (tmp_path / "asc" / "geology_classdefinition.txt").read_text() == (
         _expected_classdefinition()
     )
@@ -125,6 +158,40 @@ def test_format_geology_data_writes_nc_and_asc(tmp_path: Path):
         np.testing.assert_allclose(asc_dataset["lat"].values, [215, 205])
     finally:
         asc_dataset.close()
+
+
+@pytest.mark.parametrize(
+    ("input_suffix", "dem_suffix"),
+    [(".asc", ".nc"), (".nc", ".asc")],
+)
+def test_format_geology_data_accepts_mixed_raster_formats(
+    tmp_path: Path, input_suffix: str, dem_suffix: str
+):
+    """Mixed supported raster formats use the DEM grid and CRS."""
+    input_tif = tmp_path / "geology_raw.tif"
+    dem_tif = tmp_path / "dem.tif"
+    input_file = tmp_path / f"geology_raw{input_suffix}"
+    dem_file = tmp_path / f"dem{dem_suffix}"
+    lookup_file = tmp_path / "geology_lookup.gpkg"
+    _write_category_raster(input_tif)
+    _write_dem(dem_tif)
+    _convert_raster(input_tif, input_file)
+    _convert_raster(dem_tif, dem_file)
+    _write_lookup(lookup_file)
+
+    output = format_geology_data(
+        input_file,
+        dem_file,
+        tmp_path / "output",
+        lookup_file,
+        "map code",
+    )
+
+    with xr.open_dataset(output, decode_cf=False) as dataset:
+        np.testing.assert_array_equal(
+            dataset["geology_class"].values,
+            [[3, 1, -9999], [2, 3, -9999]],
+        )
 
 
 def test_write_geology_classdefinition_normalizes_sorts_and_parses_karstic(
@@ -154,13 +221,12 @@ def test_format_geology_data_requires_at_least_one_mapping(tmp_path: Path):
             "GEOLOGY_CLASS": [1],
             "GEO_CLASS": [1],
             "KARSTIC": [0],
-            "PARAMETER_VALUE": [10],
         }
     )
     table.to_file(lookup_file, driver="GPKG")
 
     with pytest.raises(ValueError, match="No valid raster category matched"):
-        format_geology_data(input_file, output_path, lookup_file, "source")
+        format_geology_data(input_file, input_file, output_path, lookup_file, "source")
 
     assert not (output_path / "geology_class.nc").exists()
     assert not (output_path / "geology_classdefinition.txt").exists()
@@ -177,13 +243,12 @@ def test_definition_is_validated_before_geology_raster_is_written(tmp_path: Path
             "source": [10],
             "GEOLOGY_CLASS": [1],
             "GEO_CLASS": [1],
-            "KARSTIC": [0],
         }
     )
     table.to_file(lookup_file, driver="GPKG")
 
-    with pytest.raises(ValueError, match="PARAMETER_VALUE"):
-        format_geology_data(input_file, output_path, lookup_file, "source")
+    with pytest.raises(ValueError, match="KARSTIC"):
+        format_geology_data(input_file, input_file, output_path, lookup_file, "source")
 
     assert not (output_path / "geology_class.nc").exists()
     assert not (output_path / "geology_classdefinition.txt").exists()
@@ -212,6 +277,8 @@ def test_format_geology_cli_short_options_alias_and_pre_exports(monkeypatch):
             "format-geology-data",
             "-i",
             "geology.tif",
+            "-d",
+            "dem.asc",
             "-o",
             "output",
             "-l",
@@ -220,16 +287,23 @@ def test_format_geology_cli_short_options_alias_and_pre_exports(monkeypatch):
             "source",
             "-t",
             "asc",
+            "-s",
+            "EPSG:32632",
+            "-r",
+            "EPSG:32633",
         ],
     )
 
     assert result.exit_code == 0, result.output
     assert captured == {
         "input_file": Path("geology.tif"),
+        "dem_file": Path("dem.asc"),
         "output_path": Path("output"),
         "lookup_table": Path("lookup.gpkg"),
         "mapping_field": "source",
         "output_type": "asc",
+        "input_crs": "EPSG:32632",
+        "dem_crs": "EPSG:32633",
     }
     alias_result = runner.invoke(
         cli,
@@ -237,3 +311,41 @@ def test_format_geology_cli_short_options_alias_and_pre_exports(monkeypatch):
     )
     assert alias_result.exit_code == 0
     assert "geology_classdefinition.txt" in alias_result.output
+
+
+def test_format_geology_data_uses_exact_dem_grid(tmp_path: Path):
+    """Input categories are aligned to the exact DEM grid before mapping."""
+    input_file = tmp_path / "geology_raw.tif"
+    dem_file = tmp_path / "dem.tif"
+    lookup_file = tmp_path / "geology_lookup.gpkg"
+    _write_category_raster(input_file)
+    _write_dem(dem_file, width=6, height=4, cellsize=5)
+    _write_lookup(lookup_file)
+
+    result = format_geology_data(
+        input_file,
+        dem_file,
+        tmp_path / "output",
+        lookup_file,
+        "map code",
+    )
+
+    expected = np.repeat(
+        np.repeat(
+            np.array([[3, 1, -9999], [2, 3, -9999]], dtype=np.int32),
+            2,
+            axis=0,
+        ),
+        2,
+        axis=1,
+    )
+    output = get_raster_data(result)
+    reference = get_raster_data(dem_file)
+    try:
+        assert output.rio.crs == reference.rio.crs
+        assert output.rio.transform() == reference.rio.transform()
+        assert output.shape == reference.shape
+        np.testing.assert_array_equal(output.fillna(-9999).values, expected)
+    finally:
+        output.close()
+        reference.close()
