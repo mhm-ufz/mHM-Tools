@@ -6,13 +6,13 @@ import rioxarray  # noqa: F401
 import xarray as xr
 from rasterio.transform import from_origin
 
+from mhm_tools.common import file_handler
+from mhm_tools.common.crs_handler import MissingCRSError, resolve_crs
 from mhm_tools.common.file_handler import (
-    MissingCRSError,
     align_raster_to_reference,
     get_raster_data,
     get_xarray_ds_from_file,
     read_ascii_to_xarray,
-    resolve_crs,
     write_xarray_to_file,
 )
 
@@ -26,6 +26,12 @@ def _raster(*, crs="EPSG:32645", nodata=-9999):
         attrs={"nodata_value": nodata},
     ).rio.set_spatial_dims(x_dim="x", y_dim="y")
     return data.rio.write_crs(crs) if crs else data
+
+
+def test_file_handler_crs_exports_are_compatibility_aliases():
+    """Legacy file-handler imports resolve to the canonical CRS helpers."""
+    assert file_handler.MissingCRSError is MissingCRSError
+    assert file_handler.resolve_crs is resolve_crs
 
 
 def test_geotiff_roundtrip_preserves_grid_crs_and_zero_nodata(tmp_path):
