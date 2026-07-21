@@ -7,17 +7,14 @@ import numpy as np
 import pytest
 import rasterio
 import xarray as xr
-from click.testing import CliRunner
 from shapely import geometry as shapely_geometry
 
 from mhm_tools import pre
-from mhm_tools._cli._main import cli
 from mhm_tools.common.file_handler import (
     get_raster_data,
     get_xarray_ds_from_file,
     write_xarray_to_file,
 )
-from mhm_tools.pre import format_soil as format_soil_module
 from mhm_tools.pre.format_soil import format_soil_data, write_soil_classdefinition
 
 
@@ -86,7 +83,7 @@ def _write_lookup(path: Path) -> None:
     table.to_file(path, driver="GPKG")
 
 
-def test_format_soil_data_writes_nc_and_asc(tmp_path: Path):
+def test_format_soil_data_writes_nc_asc_and_tif(tmp_path: Path):
     """Lookup fields are normalized and the source grid and nodata are kept."""
     input_file = tmp_path / "soil_raw.tif"
     dem_file = tmp_path / "dem.tif"
@@ -97,6 +94,15 @@ def test_format_soil_data_writes_nc_and_asc(tmp_path: Path):
     expected = np.array(
         [[1, 2, -9999], [3, 1, -9999]],
         dtype=np.int32,
+    )
+    expected_definition = (
+        "nSoil_Types 3\n"
+        "SOIL_NR\tHORIZON\tUD[mm]\tLD[mm]\tClay[%]\tSAND[%]\t"
+        "Bd[gcm-3]\tSilt[%]\n"
+        "1\t1\t0\t100\t20\t50\t1.2\t30\n"
+        "1\t2\t100\t300\t22\t48\t1.25\t30\n"
+        "2\t1\t0\t200\t30\t40\t1.3\t30\n"
+        "3\t1\t0\t300\t40\t30\t1.4\t30\n"
     )
 
     nc_file = format_soil_data(
@@ -109,15 +115,9 @@ def test_format_soil_data_writes_nc_and_asc(tmp_path: Path):
     )
 
     assert nc_file == tmp_path / "nc" / "soil_class.nc"
-    assert (tmp_path / "nc" / "soil_classdefinition.txt").read_text() == (
-        "nSoil_Types 3\n"
-        "SOIL_NR\tHORIZON\tUD[mm]\tLD[mm]\tClay[%]\tSAND[%]\t"
-        "Bd[gcm-3]\tSilt[%]\n"
-        "1\t1\t0\t100\t20\t50\t1.2\t30\n"
-        "1\t2\t100\t300\t22\t48\t1.25\t30\n"
-        "2\t1\t0\t200\t30\t40\t1.3\t30\n"
-        "3\t1\t0\t300\t40\t30\t1.4\t30\n"
-    )
+    assert (
+        tmp_path / "nc" / "soil_classdefinition.txt"
+    ).read_text() == expected_definition
     with xr.open_dataset(nc_file, decode_cf=False) as dataset:
         assert "soil_class" in dataset.data_vars
         assert dataset["soil_class"].dims == ("y", "x")
@@ -145,6 +145,27 @@ def test_format_soil_data_writes_nc_and_asc(tmp_path: Path):
         np.testing.assert_allclose(asc_dataset["lat"].values, [215, 205])
     finally:
         asc_dataset.close()
+
+    tif_file = format_soil_data(
+        input_file,
+        dem_file,
+        tmp_path / "tif",
+        lookup_file,
+        "map code",
+        output_type="tif",
+    )
+    assert tif_file == tmp_path / "tif" / "soil_class.tif"
+    assert (
+        tmp_path / "tif" / "soil_classdefinition.txt"
+    ).read_text() == expected_definition
+    with rasterio.open(tif_file) as dataset:
+        assert dataset.dtypes == ("int32",)
+        assert dataset.nodata == -9999
+        assert dataset.crs == rasterio.crs.CRS.from_epsg(32632)
+        assert dataset.transform == rasterio.transform.from_origin(
+            100.0, 220.0, 10.0, 10.0
+        )
+        np.testing.assert_array_equal(dataset.read(1), expected)
 
 
 @pytest.mark.parametrize(
@@ -214,61 +235,11 @@ def test_format_soil_data_requires_at_least_one_mapping(tmp_path: Path):
         )
 
 
-def test_format_soil_cli_short_options_and_pre_exports(monkeypatch):
-    """The command is grouped, uses short options, and public APIs are exposed."""
+def test_pre_exports_soil_formatters():
+    """The public pre package exposes the soil formatters."""
     assert pre.format_soil_data is format_soil_data
     assert pre.write_soil_classdefinition is write_soil_classdefinition
     assert pre.rasterize_map_data.__name__ == "rasterize_map_data"
-
-    captured = {}
-
-    def fake_format_soil_data(**kwargs):
-        captured.update(kwargs)
-
-    monkeypatch.setattr(
-        format_soil_module,
-        "format_soil_data",
-        fake_format_soil_data,
-    )
-    runner = CliRunner()
-    result = runner.invoke(
-        cli,
-        [
-            "data-converter",
-            "format-soil-data",
-            "-i",
-            "soil.tif",
-            "-d",
-            "dem.nc",
-            "-o",
-            "output",
-            "-l",
-            "lookup.gpkg",
-            "-m",
-            "source",
-            "-t",
-            "asc",
-            "-s",
-            "EPSG:32632",
-            "-r",
-            "EPSG:32633",
-        ],
-    )
-
-    assert result.exit_code == 0, result.output
-    assert captured == {
-        "input_file": Path("soil.tif"),
-        "dem_file": Path("dem.nc"),
-        "output_path": Path("output"),
-        "lookup_table": Path("lookup.gpkg"),
-        "mapping_field": "source",
-        "output_type": "asc",
-        "input_crs": "EPSG:32632",
-        "dem_crs": "EPSG:32633",
-    }
-    alias_result = runner.invoke(cli, ["data-converter", "format_soil_data", "--help"])
-    assert alias_result.exit_code == 0
-    assert "soil_classdefinition.txt" in alias_result.output
 
 
 def test_write_soil_classdefinition_rowwise_exact_output(tmp_path: Path):

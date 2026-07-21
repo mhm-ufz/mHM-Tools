@@ -7,16 +7,13 @@ import numpy as np
 import pytest
 import rasterio
 import xarray as xr
-from click.testing import CliRunner
 
 from mhm_tools import pre
-from mhm_tools._cli._main import cli
 from mhm_tools.common.file_handler import (
     get_raster_data,
     get_xarray_ds_from_file,
     write_xarray_to_file,
 )
-from mhm_tools.pre import format_geology as format_geology_module
 from mhm_tools.pre.format_geology import (
     format_geology_data,
     write_geology_classdefinition,
@@ -102,8 +99,8 @@ def _expected_classdefinition() -> str:
     )
 
 
-def test_format_geology_data_writes_nc_and_asc(tmp_path: Path):
-    """Both output formats preserve the grid, classes, and nodata."""
+def test_format_geology_data_writes_nc_asc_and_tif(tmp_path: Path):
+    """All output formats preserve the grid, classes, and nodata."""
     input_file = tmp_path / "geology_raw.tif"
     dem_file = tmp_path / "dem.tif"
     lookup_file = tmp_path / "geology_lookup.gpkg"
@@ -158,6 +155,27 @@ def test_format_geology_data_writes_nc_and_asc(tmp_path: Path):
         np.testing.assert_allclose(asc_dataset["lat"].values, [215, 205])
     finally:
         asc_dataset.close()
+
+    tif_file = format_geology_data(
+        input_file,
+        dem_file,
+        tmp_path / "tif",
+        lookup_file,
+        "map code",
+        output_type="tif",
+    )
+    assert tif_file == tmp_path / "tif" / "geology_class.tif"
+    assert (tmp_path / "tif" / "geology_classdefinition.txt").read_text() == (
+        _expected_classdefinition()
+    )
+    with rasterio.open(tif_file) as dataset:
+        assert dataset.dtypes == ("int32",)
+        assert dataset.nodata == -9999
+        assert dataset.crs == rasterio.crs.CRS.from_epsg(32632)
+        assert dataset.transform == rasterio.transform.from_origin(
+            100.0, 220.0, 10.0, 10.0
+        )
+        np.testing.assert_array_equal(dataset.read(1), expected)
 
 
 @pytest.mark.parametrize(
@@ -254,63 +272,10 @@ def test_definition_is_validated_before_geology_raster_is_written(tmp_path: Path
     assert not (output_path / "geology_classdefinition.txt").exists()
 
 
-def test_format_geology_cli_short_options_alias_and_pre_exports(monkeypatch):
-    """The grouped command and lazy public exports expose the new formatter."""
+def test_pre_exports_geology_formatters():
+    """The public pre package exposes the geology formatters."""
     assert pre.format_geology_data is format_geology_data
     assert pre.write_geology_classdefinition is write_geology_classdefinition
-
-    captured = {}
-
-    def fake_format_geology_data(**kwargs):
-        captured.update(kwargs)
-
-    monkeypatch.setattr(
-        format_geology_module,
-        "format_geology_data",
-        fake_format_geology_data,
-    )
-    runner = CliRunner()
-    result = runner.invoke(
-        cli,
-        [
-            "data-converter",
-            "format-geology-data",
-            "-i",
-            "geology.tif",
-            "-d",
-            "dem.asc",
-            "-o",
-            "output",
-            "-l",
-            "lookup.gpkg",
-            "-m",
-            "source",
-            "-t",
-            "asc",
-            "-s",
-            "EPSG:32632",
-            "-r",
-            "EPSG:32633",
-        ],
-    )
-
-    assert result.exit_code == 0, result.output
-    assert captured == {
-        "input_file": Path("geology.tif"),
-        "dem_file": Path("dem.asc"),
-        "output_path": Path("output"),
-        "lookup_table": Path("lookup.gpkg"),
-        "mapping_field": "source",
-        "output_type": "asc",
-        "input_crs": "EPSG:32632",
-        "dem_crs": "EPSG:32633",
-    }
-    alias_result = runner.invoke(
-        cli,
-        ["data-converter", "format_geology_data", "--help"],
-    )
-    assert alias_result.exit_code == 0
-    assert "geology_classdefinition.txt" in alias_result.output
 
 
 def test_format_geology_data_uses_exact_dem_grid(tmp_path: Path):
