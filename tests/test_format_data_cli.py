@@ -26,6 +26,13 @@ from mhm_tools._cli._main import cli
             [],
             "nc",
         ),
+        (
+            "lc",
+            "mhm_tools.pre.format_lc_data",
+            "format_lc_data",
+            ["-e", "asc"],
+            "asc",
+        ),
     ],
 )
 def test_format_data_dispatches_with_shared_options(
@@ -61,6 +68,8 @@ def test_format_data_dispatches_with_shared_options(
             "lookup.gpkg",
             "-m",
             "source",
+            "-c",
+            "target",
             "-s",
             "EPSG:32632",
             "-r",
@@ -76,6 +85,7 @@ def test_format_data_dispatches_with_shared_options(
         "output_path": Path("output"),
         "lookup_table": Path("lookup.gpkg"),
         "mapping_field": "source",
+        "class_field": "target",
         "output_type": extension,
         "input_crs": "EPSG:32632",
         "dem_crs": "EPSG:32633",
@@ -91,7 +101,8 @@ def test_format_data_help_and_alias():
     assert result.exit_code == 0, result.output
     assert alias_result.exit_code == 0, alias_result.output
     assert "-t, --type" in result.output
-    assert "[soil|geology]" in result.output
+    assert "[soil|geology|lc]" in result.output
+    assert "-c, --class-field" in result.output
     assert "-e, --extension" in result.output
     assert "[nc|asc|tif]" in result.output
 
@@ -117,6 +128,8 @@ def test_format_data_rejects_invalid_choices(option, value):
         "lookup.gpkg",
         "-m",
         "source",
+        "-c",
+        "target",
     ]
     if option == "-t":
         arguments[arguments.index("soil")] = value
@@ -127,6 +140,32 @@ def test_format_data_rejects_invalid_choices(option, value):
 
     assert result.exit_code != 0
     assert "Invalid value" in result.output
+
+
+def test_format_data_requires_class_field():
+    """The CLI never guesses a lookup class column."""
+    result = CliRunner().invoke(
+        cli,
+        [
+            "data-converter",
+            "format-data",
+            "-t",
+            "lc",
+            "-i",
+            "input.tif",
+            "-d",
+            "dem.tif",
+            "-o",
+            "output",
+            "-l",
+            "lookup.gpkg",
+            "-m",
+            "source",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "class-field" in result.output
 
 
 def test_old_format_commands_are_not_registered():

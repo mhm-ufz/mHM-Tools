@@ -19,6 +19,8 @@ from mhm_tools.pre.format_geology import (
     write_geology_classdefinition,
 )
 
+_CLASS_FIELD = "mapped geology unit"
+
 
 def _write_category_raster(path: Path) -> None:
     values = np.array(
@@ -69,7 +71,7 @@ def _write_lookup(path: Path) -> None:
     table = gpd.GeoDataFrame(
         {
             "*Map-code [id]": [10, 20, 30],
-            "*Geology Class [id]": [3, 1, 2],
+            "*Mapped Geology Unit [id]": [3, 1, 2],
             "Geo Class [count]": [2, 1, 2],
             "Karstic [flag]": ["yes", "0", "TRUE"],
         }
@@ -100,7 +102,7 @@ def _expected_classdefinition() -> str:
 
 
 def test_format_geology_data_writes_nc_asc_and_tif(tmp_path: Path):
-    """All output formats preserve the grid, classes, and nodata."""
+    """A custom class field drives every raster and its classdefinition."""
     input_file = tmp_path / "geology_raw.tif"
     dem_file = tmp_path / "dem.tif"
     lookup_file = tmp_path / "geology_lookup.gpkg"
@@ -118,6 +120,7 @@ def test_format_geology_data_writes_nc_asc_and_tif(tmp_path: Path):
         tmp_path / "nc",
         lookup_file,
         "map code",
+        _CLASS_FIELD,
         output_type="nc",
     )
 
@@ -140,6 +143,7 @@ def test_format_geology_data_writes_nc_asc_and_tif(tmp_path: Path):
         tmp_path / "asc",
         lookup_file,
         "map code",
+        _CLASS_FIELD,
         output_type="asc",
     )
 
@@ -162,6 +166,7 @@ def test_format_geology_data_writes_nc_asc_and_tif(tmp_path: Path):
         tmp_path / "tif",
         lookup_file,
         "map code",
+        _CLASS_FIELD,
         output_type="tif",
     )
     assert tif_file == tmp_path / "tif" / "geology_class.tif"
@@ -203,6 +208,7 @@ def test_format_geology_data_accepts_mixed_raster_formats(
         tmp_path / "output",
         lookup_file,
         "map code",
+        _CLASS_FIELD,
     )
 
     with xr.open_dataset(output, decode_cf=False) as dataset:
@@ -222,6 +228,7 @@ def test_write_geology_classdefinition_normalizes_sorts_and_parses_karstic(
     output_file = write_geology_classdefinition(
         lookup_file,
         tmp_path / "definitions" / "geology_classdefinition.txt",
+        _CLASS_FIELD,
     )
 
     assert output_file.read_text() == _expected_classdefinition()
@@ -244,7 +251,14 @@ def test_format_geology_data_requires_at_least_one_mapping(tmp_path: Path):
     table.to_file(lookup_file, driver="GPKG")
 
     with pytest.raises(ValueError, match="No valid raster category matched"):
-        format_geology_data(input_file, input_file, output_path, lookup_file, "source")
+        format_geology_data(
+            input_file,
+            input_file,
+            output_path,
+            lookup_file,
+            "source",
+            "GEOLOGY_CLASS",
+        )
 
     assert not (output_path / "geology_class.nc").exists()
     assert not (output_path / "geology_classdefinition.txt").exists()
@@ -266,7 +280,14 @@ def test_definition_is_validated_before_geology_raster_is_written(tmp_path: Path
     table.to_file(lookup_file, driver="GPKG")
 
     with pytest.raises(ValueError, match="KARSTIC"):
-        format_geology_data(input_file, input_file, output_path, lookup_file, "source")
+        format_geology_data(
+            input_file,
+            input_file,
+            output_path,
+            lookup_file,
+            "source",
+            "GEOLOGY_CLASS",
+        )
 
     assert not (output_path / "geology_class.nc").exists()
     assert not (output_path / "geology_classdefinition.txt").exists()
@@ -293,6 +314,7 @@ def test_format_geology_data_uses_exact_dem_grid(tmp_path: Path):
         tmp_path / "output",
         lookup_file,
         "map code",
+        _CLASS_FIELD,
     )
 
     expected = np.repeat(

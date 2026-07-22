@@ -98,12 +98,12 @@ def _required_bool_int(value: object, row_number: int, field: object) -> int:
     raise ValueError(msg)
 
 
-def _classdefinition_rows(table) -> list:
+def _classdefinition_rows(table, class_field: str) -> list:
     """Validate and sort geology class-definition rows."""
     field_lookup = {}
     for field_name in table.columns:
         field_lookup.setdefault(_normalise_field_name(field_name), field_name)
-    geology_class_field = _required_field(field_lookup, "GEOLOGY_CLASS")
+    geology_class_field = _required_field(field_lookup, class_field)
     geo_class_field = _required_field(field_lookup, "GEO_CLASS")
     karstic_field = _required_field(field_lookup, "KARSTIC")
 
@@ -125,9 +125,9 @@ def _classdefinition_rows(table) -> list:
     return sorted(rows, key=lambda item: (item["geo_param"], item["class_unit"]))
 
 
-def _classdefinition_text(table) -> str:
+def _classdefinition_text(table, class_field: str) -> str:
     """Render the geology class-definition text used by pymhm."""
-    rows = _classdefinition_rows(table)
+    rows = _classdefinition_rows(table, class_field)
     if not rows:
         msg = "No valid geology classdefinition rows were found."
         raise ValueError(msg)
@@ -171,7 +171,7 @@ def _write_classdefinition_text(text: str, output_file: Path) -> Path:
 
 
 def write_geology_classdefinition(
-    lookup_table: PathLike, output_file: PathLike
+    lookup_table: PathLike, output_file: PathLike, class_field: str
 ) -> Path:
     """Write ``geology_classdefinition.txt`` from a geology lookup table."""
     lookup_table = Path(lookup_table)
@@ -180,7 +180,9 @@ def write_geology_classdefinition(
         msg = f"Lookup table does not exist: {lookup_table}"
         raise ValueError(msg)
     table = read_lookup_table(lookup_table)
-    return _write_classdefinition_text(_classdefinition_text(table), output_file)
+    return _write_classdefinition_text(
+        _classdefinition_text(table, class_field), output_file
+    )
 
 
 def format_geology_data(
@@ -189,6 +191,7 @@ def format_geology_data(
     output_path: PathLike,
     lookup_table: PathLike,
     mapping_field: str,
+    class_field: str,
     output_type: str = "nc",
     *,
     input_crs: str | None = None,
@@ -220,14 +223,15 @@ def format_geology_data(
         raise ValueError(msg)
 
     table = read_lookup_table(lookup_table)
-    definition_text = _classdefinition_text(table)
+    definition_text = _classdefinition_text(table, class_field)
     format_categorical_data(
         input_file,
         dem_file,
         raster_output,
         table,
         mapping_field,
-        "GEOLOGY_CLASS",
+        class_field,
+        variable_name="geology_class",
         input_crs=input_crs,
         dem_crs=dem_crs,
     )

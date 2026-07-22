@@ -165,12 +165,12 @@ def _wide_soil_rows(
     return sorted(output_rows, key=lambda item: (item["soil_class"], item["horizon"]))
 
 
-def _soil_classdefinition_rows(table) -> list:
+def _soil_classdefinition_rows(table, class_field: str) -> list:
     """Build definition rows from the rowwise or wide lookup layout."""
     field_lookup = {}
     for field_name in table.columns:
         field_lookup.setdefault(_normalise_field_name(field_name), field_name)
-    soil_class_field = _required_soil_field(field_lookup, "SOIL_CLASS")
+    soil_class_field = _required_soil_field(field_lookup, class_field)
 
     rowwise_fields = (
         "HORIZON",
@@ -217,9 +217,9 @@ def _format_soil_value(value: object) -> str:
     return f"{number:.6g}"
 
 
-def _soil_classdefinition_text(table) -> str:
+def _soil_classdefinition_text(table, class_field: str) -> str:
     """Validate a lookup table and render its classdefinition text."""
-    output_rows = _soil_classdefinition_rows(table)
+    output_rows = _soil_classdefinition_rows(table, class_field)
     if not output_rows:
         msg = "No valid soil horizon rows were found."
         raise ValueError(msg)
@@ -247,7 +247,9 @@ def _write_soil_classdefinition_text(text: str, output_file: Path) -> Path:
     return output_file
 
 
-def write_soil_classdefinition(lookup_table: PathLike, output_file: PathLike) -> Path:
+def write_soil_classdefinition(
+    lookup_table: PathLike, output_file: PathLike, class_field: str
+) -> Path:
     """Write an mHM ``soil_classdefinition.txt`` from a lookup table.
 
     The lookup may contain either one row per soil horizon or one row per soil
@@ -259,7 +261,7 @@ def write_soil_classdefinition(lookup_table: PathLike, output_file: PathLike) ->
         msg = f"Lookup table does not exist: {lookup_table}"
         raise ValueError(msg)
     table = read_lookup_table(lookup_table)
-    text = _soil_classdefinition_text(table)
+    text = _soil_classdefinition_text(table, class_field)
     return _write_soil_classdefinition_text(text, output_file)
 
 
@@ -269,6 +271,7 @@ def format_soil_data(
     output_path: PathLike,
     lookup_table: PathLike,
     mapping_field: str,
+    class_field: str,
     output_type: str = "nc",
     *,
     input_crs: str | None = None,
@@ -285,9 +288,11 @@ def format_soil_data(
     output_path : path-like
         Directory containing the soil-class raster and classdefinition.
     lookup_table : path-like
-        OGR-readable table containing ``mapping_field`` and ``SOIL_CLASS``.
+        OGR-readable table containing ``mapping_field`` and ``class_field``.
     mapping_field : str
         Numeric lookup-table column corresponding to the input raster values.
+    class_field : str
+        Numeric lookup-table column containing the output soil classes.
     output_type : {"nc", "asc", "tif"}, default "nc"
         Output raster format.
     input_crs, dem_crs : str, optional
@@ -318,14 +323,15 @@ def format_soil_data(
             msg = f"{label} must differ from all input files: {path}"
             raise ValueError(msg)
     table = read_lookup_table(lookup_table)
-    definition_text = _soil_classdefinition_text(table)
+    definition_text = _soil_classdefinition_text(table, class_field)
     format_categorical_data(
         input_file,
         dem_file,
         raster_output,
         table,
         mapping_field,
-        "SOIL_CLASS",
+        class_field,
+        variable_name="soil_class",
         input_crs=input_crs,
         dem_crs=dem_crs,
     )

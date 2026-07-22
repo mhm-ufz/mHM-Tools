@@ -106,14 +106,14 @@ def read_lookup_table(lookup_table: PathLike):
 
 
 def get_categorical_output_path(
-    output_path: PathLike, class_field: str, extension: str
+    output_path: PathLike, output_name: str, extension: str
 ) -> Path:
     """Return the validated output path for a categorical class raster."""
     extension = str(extension).lower().lstrip(".")
     if f".{extension}" not in _OUTPUT_SUFFIXES:
         msg = "Output extension must be 'nc', 'asc', or 'tif'."
         raise ValueError(msg)
-    return Path(output_path) / f"{class_field.lower()}.{extension}"
+    return Path(output_path) / f"{output_name.lower()}.{extension}"
 
 
 def _lookup_mapping(table, mapping_field: str, class_field: str) -> dict:
@@ -234,6 +234,7 @@ def format_categorical_data(
     mapping_field: str,
     class_field: str,
     *,
+    variable_name: str,
     input_crs: str | None = None,
     dem_crs: str | None = None,
 ) -> Path:
@@ -272,7 +273,6 @@ def format_categorical_data(
         try:
             aligned = align_raster_to_reference(source, reference, nodata=int(_NODATA))
             classes = _reclassify(aligned, mapping)
-            variable_name = class_field.lower()
             output = set_grid(
                 classes,
                 get_grid(reference.to_dataset(name="_dem"), "_dem"),

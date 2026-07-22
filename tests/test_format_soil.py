@@ -68,7 +68,7 @@ def _write_lookup(path: Path) -> None:
     table = gpd.GeoDataFrame(
         {
             "*Map-code [id]": [10, None, 20, 30],
-            "soil class [id]": [1, 1, 2, 3],
+            "Target class [id]": [1, 1, 2, 3],
             "HORIZON": [1, 2, 1, 1],
             "UPPER_DEPTH [mm]": [0, 100, 0, 0],
             "LOWER_DEPTH [mm]": [100, 300, 200, 300],
@@ -111,6 +111,7 @@ def test_format_soil_data_writes_nc_asc_and_tif(tmp_path: Path):
         tmp_path / "nc",
         lookup_file,
         "map code",
+        "target class",
         output_type="nc",
     )
 
@@ -133,6 +134,7 @@ def test_format_soil_data_writes_nc_asc_and_tif(tmp_path: Path):
         tmp_path / "asc",
         lookup_file,
         "map code",
+        "target class",
         output_type="asc",
     )
     assert asc_file == tmp_path / "asc" / "soil_class.asc"
@@ -152,6 +154,7 @@ def test_format_soil_data_writes_nc_asc_and_tif(tmp_path: Path):
         tmp_path / "tif",
         lookup_file,
         "map code",
+        "target class",
         output_type="tif",
     )
     assert tif_file == tmp_path / "tif" / "soil_class.tif"
@@ -193,6 +196,7 @@ def test_format_soil_data_accepts_mixed_raster_formats(
         tmp_path / "output",
         lookup_file,
         "map code",
+        "target class",
     )
 
     with xr.open_dataset(output, decode_cf=False) as dataset:
@@ -232,6 +236,7 @@ def test_format_soil_data_requires_at_least_one_mapping(tmp_path: Path):
             tmp_path / "output",
             lookup_file,
             "source",
+            "SOIL_CLASS",
         )
 
 
@@ -247,7 +252,7 @@ def test_write_soil_classdefinition_rowwise_exact_output(tmp_path: Path):
     lookup_file = tmp_path / "rowwise.gpkg"
     table = gpd.GeoDataFrame(
         {
-            "*SOIL CLASS [id]": [2, 1, 2],
+            "*Custom Class [id]": [2, 1, 2],
             "HORIZON": [2, 1, 1],
             "UPPER-DEPTH [mm]": [100, 0, 0],
             "LOWER DEPTH [mm]": [300, 120, 100],
@@ -266,7 +271,9 @@ def test_write_soil_classdefinition_rowwise_exact_output(tmp_path: Path):
     table.to_file(lookup_file, driver="GPKG")
 
     output_file = write_soil_classdefinition(
-        lookup_file, tmp_path / "definitions" / "soil_classdefinition.txt"
+        lookup_file,
+        tmp_path / "definitions" / "soil_classdefinition.txt",
+        "custom class",
     )
 
     assert output_file.read_text() == (
@@ -301,7 +308,9 @@ def test_write_soil_classdefinition_wide_exact_output(tmp_path: Path):
     table.to_file(lookup_file, driver="GPKG")
 
     output_file = write_soil_classdefinition(
-        lookup_file, tmp_path / "soil_classdefinition.txt"
+        lookup_file,
+        tmp_path / "soil_classdefinition.txt",
+        "SOIL_CLASS",
     )
 
     assert output_file.read_text() == (
@@ -341,6 +350,7 @@ def test_format_soil_data_uses_exact_dem_grid(tmp_path: Path):
         tmp_path / "output",
         lookup_file,
         "map code",
+        "target class",
     )
 
     assert result == tmp_path / "output" / "soil_class.nc"
@@ -380,7 +390,14 @@ def test_definition_is_validated_before_raster_is_written(tmp_path: Path):
     output_path = tmp_path / "output"
 
     with pytest.raises(ValueError, match="row-per-horizon layout"):
-        format_soil_data(input_file, input_file, output_path, lookup_file, "source")
+        format_soil_data(
+            input_file,
+            input_file,
+            output_path,
+            lookup_file,
+            "source",
+            "SOIL_CLASS",
+        )
 
     assert not (output_path / "soil_class.nc").exists()
     assert not (output_path / "soil_classdefinition.txt").exists()

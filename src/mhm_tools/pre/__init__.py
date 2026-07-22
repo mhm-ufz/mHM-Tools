@@ -13,6 +13,7 @@ Files
    ~mhm_tools.pre.crop_mhm_setup
    ~mhm_tools.pre.fill_nearest
    ~mhm_tools.pre.format_geology
+   ~mhm_tools.pre.format_lc_data
    ~mhm_tools.pre.format_soil
    ~mhm_tools.pre.landcover_ascii_to_nc
    ~mhm_tools.pre.latlon
@@ -26,6 +27,8 @@ Files
 """
 
 import importlib
+
+from .format_lc_data import format_lc_data
 
 _MODULE_EXPORTS = {
     "catchment": "catchment",
@@ -84,6 +87,7 @@ __all__ = [
     "fill_nearest",
     "format_geology",
     "format_geology_data",
+    "format_lc_data",
     "format_soil",
     "format_soil_data",
     "latlon",

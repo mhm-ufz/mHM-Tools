@@ -1,4 +1,4 @@
-"""Format categorical soil or geology data for use by mHM.
+"""Format categorical soil, geology, or land-cover data for use by mHM.
 
 Authors
 -------
@@ -18,7 +18,7 @@ def add_args(parser: ArgumentParser) -> None:
         "--type",
         dest="data_type",
         required=True,
-        choices=("soil", "geology"),
+        choices=("soil", "geology", "lc"),
         help="Categorical data type to format.",
     )
     required.add_argument(
@@ -37,7 +37,7 @@ def add_args(parser: ArgumentParser) -> None:
         "-o",
         "--output-path",
         required=True,
-        help="Directory where the formatted raster and classdefinition are written.",
+        help="Directory where the formatted output files are written.",
     )
     required.add_argument(
         "-l",
@@ -50,6 +50,12 @@ def add_args(parser: ArgumentParser) -> None:
         "--mapping-field",
         required=True,
         help="Lookup-table column containing the input raster values.",
+    )
+    required.add_argument(
+        "-c",
+        "--class-field",
+        required=True,
+        help="Lookup-table column containing the output class values.",
     )
     optional.add_argument(
         "-e",
@@ -74,8 +80,10 @@ def run(args: Namespace) -> None:
     """Dispatch categorical formatting to the selected data formatter."""
     if args.data_type == "soil":
         from mhm_tools.pre.format_soil import format_soil_data as formatter
-    else:
+    elif args.data_type == "geology":
         from mhm_tools.pre.format_geology import format_geology_data as formatter
+    else:
+        from mhm_tools.pre.format_lc_data import format_lc_data as formatter
 
     formatter(
         input_file=Path(args.input_file),
@@ -83,6 +91,7 @@ def run(args: Namespace) -> None:
         output_path=Path(args.output_path),
         lookup_table=Path(args.lookup_table),
         mapping_field=args.mapping_field,
+        class_field=args.class_field,
         output_type=args.extension,
         input_crs=args.input_crs,
         dem_crs=args.dem_crs,
