@@ -2,6 +2,7 @@ import argparse
 
 import click
 import numpy as np
+import rioxarray  # noqa: F401
 import xarray as xr
 from click.testing import CliRunner
 
@@ -103,3 +104,53 @@ def test_converter_nc_ascii_only_header_writes_requested_new_file(
 
     assert result.exit_code == 0
     assert output_path.is_file()
+
+
+def test_converter_forwards_explicit_crs_to_geotiff_writer(monkeypatch):
+    """The CLI exposes CRS assignment for otherwise CRS-less inputs."""
+    ds = xr.Dataset(
+        {"var": (("lat", "lon"), np.ones((2, 2), dtype=np.int32))},
+        coords={"lat": [1.5, 0.5], "lon": [0.5, 1.5]},
+    )
+    captured = {}
+    monkeypatch.setattr(fh, "get_xarray_ds_from_file", lambda *_args, **_kwargs: ds)
+
+    def fake_write(*args, **kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(fh, "write_xarray_to_file", fake_write)
+    command = _build_click_command("converter-nc-ascii", _file_converter)
+    result = CliRunner().invoke(
+        command,
+        ["-i", "input.asc", "-o", "output.tif", "-c", "EPSG:32632"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["crs"] == "EPSG:32632"
+
+
+def test_converter_preserves_netcdf_crs_in_geotiff(tmp_path):
+    """CF grid-mapping metadata is available during NetCDF conversion."""
+    data = xr.DataArray(
+        np.arange(4, dtype=np.int32).reshape(2, 2),
+        dims=("y", "x"),
+        coords={"y": [1.5, 0.5], "x": [0.5, 1.5]},
+        name="classes",
+    ).rio.write_crs("EPSG:32632")
+    input_file = tmp_path / "classes.nc"
+    output_file = tmp_path / "classes.tif"
+    fh.write_xarray_to_file(data, input_file)
+    command = _build_click_command("converter-nc-ascii", _file_converter)
+
+    result = CliRunner().invoke(
+        command,
+        ["-i", str(input_file), "-o", str(output_file)],
+    )
+
+    assert result.exit_code == 0, result.output
+    converted = fh.get_raster_data(output_file)
+    try:
+        assert converted.rio.crs.to_epsg() == 32632
+        np.testing.assert_array_equal(converted.values, data.values)
+    finally:
+        converted.close()

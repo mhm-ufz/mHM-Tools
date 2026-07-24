@@ -88,6 +88,14 @@ _COMMAND_GROUPS: List[Tuple[str, str, List[Tuple[str, object]]]] = [
         ],
     ),
     (
+        "data-converter",
+        "Convert maps and categorical data for mHM.",
+        [
+            ("rasterize-map", "mhm_tools._cli._rasterize_map"),
+            ("format-data", "mhm_tools._cli._format_data"),
+        ],
+    ),
+    (
         "evaluation",
         "Evaluate simulations against observations or reference data.",
         [

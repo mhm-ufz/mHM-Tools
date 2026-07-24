@@ -38,7 +38,12 @@ def add_args(parser):
         "--output",
         dest="output",
         required=True,
-        help="The name of the output file. Can be ASCII or NetCDF. The file type is determined by the file suffix.",
+        help="The output ASCII, GeoTIFF, or NetCDF file; type is inferred from its suffix.",
+    )
+    optional.add_argument(
+        "-c",
+        "--crs",
+        help="CRS to assign when the input has no CRS metadata.",
     )
     flags.add_argument(
         "-f",
@@ -76,7 +81,7 @@ def add_args(parser):
 
 
 def run(args):
-    """Convert between ASCII and NetCDF based on file suffix.
+    """Convert between ASCII, GeoTIFF, and NetCDF formats based on file suffix.
 
     Parameters
     ----------
@@ -96,10 +101,19 @@ def run(args):
         var_name = input.stem
     elif args.varname_eq_out_filename:
         var_name = output.stem
-    ds = get_xarray_ds_from_file(
-        input, var_name=var_name, normalize_latlon_coords=args.latlon
+    decode_coords = (
+        "all" if output.suffix.lower() in {".asc", ".tif", ".tiff"} else "coordinates"
     )
-    if args.only_header:
-        create_header(ds, output_path=output, no_data_value=None)
-    else:
-        write_xarray_to_file(ds, output, var_name=var_name)
+    ds = get_xarray_ds_from_file(
+        input,
+        var_name=var_name,
+        normalize_latlon_coords=args.latlon,
+        decode_coords=decode_coords,
+    )
+    try:
+        if args.only_header:
+            create_header(ds, output_path=output, no_data_value=None)
+        else:
+            write_xarray_to_file(ds, output, var_name=var_name, crs=args.crs)
+    finally:
+        ds.close()

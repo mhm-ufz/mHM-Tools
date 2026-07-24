@@ -106,6 +106,7 @@ def read_dataset(
     file_path: Union[str, Path, List[Union[str, Path]]],
     use_mfdataset: bool = False,
     engine: str = "netcdf4",
+    decode_coords: str = "coordinates",
 ) -> xr.Dataset:
     """
     Load one or more NetCDF files into a single xarray.Dataset.
@@ -131,6 +132,8 @@ def read_dataset(
         `xr.open_dataset` and combine.
     engine : str, default "netcdf4"
         The backend engine to use for opening NetCDF files.
+    decode_coords : str, default "coordinates"
+        Coordinate decoding mode passed to xarray.
 
     Returns
     -------
@@ -185,7 +188,12 @@ def read_dataset(
         logger.debug(f"{len(paths)} files to open; use_mfdataset={use_mfdataset}")
         if use_mfdataset:
             try:
-                ds = _fallback_open(xr.open_mfdataset, paths=paths, engine=engine)
+                ds = _fallback_open(
+                    xr.open_mfdataset,
+                    paths=paths,
+                    engine=engine,
+                    decode_coords=decode_coords,
+                )
             except Exception as exc:
                 logger.error(f"open_mfdataset failed on {paths!r}: {exc}")
                 raise
@@ -195,7 +203,10 @@ def read_dataset(
             logger.debug(f"Opening (single) {p}")
             try:
                 ds_tmp = _fallback_open(
-                    xr.open_dataset, filename_or_obj=p, engine=engine
+                    xr.open_dataset,
+                    filename_or_obj=p,
+                    engine=engine,
+                    decode_coords=decode_coords,
                 )
             except Exception as exc:
                 logger.error(f"Failed opening {p}: {exc}")
@@ -215,7 +226,12 @@ def read_dataset(
     single = paths[0]
     logger.debug(f"Reading single NetCDF file: {single}")
     try:
-        ds = _fallback_open(xr.open_dataset, filename_or_obj=single, engine=engine)
+        ds = _fallback_open(
+            xr.open_dataset,
+            filename_or_obj=single,
+            engine=engine,
+            decode_coords=decode_coords,
+        )
     except Exception as exc:
         logger.error(f"Failed opening {single}: {exc}")
         raise
@@ -421,9 +437,14 @@ def get_netcdf_metadata_data_vars(dataset: xr.Dataset) -> Set[str]:
         if bounds in dataset:
             metadata_vars.add(bounds)
     for var in dataset.data_vars.values():
-        grid_mapping = var.attrs.get("grid_mapping")
+        grid_mapping = var.attrs.get("grid_mapping") or var.encoding.get("grid_mapping")
         if grid_mapping in dataset:
             metadata_vars.add(grid_mapping)
+    for name, var in dataset.data_vars.items():
+        if var.ndim == 0 and any(
+            key in var.attrs for key in ("grid_mapping_name", "spatial_ref", "crs_wkt")
+        ):
+            metadata_vars.add(name)
     return metadata_vars
 
 
@@ -452,6 +473,7 @@ def apply_cf_baseline_metadata(ds: xr.Dataset, data_vars: Sequence[str]) -> None
     lat_key = _get_axis_coord_key(ds, axis="Y", candidate_names=LAT_KEYS)
     lon_key = _get_axis_coord_key(ds, axis="X", candidate_names=LON_KEYS)
     time_key = _get_time_coord_key(ds)
+    projected = _has_projected_crs(ds)
 
     if lat_key is None:
         logger.warning(
@@ -464,8 +486,12 @@ def apply_cf_baseline_metadata(ds: xr.Dataset, data_vars: Sequence[str]) -> None
                 f"using inferred coordinate {lat_key!r}."
             )
         lat = ds[lat_key]
-        lat.attrs.setdefault("standard_name", "latitude")
-        lat.attrs.setdefault("units", "degrees_north")
+        lat.attrs.setdefault(
+            "standard_name",
+            "projection_y_coordinate" if projected else "latitude",
+        )
+        if not projected:
+            lat.attrs.setdefault("units", "degrees_north")
         lat.attrs.setdefault("axis", "Y")
 
     if lon_key is None:
@@ -479,8 +505,12 @@ def apply_cf_baseline_metadata(ds: xr.Dataset, data_vars: Sequence[str]) -> None
                 f"using inferred coordinate {lon_key!r}."
             )
         lon = ds[lon_key]
-        lon.attrs.setdefault("standard_name", "longitude")
-        lon.attrs.setdefault("units", "degrees_east")
+        lon.attrs.setdefault(
+            "standard_name",
+            "projection_x_coordinate" if projected else "longitude",
+        )
+        if not projected:
+            lon.attrs.setdefault("units", "degrees_east")
         lon.attrs.setdefault("axis", "X")
 
     if time_key is None:
@@ -762,6 +792,18 @@ def _get_axis_coord_key(
             )
             return name
     return None
+
+
+def _has_projected_crs(ds: xr.Dataset) -> bool:
+    """Return whether rioxarray can resolve a projected dataset CRS."""
+    try:
+        import rioxarray as rxr
+
+        _ = rxr  # register the ``rio`` accessor
+        crs = ds.rio.crs
+    except Exception:
+        return False
+    return bool(crs and crs.is_projected)
 
 
 def _get_time_coord_key(ds: xr.Dataset) -> Optional[str]:

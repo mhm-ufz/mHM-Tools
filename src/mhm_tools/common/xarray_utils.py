@@ -10,7 +10,10 @@ from scipy.stats import spearmanr
 
 from mhm_tools.common.constants import LAT_KEYS, LON_KEYS, TIME_KEYS
 from mhm_tools.common.logger import ErrorLogger
-from mhm_tools.common.netcdf import generate_bounds_for_all_coords
+from mhm_tools.common.netcdf import (
+    generate_bounds_for_all_coords,
+    get_netcdf_metadata_data_vars,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -154,7 +157,8 @@ def get_coord_key(
 
 def get_single_data_var(ds: xr.Dataset, proposed_vars: Optional[list] = None):
     """Get the data var name from a dataset that only contains one data variable."""
-    data_vars = list(ds.data_vars)  # shallow copy is enough; entries are strings
+    metadata_vars = get_netcdf_metadata_data_vars(ds)
+    data_vars = [name for name in ds.data_vars if name not in metadata_vars]
     if isinstance(proposed_vars, list):
         for var in data_vars:
             if var in proposed_vars:
