@@ -1,4 +1,10 @@
-"""Prepare an mHM geology-class raster from categorical raster data."""
+"""
+Prepare an mHM geology-class raster from categorical raster data.
+
+Authors
+-------
+- Sanjeev Bashyal
+"""
 
 from __future__ import annotations
 

@@ -1,8 +1,9 @@
-"""Rasterize vector map data on a reference DEM grid.
+"""
+Rasterize vector map data on a reference DEM grid.
 
 Authors
 -------
-- mHM-Tools Developers
+- Sanjeev Bashyal
 """
 
 from argparse import ArgumentParser, Namespace

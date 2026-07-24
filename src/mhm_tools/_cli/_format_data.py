@@ -1,8 +1,9 @@
-"""Format categorical soil, geology, or land-cover data for use by mHM.
+"""
+Format categorical soil, geology, or land-cover data for use by mHM.
 
 Authors
 -------
-- mHM-Tools Developers
+- Sanjeev Bashyal
 """
 
 from argparse import ArgumentParser, Namespace
