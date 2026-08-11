@@ -28,7 +28,7 @@ Files
 
 import importlib
 
-from .format_lc_data import format_lc_data
+from .format_lc_data import format_lc_data, format_lc_periods
 
 _MODULE_EXPORTS = {
     "catchment": "catchment",
@@ -63,6 +63,7 @@ _ATTR_EXPORTS = {
         "write_geology_classdefinition",
     ),
     "format_soil_data": ("format_soil", "format_soil_data"),
+    "format_soil_horizons": ("format_soil", "format_soil_horizons"),
     "write_soil_classdefinition": (
         "format_soil",
         "write_soil_classdefinition",
@@ -88,8 +89,10 @@ __all__ = [
     "format_geology",
     "format_geology_data",
     "format_lc_data",
+    "format_lc_periods",
     "format_soil",
     "format_soil_data",
+    "format_soil_horizons",
     "latlon",
     "link_folder_tree",
     "merge_catchment",

@@ -27,6 +27,7 @@ PathLike = Union[str, Path]
 _INPUT_SUFFIXES = {".asc", ".nc", ".tif", ".tiff"}
 _OUTPUT_SUFFIXES = {".asc", ".nc", ".tif"}
 _NODATA = np.int32(NO_DATA)
+_MANIFEST_NAMES = ("format-data.csv", "format-data.txt")
 
 
 def _normalise_field_name(field_name: object) -> str:
@@ -103,6 +104,68 @@ def read_lookup_table(lookup_table: PathLike):
         msg = f"Lookup table {lookup_table} is empty."
         raise ValueError(msg)
     return table
+
+
+def get_format_manifest_path(input_path: PathLike) -> Path:
+    """Return the single format-data manifest in an input directory."""
+    input_path = Path(input_path)
+    if not input_path.is_dir():
+        msg = f"Input path must be a directory: {input_path}"
+        raise ValueError(msg)
+    manifests = [input_path / name for name in _MANIFEST_NAMES]
+    manifests = [path for path in manifests if path.is_file()]
+    if not manifests:
+        names = " or ".join(_MANIFEST_NAMES)
+        msg = f"Input directory must contain {names}: {input_path}"
+        raise ValueError(msg)
+    if len(manifests) > 1:
+        names = ", ".join(str(path) for path in manifests)
+        msg = f"Input directory contains multiple format-data manifests: {names}"
+        raise ValueError(msg)
+    return manifests[0]
+
+
+def read_format_manifest(
+    input_path: PathLike,
+    required_columns,
+    *,
+    skiprows: int = 0,
+):
+    """Read and normalize a comma-separated ``format-data`` manifest."""
+    manifest = get_format_manifest_path(input_path)
+
+    try:
+        table = pd.read_csv(manifest, skiprows=skiprows)
+    except Exception as exc:
+        msg = f"Could not read format-data manifest {manifest}: {exc}"
+        raise ValueError(msg) from exc
+    if table.empty:
+        msg = f"Format-data manifest {manifest} is empty."
+        raise ValueError(msg)
+
+    columns = {}
+    for column in table.columns:
+        normalized = _normalise_field_name(column)
+        if normalized in columns:
+            msg = (
+                f"Format-data manifest {manifest} has ambiguous columns "
+                f"{columns[normalized]!r} and {column!r}."
+            )
+            raise ValueError(msg)
+        columns[normalized] = column
+
+    rename = {}
+    for required in required_columns:
+        column = columns.get(_normalise_field_name(required))
+        if column is None:
+            available = ", ".join(str(name) for name in table.columns)
+            msg = (
+                f"Format-data manifest {manifest} is missing required column "
+                f"{required!r}. Available columns: {available or '<none>'}."
+            )
+            raise ValueError(msg)
+        rename[column] = required
+    return manifest, table.rename(columns=rename)[list(required_columns)].copy()
 
 
 def get_categorical_output_path(
@@ -226,6 +289,90 @@ def _reclassify(data: xr.DataArray, mapping: dict) -> np.ndarray:
     return output
 
 
+def reclassify_categorical_raster(
+    data: xr.DataArray,
+    table,
+    mapping_field: str,
+    class_field: str,
+    *,
+    variable_name: str,
+) -> xr.DataArray:
+    """Map categories on their source grid before spatial resampling."""
+    values = _reclassify(data, _lookup_mapping(table, mapping_field, class_field))
+    attrs = {
+        "long_name": f"mHM {variable_name.replace('_', ' ')}",
+        "units": "1",
+        "nodata_value": int(_NODATA),
+    }
+    result = xr.DataArray(
+        values,
+        dims=data.dims,
+        coords=data.coords,
+        name=variable_name,
+        attrs=attrs,
+    )
+    result = result.rio.set_spatial_dims(
+        x_dim=data.rio.x_dim,
+        y_dim=data.rio.y_dim,
+    )
+    result = result.rio.write_crs(data.rio.crs, inplace=False)
+    result = result.rio.write_transform(data.rio.transform(), inplace=False)
+    return result.rio.write_nodata(int(_NODATA), inplace=False)
+
+
+def prepare_categorical_data(
+    input_file: PathLike,
+    reference: xr.DataArray,
+    table,
+    mapping_field: str,
+    class_field: str,
+    *,
+    variable_name: str,
+    input_crs: str | None = None,
+    resampling="nearest",
+    mask_reference: bool = False,
+) -> xr.Dataset:
+    """Classify one source raster and align it to an open reference raster."""
+    input_file = Path(input_file)
+    if not input_file.is_file():
+        msg = f"Input raster does not exist: {input_file}"
+        raise ValueError(msg)
+    if input_file.suffix.lower() not in _INPUT_SUFFIXES:
+        suffixes = ", ".join(sorted(_INPUT_SUFFIXES))
+        msg = f"Input must be a raster with one of these suffixes: {suffixes}."
+        raise ValueError(msg)
+
+    source = get_raster_data(input_file, crs=input_crs)
+    try:
+        classified = reclassify_categorical_raster(
+            source,
+            table,
+            mapping_field,
+            class_field,
+            variable_name=variable_name,
+        )
+        aligned = align_raster_to_reference(
+            classified,
+            reference,
+            nodata=int(_NODATA),
+            resampling=resampling,
+            data_kind="categorical",
+            mask_reference=mask_reference,
+        )
+        return set_grid(
+            np.asarray(aligned.values, dtype=np.int32),
+            get_grid(reference.to_dataset(name="_dem"), "_dem"),
+            variable_name,
+            data_attrs={
+                "long_name": f"mHM {variable_name.replace('_', ' ')}",
+                "units": "1",
+                "nodata_value": int(_NODATA),
+            },
+        )
+    finally:
+        source.close()
+
+
 def format_categorical_data(
     input_file: PathLike,
     dem_file: PathLike,
@@ -237,18 +384,12 @@ def format_categorical_data(
     variable_name: str,
     input_crs: str | None = None,
     dem_crs: str | None = None,
+    resampling="nearest",
 ) -> Path:
     """Map a categorical raster to classes on the exact DEM grid."""
     input_file = Path(input_file)
     dem_file = Path(dem_file)
     output_file = Path(output_file)
-    if not input_file.is_file():
-        msg = f"Input raster does not exist: {input_file}"
-        raise ValueError(msg)
-    if input_file.suffix.lower() not in _INPUT_SUFFIXES:
-        suffixes = ", ".join(sorted(_INPUT_SUFFIXES))
-        msg = f"Input must be a raster with one of these suffixes: {suffixes}."
-        raise ValueError(msg)
     if not dem_file.is_file():
         msg = f"DEM raster does not exist: {dem_file}"
         raise ValueError(msg)
@@ -266,42 +407,44 @@ def format_categorical_data(
         msg = f"Raster output must differ from input files: {output_file}"
         raise ValueError(msg)
 
-    mapping = _lookup_mapping(table, mapping_field, class_field)
-    source = get_raster_data(input_file, crs=input_crs)
+    if not input_file.is_file():
+        msg = f"Input raster does not exist: {input_file}"
+        raise ValueError(msg)
+    if input_file.suffix.lower() not in _INPUT_SUFFIXES:
+        suffixes = ", ".join(sorted(_INPUT_SUFFIXES))
+        msg = f"Input must be a raster with one of these suffixes: {suffixes}."
+        raise ValueError(msg)
+
+    reference = get_raster_data(dem_file, crs=dem_crs)
     try:
-        reference = get_raster_data(dem_file, crs=dem_crs)
-        try:
-            aligned = align_raster_to_reference(source, reference, nodata=int(_NODATA))
-            classes = _reclassify(aligned, mapping)
-            output = set_grid(
-                classes,
-                get_grid(reference.to_dataset(name="_dem"), "_dem"),
-                variable_name,
-                data_attrs={
-                    "long_name": f"mHM {variable_name.replace('_', ' ')}",
-                    "nodata_value": int(_NODATA),
-                },
-            )
-            encoding = {
-                variable_name: {
-                    "zlib": True,
-                    "complevel": 4,
-                    "shuffle": True,
-                    "_FillValue": int(_NODATA),
-                    "dtype": "int32",
-                }
+        output = prepare_categorical_data(
+            input_file,
+            reference,
+            table,
+            mapping_field,
+            class_field,
+            variable_name=variable_name,
+            input_crs=input_crs,
+            resampling=resampling,
+        )
+        encoding = {
+            variable_name: {
+                "zlib": True,
+                "complevel": 4,
+                "shuffle": True,
+                "_FillValue": int(_NODATA),
+                "dtype": "int32",
             }
-            write_xarray_to_file(
-                output,
-                output_file,
-                var_name=variable_name,
-                encoding=encoding if output_file.suffix.lower() == ".nc" else None,
-                crs=reference.rio.crs,
-            )
-        finally:
-            reference.close()
+        }
+        write_xarray_to_file(
+            output,
+            output_file,
+            var_name=variable_name,
+            encoding=encoding if output_file.suffix.lower() == ".nc" else None,
+            crs=reference.rio.crs,
+        )
     finally:
-        source.close()
+        reference.close()
 
     if not output_file.is_file():
         msg = f"Formatted raster was not created: {output_file}"

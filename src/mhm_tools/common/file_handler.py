@@ -21,6 +21,7 @@ import xarray as xr
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
 from rasterio.transform import from_origin
+from rasterio.warp import calculate_default_transform
 
 from mhm_tools.common.constants import NC_ENCODE_DEFAULTS, NO_DATA
 from mhm_tools.common.crs_handler import MissingCRSError as _MissingCRSError
@@ -92,8 +93,11 @@ def align_raster_to_reference(
     reference: xr.DataArray,
     *,
     nodata=NO_DATA,
+    resampling="nearest",
+    data_kind=None,
+    mask_reference=False,
 ) -> xr.DataArray:
-    """Match a categorical raster to a reference grid using nearest neighbour."""
+    """Match a raster to a reference grid with explicit or automatic resampling."""
     data = _set_spatial_dims(data)
     reference = _set_spatial_dims(reference)
     data_y, data_x = data.rio.y_dim, data.rio.x_dim
@@ -108,6 +112,12 @@ def align_raster_to_reference(
     reference_crs = resolve_crs(reference, required=True)
     source_nodata = _get_nodata(data)
     data = _ensure_nodata_dtype(data, nodata)
+    resampling = _resolve_raster_resampling(
+        data,
+        reference,
+        resampling=resampling,
+        data_kind=data_kind,
+    )
 
     if _same_raster_grid(data, reference):
         normalized = data
@@ -120,9 +130,18 @@ def align_raster_to_reference(
     else:
         values = data.rio.reproject_match(
             reference,
-            resampling=Resampling.nearest,
+            resampling=resampling,
             nodata=nodata,
         ).data
+
+    if mask_reference:
+        reference_values = np.asarray(reference.values)
+        reference_valid = np.ones(reference.shape, dtype=bool)
+        if np.issubdtype(reference_values.dtype, np.floating):
+            reference_valid &= np.isfinite(reference_values)
+        for reference_nodata in _raster_nodata_values(reference):
+            reference_valid &= reference_values != reference_nodata
+        values = np.where(reference_valid, values, nodata)
 
     coords = {
         name: coord
@@ -144,6 +163,91 @@ def align_raster_to_reference(
     result = result.rio.write_transform(reference.rio.transform(), inplace=False)
     result.attrs["nodata_value"] = nodata
     return result.rio.write_nodata(nodata, inplace=False)
+
+
+def _resolve_raster_resampling(data, reference, *, resampling, data_kind):
+    """Resolve a Rasterio resampling enum, including data-aware ``auto`` mode."""
+    if isinstance(resampling, Resampling):
+        return resampling
+
+    method = str(resampling).strip().lower()
+    if method in {"categorical", "continuous"}:
+        data_kind = method
+        method = "auto"
+    if method != "auto":
+        try:
+            return Resampling[method]
+        except KeyError as exc:
+            choices = ", ".join(member.name for member in Resampling)
+            msg = (
+                f"Unsupported resampling method {resampling!r}. "
+                f"Choose from: {choices}."
+            )
+            raise ValueError(msg) from exc
+
+    if data_kind is None:
+        data_kind = (
+            "categorical" if np.issubdtype(data.dtype, np.integer) else "continuous"
+        )
+    data_kind = str(data_kind).strip().lower()
+    if data_kind not in {"categorical", "continuous"}:
+        msg = "data_kind must be 'categorical' or 'continuous'."
+        raise ValueError(msg)
+
+    downsampling = _is_raster_downsampling(data, reference)
+    if data_kind == "categorical":
+        return Resampling.mode if downsampling else Resampling.nearest
+    return Resampling.average if downsampling else Resampling.bilinear
+
+
+def _is_raster_downsampling(data, reference) -> bool:
+    """Return whether a reference pixel covers more area than a source pixel."""
+    source_transform = data.rio.transform()
+    source_crs = resolve_crs(data, required=True)
+    reference_crs = resolve_crs(reference, required=True)
+    if source_crs != reference_crs:
+        source_transform, _, _ = calculate_default_transform(
+            source_crs,
+            reference_crs,
+            data.sizes[data.rio.x_dim],
+            data.sizes[data.rio.y_dim],
+            *data.rio.bounds(),
+        )
+    reference_transform = reference.rio.transform()
+    source_area = abs(
+        source_transform.a * source_transform.e
+        - source_transform.b * source_transform.d
+    )
+    reference_area = abs(
+        reference_transform.a * reference_transform.e
+        - reference_transform.b * reference_transform.d
+    )
+    return bool(
+        reference_area > source_area
+        and not np.isclose(reference_area, source_area, rtol=1e-9, atol=0.0)
+    )
+
+
+def _raster_nodata_values(data):
+    """Yield finite nodata sentinels declared by a raster."""
+    values = []
+    with contextlib.suppress(Exception):
+        values.extend([data.rio.encoded_nodata, data.rio.nodata])
+    values.extend(
+        data.attrs.get(key) for key in ("nodata_value", "_FillValue", "missing_value")
+    )
+    values.extend(data.encoding.get(key) for key in ("_FillValue", "missing_value"))
+    seen = set()
+    for value in values:
+        if value is None or _is_nan(value):
+            continue
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            continue
+        if np.isfinite(number) and number not in seen:
+            seen.add(number)
+            yield number
 
 
 def _same_raster_grid(data: xr.DataArray, reference: xr.DataArray) -> bool:

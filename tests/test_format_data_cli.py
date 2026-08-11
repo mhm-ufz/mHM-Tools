@@ -102,9 +102,174 @@ def test_format_data_help_and_alias():
     assert alias_result.exit_code == 0, alias_result.output
     assert "-t, --type" in result.output
     assert "[soil|geology|lc]" in result.output
+    assert "-i, --input-path" in result.output
     assert "-c, --class-field" in result.output
     assert "-e, --extension" in result.output
     assert "[nc|asc|tif]" in result.output
+
+
+def test_format_data_accepts_input_file_as_a_legacy_alias(monkeypatch):
+    """Existing callers may keep using the old --input-file spelling."""
+    captured = {}
+
+    def fake_formatter(**kwargs):
+        captured.update(kwargs)
+
+    module = importlib.import_module("mhm_tools.pre.format_lc_data")
+    monkeypatch.setattr(module, "format_lc_data", fake_formatter)
+    result = CliRunner().invoke(
+        cli,
+        [
+            "data-converter",
+            "format-data",
+            "-t",
+            "lc",
+            "--input-file",
+            "input.tif",
+            "-d",
+            "dem.tif",
+            "-o",
+            "output",
+            "-l",
+            "lookup.gpkg",
+            "-m",
+            "source",
+            "-c",
+            "target",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["input_file"] == Path("input.tif")
+
+
+def test_format_data_accepts_underscore_input_path_alias(monkeypatch):
+    """The documented underscore spelling remains accepted by the CLI."""
+    captured = {}
+
+    def fake_formatter(**kwargs):
+        captured.update(kwargs)
+
+    module = importlib.import_module("mhm_tools.pre.format_lc_data")
+    monkeypatch.setattr(module, "format_lc_data", fake_formatter)
+    result = CliRunner().invoke(
+        cli,
+        [
+            "data-converter",
+            "format-data",
+            "-t",
+            "lc",
+            "--input_path",
+            "input.tif",
+            "-d",
+            "dem.tif",
+            "-o",
+            "output",
+            "-l",
+            "lookup.gpkg",
+            "-m",
+            "source",
+            "-c",
+            "target",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["input_file"] == Path("input.tif")
+
+
+def test_format_data_forwards_explicit_resampling_to_single_files(monkeypatch):
+    """The shared resampling option also applies to legacy file inputs."""
+    captured = {}
+
+    def fake_formatter(**kwargs):
+        captured.update(kwargs)
+
+    module = importlib.import_module("mhm_tools.pre.format_geology")
+    monkeypatch.setattr(module, "format_geology_data", fake_formatter)
+    result = CliRunner().invoke(
+        cli,
+        [
+            "data-converter",
+            "format-data",
+            "-t",
+            "geology",
+            "-i",
+            "input.tif",
+            "-d",
+            "dem.tif",
+            "-o",
+            "output",
+            "-l",
+            "lookup.gpkg",
+            "-m",
+            "source",
+            "-c",
+            "target",
+            "--resampling",
+            "mode",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["resampling"] == "mode"
+
+
+@pytest.mark.parametrize(
+    ("data_type", "module_name", "function_name", "lookup_options"),
+    [
+        (
+            "lc",
+            "mhm_tools.pre.format_lc_data",
+            "format_lc_periods",
+            ["-l", "lookup.gpkg", "-m", "source", "-c", "target"],
+        ),
+        ("soil", "mhm_tools.pre.format_soil", "format_soil_horizons", []),
+    ],
+)
+def test_format_data_dispatches_directory_manifests(
+    tmp_path,
+    monkeypatch,
+    data_type,
+    module_name,
+    function_name,
+    lookup_options,
+):
+    """A directory selects the multi-period or multi-horizon public API."""
+    input_path = tmp_path / data_type
+    input_path.mkdir()
+    captured = {}
+
+    def fake_formatter(**kwargs):
+        captured.update(kwargs)
+
+    module = importlib.import_module(module_name)
+    monkeypatch.setattr(module, function_name, fake_formatter)
+    result = CliRunner().invoke(
+        cli,
+        [
+            "data-converter",
+            "format-data",
+            "-t",
+            data_type,
+            "--input-path",
+            str(input_path),
+            "-d",
+            "dem.tif",
+            "-o",
+            "output",
+            "--resampling",
+            "auto",
+            *lookup_options,
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["input_path"] == input_path
+    assert captured["resampling"] == "auto"
+    assert "input_file" not in captured
+    if data_type == "soil":
+        assert "lookup_table" not in captured
 
 
 @pytest.mark.parametrize(

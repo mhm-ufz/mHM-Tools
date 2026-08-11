@@ -1,0 +1,254 @@
+"""Tests for manifest-based land-cover and soil formatting."""
+
+from pathlib import Path
+
+import geopandas as gpd
+import numpy as np
+import pytest
+import rasterio
+import xarray as xr
+
+from mhm_tools import pre
+from mhm_tools.pre.format_lc_data import format_lc_periods
+from mhm_tools.pre.format_soil import _bulk_density_unit, format_soil_horizons
+
+
+def _write_raster(path: Path, values, *, cellsize: float = 1.0) -> None:
+    values = np.asarray(values)
+    with rasterio.open(
+        path,
+        "w",
+        driver="GTiff",
+        width=values.shape[1],
+        height=values.shape[0],
+        count=1,
+        dtype=values.dtype,
+        crs="EPSG:32632",
+        transform=rasterio.transform.from_origin(
+            0.0, values.shape[0] * cellsize, cellsize, cellsize
+        ),
+        nodata=-9999,
+    ) as dataset:
+        dataset.write(values, 1)
+
+
+def test_format_lc_periods_maps_before_majority_and_writes_both_formats(tmp_path):
+    """Historical classes are mapped before mode resampling and retain bounds."""
+    input_path = tmp_path / "land-cover"
+    input_path.mkdir()
+    first = input_path / "first.tif"
+    second = input_path / "second.tif"
+    dem = tmp_path / "dem.tif"
+    lookup = tmp_path / "lookup.gpkg"
+
+    # Code 30 is the raw majority, while mapped class 1 is the class majority.
+    _write_raster(
+        first,
+        np.array([10] * 5 + [20] * 5 + [30] * 6, dtype=np.int16).reshape(4, 4),
+    )
+    _write_raster(second, np.full((4, 4), 30, dtype=np.int16))
+    _write_raster(dem, np.ones((1, 1), dtype=np.float32), cellsize=4.0)
+    gpd.GeoDataFrame({"source": [10, 20, 30], "class": [1, 1, 2]}).to_file(
+        lookup, driver="GPKG"
+    )
+    (input_path / "format-data.csv").write_text(
+        "StartYear,EndYear,FilePath\n"
+        "2000,2004,first.tif\n"
+        "2005,2009,second.tif\n",
+        encoding="utf-8",
+    )
+
+    ascii_outputs = format_lc_periods(
+        input_path,
+        dem,
+        tmp_path / "ascii",
+        lookup,
+        "source",
+        "class",
+        "asc",
+    )
+    assert [path.name for path in ascii_outputs] == [
+        "lc_2000_2004.asc",
+        "lc_2005_2009.asc",
+    ]
+    with rasterio.open(ascii_outputs[0]) as dataset:
+        np.testing.assert_array_equal(dataset.read(1), [[1]])
+        assert dataset.transform == rasterio.transform.from_origin(0, 4, 4, 4)
+    with rasterio.open(ascii_outputs[1]) as dataset:
+        np.testing.assert_array_equal(dataset.read(1), [[2]])
+
+    netcdf_outputs = format_lc_periods(
+        input_path,
+        dem,
+        tmp_path / "netcdf",
+        lookup,
+        "source",
+        "class",
+        "nc",
+    )
+    assert [path.name for path in netcdf_outputs] == ["lc_periods.nc"]
+    with xr.open_dataset(netcdf_outputs[0]) as dataset:
+        assert dataset["land_cover"].dims == ("time", "y", "x")
+        np.testing.assert_array_equal(dataset["land_cover"].values[:, 0, 0], [1, 2])
+        np.testing.assert_array_equal(
+            dataset["time"].values,
+            np.array(["2000-01-01", "2005-01-01"], dtype="datetime64[ns]"),
+        )
+        np.testing.assert_array_equal(
+            dataset["time_bnds"].values,
+            np.array(
+                [
+                    ["2000-01-01", "2005-01-01"],
+                    ["2005-01-01", "2010-01-01"],
+                ],
+                dtype="datetime64[ns]",
+            ),
+        )
+        assert dataset["time"].attrs["bounds"] == "time_bnds"
+        assert dataset["time"].attrs["standard_name"] == "time"
+        assert dataset["land_cover"].attrs["units"] == "1"
+        assert dataset.attrs["Conventions"].startswith("CF-")
+
+
+def test_format_lc_periods_rejects_gaps(tmp_path):
+    """Inclusive historical periods must form one gap-free time axis."""
+    input_path = tmp_path / "land-cover"
+    input_path.mkdir()
+    _write_raster(input_path / "first.tif", np.ones((1, 1), dtype=np.int16))
+    _write_raster(input_path / "second.tif", np.ones((1, 1), dtype=np.int16))
+    (input_path / "format-data.csv").write_text(
+        "StartYear,EndYear,FilePath\n"
+        "2000,2004,first.tif\n"
+        "2006,2009,second.tif\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="gap between 2004 and 2006"):
+        format_lc_periods(
+            input_path,
+            tmp_path / "missing-dem.tif",
+            tmp_path / "output",
+            tmp_path / "missing-lookup.gpkg",
+            "source",
+            "class",
+        )
+
+
+def _write_soil_manifest(input_path: Path) -> None:
+    header = (
+        "Horizon,Upper Depth,Lower Depth,Clay Layer,Sand Layer,Silt Layer,"
+        "Bulk Density Layer\n"
+    )
+    rows = (
+        "1,0,100,clay1.tif,sand1.tif,silt1.tif,bd1.tif\n"
+        "2,100,300,clay2.tif,sand2.tif,silt2.tif,bd2.tif\n"
+    )
+    (input_path / "format-data.txt").write_text(
+        "Bulk Density Unit = kg/m3\n" + header + rows,
+        encoding="utf-8",
+    )
+
+
+def _write_soil_inputs(input_path: Path) -> None:
+    values = {
+        "clay1": [[2, 4], [0, 20]],
+        "sand1": [[3, 2], [0, 30]],
+        "silt1": [[5, 4], [0, 50]],
+        "bd1": [[1300, 1400], [1500, 1300]],
+        "clay2": [[1, 2], [3, 1]],
+        "sand2": [[1, 4], [3, 1]],
+        "silt2": [[3, 4], [4, 3]],
+        "bd2": [[1500, 1600], [1700, 1500]],
+    }
+    for name, data in values.items():
+        _write_raster(input_path / f"{name}.tif", np.asarray(data, dtype=np.float32))
+
+
+def test_format_soil_horizons_writes_v5_profiles_and_normalizes_composition(
+    tmp_path,
+):
+    """v5 classes describe full profiles and preserve an invalid component sum."""
+    input_path = tmp_path / "soil"
+    input_path.mkdir()
+    _write_soil_manifest(input_path)
+    _write_soil_inputs(input_path)
+    dem = tmp_path / "dem.tif"
+    _write_raster(dem, np.ones((2, 2), dtype=np.float32))
+
+    raster, definition = format_soil_horizons(
+        input_path, dem, tmp_path / "v5", "asc"
+    )
+
+    assert raster.name == "soil_class.asc"
+    assert definition.name == "soil_classdefinition.txt"
+    with rasterio.open(raster) as dataset:
+        np.testing.assert_array_equal(dataset.read(1), [[1, 2], [-9999, 1]])
+        assert dataset.transform == rasterio.transform.from_origin(0, 2, 1, 1)
+    assert definition.read_text(encoding="utf-8").splitlines() == [
+        "nSoil_Types 2",
+        "MU_GLOBAL\tHORIZON\tUD[mm]\tLD[mm]\tCLAY[%]\tSAND[%]\tBD[gcm-3]",
+        "1\t1\t0\t100\t20\t30\t1.3",
+        "1\t2\t100\t300\t20\t20\t1.5",
+        "2\t1\t0\t100\t40\t20\t1.4",
+        "2\t2\t100\t300\t20\t40\t1.6",
+    ]
+
+
+def test_format_soil_horizons_writes_v6_horizon_classes_and_mode1_lut(tmp_path):
+    """v6 retains per-horizon validity, depth bounds, and a mode-1 LUT."""
+    input_path = tmp_path / "soil"
+    input_path.mkdir()
+    _write_soil_manifest(input_path)
+    _write_soil_inputs(input_path)
+    dem = tmp_path / "dem.tif"
+    _write_raster(dem, np.ones((2, 2), dtype=np.float32))
+
+    raster, definition = format_soil_horizons(
+        input_path, dem, tmp_path / "v6", "nc"
+    )
+
+    assert raster.name == "soil_horizon_class.nc"
+    assert definition.name == "soil_classdefinition_iFlag_soilDB_1.txt"
+    with xr.open_dataset(raster, decode_cf=False) as dataset:
+        assert dataset["soil_class"].dims == ("z", "y", "x")
+        np.testing.assert_array_equal(
+            dataset["soil_class"].values,
+            [[[2, 5], [-9999, 2]], [[1, 3], [4, 1]]],
+        )
+        np.testing.assert_allclose(dataset["z"].values, [100, 300])
+        np.testing.assert_allclose(dataset["z_bnds"].values, [[0, 100], [100, 300]])
+        assert dataset["z"].attrs["bounds"] == "z_bnds"
+        assert dataset["z"].attrs["positive"] == "down"
+        assert dataset["soil_class"].attrs["_FillValue"] == -9999
+        assert dataset.attrs["Conventions"].startswith("CF-")
+    assert definition.read_text(encoding="utf-8").splitlines() == [
+        "nSoil_Types 5",
+        "ID\tCLAY[%]\tSAND[%]\tBD[gcm-3]",
+        "1\t20\t20\t1.5",
+        "2\t20\t30\t1.3",
+        "3\t20\t40\t1.6",
+        "4\t30\t30\t1.7",
+        "5\t40\t20\t1.4",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("unit", "canonical", "factor"),
+    [
+        ("g/cm3", "g/cm3", 1.0),
+        ("kg m^-3", "kg/m3", 1.0e-3),
+        ("cg/cm³", "cg/cm3", 1.0e-2),
+        ("mg/cm3", "mg/cm3", 1.0e-3),
+        ("g/dm3", "g/dm3", 1.0e-3),
+        ("kg/dm3", "kg/dm3", 1.0),
+    ],
+)
+def test_bulk_density_units_convert_to_g_per_cm3(unit, canonical, factor):
+    """Manifest units have explicit, tested conversions to g/cm3."""
+    assert _bulk_density_unit(unit) == (canonical, factor)
+
+
+def test_pre_exports_manifest_formatters():
+    """Both manifest-based formatters are public Python APIs."""
+    assert pre.format_lc_periods is format_lc_periods
+    assert pre.format_soil_horizons is format_soil_horizons
