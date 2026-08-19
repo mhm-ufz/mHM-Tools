@@ -168,6 +168,8 @@ select = [
 ignore = [
   "E501",    # line to long (black decides)
   "PLR2004", # magic values as constant
+  "PLC0415", # local imports are used deliberately (circular imports, optional heavy deps)
+  "PLR0917", # too many positional args; already tolerated via max-args and PLR0913 noqas
 ]
 
 [tool.ruff.lint.pylint]

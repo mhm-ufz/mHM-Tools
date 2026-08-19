@@ -41,6 +41,8 @@ from mhm_tools.common.xarray_utils import (
     get_coord_key,
     get_ds_extend,
     get_overlapping_time_slice,
+    normalize_lat_lon,
+    regrid_mask,
     spearman_correlation,
     timedelta_to_alias,
 )
@@ -254,19 +256,31 @@ def get_file_stats(
 ):
     """Get statistics for one file."""
     # logger.debug(f"Get file stats {file}")
+    lat_key = get_coord_key(ds_in, lat=True)
+    lon_key = get_coord_key(ds_in, lon=True)
+    try:
+        spatial_resolution = _spatial_resolution(ds_in, lon_key, lat_key)
+    except ValueError:
+        spatial_resolution = None
+
+    # Normalize to canonical 'lat'/'lon' dimension names, since the statistics
+    # dataset built below always coordinates itself as 'lat'/'lon'.
+    if lat_key != "lat" and "lat" in ds_in.coords:
+        ds_in = ds_in.drop_vars("lat")
+    if lon_key != "lon" and "lon" in ds_in.coords:
+        ds_in = ds_in.drop_vars("lon")
+    ds_in = normalize_lat_lon(ds_in, lat_key=lat_key, lon_key=lon_key)
 
     # Apply coordinate slicing if needed
     logger.debug(f"before cropping the file {ds_in}")
-    lat_key = get_coord_key(ds_in, lat=True)
-    lon_key = get_coord_key(ds_in, lon=True)
     # make sure that latitude order is from highest to lowest value
-    if ds_in[lat_key].shape[0] > 1 and ds_in[lat_key][1] > ds_in[lat_key][0]:
+    if ds_in["lat"].shape[0] > 1 and ds_in["lat"][1] > ds_in["lat"][0]:
         ds_croped = ds_in.isel(lat=slice(None, None, -1))
     else:
         ds_croped = ds_in
     if coordinate_slice is not None:
         ds_croped = ds_croped.sel(
-            {lat_key: coordinate_slice["lat"], lon_key: coordinate_slice["lon"]}
+            {"lat": coordinate_slice["lat"], "lon": coordinate_slice["lon"]}
         )
     if avaiable_years is not None:
         ds_croped = ds_croped.sel(time=ds_croped.time.dt.year.isin(avaiable_years))
@@ -288,6 +302,17 @@ def get_file_stats(
         f"mean={bool(mean.isnull().all().compute().item())}"
     )
 
+    # Aggregation/arithmetic above drops attrs; give each output CF metadata
+    # describing the statistic, copying units from the source variable when known.
+    source_units = ds_croped[input_var].attrs.get("units")
+    clim.attrs = {"long_name": f"Monthly climatology of {input_var}"}
+    std.attrs = {"long_name": f"Temporal standard deviation of {input_var}"}
+    mean.attrs = {"long_name": f"Temporal mean of {input_var}"}
+    if source_units is not None:
+        clim.attrs["units"] = source_units
+        std.attrs["units"] = source_units
+        mean.attrs["units"] = source_units
+
     # Construct the output dataset with lazy evaluations
     output = xr.Dataset(
         {"clim": clim, "std": std, "mean": mean},
@@ -297,9 +322,10 @@ def get_file_stats(
             "lon": get_coord_values(ds_croped, lon=True),
         },
     )
-    output = generate_bounds_for_all_coords(output)
+    output = generate_bounds_for_all_coords(output, res=spatial_resolution)
     if direct_comp:
         ts = ds_croped[input_var] * factor
+        ts.attrs = dict(ds_croped[input_var].attrs)
         ts.name = "time_series"
         output = xr.merge([output, ts])
     if output_path is not None:
@@ -426,8 +452,6 @@ def apply_spatial_mask(ds, mask_da, mask_var=None):
             mask_res,
             target_res,
         ) = _select_mask_for_grid(mask_da, ds, mask_var=mask_var)
-        from mhm_tools.pre.crop_mhm_setup import regrid_mask
-
         mask_on_ds = regrid_mask(
             mask_ds=mask_2d,
             lon_key_mask=lon_key_mask,
@@ -491,7 +515,9 @@ def apply_spatial_mask(ds, mask_da, mask_var=None):
     for var_name in out.data_vars:
         da = out[var_name]
         if lat_key_ds in da.dims and lon_key_ds in da.dims:
+            original_attrs = dict(da.attrs)
             out[var_name] = da.where(valid_mask)
+            out[var_name].attrs = original_attrs
     logger.debug(
         f"After spatial mask stats are all nan: "
         f"clim={bool(out['clim'].isnull().all().compute().item()) if 'clim' in out else None}, "
@@ -515,12 +541,6 @@ def apply_spatial_mask(ds, mask_da, mask_var=None):
             resolutions=resolutions,
             catchment_mask=mask_np,
             buffer=buffer,
-        )
-        lat_slice_idx = slice(
-            lat_slice_idx.start, min(lat_slice_idx.stop + 1, out[lat_key_ds].size)
-        )
-        lon_slice_idx = slice(
-            lon_slice_idx.start, min(lon_slice_idx.stop + 1, out[lon_key_ds].size)
         )
         out = out.isel({lat_key_ds: lat_slice_idx, lon_key_ds: lon_slice_idx})
         logger.debug(
@@ -727,11 +747,17 @@ def get_stats_one_pass(
     monthly_counts = np.where(monthly_counts > 0, monthly_counts, np.nan)
     climatology = monthly_sums / monthly_counts
     climatology = np.where(monthly_counts > 0, climatology, np.nan)
-    with get_xarray_ds_from_file(
-        files[0], engine="netcdf4", force_decending_y=True
+    with get_dataset_from_path(
+        files[0],
+        engine="netcdf4",
+        force_decending_y=True,
     ) as ds_in:
         lat_key = get_coord_key(ds_in, lat=True)
         lon_key = get_coord_key(ds_in, lon=True)
+        try:
+            spatial_resolution = _spatial_resolution(ds_in, lon_key, lat_key)
+        except ValueError:
+            spatial_resolution = None
         # Apply coordinate slicing if needed
         ds = (
             ds_in.sel(
@@ -742,6 +768,7 @@ def get_stats_one_pass(
         )
         lat = get_coord_values(ds, lat=True)
         lon = get_coord_values(ds, lon=True)
+        source_units = ds[var].attrs.get("units") if var in ds else None
     # Calculate climatology and standard deviation along the time dimension
     # Construct the output dataset with lazy evaluations
     # climatology = climatology.rename({get_coord_key(climatology, lat=True): "lat", get_coord_key(climatology, lon=True): "lon"})
@@ -753,11 +780,18 @@ def get_stats_one_pass(
         dims=["month", "lat", "lon"],
     )
     mean = xr.DataArray(mean, coords={"lat": lat, "lon": lon}, dims=["lat", "lon"])
+    clim.attrs = {"long_name": f"Monthly climatology of {var}"}
+    std.attrs = {"long_name": f"Temporal standard deviation of {var}"}
+    mean.attrs = {"long_name": f"Temporal mean of {var}"}
+    if source_units is not None:
+        clim.attrs["units"] = source_units
+        std.attrs["units"] = source_units
+        mean.attrs["units"] = source_units
     output = xr.Dataset(
         {"clim": clim, "std": std, "mean": mean},
         coords={"month": np.arange(1, 13, 1), "lat": lat, "lon": lon},
     )
-    output = generate_bounds_for_all_coords(output)
+    output = generate_bounds_for_all_coords(output, res=spatial_resolution)
     # Trigger computation if needed
     if output_path is not None:
         output_file = (
@@ -940,8 +974,8 @@ def resample_to_target_freq(
     ds_input: xr.Dataset, ds_ref: xr.Dataset, target_freq
 ) -> Tuple[xr.Dataset, xr.Dataset]:
     """Resample both datasets to the provided target freq."""
-    hours_in, alias_in = timedelta_to_alias(ds_input)
-    hours_ref, alias_ref = timedelta_to_alias(ds_ref)
+    _hours_in, alias_in = timedelta_to_alias(ds_input)
+    _hours_ref, alias_ref = timedelta_to_alias(ds_ref)
 
     if target_freq != alias_ref:
         # input is coarser (e.g. monthly) → bring ref up to that
@@ -956,8 +990,9 @@ def resample_to_target_freq(
     ds_input = normalize_time_axis(ds_input, target_freq)
     ds_ref = normalize_time_axis(ds_ref, target_freq)
 
-    # finally, force them onto exactly the same time-axis
-    ds_input, ds_ref = xr.align(ds_input, ds_ref, join="inner")
+    # Align the two datasets along the time dimension ensuring that they match exactly, while ignoring any other dimensions
+    non_time_dims = (set(ds_input.dims) | set(ds_ref.dims)) - {"time"}
+    ds_input, ds_ref = xr.align(ds_input, ds_ref, join="inner", exclude=non_time_dims)
     # logger.debug(f"Input file after align {ds_input}")
     return ds_input, ds_ref
 
@@ -1710,7 +1745,7 @@ def get_stats(
         elif path.is_dir() or path.is_file():
             if path.is_file() and path.suffix == ".nc":
                 chunking = available_mem is not None
-                ds = get_xarray_ds_from_file(
+                ds = get_dataset_from_path(
                     path,
                     chunking=chunking,
                     available_mem_gib=available_mem,
@@ -1732,7 +1767,9 @@ def get_stats(
                     path, available_years=available_years, file_name=file_name
                 )
                 with get_dataset_from_path(
-                    file_list, available_mem=available_mem, file_name=file_name
+                    file_list,
+                    available_mem=available_mem,
+                    file_name=file_name,
                 ) as ds_in:
                     stats_ds = get_file_stats(
                         ds_in,
@@ -1748,8 +1785,11 @@ def get_stats(
             with ErrorLogger(logger):
                 raise ValueError(msg)
     else:
-        with get_xarray_ds_from_file(
-            path, engine="netcdf4", force_decending_y=True
+        with get_dataset_from_path(
+            path,
+            engine="netcdf4",
+            force_decending_y=True,
+            create_bounds=True,
         ) as ds_input:
             ds = ds_input
             if coordinate_slice is not None:
@@ -1767,6 +1807,13 @@ def get_stats(
                 with ErrorLogger(logger):
                     msg = "Wrong statisitcs file. If you want to create new statistics you have to provide a var."
                     raise KeyError(msg)
+
+    # get_file_stats/get_stats_one_pass already attach real bounds to their
+    # own output before returning (deriving cell width from the still-
+    # uncropped source), and the direct-open branch above opens its file
+    # with create_bounds=True — so stats_ds already carries real *_bnds
+    # coordinates by this point, and apply_spatial_mask's crop preserves
+    # them (including when it narrows an axis to a single point).
     masked_ds = apply_spatial_mask(stats_ds, mask_da, mask_var=mask_var)
     return generate_bounds_for_all_coords(masked_ds)
 
@@ -2022,6 +2069,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
             "lon": get_coord_values(input, lon=True),
         },
         dims=["month", "lat", "lon"],
+        attrs=dict(input["clim"].attrs),
     )
     ref_clim = xr.DataArray(
         np.where(clim_valid, ref["clim"].values, np.nan),
@@ -2031,8 +2079,13 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
             "lon": get_coord_values(input, lon=True),
         },
         dims=["month", "lat", "lon"],
+        attrs=dict(ref["clim"].attrs),
     )
     rel_mean = rel_mean.where(np.isfinite(rel_mean) & (rel_mean >= 0))
+    rel_mean.attrs = {
+        "units": "1",
+        "long_name": "Relative mean (input / reference)",
+    }
     output = xr.Dataset(
         {
             "rel_mean": rel_mean,
@@ -2045,8 +2098,20 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
     )
     if with_std:
         rel_std = rel_std.where(np.isfinite(rel_std) & (rel_std >= 0))
+        rel_std.attrs = {
+            "units": "1",
+            "long_name": "Relative standard deviation (input / reference)",
+        }
         output["rel_std"] = rel_std
     if full_metrics:
+        spearman.attrs = {
+            "units": "1",
+            "long_name": "Spearman rank correlation (input vs reference)",
+        }
+        spearman_pval.attrs = {
+            "units": "1",
+            "long_name": "p-value of Spearman rank correlation (input vs reference)",
+        }
         output["spearman"] = spearman
         output["spearman_pval"] = spearman_pval
     file_name = "relative_stats"

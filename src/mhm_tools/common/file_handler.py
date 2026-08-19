@@ -22,7 +22,7 @@ from rasterio.crs import CRS
 from rasterio.enums import Resampling
 from rasterio.transform import from_origin
 
-from mhm_tools.common.constants import NC_ENCODE_DEFAULTS, NO_DATA
+from mhm_tools.common.constants import NC_ENCODE_DEFAULTS, NC_ENCODE_MASK, NO_DATA
 from mhm_tools.common.crs_handler import MissingCRSError as _MissingCRSError
 from mhm_tools.common.crs_handler import (
     _set_spatial_dims,
@@ -32,7 +32,9 @@ from mhm_tools.common.crs_handler import (
 from mhm_tools.common.esri_grid import standardize_header, write_grid, write_header
 from mhm_tools.common.logger import ErrorLogger, log_arguments
 from mhm_tools.common.netcdf import (
+    add_variable_hard_link,
     apply_cf_baseline_metadata,
+    generate_bounds,
     generate_bounds_for_all_coords,
     get_netcdf_metadata_data_vars,
     prepare_dataset_for_netcdf_write,
@@ -738,6 +740,79 @@ def write_xarray_to_file(
         write_xarray_to_geotiff(ds, file_path, var_name, crs=crs)
 
 
+def write_mask_to_file(
+    mask_array, lat, lon, file_path, long_name="mask", var_name="mask"
+):
+    """Write a boolean mask array to a NetCDF file with CF lat/lon metadata.
+
+    Adds a ``land_mask`` alias for `var_name` via an HDF5 hard link (no data
+    duplication), unless `var_name` is already ``"land_mask"``.
+
+    Parameters
+    ----------
+    mask_array : numpy.ndarray or xarray.DataArray
+        2D boolean/int mask, `(lat, lon)` ordered.
+    lat, lon : array-like
+        Coordinate values for the mask grid.
+    file_path : str or pathlib.Path
+        NetCDF file to write.
+    long_name : str, optional
+        CF `long_name` attribute for the mask variable.
+    var_name : str, optional
+        Name of the mask data variable, by default ``"mask"``.
+
+    Returns
+    -------
+    pathlib.Path
+        The written file path.
+    """
+    file_path = Path(file_path)
+    mask_values = np.where(np.asarray(mask_array), 1, 0)
+    mask_da = xr.DataArray(
+        mask_values, coords={"lat": lat, "lon": lon}, dims=["lat", "lon"]
+    )
+    mask_da["lat"].attrs.update(
+        {
+            "units": "degrees_north",
+            "long_name": "latitude",
+            "standard_name": "latitude",
+            "axis": "Y",
+        }
+    )
+    mask_da["lon"].attrs.update(
+        {
+            "units": "degrees_east",
+            "long_name": "longitude",
+            "standard_name": "longitude",
+            "axis": "X",
+        }
+    )
+    mask_da.attrs.update(
+        {
+            "units": "1",
+            "long_name": long_name,
+            "flag_values": np.array([0, 1], dtype=mask_da.dtype),
+            "flag_meanings": "outside_mask inside_mask",
+        }
+    )
+    mask_ds = xr.Dataset({var_name: mask_da})
+    for coord in ("lat", "lon"):
+        bounds_name = f"{coord}_bnds"
+        try:
+            mask_ds.coords[bounds_name] = generate_bounds(mask_ds[coord])
+            mask_ds[coord].attrs["bounds"] = bounds_name
+        except IndexError:
+            logger.info(f"Could not generate bounds for coord {coord}")
+    encoding = {
+        var_name: {"zlib": True, "complevel": 4, "shuffle": True, **NC_ENCODE_MASK}
+    }
+    write_xarray_to_file(mask_ds, file_path, encoding=encoding)
+    if var_name != "land_mask":
+        add_variable_hard_link(file_path, existing_var=var_name, alias_var="land_mask")
+    logger.info(f"Mask file has been written to {file_path}")
+    return file_path
+
+
 def write_xarray_to_ascii(
     dataset,
     filepath,
@@ -998,6 +1073,7 @@ def get_dataset_from_path(
     landcover_year_start=None,
     available_mem=None,
     file_name="*.*",
+    create_bounds=False,
 ):
     """Load a dataset from a file, directory, or pattern.
 
@@ -1026,6 +1102,8 @@ def get_dataset_from_path(
             )
         ):
             ds_out = ds_out.sel({lat_key: slice(None, None, -1)})
+        if create_bounds:
+            ds_out = generate_bounds_for_all_coords(ds_out)
 
         logger.debug(ds_out)
         logger.debug(lat_key)
@@ -1090,6 +1168,7 @@ def get_dataset_from_path(
                 force_ascending_y=force_ascending_y,
                 landcover=landcover,
                 landcover_year_start=landcover_year_start,
+                create_bounds=create_bounds,
             )
         non_nc = [p for p in file_list if Path(p).suffix != ".nc"]
         if non_nc:
@@ -1116,6 +1195,7 @@ def get_dataset_from_path(
             force_ascending_y=force_ascending_y,
             landcover=landcover,
             landcover_year_start=landcover_year_start,
+            create_bounds=create_bounds,
         )
 
     path_str = str(path_in)

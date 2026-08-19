@@ -492,6 +492,32 @@ class TestGetXarrayDsFromFile(unittest.TestCase, BaseDatasetMixin):
                 self.assertGreater(out["lat"].values[0], out["lat"].values[-1])
                 out.close()
 
+    def test_get_xarray_ds_from_file_create_bounds(self):
+        ds = self.make_simple_ds()
+        with tempfile.TemporaryDirectory() as td:
+            nc_path = Path(td) / "res.nc"
+            ds.to_netcdf(nc_path)
+
+            out = fh.get_xarray_ds_from_file(nc_path, create_bounds=True)
+            self.assertIn("lat_bnds", out.coords)
+            self.assertIn("lon_bnds", out.coords)
+            self.assertEqual(out["lat"].attrs.get("bounds"), "lat_bnds")
+            self.assertEqual(out["lon"].attrs.get("bounds"), "lon_bnds")
+            lat_width = np.abs(np.diff(out["lat_bnds"].values, axis=-1))
+            lon_width = np.abs(np.diff(out["lon_bnds"].values, axis=-1))
+            np.testing.assert_allclose(lat_width, 1.0)
+            np.testing.assert_allclose(lon_width, 1.0)
+
+    def test_get_xarray_ds_from_file_no_bounds_by_default(self):
+        ds = self.make_simple_ds()
+        with tempfile.TemporaryDirectory() as td:
+            nc_path = Path(td) / "res.nc"
+            ds.to_netcdf(nc_path)
+
+            out = fh.get_xarray_ds_from_file(nc_path)
+            self.assertNotIn("lat_bnds", out.coords)
+            self.assertNotIn("lon_bnds", out.coords)
+
 
 class TestGetDatasetFromPath(unittest.TestCase, BaseDatasetMixin):
     def test_get_dataset_from_path_file(self):
@@ -548,6 +574,65 @@ class TestGetDatasetFromPath(unittest.TestCase, BaseDatasetMixin):
                 out = fh.get_dataset_from_path(str(base / "*.nc"))
                 self.assertIn("var", out.data_vars)
                 self.assertTrue(mocked.called)
+
+    def test_get_dataset_from_path_file_create_bounds(self):
+        ds = self.make_simple_ds()
+        with tempfile.TemporaryDirectory() as td:
+            nc_path = Path(td) / "single.nc"
+            ds.to_netcdf(nc_path)
+
+            out = fh.get_dataset_from_path(nc_path, create_bounds=True)
+            self.assertIn("lat_bnds", out.coords)
+            self.assertIn("lon_bnds", out.coords)
+            self.assertEqual(out["lat"].attrs.get("bounds"), "lat_bnds")
+            self.assertEqual(out["lon"].attrs.get("bounds"), "lon_bnds")
+            lat_width = np.abs(np.diff(out["lat_bnds"].values, axis=-1))
+            lon_width = np.abs(np.diff(out["lon_bnds"].values, axis=-1))
+            np.testing.assert_allclose(lat_width, 1.0)
+            np.testing.assert_allclose(lon_width, 1.0)
+
+    def test_get_dataset_from_path_directory_create_bounds(self):
+        lat = np.array([50.0, 51.0, 52.0])
+        lon = np.array([10.0, 11.0, 12.0, 13.0])
+        data = np.arange(lat.size * lon.size, dtype=np.float32).reshape(
+            lat.size, lon.size
+        )
+        asc_lat_ds = xr.Dataset(
+            {"var": (("lat", "lon"), data)}, coords={"lat": lat, "lon": lon}
+        )
+
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            year_dir = base / "2000"
+            year_dir.mkdir(parents=True, exist_ok=True)
+            file_list = []
+            for name in ["a.nc", "b.nc"]:
+                p = year_dir / name
+                p.write_text("stub")
+                file_list.append(p)
+
+            with patch.object(fh, "read_dataset", return_value=asc_lat_ds):
+                out = fh.get_dataset_from_path(
+                    base, force_decending_y=True, create_bounds=True
+                )
+                self.assertIn("lat_bnds", out.coords)
+                self.assertIn("lon_bnds", out.coords)
+                self.assertEqual(out["lat"].attrs.get("bounds"), "lat_bnds")
+                self.assertEqual(out["lon"].attrs.get("bounds"), "lon_bnds")
+                lat_width = np.abs(np.diff(out["lat_bnds"].values, axis=-1))
+                lon_width = np.abs(np.diff(out["lon_bnds"].values, axis=-1))
+                np.testing.assert_allclose(lat_width, 1.0)
+                np.testing.assert_allclose(lon_width, 1.0)
+
+    def test_get_dataset_from_path_no_bounds_by_default(self):
+        ds = self.make_simple_ds()
+        with tempfile.TemporaryDirectory() as td:
+            nc_path = Path(td) / "single.nc"
+            ds.to_netcdf(nc_path)
+
+            out = fh.get_dataset_from_path(nc_path)
+            self.assertNotIn("lat_bnds", out.coords)
+            self.assertNotIn("lon_bnds", out.coords)
 
 
 class TestCropAndCoords(unittest.TestCase, BaseDatasetMixin):

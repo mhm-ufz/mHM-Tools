@@ -7,6 +7,7 @@ import pandas as pd
 import xarray as xr
 
 import mhm_tools.common.xarray_utils as utils
+from mhm_tools.common.netcdf import generate_bounds
 from mhm_tools.common.xarray_utils import (
     crop_ds,
     get_coord_key,
@@ -14,6 +15,7 @@ from mhm_tools.common.xarray_utils import (
     get_single_data_var,
     induce_data_var_from_file_name,
     normalize_lat_lon,
+    regrid_mask,
     snap_to_target,
     timedelta_to_alias,
 )
@@ -112,6 +114,194 @@ class TestNormalizeLatLon(XarrayUtilsBase):
         self.assertEqual(out.dims, ("lat", "lon"))
         np.testing.assert_array_equal(out["lat"].values, target_lat)
         np.testing.assert_array_equal(out["lon"].values, target_lon)
+
+
+class TestRegridMask(XarrayUtilsBase):
+    def test_regrid_mask_snaps_same_resolution_shifted_coordinates(self):
+        target_lon = np.array([0.0, 1.0, 2.0])
+        target_lat = np.array([3.0, 2.0, 1.0])
+        mask = xr.DataArray(
+            np.array(
+                [
+                    [1.0, 0.0, 1.0],
+                    [1.0, 1.0, 0.0],
+                    [0.0, 1.0, 1.0],
+                ]
+            ),
+            dims=("lat", "lon"),
+            coords={
+                "lat": target_lat + 1e-4,
+                "lon": target_lon + 1e-4,
+            },
+            name="mask",
+        )
+
+        regridded = regrid_mask(
+            mask_ds=mask,
+            lon_key_mask="lon",
+            lat_key_mask="lat",
+            target_lon=target_lon,
+            target_lat=target_lat,
+            lon_key_target="lon",
+            lat_key_target="lat",
+        )
+
+        self.assertEqual(regridded.dims, ("lat", "lon"))
+        np.testing.assert_allclose(regridded["lon"].values, target_lon)
+        np.testing.assert_allclose(regridded["lat"].values, target_lat)
+        np.testing.assert_array_equal(regridded.values, mask.values)
+
+    def test_regrid_mask_uses_precomputed_resolution_for_single_point_target_axis(
+        self,
+    ):
+        """A target axis narrowed to one point can't derive its own resolution by
+        diffing; regrid_mask must use the caller-supplied target_res/mask_res
+        instead of blindly re-deriving them from the (possibly length-1) arrays.
+        """
+        mask_lon = np.array([0.0, 0.5, 1.0, 1.5, 2.0])
+        mask_lat = np.array([2.0, 1.5, 1.0, 0.5, 0.0])
+        mask = xr.DataArray(
+            np.ones((len(mask_lat), len(mask_lon))),
+            dims=("lat", "lon"),
+            coords={"lat": mask_lat, "lon": mask_lon},
+            name="mask",
+        )
+
+        target_lon = np.array([1.0])
+        target_lat = np.array([2.0, 1.0, 0.0])
+
+        regridded = regrid_mask(
+            mask_ds=mask,
+            lon_key_mask="lon",
+            lat_key_mask="lat",
+            target_lon=target_lon,
+            target_lat=target_lat,
+            lon_key_target="lon",
+            lat_key_target="lat",
+            target_res=1.0,
+            mask_res=0.5,
+        )
+
+        self.assertEqual(regridded.shape, (3, 1))
+        np.testing.assert_array_equal(regridded.values, np.ones((3, 1)))
+
+    def test_regrid_mask_fallback_derives_resolution_from_other_axis(self):
+        """No target_res/mask_res given, and target_lon has only one point -
+        regrid_mask's own fallback must derive resolution from target_lat
+        instead of blindly indexing the length-1 target_lon, mirroring the
+        real crash this was fixed for (a coordinate_slice narrowing only one
+        axis to a point).
+        """
+        mask_lon = np.array([0.0, 1.0, 2.0])
+        mask_lat = np.array([2.0, 1.0, 0.0])
+        mask = xr.DataArray(
+            np.ones((len(mask_lat), len(mask_lon))),
+            dims=("lat", "lon"),
+            coords={"lat": mask_lat, "lon": mask_lon},
+            name="mask",
+        )
+
+        target_lon = np.array([1.0])
+        target_lat = np.array([2.0, 1.0, 0.0])
+
+        regridded = regrid_mask(
+            mask_ds=mask,
+            lon_key_mask="lon",
+            lat_key_mask="lat",
+            target_lon=target_lon,
+            target_lat=target_lat,
+            lon_key_target="lon",
+            lat_key_target="lat",
+        )
+
+        self.assertEqual(regridded.shape, (3, 1))
+        np.testing.assert_array_equal(regridded.values, np.ones((3, 1)))
+
+    def test_regrid_mask_uses_provided_resolution_over_diffed_value(self):
+        """A provided target_res must actually change the regridding window,
+        not be silently recomputed - proven here since target_lon/target_lat
+        both have a single point, so regrid_mask has no other way to obtain
+        a resolution at all.
+        """
+        mask_lat = np.array([0.0])
+        mask_lon = np.array([0.0, 3.0])
+        mask = xr.DataArray(
+            np.array([[0.0, 1.0]]),
+            dims=("lat", "lon"),
+            coords={"lat": mask_lat, "lon": mask_lon},
+            name="mask",
+        )
+        target_lat = np.array([0.0])
+        target_lon = np.array([0.0])
+
+        narrow = regrid_mask(
+            mask_ds=mask,
+            lon_key_mask="lon",
+            lat_key_mask="lat",
+            target_lon=target_lon,
+            target_lat=target_lat,
+            lon_key_target="lon",
+            lat_key_target="lat",
+            target_res=1.0,
+            mask_res=0.5,
+        )
+        wide = regrid_mask(
+            mask_ds=mask,
+            lon_key_mask="lon",
+            lat_key_mask="lat",
+            target_lon=target_lon,
+            target_lat=target_lat,
+            lon_key_target="lon",
+            lat_key_target="lat",
+            target_res=8.0,
+            mask_res=0.5,
+        )
+
+        np.testing.assert_array_equal(narrow.values, np.zeros((1, 1)))
+        np.testing.assert_array_equal(wide.values, np.ones((1, 1)))
+
+    def test_regrid_mask_single_point_target_with_bounds_derived_resolution(self):
+        """Resolution can also come from real CF bounds (as produced by
+        generate_bounds elsewhere in this bounds-based architecture), not
+        just a hand-picked literal or coordinate diffing.
+        """
+        mask_lon = np.array([0.0, 0.5, 1.0, 1.5, 2.0])
+        mask_lat = np.array([2.0, 1.5, 1.0, 0.5, 0.0])
+        mask = xr.DataArray(
+            np.ones((len(mask_lat), len(mask_lon))),
+            dims=("lat", "lon"),
+            coords={"lat": mask_lat, "lon": mask_lon},
+            name="mask",
+        )
+        mask_lon_bnds = generate_bounds(
+            xr.DataArray(mask_lon, dims="lon", coords={"lon": mask_lon})
+        )
+        mask_res = float(
+            np.abs(mask_lon_bnds.values[0, 1] - mask_lon_bnds.values[0, 0])
+        )
+
+        full_target_lat = np.array([2.0, 1.0, 0.0])
+        target_lat_bnds = generate_bounds(
+            xr.DataArray(full_target_lat, dims="lat", coords={"lat": full_target_lat})
+        )
+        target_res = float(
+            np.abs(target_lat_bnds.values[0, 1] - target_lat_bnds.values[0, 0])
+        )
+
+        regridded = regrid_mask(
+            mask_ds=mask,
+            lon_key_mask="lon",
+            lat_key_mask="lat",
+            target_lon=np.array([1.0]),
+            target_lat=full_target_lat,
+            lon_key_target="lon",
+            lat_key_target="lat",
+            target_res=target_res,
+            mask_res=mask_res,
+        )
+
+        self.assertEqual(regridded.shape, (3, 1))
+        np.testing.assert_array_equal(regridded.values, np.ones((3, 1)))
 
 
 class TestGetCoordKey(XarrayUtilsBase):

@@ -508,13 +508,18 @@ def cut_to_filled_area(
 
     min_row, max_row = np.where(rows)[0][[0, -1]]
     min_col, max_col = np.where(cols)[0][[0, -1]]
+    # Keep max_row/max_col as an exclusive stop (one past the last filled
+    # index) from here on, so every branch below ends in the same
+    # `slice(min, max)` regardless of whether upscaling is applied.
+    max_row += 1
+    max_col += 1
 
     if buffer > 0:
         logger.info(f"Using a min buffer of {buffer}")
         min_row = max(0, min_row - buffer)
         min_col = max(0, min_col - buffer)
-        max_row = min(catchment_mask.shape[0] - 1, max_row + buffer)
-        max_col = min(catchment_mask.shape[1] - 1, max_col + buffer)
+        max_row = min(catchment_mask.shape[0], max_row + buffer)
+        max_col = min(catchment_mask.shape[1], max_col + buffer)
     logger.info(
         f"L0 initial window (rows, cols): [{min_row}:{max_row}], [{min_col}:{max_col}]"
     )
@@ -526,18 +531,21 @@ def cut_to_filled_area(
         )
         if resolutions.l2_file is not None and not repeat:
             logger.debug(f"Aligning to L2 grid from file {resolutions.l2_file}")
+            # align_bounds_to_l2 expects/returns an inclusive max_row/max_col.
             min_row, max_row, min_col, max_col = align_bounds_to_l2(
-                ds, resolutions, min_row, max_row, min_col, max_col
+                ds, resolutions, min_row, max_row - 1, min_col, max_col - 1
             )
+            max_row += 1
+            max_col += 1
         else:
             min_row = min_row // factor * factor
             min_col = min_col // factor * factor
-            max_row = (max_row // factor + 1) * factor
-            max_col = (max_col // factor + 1) * factor
+            max_row = -(-max_row // factor) * factor  # ceiling division
+            max_col = -(-max_col // factor) * factor
         min_row = max(min_row, 0)
         min_col = max(min_col, 0)
-        max_row = min(max_row, catchment_mask.shape[0] - 1)
-        max_col = min(max_col, catchment_mask.shape[1] - 1)
+        max_row = min(max_row, catchment_mask.shape[0])
+        max_col = min(max_col, catchment_mask.shape[1])
         logger.info(
             f"After shifting to L2 grid (rows, cols): [{min_row}:{max_row}], [{min_col}:{max_col}]"
         )

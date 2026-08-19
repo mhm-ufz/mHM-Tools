@@ -367,7 +367,7 @@ def get_time_and_freq(ds, stat_freq):
     """Return time as array and time frequencs as string."""
     times = ds.time.data
     if stat_freq is None:
-        hours, time_id = timedelta_to_alias(ds)
+        _hours, time_id = timedelta_to_alias(ds)
         if time_id == "D":
             stat_freq = "daily"
         elif time_id in ["1h", "1H"]:

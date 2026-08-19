@@ -16,18 +16,18 @@ Based on a script by
 import logging
 from pathlib import Path
 
-import matplotlib as mpl
 import numpy as np
 import xarray as xr
 from scipy.interpolate import NearestNDInterpolator
 
+from mhm_tools.common.constants import GREENLAND_COORDS
 from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_to_file
 from mhm_tools.common.logger import ErrorLogger, log_arguments
+from mhm_tools.common.xarray_utils import create_mask_from_polygon
 
 logger = logging.getLogger(__name__)
 
 # GLOBAL VARIABLES
-# Coordinate arrays for the shape of Greenland in lons, lats
 REF_FILE_ENCODING = {
     "elevtn": {"dtype": "float32", "_FillValue": -9999.0, "zlib": True, "complevel": 4},
     "basin": {"dtype": "int32", "_FillValue": -9999, "zlib": True, "complevel": 4},
@@ -43,12 +43,6 @@ REF_FILE_ENCODING = {
     "lon": {"dtype": "float32", "_FillValue": -9999.0, "zlib": True, "complevel": 4},
 }
 COMPRESSION_DICT = {"zlib": True, "complevel": 4}
-GREENLAND_COORDS = np.array(
-    [
-        [-43.65, -17.25, -7.05, -56.05, -60.05, -69.85, -73.65, -71.85, -46.65],
-        [58.25, 69.85, 84.65, 85.85, 82.65, 79.45, 79.05, 75.25, 57.65],
-    ]
-).T
 FILL_VALUE = -9999
 
 # FUNCTIONS
@@ -112,39 +106,9 @@ class CreateSubdomainMasks:
     def get_mask_from_polygon(arr, vertices):
         """Create a boolean mask for points inside a polygon.
 
-        The input `arr` is a 2D array with `lat` and `lon` coordinates; the mask is
-        True for cells whose (lon, lat) fall inside the polygon defined by
-        `vertices`.
-
-        Parameters
-        ----------
-        arr : xarray.DataArray
-            2D data array with coordinates `lat` and `lon`.
-        vertices : sequence[tuple[float, float]]
-            Polygon vertices as (lon, lat) pairs.
-
-        Returns
-        -------
-        numpy.ndarray
-            Boolean mask with the same shape as `arr`, True inside the polygon.
+        See `mhm_tools.common.xarray_utils.create_mask_from_polygon`.
         """
-        polygon = mpl.path.Path(vertices)
-        # mask out only the values in arr that fall within bbox of polygon, convert them to points
-        bbox = polygon.get_extents()
-        bbox_lon_mask = (bbox.xmin < arr.lon) & (bbox.xmax > arr.lon)
-        bbox_lat_mask = (bbox.ymin < arr.lat) & (bbox.ymax > arr.lat)
-        lon2d, lat2d = np.meshgrid(arr.lon[bbox_lon_mask], arr.lat[bbox_lat_mask])
-        points = np.hstack((lon2d.reshape(-1, 1), lat2d.reshape(-1, 1)))
-        # mask out the values
-        bbox_mask = polygon.contains_points(points).reshape(
-            int(bbox_lat_mask.sum()), int(bbox_lon_mask.sum())
-        )
-
-        # global mask, set to False
-        mask = np.zeros_like(arr.data, dtype=bool)
-        # insert the local mask into the global one
-        mask[np.ix_(bbox_lat_mask, bbox_lon_mask)] = bbox_mask
-        return mask
+        return create_mask_from_polygon(arr, vertices)
 
     def create_subdomains(self):
         """Create subdomain masks based on the input data.

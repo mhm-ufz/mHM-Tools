@@ -3,6 +3,7 @@
 import logging
 from typing import Optional, Union
 
+import matplotlib as mpl
 import numpy as np
 import pandas as pd
 import xarray as xr
@@ -16,6 +17,90 @@ from mhm_tools.common.netcdf import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def create_mask_from_polygon(data_array, vertices):
+    """Create a boolean mask for grid cells whose center falls inside a polygon.
+
+    The input `data_array` is a 2D array with `lat` and `lon` coordinates; the
+    mask is True for cells whose (lon, lat) center falls inside the polygon
+    defined by `vertices`.
+
+    Parameters
+    ----------
+    data_array : xarray.DataArray
+        2D data array with coordinates `lat` and `lon`.
+    vertices : sequence[tuple[float, float]]
+        Polygon vertices as (lon, lat) pairs.
+
+    Returns
+    -------
+    numpy.ndarray
+        Boolean mask with the same shape as `data_array`, True inside the polygon.
+    """
+    polygon = mpl.path.Path(vertices)
+    # mask out only the values in data_array that fall within bbox of polygon, convert them to points
+    bbox = polygon.get_extents()
+    bbox_lon_mask = (bbox.xmin < data_array.lon) & (bbox.xmax > data_array.lon)
+    bbox_lat_mask = (bbox.ymin < data_array.lat) & (bbox.ymax > data_array.lat)
+    lon2d, lat2d = np.meshgrid(
+        data_array.lon[bbox_lon_mask], data_array.lat[bbox_lat_mask]
+    )
+    points = np.hstack((lon2d.reshape(-1, 1), lat2d.reshape(-1, 1)))
+    # mask out the values
+    bbox_mask = polygon.contains_points(points).reshape(
+        int(bbox_lat_mask.sum()), int(bbox_lon_mask.sum())
+    )
+
+    # global mask, set to False
+    mask = np.zeros_like(data_array.data, dtype=bool)
+    # insert the local mask into the global one
+    mask[np.ix_(bbox_lat_mask, bbox_lon_mask)] = bbox_mask
+    return mask
+
+
+def combine_region_grids(priority_grid, fallback_grid):
+    """Combine two region grids, preferring priority_grid and filling its gaps from fallback_grid.
+
+    Both grids are expected to use NaN for unset cells on the same lat/lon grid.
+
+    Parameters
+    ----------
+    priority_grid : xarray.DataArray
+        Region grid whose values are kept wherever finite.
+    fallback_grid : xarray.DataArray
+        Region grid used only where `priority_grid` is NaN.
+
+    Returns
+    -------
+    xarray.DataArray
+        Combined region grid.
+    """
+    return fallback_grid.where(~np.isfinite(priority_grid), priority_grid)
+
+
+def create_valid_data_mask(data_array, treat_zero_as_missing=True):
+    """Return a boolean validity mask, treating NaN (and optionally 0) as missing.
+
+    Guards against the common bug where a mask stores 0/1 without a declared
+    `_FillValue`: checking only `np.isfinite` then treats every 0 cell as valid.
+
+    Parameters
+    ----------
+    data_array : xarray.DataArray or numpy.ndarray
+        Data to derive validity from.
+    treat_zero_as_missing : bool, optional
+        Also treat exact 0 values as missing, by default True.
+
+    Returns
+    -------
+    xarray.DataArray or numpy.ndarray
+        Boolean mask, True where data is valid.
+    """
+    valid = np.isfinite(data_array)
+    if treat_zero_as_missing:
+        valid = valid & (data_array != 0)
+    return valid
 
 
 def normalize_lat_lon(
@@ -98,6 +183,140 @@ def snap_to_target(
             new_lon_key: np.asarray(target_lon_array),
         }
     )
+
+
+def regrid_mask(
+    mask_ds,
+    lon_key_mask,
+    lat_key_mask,
+    target_lon,
+    target_lat,
+    mask_key=None,
+    lon_key_target=None,
+    lat_key_target=None,
+    target_res=None,
+    mask_res=None,
+):
+    """Regrid a xarray mask dataset mask_ds to the resolution of a second dataset ds2."""
+
+    def _select_mask_var(mask_obj):
+        if isinstance(mask_obj, xr.DataArray):
+            return mask_obj
+        if isinstance(mask_obj, xr.Dataset):
+            key = mask_key or get_single_data_var(mask_obj)
+            if key is None:
+                no_key_msg = "Mask dataset has multiple data_vars; provide mask_key."
+                with ErrorLogger(logger):
+                    raise ValueError(no_key_msg)
+            return mask_obj[key]
+        wrong_type_msg = f"Unsupported mask type: {type(mask_obj)}"
+        with ErrorLogger(logger):
+            raise ValueError(wrong_type_msg)
+
+    if lon_key_target is None:
+        lon_key_target = lon_key_mask
+    if lat_key_target is None:
+        lat_key_target = lat_key_mask
+    mask_lon = mask_ds[lon_key_mask].data
+    mask_lat = mask_ds[lat_key_mask].data
+    if mask_res is None or target_res is None:
+        from mhm_tools.common.resolution_handler import get_file_res
+
+        if mask_res is None:
+            mask_res = get_file_res(lon=mask_lon, lat=mask_lat)
+        if target_res is None:
+            target_res = get_file_res(lon=target_lon, lat=target_lat)
+    if (target_res - mask_res) > 1e-5:
+        if target_res % mask_res > 1e-5:
+            logger.warning(
+                f"Target resolution {target_res} is not an integer muptiple of mask resolution {mask_res}. Factor: {target_res / mask_res}"
+            )
+        results = np.full((len(target_lat), len(target_lon)), 0.0)
+        for i, lat in enumerate(target_lat):
+            for j, lon in enumerate(target_lon):
+                for n, mlat in enumerate(mask_lat):
+                    if mlat < (lat - target_res / 2) or mlat > (lat + target_res / 2):
+                        continue
+                    for m, mlon in enumerate(mask_lon):
+                        if mlon < lon - target_res / 2 or mlon > lon + target_res / 2:
+                            continue
+                        if mask_key is not None:
+                            results[i][j] += mask_ds[mask_key].data[n, m]
+                        else:
+                            results[i][j] += mask_ds.data[n, m]
+        results = np.where(np.isfinite(results), results, 0.0)
+        max_result = np.max(results) if results.size else 0.0
+        if max_result <= 0:
+            logger.warning("Regridded mask has no positive cells on target grid.")
+            return xr.DataArray(
+                results,
+                dims=[lat_key_target, lon_key_target],
+                coords={lat_key_target: target_lat, lon_key_target: target_lon},
+            )
+        results /= max_result
+        mask = results > 1e-3
+        results[mask] = 1
+        results[~mask] = 0
+        return xr.DataArray(
+            results,
+            dims=[lat_key_target, lon_key_target],
+            coords={lat_key_target: target_lat, lon_key_target: target_lon},
+        )
+    if abs(target_res - mask_res) <= 1e-5:
+        logger.debug("Target resolution equals mask resolution (within tolerance).")
+
+        try:
+            # quick path: if coords are almost equal, reuse data but snap labels
+            if (
+                len(mask_lon) == len(target_lon)
+                and len(mask_lat) == len(target_lat)
+                and np.allclose(mask_lon, target_lon, rtol=0, atol=1e-9)
+                and np.allclose(mask_lat, target_lat, rtol=0, atol=1e-9)
+            ):
+                return snap_to_target(
+                    _select_mask_var(mask_ds),
+                    lat_key=lat_key_mask,
+                    lon_key=lon_key_mask,
+                    target_lat_array=target_lat,
+                    target_lon_array=target_lon,
+                    new_lat_key=lat_key_target,
+                    new_lon_key=lon_key_target,
+                )
+
+            tol = max(mask_res, target_res) * 1e-3  # generous but safe snapping tol
+            reindexed = mask_ds.reindex(
+                {
+                    lat_key_mask: np.asarray(target_lat),
+                    lon_key_mask: np.asarray(target_lon),
+                },
+                method="nearest",
+                tolerance=tol,
+            )
+            min_lon = min(len(mask_lon), len(target_lon))
+            min_lat = min(len(mask_lat), len(target_lat))
+            logger.debug(
+                f"Reindexed mask to target grid with tolerance {tol}; "
+                f"delta lon={float(np.nanmax(np.abs(mask_lon[:min_lon] - target_lon[:min_lon]))):.3g}, "
+                f"delta lat={float(np.nanmax(np.abs(mask_lat[:min_lat] - target_lat[:min_lat]))):.3g}"
+            )
+            return snap_to_target(
+                _select_mask_var(reindexed),
+                lat_key=lat_key_mask,
+                lon_key=lon_key_mask,
+                target_lat_array=target_lat,
+                target_lon_array=target_lon,
+                new_lat_key=lat_key_target,
+                new_lon_key=lon_key_target,
+            )
+        except Exception:
+            logger.debug(
+                "Mask reindex to target grid failed; using original mask", exc_info=True
+            )
+            return _select_mask_var(mask_ds)
+    else:
+        msg = "mask coarser than file not yet implemented"
+        with ErrorLogger(logger):
+            raise Exception(msg)
 
 
 def get_coord_key(

@@ -1,4 +1,69 @@
 # Changelog
+## [Unreleased]
+
+### Added
+- Add `create-wmo-region-masks`, a new tool that delineates (or reuses) global basins, rasterizes the 6 WMO regions from a shapefile set and a GeoJSON, maps every basin to exactly one region using a basin-adjacency graph seeded from anchor basins covered by the original shapefiles (instead of a context-free per-basin raster vote), excludes Greenland, and writes one mask per region plus a 4-panel overview plot (shapes / GeoJSON / combined / final). The anchor-seeded region growing keeps regions contiguous and stops endorheic basins from forming isolated islands of the wrong region, which the previous per-basin majority vote (`legacy create-subdomain-masks`) could not guarantee.
+- Add `combine_region_grids`, `create_mask_from_polygon`, and `create_valid_data_mask` to `mhm_tools.common.xarray_utils`; `plot_categorical_map_panels` to `mhm_tools.common.plotter`; and `write_mask_to_file` to `mhm_tools.common.file_handler`, extracted for reuse by `create-wmo-region-masks` (`CreateSubdomainMasks.get_mask_from_polygon` now delegates to the relocated `create_mask_from_polygon`, and `GREENLAND_COORDS` moved to `mhm_tools.common.constants`, both without changing existing behavior).
+
+## [v0.2.3]
+
+### Added
+
+- Add CF-conventions `long_name` (and `units` where derivable from the source variable) to the outputs of `calc_diff`, `calc_ratio`, and `calc_rel_diff`, and to `gridded-data-evaluation`'s climatology/std/mean/time-series outputs, instead of shipping unlabeled arrays.
+- Add a `--update-tile-masks` flag to `create-mhm-restart-from-setup` that rewrites each reused tile's `mask_tile.nc` from the current mask instead of keeping the existing one, so `--no-tile-creation`/`--skip-mhm-run` reruns with a changed mask no longer silently mask restart data with a stale per-tile mask.
+
+### Fixed
+
+- Restore variable attributes that xarray's `.where()`/arithmetic operations silently drop when masking DEM cells (`_mask_dem_with_l0_file`, `crop_file`), merging catchments (`merge_catchment`), and converting forcing units (`convert_units`), so masked/merged/unit-converted output keeps its original CF metadata.
+- Fix `_fill_recreated_restart_inputs` passing meteo/input fill values to `fill_nearest`'s `default_value` parameter as `fill_value` instead, which set the wrong NetCDF `_FillValue`/`missing_value` metadata instead of the intended out-of-domain default.
+- Fix `merge_files`'s final merge staging its temp directory under a stale subfolder path left over from the last-processed input folder instead of the actual output directory, breaking the "same filesystem, atomic rename" assumption and risking a cross-device link error.
+- Remove intermediate per-folder merge outputs once `preserve_folders` is disabled in `merge_files`, instead of leaving redundant per-folder files and directories behind after everything has already been merged into the final output.
+- Fix stale/broken symlinks being invisible to `Path.exists()`, which crashed `merge_files`, `Grid.migrate_grid_using_systemlink`, and `link_folder_tree` with `FileExistsError` when rerun after a symlink's original target had moved or been removed.
+- Fix the final restart file written by `create-mhm-restart-from-setup` declaring `NaN` as its `_FillValue` instead of `-9999.0`, so mHM's Fortran reader (which expects `-9999.0`, matching the tile restart files read in) could no longer recognize missing cells in the merged output.
+- Fix `gridded-data-evaluation`'s `get_file_stats` building its climatology/std/mean output with a disconnected `lat`/`lon` coordinate whenever the input file's real spatial dimension used an alias (e.g. `northing`/`y`) instead of `lat`/`lon`: the statistics stayed keyed by the alias while a separate, unrelated `lat`/`lon` coordinate was attached alongside them, so `apply_spatial_mask` silently skipped masking/cropping the actual data (only cropping the orphan coordinate) and the mismatch later crashed with `CoordinateValidationError: conflicting sizes for dimension 'lat'`.
+
+## [v0.2.2]
+
+### Added
+
+- Always derive `L1_soilMoist` in the merged restart as the midpoint between `L1_wiltingPoint` and `L1_soilMoistFC` when both are available, overwriting any value a native tile restart may already carry.
+
+### Changed
+
+- Extend `generate_bounds`/`generate_bounds_for_all_coords` to accept an explicit resolution fallback for coordinates with only one point, where a cell width can no longer be derived by differencing.
+- Add a `create_bounds` option to `get_dataset_from_path`, mirroring the existing option on `get_xarray_ds_from_file`, to attach real coordinate bounds to a dataset at open time, before any cropping.
+- Move `regrid_mask` from `mhm_tools.pre.crop_mhm_setup` to `mhm_tools.common.xarray_utils`, since it's pure xarray grid-matching logic already used by both pre- and post-processing modules.
+- `write_mask_file` now writes the catchment mask once (as `mask`) and adds `land_mask` as an HDF5 hard link to the same on-disk data via the new `add_variable_hard_link` helper (`mhm_tools.common.netcdf`), instead of writing the identical array twice under both names. Both variables remain fully and independently readable by any NetCDF/HDF5 tool, including all attributes, with no duplicated storage.
+- `write_metric_plots` now always writes the same per-variable/per-realisation statistics table (n, min, max, mean, median) to `metric_summary.csv` via the new `write_metric_summary_csv`, independent of which `--plot-types` were requested, so the numbers are available as a machine-readable file rather than only inside the optional overview PDF.
+- `write_metric_plots`'s `metric_plots_overview.pdf` is now written whenever there is at least one plot or summary row to show, instead of being skipped for the common case of a single variable and a single plot type; it now also embeds every plot type actually produced in that call (previously it could end up containing only catchment-map plots).
+
+### Fixed
+
+- Fix `cut_to_filled_area` producing an empty crop, and silently dropping the last filled row/column even when multiple cells are filled, due to an off-by-one in its bounding-box-to-slice conversion. A single-cell spatial mask previously crashed `gridded-data-evaluation` with `Cannot determine file resolution: no valid lon or lat coordinates provided`.
+- Fix `generate_bounds_for_all_coords` writing the `bounds` attribute onto a discarded copy of the dataset instead of the one it returns, so the generated `*_bnds` coordinate existed but nothing pointing to it.
+- Keep real CF coordinate bounds on `gridded-data-evaluation` statistics through cropping, including crops down to a single cell, instead of relying on resolution being re-derivable from the already-cropped coordinates afterward.
+- Fix `regrid_mask` crashing with `IndexError` when a target or mask coordinate had been cropped to a single point: it now honors a caller-supplied `target_res`/`mask_res` instead of always re-deriving them from the raw coordinate arrays, and its own fallback now derives resolution via `get_file_res` (trying both lon and lat) instead of assuming `lon` has at least two points.
+- Fix `get_file_res` returning a negative resolution for descending coordinates, which also silently broke matching against configured `l0`/`l1`/`l2`/`l11` resolutions for such files.
+- Fix `create-mhm-restart-from-setup` merge producing an mHM-unreadable restart file: soil-horizon, land-cover-period, and LAI-timestep boundaries were looked up under invented native variable names, and a missing `return` corrupted the default six-horizon boundaries — both silently replaced real depths/periods/months with meaningless index values that mHM rejected on restart.
+- Fix border-clobbering when merging restart tiles shared across multiple mask/parameter runs: a later tile's fill/NaN cells could overwrite an earlier tile's valid data at the same position.
+- Mask each tile restart file in place with its own tile mask before it is moved or merged, so unmasked edge values can no longer leak into relocated or merged restart output.
+- Write a tile's mask section on demand when reusing an existing tile setup (`--no-tile-creation`) whose `mask_tile.nc` predates this file, instead of requiring the whole tile to be recreated.
+- crop_mhm_setup tryed to read mask regardless of whether it was provided or not
+- avoid division by zero in SPEAF by returning nan whenever std of one array is zero
+- Fix `resample_to_target_freq` silently dropping all data before the final overlap check: its closing `xr.align(..., join="inner")` joined on every shared dimension, so `lat`/`lon` labels that were already positionally matched by earlier cropping/regridding but still differed by float32-vs-float64 precision (e.g. `68.1500015258789` vs `68.15`) failed an exact-equality join and collapsed to near-empty, leaving `gridded-data-evaluation` unable to find any temporal overlap between input and reference.
+
+### Removed
+
+- Remove the unused `merge_mhm_restart_files` restart-merge pipeline and the ~15 helper functions reachable only from it (superseded in production by `merge_restart_files`), plus dead entries in the internal variable/dimension rename lookup tables that never matched real mHM restart output.
+
+### Tests
+
+- Add direct unit coverage for `cut_to_filled_area`: single-cell crops, inclusion of the last filled row/column, buffer clipping at both array bounds, and an upscaling edge case at the array boundary.
+- Add coverage for `create_bounds` on `get_xarray_ds_from_file`/`get_dataset_from_path`, including that the coordinate's `bounds` attribute is set correctly.
+- Rewrite `gridded-data-evaluation` single-point-crop regression tests to check for real coordinate bounds rather than a cached resolution attribute.
+- Add `regrid_mask` coverage (moved to `tests/test_xarray_utils.py`) for resolution-fallback correctness: falling back across axes when a coordinate has a single point, honoring an explicitly provided resolution over a diffed one, and single-cell domains with a resolution supplied directly or derived from CF bounds.
+- Add regression coverage for `resample_to_target_freq` confirming that lat/lon labels differing only by float32-vs-float64 precision no longer collapse the aligned output, using coordinate arrays reproducing the exact mismatch (`68.15` vs `68.1500015258789`).
+- Add coverage for `write_mask_file` confirming `land_mask` and `mask` stay independently readable with identical data while verifying, via direct HDF5 object-address inspection, that `land_mask` is a genuine hard link rather than a separately stored duplicate.
 
 ## [v0.2.1]
 

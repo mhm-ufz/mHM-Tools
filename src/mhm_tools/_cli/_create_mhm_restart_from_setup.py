@@ -299,6 +299,18 @@ def add_args(parser):
         action="store_true",
         help="Do not merge the tiled mHM restart files after running mHM.",
     )
+    flags.add_argument(
+        "--update-tile-masks",
+        dest="update_tile_masks",
+        required=False,
+        default=False,
+        action="store_true",
+        help=(
+            "Rewrite mask_tile.nc for reused tile setups (with --no-tile-creation "
+            "or --skip-mhm-run) instead of keeping the existing one. Has no effect "
+            "when tiles are freshly created, since their mask is always written."
+        ),
+    )
 
 
 def _as_list(value):
@@ -383,7 +395,6 @@ def run(args):
             run_restart_output_path = restart_output_dir
             run_merge = not args.no_merge
             run_merged_restart_file = args.merged_restart_file
-
         result = create_mhm_restart_from_setup(
             input_path=args.input_path,
             output_path=run_output_path,
@@ -420,6 +431,7 @@ def run(args):
             skip_tile_creation=args.skip_tile_creation or args.skip_mhm_run,
             skip_mhm_run=args.skip_mhm_run,
             recreate_restart=args.recreate_restart,
+            update_tile_masks=args.update_tile_masks,
         )
         results.append(result)
         all_restart_files.extend(result["restart_files"])

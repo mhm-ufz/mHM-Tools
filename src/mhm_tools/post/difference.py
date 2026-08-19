@@ -81,6 +81,8 @@ def calc_diff(
 
     # Compute difference
     diff = da_ref - da_mod_interp
+    diff.attrs = dict(da_ref.attrs)
+    diff.attrs["long_name"] = f"Difference ({ref_var} minus {mod_var})"
 
     # Prepare output directory
     out_path_dir = Path(output.output_dir)

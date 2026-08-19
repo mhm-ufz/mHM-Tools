@@ -138,6 +138,7 @@ def merge_files(input_path, input_file_part, output, n_cpus, preserve_folders=Fa
         output_file_name (str): name of output NetCDF (e.g., "merged.nc")
         n_cpus (int): number of parallel workers
         preserve_folders (bool): Decides if the top level folder structure should be preserved.
+            If False, intermediate per-folder outputs are removed after the final merge.
 
     Returns
     -------
@@ -172,7 +173,7 @@ def merge_files(input_path, input_file_part, output, n_cpus, preserve_folders=Fa
         logger.info(f"Found {len(file_list)} files in {in_dir / folder}")
         if len(file_list) == 1:
             # cdo.copy(input=str(files[0]), output=str(out_file), options="-O")
-            if out_file.exists():
+            if out_file.exists() or out_file.is_symlink():
                 out_file.unlink()
             out_file.symlink_to(file_list[0])
             out_files.append(out_file)
@@ -187,9 +188,17 @@ def merge_files(input_path, input_file_part, output, n_cpus, preserve_folders=Fa
         with ErrorLogger(logger):
             raise FileNotFoundError(msg)
     if not preserve_folders:
-        with tempfile.TemporaryDirectory(dir=out_file.parent) as tmpdir:
+        with tempfile.TemporaryDirectory(dir=output.parent) as tmpdir:
             final_merge = merge_files_from_folder(tmpdir, out_files, output, n_cpus)
         logger.info(f"Merged a total of {sum_files} to: {final_merge}")
+        for folder_out_file in out_files:
+            folder_out_file_path = Path(folder_out_file)
+            folder_out_dir = folder_out_file_path.parent
+            if folder_out_dir == output.parent:
+                continue
+            folder_out_file_path.unlink(missing_ok=True)
+            if not any(folder_out_dir.iterdir()):
+                folder_out_dir.rmdir()
     else:
         logger.info(
             f"Merged a total of {sum_files} into these {len(out_files)} files: {out_files}"

@@ -21,7 +21,7 @@ def configure_mhm_tools_logger(
     """Configure the parser settings formatting as well as Stream and File handler."""
     logger = logging.getLogger("mhm_tools")
     logger.propagate = propagate
-    general_level, error_msg_gnrl, error_msg_gnrl2 = get_lowest_level(
+    general_level, error_msg_gnrl, error_msg_gnrl_file = get_lowest_level(
         log_level=log_level,
         log_file_level=log_file_level,
         count_verbose=count_verbose,
@@ -64,6 +64,8 @@ def configure_mhm_tools_logger(
             logger.info(f"Writing logs to {log_file}")
     if error_msg_gnrl is not None:
         logger.error(f"Logger: {error_msg_gnrl}")
+    if error_msg_gnrl_file is not None:
+        logger.error(f"Logger (log file level): {error_msg_gnrl_file}")
     if error_msg_ch is not None:
         logger.error(f"StreamHandler: {error_msg_ch}")
     if error_msg_fh is not None:
