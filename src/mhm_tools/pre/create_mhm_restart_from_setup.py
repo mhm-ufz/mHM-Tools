@@ -16,6 +16,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+import netCDF4
 import numpy as np
 import xarray as xr
 from joblib import Parallel, delayed
@@ -23,8 +24,12 @@ from joblib import Parallel, delayed
 from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_to_file
 from mhm_tools.common.logger import ErrorLogger, log_arguments
 from mhm_tools.common.resolution_handler import Resolution
-from mhm_tools.common.xarray_utils import get_coord_key, get_single_data_var
-from mhm_tools.pre.crop_mhm_setup import crop_mhm_setup, regrid_mask
+from mhm_tools.common.xarray_utils import (
+    get_coord_key,
+    get_single_data_var,
+    regrid_mask,
+)
+from mhm_tools.pre.crop_mhm_setup import crop_mhm_setup
 from mhm_tools.pre.fill_nearest import fill_nearest
 
 logger = logging.getLogger(__name__)
@@ -203,9 +208,6 @@ def _tile_has_active_mask_cell(tile, mask_da):
     """Return whether an L1 tile overlaps at least one active mask cell."""
     lon_key = get_coord_key(mask_da, lon=True)
     lat_key = get_coord_key(mask_da, lat=True)
-    # mask = mask_da.sel({lon_key: tile.lonslice, lat_key: tile.latslice})
-    # active = np.isfinite(mask) & (mask > 0)
-    # return bool(active.any())
     lon_min = min(float(tile.lonslice.start), float(tile.lonslice.stop))
     lon_max = max(float(tile.lonslice.start), float(tile.lonslice.stop))
     lat_min = min(float(tile.latslice.start), float(tile.latslice.stop))
@@ -254,6 +256,16 @@ def _write_tile_mask_section(tile, mask_ds, mask_var, fname="mask_tile.nc"):
     logger.info(f"Writing mask section for tile {tile.name} to {output_file}.")
     write_xarray_to_file(mask_section, output_file, var_name=mask_section.name)
     return output_file
+
+
+def _ensure_tile_mask_section(
+    tile, mask_ds, mask_var, fname="mask_tile.nc", update_tile_masks=False
+):
+    """Write the tile mask section if missing, or always when update_tile_masks is set."""
+    mask_file = Path(tile.output_path) / fname
+    if mask_file.is_file() and not update_tile_masks:
+        return mask_file
+    return _write_tile_mask_section(tile, mask_ds, mask_var, fname=fname)
 
 
 def _meteo_fill_nearest_files(setup_path):
@@ -354,13 +366,15 @@ class MHMRunner:
             [
                 "import mhm",
                 f"mhm.model.set_verbosity(level={int(args['verbosity'])})",
-                "mhm.model.init("
-                f"namelist_mhm={json.dumps(args['namelist_mhm'])}, "
-                f"namelist_mhm_param={json.dumps(args['namelist_mhm_param'])}, "
-                f"namelist_mhm_output={json.dumps(args['namelist_mhm_output'])}, "
-                f"namelist_mrm_output={json.dumps(args['namelist_mrm_output'])}, "
-                "cwd='.'"
-                ")",
+                (
+                    "mhm.model.init("
+                    f"namelist_mhm={json.dumps(args['namelist_mhm'])}, "
+                    f"namelist_mhm_param={json.dumps(args['namelist_mhm_param'])}, "
+                    f"namelist_mhm_output={json.dumps(args['namelist_mhm_output'])}, "
+                    f"namelist_mrm_output={json.dumps(args['namelist_mrm_output'])}, "
+                    "cwd='.'"
+                    ")"
+                ),
                 "try:",
                 "    mhm.model.run()",
                 "finally:",
@@ -588,7 +602,9 @@ def _mask_dem_with_l0_file(dem_file, mask_file):
     masked_vars = []
     for var in dem_ds.data_vars:
         if {dem_lat_key, dem_lon_key}.issubset(dem_ds[var].dims):
+            original_attrs = dict(dem_ds[var].attrs)
             dem_ds[var] = dem_ds[var].where(mask_regridded == 1, np.nan)
+            dem_ds[var].attrs = original_attrs
             masked_vars.append(var)
 
     if not masked_vars:
@@ -890,7 +906,7 @@ def _fill_recreated_restart_inputs(tile, fill_nearest_files):
                 raise FileNotFoundError(msg)
         logger.info(
             f"Nearest-neighbour filling recreated meteo file {meteo_file} "
-            "without mask and fill_value=2.2."
+            "without mask and default_value=2.2."
         )
         staged_files = fill_nearest(
             input_dir=meteo_file.parent,
@@ -898,7 +914,7 @@ def _fill_recreated_restart_inputs(tile, fill_nearest_files):
             output_dir=meteo_file.parent.parent / "meteo_filled",
             mask_file=None,
             mask_var=None,
-            fill_value=2.2,
+            default_value=2.2,
         )
         for staged_file in staged_files:
             target = meteo_file.parent / staged_file.name
@@ -931,7 +947,8 @@ def _fill_recreated_restart_inputs(tile, fill_nearest_files):
                 output_dir=input_file.parent,
                 mask_file=None,
                 mask_var=None,
-                fill_value=1,
+                fill_value=-9999.0,
+                default_value=1,
             )
             logger.debug(f"Filled recreated input files: {staged_files}.")
 
@@ -1053,231 +1070,6 @@ def _add_restart_spatial_coords(dataset):
     return dataset.assign_coords(coord_updates).swap_dims(rename_dims)
 
 
-def _load_restart_dataset_for_merge(restart_file):
-    """Load one restart file and attach merge coordinates."""
-    with get_xarray_ds_from_file(restart_file) as dataset:
-        loaded = dataset.load()
-    logger.debug(
-        f"Loaded restart file {restart_file} sizes={dict(loaded.sizes)} "
-        f"data_vars={list(loaded.data_vars)} coords={list(loaded.coords)}."
-    )
-    return _add_restart_spatial_coords(loaded)
-
-
-def _restart_spatial_coord_names(level):
-    """Return lon/lat coordinate names used for a transformed restart level."""
-    if level == "L1":
-        return "lon", "lat"
-    return f"lon_{level}", f"lat_{level}"
-
-
-def _restart_levels_from_dataset(dataset):
-    """Return restart levels that have transformed spatial coordinates."""
-    levels = []
-    for key in dataset.attrs:
-        key_str = str(key)
-        if not key_str.startswith("xllcorner_L"):
-            continue
-        level = key_str.replace("xllcorner_", "", 1)
-        lon_key, lat_key = _restart_spatial_coord_names(level)
-        if lon_key in dataset.coords and lat_key in dataset.coords:
-            levels.append(level)
-    return sorted(levels)
-
-
-def _global_restart_coords_for_level(
-    level,
-    template,
-    lon_min_bound,
-    lon_max_bound,
-    lat_min_bound,
-    lat_max_bound,
-    l1_resolution,
-    lat_order,
-):
-    """Create final-domain restart coordinates for one restart level."""
-    resolution = (
-        float(l1_resolution)
-        if level == "L1"
-        else float(template.attrs[f"cellsize_{level}"])
-    )
-    lon_coords = _global_center_coords(
-        min_bound=lon_min_bound,
-        max_bound=lon_max_bound,
-        resolution=resolution,
-        increasing=True,
-    )
-    lat_coords = _global_center_coords(
-        min_bound=lat_min_bound,
-        max_bound=lat_max_bound,
-        resolution=resolution,
-        increasing=lat_order == "increasing",
-    )
-    return lon_coords, lat_coords
-
-
-def _global_restart_coords(
-    template,
-    lon_min_bound,
-    lon_max_bound,
-    lat_min_bound,
-    lat_max_bound,
-    l1_resolution,
-    lat_order,
-):
-    """Build final-domain coordinates for all transformed restart levels."""
-    global_coords = {}
-    for level in _restart_levels_from_dataset(template):
-        lon_key, lat_key = _restart_spatial_coord_names(level)
-        lon_coords, lat_coords = _global_restart_coords_for_level(
-            level=level,
-            template=template,
-            lon_min_bound=lon_min_bound,
-            lon_max_bound=lon_max_bound,
-            lat_min_bound=lat_min_bound,
-            lat_max_bound=lat_max_bound,
-            l1_resolution=l1_resolution,
-            lat_order=lat_order,
-        )
-        global_coords[lon_key] = xr.DataArray(
-            lon_coords,
-            dims=[lon_key],
-            attrs=template.coords.get(lon_key, xr.DataArray()).attrs,
-        )
-        global_coords[lat_key] = xr.DataArray(
-            lat_coords,
-            dims=[lat_key],
-            attrs=template.coords.get(lat_key, xr.DataArray()).attrs,
-        )
-    if "lon" not in global_coords and "lon" in template.dims:
-        lon_coords = _global_center_coords(
-            min_bound=lon_min_bound,
-            max_bound=lon_max_bound,
-            resolution=l1_resolution,
-            increasing=True,
-        )
-        global_coords["lon"] = xr.DataArray(lon_coords, dims=["lon"])
-    if "lat" not in global_coords and "lat" in template.dims:
-        lat_coords = _global_center_coords(
-            min_bound=lat_min_bound,
-            max_bound=lat_max_bound,
-            resolution=l1_resolution,
-            increasing=lat_order == "increasing",
-        )
-        global_coords["lat"] = xr.DataArray(lat_coords, dims=["lat"])
-    return global_coords
-
-
-def _init_merged_restart_dataset(template, global_coords):
-    """Create an empty final restart dataset from one tile template."""
-    merged = xr.Dataset(attrs=dict(template.attrs))
-    for coord_name, coord in template.coords.items():
-        if coord_name in global_coords:
-            continue
-        if any(dim in global_coords for dim in coord.dims):
-            continue
-        merged = merged.assign_coords({coord_name: coord.copy(deep=True)})
-    for coord_name, coord in global_coords.items():
-        merged = merged.assign_coords({coord_name: coord})
-    return merged
-
-
-def _is_spatial_restart_var(data_array, global_coords):
-    """Return whether a restart variable uses any merged spatial dimension."""
-    return any(dim in global_coords for dim in data_array.dims)
-
-
-def _spatial_fill_dtype(data_array):
-    """Return a safe dtype for initializing merged spatial restart arrays."""
-    dtype = data_array.dtype
-    if np.issubdtype(dtype, np.floating):
-        return dtype
-    return float
-
-
-def _ensure_merged_restart_var(merged, name, tile_data_array, global_coords):
-    """Initialize one output variable if it is not present yet."""
-    if name in merged:
-        return merged
-    if not _is_spatial_restart_var(tile_data_array, global_coords):
-        merged[name] = tile_data_array.copy(deep=True)
-        return merged
-
-    coords = {}
-    shape = []
-    for dim in tile_data_array.dims:
-        if dim in global_coords:
-            coords[dim] = global_coords[dim]
-            shape.append(global_coords[dim].size)
-        else:
-            if dim in tile_data_array.coords:
-                coords[dim] = tile_data_array[dim].copy(deep=True)
-            shape.append(tile_data_array.sizes[dim])
-    merged[name] = xr.DataArray(
-        np.full(shape, np.nan, dtype=_spatial_fill_dtype(tile_data_array)),
-        dims=tile_data_array.dims,
-        coords=coords,
-        attrs=tile_data_array.attrs.copy(),
-        name=name,
-    )
-    logger.debug(
-        f"Initialized merged restart variable {name} with dims "
-        f"{merged[name].dims} and shape {merged[name].shape}."
-    )
-    return merged
-
-
-def _restart_coord_match_tolerance(global_values):
-    """Return tolerance for matching restart tile coordinates to global coords."""
-    values = np.asarray(global_values, dtype=float)
-    magnitude = max(float(np.nanmax(np.abs(values))), 1.0)
-    if values.size < 2:
-        return np.finfo(float).eps * magnitude * 64
-    steps = np.abs(np.diff(values))
-    steps = steps[steps > 0]
-    if steps.size == 0:
-        return np.finfo(float).eps * magnitude * 64
-    grid_tolerance = float(np.nanmin(steps)) * 1.0e-6
-    precision_tolerance = np.finfo(float).eps * magnitude * 64
-    return max(grid_tolerance, precision_tolerance)
-
-
-def _nearest_global_coord_labels(dim, tile_values, global_values):
-    """Map tile coordinate values to nearest global coordinate labels."""
-    tile_values = np.asarray(tile_values, dtype=float)
-    global_values = np.asarray(global_values, dtype=float)
-    if global_values.size == 0:
-        msg = f"Global restart coordinate {dim!r} has no values."
-        with ErrorLogger(logger):
-            raise ValueError(msg)
-
-    increasing = global_values[0] <= global_values[-1]
-    sorted_global = global_values if increasing else global_values[::-1]
-    insert_positions = np.searchsorted(sorted_global, tile_values, side="left")
-    right_positions = np.clip(insert_positions, 0, sorted_global.size - 1)
-    left_positions = np.clip(insert_positions - 1, 0, sorted_global.size - 1)
-    choose_left = np.abs(tile_values - sorted_global[left_positions]) <= np.abs(
-        tile_values - sorted_global[right_positions]
-    )
-    sorted_positions = np.where(choose_left, left_positions, right_positions)
-    global_positions = (
-        sorted_positions if increasing else global_values.size - 1 - sorted_positions
-    )
-
-    matched_values = global_values[global_positions]
-    tolerance = _restart_coord_match_tolerance(global_values)
-    missing = np.abs(tile_values - matched_values) > tolerance
-    if np.any(missing):
-        sample = tile_values[missing][:5].tolist()
-        msg = (
-            f"Restart tile coordinate {dim!r} contains values outside the merged "
-            f"domain or off the global grid; sample unmatched values: {sample}."
-        )
-        with ErrorLogger(logger):
-            raise KeyError(msg)
-    return matched_values
-
-
 def _tile_mask_file_for_restart(restart_file):
     """Find the mask section written for the tile that produced a restart file."""
     restart_file = Path(restart_file)
@@ -1299,124 +1091,112 @@ def _load_tile_mask_for_restart(restart_file):
         return mask_ds.load()
 
 
-def _mask_restart_tile_with_tile_mask(dataset, restart_file, mask_var):
-    """Mask L1 spatial variables in one restart tile using its tile mask."""
-    tile_mask = _load_tile_mask_for_restart(restart_file)
-    if tile_mask is None:
-        return dataset
-    mask_da = _get_mask_data_array(tile_mask, mask_var)
+def _load_l1_restart_subset(restart_file):
+    """Open a restart file lazily and load only its L1-dimensioned variables.
+
+    A tile restart file also carries much larger native L0 (and possibly L11)
+    grids that masking never touches. Reading raw (``mask_and_scale=False``)
+    keeps ``_FillValue``/missing-value markers exactly as stored on disk, since
+    values are written back below with plain ``netCDF4`` (no CF re-encoding).
+    """
+    restart_file = Path(restart_file)
+    with xr.open_dataset(
+        restart_file, engine="netcdf4", mask_and_scale=False, decode_times=False
+    ) as lazy_ds:
+        transformed = _add_restart_spatial_coords(lazy_ds)
+        if "lon" not in transformed.coords or "lat" not in transformed.coords:
+            return None
+        l1_vars = [
+            var
+            for var in transformed.data_vars
+            if "lon" in transformed[var].dims and "lat" in transformed[var].dims
+        ]
+        if not l1_vars:
+            return None
+        # Selecting only the L1 variables and loading that subset keeps large
+        # L0/L11 arrays untouched on disk; their bytes are never read.
+        return transformed[l1_vars].load()
+
+
+def _mask_l1_restart_subset(subset, tile_mask_ds, mask_var):
+    """Return ``{var_name: masked ndarray}`` for L1 variables in native order."""
+    mask_da = _get_mask_data_array(tile_mask_ds, mask_var)
     if mask_da is None:
-        return dataset
+        return {}
     if mask_da.name is None:
         mask_da = mask_da.rename(mask_var)
-    tile_mask_ds = mask_da.to_dataset(name=mask_da.name)
+    mask_input = mask_da.to_dataset(name=mask_da.name)
     mask_lon_key = get_coord_key(mask_da, lon=True)
     mask_lat_key = get_coord_key(mask_da, lat=True)
-    masked_vars = []
-    for var in dataset.data_vars:
-        data_array = dataset[var]
-        if "lon" not in data_array.dims or "lat" not in data_array.dims:
-            continue
-        mask_regridded = regrid_mask(
-            mask_ds=tile_mask_ds,
-            lon_key_mask=mask_lon_key,
-            lat_key_mask=mask_lat_key,
-            target_lon=dataset["lon"],
-            target_lat=dataset["lat"],
-            mask_key=mask_da.name,
-            lon_key_target="lon",
-            lat_key_target="lat",
-        )
-        dataset[var] = data_array.where(mask_regridded == 1, np.nan)
-        masked_vars.append(var)
+    mask_regridded = regrid_mask(
+        mask_ds=mask_input,
+        lon_key_mask=mask_lon_key,
+        lat_key_mask=mask_lat_key,
+        target_lon=subset["lon"],
+        target_lat=subset["lat"],
+        mask_key=mask_da.name,
+        lon_key_target="lon",
+        lat_key_target="lat",
+    )
+    active = mask_regridded == 1
+
+    masked_arrays = {}
+    for var in subset.data_vars:
+        data_array = subset[var]
+        fill_value = _fill_value_for_restart_var(data_array)
+        masked = data_array.where(active, fill_value).transpose(*data_array.dims)
+        masked_arrays[var] = np.asarray(masked.values, dtype=data_array.dtype)
+    return masked_arrays
+
+
+def _write_restart_vars_in_place(restart_file, masked_arrays):
+    """Overwrite only the given variables' bytes; all other data stays untouched."""
+    if not masked_arrays:
+        return
+    restart_file = Path(restart_file)
+    with netCDF4.Dataset(restart_file, "r+") as nc:
+        for name, array in masked_arrays.items():
+            nc.variables[name][:] = array
+
+
+def _mask_restart_file_in_place(restart_file, mask_var):
+    """Mask one tile restart file with its own tile mask before it is relocated."""
+    restart_file = Path(restart_file)
+    tile_mask = _load_tile_mask_for_restart(restart_file)
+    if tile_mask is None:
+        return None
+    subset = _load_l1_restart_subset(restart_file)
+    if subset is None:
+        return None
+    masked_arrays = _mask_l1_restart_subset(subset, tile_mask, mask_var)
+    if not masked_arrays:
+        return None
+    _write_restart_vars_in_place(restart_file, masked_arrays)
     logger.info(
-        f"Applied tile mask for {restart_file} to {len(masked_vars)} variables."
+        f"Masked restart file {restart_file} in place using its tile mask "
+        f"for variables {list(masked_arrays)}."
     )
-    logger.debug(f"Tile-masked restart variables: {masked_vars}.")
-    return dataset
+    return restart_file
 
 
-def _write_restart_tile_to_merged(merged, tile_dataset, global_coords):
-    """Write one transformed restart tile into the final-domain dataset."""
-    for var in tile_dataset.data_vars:
-        tile_data_array = tile_dataset[var]
-        merged = _ensure_merged_restart_var(
-            merged=merged,
-            name=var,
-            tile_data_array=tile_data_array,
-            global_coords=global_coords,
-        )
-        if not _is_spatial_restart_var(tile_data_array, global_coords):
-            continue
-        indexers = {
-            dim: _nearest_global_coord_labels(
-                dim=dim,
-                tile_values=tile_data_array[dim].values,
-                global_values=global_coords[dim].values,
-            )
-            for dim in tile_data_array.dims
-            if dim in global_coords
-        }
-        logger.debug(f"Writing restart variable {var} to output indexers {indexers}.")
-        target = merged[var].loc[indexers]
-        aligned_tile = tile_data_array.transpose(*target.dims)
-        merged[var].loc[indexers] = aligned_tile.data
-    return merged
+def _mask_restart_files_in_place(restart_files, mask_var, n_jobs=1):
+    """Mask tile restart files in place before they are moved, copied, or merged.
 
-
-def _set_restart_grid_attrs(dataset, lon_min_bound=None, lat_min_bound=None):
-    """Set merged restart grid attributes from transformed spatial coordinates."""
-    levels = sorted(
-        str(key).replace("xllcorner_", "", 1)
-        for key in dataset.attrs
-        if str(key).startswith("xllcorner_L")
+    Uses process-based parallelism ("loky"), not threads: the netCDF4/HDF5 C
+    library is not reliably thread-safe (concurrent reads/writes across OS
+    threads in one process can corrupt its internal state and crash), which is
+    why every other netCDF-touching parallel step in this module already uses
+    ``backend="loky"`` (see ``_prepare_tiles_for_mhm``, ``_run_mhm_for_tiles``).
+    """
+    if int(n_jobs) == 1:
+        for restart_file in restart_files:
+            _mask_restart_file_in_place(restart_file, mask_var)
+        return restart_files
+    Parallel(n_jobs=n_jobs, backend="loky")(
+        delayed(_mask_restart_file_in_place)(restart_file, mask_var)
+        for restart_file in restart_files
     )
-    for level in levels:
-        lon_key = "lon" if level == "L1" else f"lon_{level}"
-        lat_key = "lat" if level == "L1" else f"lat_{level}"
-        cellsize_key = f"cellsize_{level}"
-        if lon_key not in dataset.coords or lat_key not in dataset.coords:
-            logger.debug(
-                f"Skipping {level} restart attrs update; missing coords "
-                f"{lon_key}/{lat_key}."
-            )
-            continue
-        cellsize = float(dataset.attrs.get(cellsize_key, np.nan))
-        if np.isnan(cellsize):
-            logger.debug(
-                f"Skipping {level} restart attrs update; missing {cellsize_key}."
-            )
-            continue
-        lon_values = np.asarray(dataset[lon_key].values, dtype=float)
-        lat_values = np.asarray(dataset[lat_key].values, dtype=float)
-        xllcorner = (
-            float(lon_min_bound)
-            if lon_min_bound is not None
-            else float(np.nanmin(lon_values) - cellsize / 2)
-        )
-        yllcorner = (
-            float(lat_min_bound)
-            if lat_min_bound is not None
-            else float(np.nanmin(lat_values) - cellsize / 2)
-        )
-        dataset.attrs.update(
-            {
-                f"xllcorner_{level}": xllcorner,
-                f"yllcorner_{level}": yllcorner,
-                cellsize_key: cellsize,
-                f"ncols_{level}": len(lon_values),
-                f"nrows_{level}": len(lat_values),
-            }
-        )
-        logger.info(
-            f"Updated merged {level} grid attrs: "
-            f"xllcorner={dataset.attrs[f'xllcorner_{level}']}, "
-            f"yllcorner={dataset.attrs[f'yllcorner_{level}']}, "
-            f"cellsize={dataset.attrs[cellsize_key]}, "
-            f"ncols={dataset.attrs[f'ncols_{level}']}, "
-            f"nrows={dataset.attrs[f'nrows_{level}']}."
-        )
-    return dataset
+    return restart_files
 
 
 def _mask_sources(mask_ds):
@@ -1461,144 +1241,6 @@ def _combined_restart_mask(mask_ds, mask_var, target_lon, target_lat):
             active_mask if combined_mask is None else combined_mask | active_mask
         )
     return combined_mask
-
-
-def _batched(items, batch_size):
-    """Yield lists of items with at most batch_size elements."""
-    batch_size = max(1, int(batch_size))
-    for start in range(0, len(items), batch_size):
-        yield items[start : start + batch_size]
-
-
-def _prepare_restart_tile_for_merge(restart_file, mask_var):
-    """Load and mask one restart tile before serial insertion."""
-    dataset = _load_restart_dataset_for_merge(restart_file)
-    return _mask_restart_tile_with_tile_mask(dataset, restart_file, mask_var)
-
-
-def _prepare_restart_tile_batch_for_merge(restart_files, mask_var, n_jobs):
-    """Prepare one batch of restart tiles, preserving input order."""
-    if int(n_jobs) == 1:
-        return [
-            _prepare_restart_tile_for_merge(restart_file, mask_var)
-            for restart_file in restart_files
-        ]
-    return Parallel(n_jobs=n_jobs, backend="threading")(
-        delayed(_prepare_restart_tile_for_merge)(restart_file, mask_var)
-        for restart_file in restart_files
-    )
-
-
-def merge_mhm_restart_files(
-    restart_files,
-    output_file,
-    lon_min_bound,
-    lon_max_bound,
-    lat_min_bound,
-    lat_max_bound,
-    l1_resolution,
-    lat_order="decreasing",
-    mask_ds=None,
-    mask_var="mask",
-    n_jobs=1,
-):
-    """Merge tiled mHM restart files without renaming variables."""
-    restart_files = [Path(restart_file) for restart_file in restart_files]
-    if not restart_files:
-        msg = "No mHM restart files were provided for merging."
-        with ErrorLogger(logger):
-            raise ValueError(msg)
-    logger.info(
-        f"Starting mHM restart merge for {len(restart_files)} files into {output_file}."
-    )
-    logger.debug(f"Restart merge input files: {restart_files}.")
-    merged = None
-    global_coords = None
-    n_jobs = max(1, int(n_jobs))
-    batch_size = max(1, 2 * n_jobs)
-    logger.info(
-        f"Preparing restart merge tiles in batches of {batch_size} "
-        f"with n_jobs={n_jobs}."
-    )
-    written_tiles = 0
-    for batch_number, restart_file_batch in enumerate(
-        _batched(restart_files, batch_size), start=1
-    ):
-        logger.info(
-            f"Preparing restart merge batch {batch_number} with "
-            f"{len(restart_file_batch)} files."
-        )
-        datasets = _prepare_restart_tile_batch_for_merge(
-            restart_files=restart_file_batch,
-            mask_var=mask_var,
-            n_jobs=n_jobs,
-        )
-        for dataset in datasets:
-            written_tiles += 1
-            if merged is None:
-                global_coords = _global_restart_coords(
-                    template=dataset,
-                    lon_min_bound=lon_min_bound,
-                    lon_max_bound=lon_max_bound,
-                    lat_min_bound=lat_min_bound,
-                    lat_max_bound=lat_max_bound,
-                    l1_resolution=l1_resolution,
-                    lat_order=lat_order,
-                )
-                logger.info(
-                    f"Initialized direct restart tile writer with global coords: "
-                    f"{ {key: value.size for key, value in global_coords.items()} }."
-                )
-                merged = _init_merged_restart_dataset(dataset, global_coords)
-                logger.debug(
-                    f"Initial restart merge dataset sizes: {dict(merged.sizes)}."
-                )
-            logger.info(
-                f"Writing restart tile {written_tiles}/{len(restart_files)} "
-                f"into output."
-            )
-            logger.debug(f"Next restart dataset sizes: {dict(dataset.sizes)}.")
-            merged = _write_restart_tile_to_merged(merged, dataset, global_coords)
-            del dataset
-            logger.debug(f"Merged restart dataset sizes now: {dict(merged.sizes)}.")
-    logger.info(f"Wrote {len(restart_files)} mHM restart tiles for {output_file}.")
-    lon_key = get_coord_key(merged, lon=True)
-    lat_key = get_coord_key(merged, lat=True)
-    logger.info(
-        f"Merged restart grid uses "
-        f"lon={lon_key} ({merged.sizes.get(lon_key)} cells), "
-        f"lat={lat_key} ({merged.sizes.get(lat_key)} cells)."
-    )
-    merged = _set_restart_grid_attrs(
-        merged,
-        lon_min_bound=lon_min_bound,
-        lat_min_bound=lat_min_bound,
-    )
-    if mask_ds is not None:
-        mask_regridded = _combined_restart_mask(
-            mask_ds=mask_ds,
-            mask_var=mask_var,
-            target_lon=merged[lon_key],
-            target_lat=merged[lat_key],
-        )
-        masked_vars = []
-        if mask_regridded is not None:
-            for var in merged.data_vars:
-                if lon_key in merged[var].dims and lat_key in merged[var].dims:
-                    merged[var] = merged[var].where(mask_regridded, np.nan)
-                    masked_vars.append(var)
-            merged.attrs["nCells_L1"] = int(np.sum(mask_regridded.values))
-            logger.info(
-                f"Applied final restart mask to {len(masked_vars)} variables; "
-                f"nCells_L1={merged.attrs['nCells_L1']}."
-            )
-            logger.debug(f"Masked restart variables: {masked_vars}.")
-    output_file = Path(output_file)
-    output_file.parent.mkdir(parents=True, exist_ok=True)
-    logger.info(f"Writing merged mHM restart file to {output_file}.")
-    write_xarray_to_file(merged, output_file)
-    logger.info(f"Finished writing merged mHM restart file to {output_file}.")
-    return output_file
 
 
 def _prepare_tile_setup(  # noqa: PLR0913
@@ -1789,6 +1431,7 @@ def _prepare_tiles_for_mhm(  # noqa: PLR0913
     crop_n_jobs,
     fill_nearest_files,
     l0_mask_files,
+    update_tile_masks=False,
 ):
     """Prepare setup tiles unless existing tile directories should be reused."""
     missing_tiles = []
@@ -1803,8 +1446,25 @@ def _prepare_tiles_for_mhm(  # noqa: PLR0913
             raise_on_missing=False,
         )
         if not missing_tiles:
+            for tile in tiles:
+                _ensure_tile_mask_section(
+                    tile, mask_ds, mask_var, update_tile_masks=update_tile_masks
+                )
             return tiles
         logger.info(f"Preparing {len(missing_tiles)} missing tile setups before reuse.")
+        missing_output_paths = {tile.output_path for tile in missing_tiles}
+        existing_tiles = [
+            tile for tile in tiles if tile.output_path not in missing_output_paths
+        ]
+        if existing_tiles:
+            logger.info(
+                f"Ensuring tile mask sections for {len(existing_tiles)} existing "
+                "tile setups without recreating them."
+            )
+            for tile in existing_tiles:
+                _ensure_tile_mask_section(
+                    tile, mask_ds, mask_var, update_tile_masks=update_tile_masks
+                )
     else:
         missing_tiles = tiles
     if int(n_jobs) == 1:
@@ -2169,6 +1829,7 @@ def create_mhm_restart_from_setup(  # noqa: PLR0913
     skip_tile_creation=False,
     skip_mhm_run=False,
     recreate_restart=False,
+    update_tile_masks=False,
 ):
     """Create restart files from a setup by tiling, running mHM, and merging output.
 
@@ -2217,6 +1878,7 @@ def create_mhm_restart_from_setup(  # noqa: PLR0913
         crop_n_jobs=crop_n_jobs,
         fill_nearest_files=fill_nearest_files,
         l0_mask_files=l0_mask_files,
+        update_tile_masks=update_tile_masks,
     )
     if skip_mhm_run:
         logger.info(
@@ -2286,6 +1948,13 @@ def create_mhm_restart_from_setup(  # noqa: PLR0913
         if int(result.get("status", result.get("Status", 0))) != 1
         for restart_file in result.get("restart_files", [])
     ]
+
+    if restart_files:
+        logger.info(
+            f"Masking {len(restart_files)} tile restart files with their tile "
+            "masks before moving or merging."
+        )
+        _mask_restart_files_in_place(restart_files, mask_var=mask_var, n_jobs=n_jobs)
 
     if restart_output_path is not None:
         restart_files = _move_restart_files(
@@ -2481,6 +2150,25 @@ def _native_restart_indexers(data_array, dataset, lon_min, lat_max):
     return indexers
 
 
+def _native_restart_valid_mask(data_array):
+    """Return a boolean array of which cells in a tile array hold real data.
+
+    Returns ``None`` when validity can't be determined for this variable's
+    convention, meaning the caller should fall back to a blind overwrite.
+    """
+    if np.issubdtype(data_array.dtype, np.floating):
+        # get_xarray_ds_from_file loads with mask_and_scale=True (default), so
+        # any declared _FillValue/missing_value is already decoded to NaN here
+        # regardless of the on-disk sentinel.
+        return ~np.isnan(data_array.data)
+    if data_array.name in ("L1_domain_mask", "L0_domain_mask"):
+        # Native domain-mask variables are plain int 0/1 with no declared
+        # _FillValue, so they aren't auto-NaN'd above. 0/inactive matches the
+        # "mask_regridded == 1" convention used elsewhere in this file.
+        return np.asarray(data_array.data) != 0
+    return None
+
+
 def _merge_native_restart_files(restart_file_paths, lon_min, lon_max, lat_min, lat_max):
     """Stitch tile restart files on their native mHM restart dimensions."""
     logger.info("Stitching restart files with native mHM restart dimensions")
@@ -2522,7 +2210,17 @@ def _merge_native_restart_files(restart_file_paths, lon_min, lon_max, lat_min, l
                 )
                 with ErrorLogger(logger):
                     raise ValueError(msg)
-            merged[data_var][indexers] = data_array.data
+            # Combine rather than blindly overwrite: when multiple continent
+            # runs select overlapping tiles at a shared border, a later file's
+            # invalid/fill cells must not wipe out an earlier file's valid
+            # cells at the same position (see _native_restart_valid_mask).
+            valid = _native_restart_valid_mask(data_array)
+            if valid is None:
+                merged[data_var][indexers] = data_array.data
+            else:
+                merged[data_var][indexers] = np.where(
+                    valid, data_array.data, target.data
+                )
 
     if "L1_domain_mask" in merged:
         mask = np.asarray(merged["L1_domain_mask"].values)
@@ -2532,41 +2230,6 @@ def _merge_native_restart_files(restart_file_paths, lon_min, lon_max, lat_min, l
         merged.attrs["nCells_L0"] = int(np.sum(np.isfinite(mask) & (mask > 0)))
 
     return merged
-
-
-_FINAL_DIM_RENAMES = {
-    "land_cover_period_out": "L1_LandCoverPeriods",
-    "land_cover_period": "L1_LandCoverPeriods",
-    "L1_LandCoverPeriods": "L1_LandCoverPeriods",
-    "horizon_out": "L1_SoilHorizons",
-    "L1_SoilHorizons": "L1_SoilHorizons",
-    "month_of_year": "L1_LAITimesteps",
-    "L1_LAITimesteps": "L1_LAITimesteps",
-}
-
-_FINAL_VAR_RENAMES = {
-    "land_cover_period_out_bnds": "L1_LandCoverPeriods_bnds",
-    "horizon_out_bnds": "L1_SoilHorizons_bnds",
-    "month_of_year_bnds": "L1_LAITimesteps_bnds",
-    "L1_SealedFraction": "L1_fSealed",
-    "L1_Alpha": "L1_alpha",
-    "L1_DegDayInc": "L1_degDayInc",
-    "L1_DegDayNoPre": "L1_degDayNoPre",
-    "L1_DegDayMax": "L1_degDayMax",
-    "L1_KarstLoss": "L1_karstLoss",
-    "L1_Max_Canopy_Intercept": "L1_maxInter",
-    "L1_FastFlow": "L1_kFastFlow",
-    "L1_Kperco": "L1_kPerco",
-    "L1_SlowFlow": "L1_kSlowFlow",
-    "L1_SoilMoistureExponent": "L1_soilMoistExp",
-    "L1_FieldCap": "L1_soilMoistFC",
-    "L1_PermWiltPoint": "L1_wiltingPoint",
-    "L1_SatSoilMoisture": "L1_soilMoistSat",
-    "L1_Jarvis_Threshold": "L1_jarvis_thresh_c1",
-    "L1_TempThresh": "L1_tempThresh",
-    "L1_UnsatThreshold": "L1_unsatThresh",
-    "L1_SealedThresh": "L1_sealedThresh",
-}
 
 
 def _cell_bounds_from_centers(values, resolution):
@@ -2589,7 +2252,7 @@ def _final_dim_name(dim):
         return "lon"
     if _restart_level_from_native_dim(dim, "ncols") is not None:
         return "lat"
-    return _FINAL_DIM_RENAMES.get(dim, dim)
+    return dim
 
 
 def _finalize_spatial_array(data_array, lon, lat_desc):
@@ -2629,7 +2292,7 @@ def _bounds_or_default(dataset, name, size, default_values):
     if default_values.shape == (size, 2):
         return default_values
     if name == "L1_SoilHorizons_bnds" and size == 6:
-        np.array(
+        return np.array(
             [
                 [0.0, 50.0],
                 [50.0, 150.0],
@@ -2656,24 +2319,24 @@ def _add_final_coords_and_bounds(ds, native, lon, lat, resolution):
     ds = ds.assign_coords(
         L1_LandCoverPeriods=(
             "L1_LandCoverPeriods",
-            _coord_or_default(native, "land_cover_period_out", period_size, [2000]),
+            _coord_or_default(native, "L1_LandCoverPeriods", period_size, [2000]),
         ),
         L1_SoilHorizons=(
             "L1_SoilHorizons",
             _coord_or_default(
-                native, "horizon_out", horizon_size, [50, 150, 300, 600, 1000, 2000]
+                native, "L1_SoilHorizons", horizon_size, [50, 150, 300, 600, 1000, 2000]
             ),
         ),
         L1_LAITimesteps=(
             "L1_LAITimesteps",
-            _coord_or_default(native, "month_of_year", lai_size, np.arange(lai_size)),
+            _coord_or_default(native, "L1_LAITimesteps", lai_size, np.arange(lai_size)),
         ),
     )
     ds["L1_LandCoverPeriods_bnds"] = (
         ("L1_LandCoverPeriods", "bnds"),
         _bounds_or_default(
             native,
-            "land_cover_period_out_bnds",
+            "L1_LandCoverPeriods_bnds",
             period_size,
             np.tile(np.array([[1900, 2099]], dtype=np.int64), (period_size, 1)),
         ),
@@ -2682,7 +2345,7 @@ def _add_final_coords_and_bounds(ds, native, lon, lat, resolution):
         ("L1_SoilHorizons", "bnds"),
         _bounds_or_default(
             native,
-            "horizon_out_bnds",
+            "L1_SoilHorizons_bnds",
             horizon_size,
             np.array(
                 [
@@ -2700,7 +2363,7 @@ def _add_final_coords_and_bounds(ds, native, lon, lat, resolution):
         ("L1_LAITimesteps", "bnds"),
         _bounds_or_default(
             native,
-            "month_of_year_bnds",
+            "L1_LAITimesteps_bnds",
             lai_size,
             np.array(
                 list(zip(range(lai_size), range(1, lai_size + 1))), dtype=np.int64
@@ -2763,6 +2426,11 @@ def _apply_final_attrs(ds, lon_min, lat_min, resolution, n_cells):
     n_lat = ds.sizes["lat"]
     xll = int(lon_min) if lon_min == int(lon_min) else float(lon_min)
     yll = int(lat_min) if lat_min == int(lat_min) else float(lat_min)
+    # The L0_domain_* variables are written as L1-sized placeholders (the
+    # native L0 grid is not stitched), so these attrs must mirror the L1
+    # grid too: mHM's restart reader uses nrows_L0/ncols_L0 to allocate the
+    # array it reads L0_domain_mask into, so any mismatch (or a value too
+    # large for its 32-bit integer) breaks restart loading.
     ds.attrs.update(
         {
             "xllcorner_L1": xll,
@@ -2842,7 +2510,7 @@ def _final_restart_encoding(ds):
             continue
         encoding[name] = {
             "dtype": "float64",
-            "_FillValue": np.nan,
+            "_FillValue": -9999.0,
             "zlib": True,
             "complevel": 4,
             "shuffle": True,
@@ -2920,7 +2588,7 @@ def _convert_native_restart_to_cf(
         ):
             logger.debug("Skipping unsupported final restart variable %s.", data_var)
             continue
-        final[_FINAL_VAR_RENAMES.get(data_var, data_var)] = finalized
+        final[data_var] = finalized
 
     final = _add_final_coords_and_bounds(final, native, lon, lat_desc, l1_resolution)
     active_mask = _final_mask(mask_ds, mask_var, lon, lat_desc)
@@ -2929,6 +2597,11 @@ def _convert_native_restart_to_cf(
         final["L1_fAsp"] = (("lat", "lon"), np.ones(active_mask.shape, dtype=float))
     if "L1_degDay" not in final:
         final["L1_degDay"] = (("lat", "lon"), np.ones(active_mask.shape, dtype=float))
+    if {"L1_wiltingPoint", "L1_soilMoistFC"} <= set(final.data_vars):
+        final["L1_soilMoist"] = (
+            final["L1_wiltingPoint"]
+            + (final["L1_soilMoistFC"] - final["L1_wiltingPoint"]) / 2
+        )
     final = _mask_final_spatial_vars(final, active_mask)
     return _apply_final_attrs(
         final,
@@ -2984,6 +2657,3 @@ def merge_restart_files(
             final.attrs["merged_tile_mask_file"] = str(tile_mask_file)
     logger.info("Merging restart files done")
     return final
-
-
-_merge_restart_files = merge_restart_files

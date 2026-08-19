@@ -10,6 +10,7 @@ Files
    ~mhm_tools.pre.create_id_gauges
    ~mhm_tools.pre.create_mhm_restart_file
    ~mhm_tools.pre.create_mhm_restart_from_setup
+   ~mhm_tools.pre.create_wmo_region_masks
    ~mhm_tools.pre.crop_mhm_setup
    ~mhm_tools.pre.fill_nearest
    ~mhm_tools.pre.format_geology
@@ -56,6 +57,7 @@ _ATTR_EXPORTS = {
     "xy_to_latlon": ("latlon", "xy_to_latlon"),
     "link_folder_tree": ("link_folder_tree", "link_folder_tree"),
     "create_subdomain_masks": ("subdomain_masks", "create_subdomain_masks"),
+    "create_wmo_region_masks": ("create_wmo_region_masks", "create_wmo_region_masks"),
     "fill_nearest": ("fill_nearest", "fill_dataarray_with_nearest"),
     "format_geology_data": ("format_geology", "format_geology_data"),
     "write_geology_classdefinition": (
@@ -83,6 +85,7 @@ __all__ = [
     "create_mhm_restart_file",
     "create_mhm_restart_from_setup",
     "create_subdomain_masks",
+    "create_wmo_region_masks",
     "crop_mhm_setup",
     "fill_nearest",
     "format_geology",

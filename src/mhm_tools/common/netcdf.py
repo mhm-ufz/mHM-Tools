@@ -888,14 +888,30 @@ def _safe_coordinate_encoding(encoding: dict) -> dict:
 def generate_bounds(
     da: xr.DataArray, bounds_dim: str = "bnds", res=None
 ) -> xr.DataArray:
-    """Generate CF-compliant bounds for a coordinate DataArray."""
+    """Generate CF-compliant bounds for a coordinate DataArray.
+
+    With a single coordinate value there is no adjacent point to derive a
+    cell width from, so an explicit ``res`` is required in that case;
+    with two or more values the per-cell spacing is always derived from
+    the coordinate itself (``res`` is only a fallback for the single-value
+    case, never an override of the real spacing).
+    """
     (dim,) = da.dims
-    if res is None:
-        res = da.diff(dim)
-    lower = da - res / 2
-    upper = da + res / 2
+    if da.sizes[dim] < 2:
+        if res is None:
+            msg = (
+                f"Cannot generate bounds for coordinate {dim!r} with a "
+                "single value without an explicit resolution."
+            )
+            raise ValueError(msg)
+        lower = da - res / 2
+        upper = da + res / 2
+        return xr.concat([lower, upper], dim=bounds_dim).transpose()
+    diffs = da.diff(dim)
+    lower = da - diffs / 2
+    upper = da + diffs / 2
     bounds = xr.concat([lower, upper], dim=bounds_dim)
-    first_lower = bounds.isel({dim: 0}) - res.isel({dim: 0})
+    first_lower = bounds.isel({dim: 0}) - diffs.isel({dim: 0})
     first = first_lower.assign_coords({dim: da[dim][0]})
     all_bounds = xr.concat([first, bounds], dim=dim)
     return all_bounds.transpose()
@@ -908,13 +924,37 @@ def generate_bounds_for_all_coords(
     ds_out = ds.copy(deep=False)
     for coord in ds.coords:
         da = ds[coord]
-        if da.ndim == 1 and da.sizes[da.dims[0]] >= 2:
-            try:
-                ds_out.coords[f"{coord}_bnds"] = generate_bounds(da, bounds_dim, res)
-                if "bounds" not in da.attrs:
-                    da.attrs["bounds"] = f"{coord}_bnds"
-            except Exception:
-                logger.debug(
-                    f"Could not generate bounds for coordinate '{coord}'", exc_info=True
-                )
+        if da.ndim != 1:
+            continue
+        try:
+            ds_out.coords[f"{coord}_bnds"] = generate_bounds(da, bounds_dim, res)
+            if "bounds" not in ds_out[coord].attrs:
+                ds_out[coord].attrs["bounds"] = f"{coord}_bnds"
+        except Exception:
+            logger.debug(
+                f"Could not generate bounds for coordinate '{coord}'", exc_info=True
+            )
     return ds_out
+
+
+def add_variable_hard_link(file_path, existing_var, alias_var):
+    """Add a second name for an existing NetCDF4 variable without duplicating its data.
+
+    Parameters
+    ----------
+    file_path : str or pathlib.Path
+        Path to an existing NetCDF4 (HDF5-backed) file, already closed for writing.
+    existing_var : str
+        Name of the variable already present in the file.
+    alias_var : str
+        New name to add; reads back identically to ``existing_var``, including all
+        of its attributes, since both names reference the same on-disk object.
+
+    Returns
+    -------
+    None
+    """
+    import h5py
+
+    with h5py.File(file_path, "r+") as f:
+        f[alias_var] = f[existing_var]

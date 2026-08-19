@@ -70,6 +70,7 @@ def calc_ratio(  # noqa: PLR0913
 
     # calculating ratio, if true prevents division by 0
     ratio = xr.where(da_ref != 0, da_mod_interp / da_ref, np.nan)
+    ratio.attrs = {"units": "1", "long_name": f"Ratio of {mod_var} to {ref_var}"}
 
     # Sets output path to save plot
     out_path_dir = Path(output_dir)

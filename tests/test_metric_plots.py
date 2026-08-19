@@ -178,6 +178,8 @@ def test_write_metric_plots_calls_shared_cdf_plotter(tmp_path, monkeypatch):
     assert output_files == [
         tmp_path / "plots" / "cdf_alpha.png",
         tmp_path / "plots" / "cdf_kge.png",
+        tmp_path / "plots" / "metric_plots_overview.pdf",
+        tmp_path / "plots" / "metric_summary.csv",
     ]
     assert [call["variable_name"] for call in calls] == ["alpha", "kge"]
     assert calls[0]["values_by_label"]["run1"].tolist() == [1.0, 2.0]
@@ -208,7 +210,11 @@ def test_write_metric_plots_calls_shared_violin_plotter(tmp_path, monkeypatch):
         plot_types=["violin"],
     )
 
-    assert output_files == [tmp_path / "plots" / "violin_alpha.png"]
+    assert output_files == [
+        tmp_path / "plots" / "violin_alpha.png",
+        tmp_path / "plots" / "metric_plots_overview.pdf",
+        tmp_path / "plots" / "metric_summary.csv",
+    ]
     assert calls[0]["variable_name"] == "alpha"
     assert calls[0]["values_by_label"]["run1"].tolist() == [1.0, 2.0]
 
@@ -231,7 +237,11 @@ def test_write_metric_plots_ignores_geometry_without_catchment_map(
         mask_paths=["mask.nc"],
     )
 
-    assert output_files == [tmp_path / "plots" / "cdf_kge.png"]
+    assert output_files == [
+        tmp_path / "plots" / "cdf_kge.png",
+        tmp_path / "plots" / "metric_plots_overview.pdf",
+        tmp_path / "plots" / "metric_summary.csv",
+    ]
 
 
 def test_write_metric_catchment_maps_treats_empty_geometry_paths_as_none(

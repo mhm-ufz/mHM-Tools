@@ -71,6 +71,10 @@ def calc_rel_diff(  # noqa: PLR0913
 
     # calculating relative difference, if true prevents division by 0
     diff = xr.where(da_ref != 0, (da_ref - da_mod_interp) / da_ref, np.nan)
+    diff.attrs = {
+        "units": "1",
+        "long_name": f"Relative difference of {mod_var} from {ref_var} ((ref - mod) / ref)",
+    }
 
     # Sets output path to save plot
     out_path_dir = Path(output_dir)

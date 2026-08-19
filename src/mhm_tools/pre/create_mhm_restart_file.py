@@ -275,7 +275,7 @@ class Grid:
         new_path.mkdir(parents=True, exist_ok=True)
         for file in self.path.glob("*.*"):
             link_loc = new_path / file.name
-            if link_loc.exists():
+            if link_loc.exists() or link_loc.is_symlink():
                 link_loc.unlink()
             link_loc.symlink_to(file)
         self.path = new_path

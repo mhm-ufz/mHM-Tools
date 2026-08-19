@@ -139,6 +139,7 @@ _COMMAND_GROUPS: List[Tuple[str, str, List[Tuple[str, object]]]] = [
                 "create-mhm-restart-from-setup",
                 "mhm_tools._cli._create_mhm_restart_from_setup",
             ),
+            ("create-wmo-region-masks", "mhm_tools._cli._create_wmo_region_masks"),
         ],
     ),
 ]

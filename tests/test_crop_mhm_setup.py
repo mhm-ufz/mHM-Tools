@@ -6,42 +6,7 @@ import xarray as xr
 from mhm_tools.common.esri_grid import read_header
 from mhm_tools.common.resolution_handler import Resolution
 from mhm_tools.common.xarray_utils import get_ds_extend
-from mhm_tools.pre.crop_mhm_setup import crop_file, regrid_mask
-
-
-def test_regrid_mask_snaps_same_resolution_shifted_coordinates():
-    target_lon = np.array([0.0, 1.0, 2.0])
-    target_lat = np.array([3.0, 2.0, 1.0])
-    mask = xr.DataArray(
-        np.array(
-            [
-                [1.0, 0.0, 1.0],
-                [1.0, 1.0, 0.0],
-                [0.0, 1.0, 1.0],
-            ]
-        ),
-        dims=("lat", "lon"),
-        coords={
-            "lat": target_lat + 1e-4,
-            "lon": target_lon + 1e-4,
-        },
-        name="mask",
-    )
-
-    regridded = regrid_mask(
-        mask_ds=mask,
-        lon_key_mask="lon",
-        lat_key_mask="lat",
-        target_lon=target_lon,
-        target_lat=target_lat,
-        lon_key_target="lon",
-        lat_key_target="lat",
-    )
-
-    assert regridded.dims == ("lat", "lon")
-    assert np.allclose(regridded["lon"].values, target_lon)
-    assert np.allclose(regridded["lat"].values, target_lat)
-    assert np.array_equal(regridded.values, mask.values)
+from mhm_tools.pre.crop_mhm_setup import crop_file
 
 
 def test_crop_file_masking_snaps_shifted_mask_coordinates_without_extra_dims(tmp_path):

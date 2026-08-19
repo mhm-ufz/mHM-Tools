@@ -65,7 +65,7 @@ def _iter_wildcard_matches(pattern):
         matches = anchor.glob(relative_pattern)
     else:
         matches = Path().glob(str(pattern))
-    return sorted(matches, key=lambda path: str(path))
+    return sorted(matches, key=str)
 
 
 def _unique_paths(paths):
@@ -618,6 +618,26 @@ def get_metric_values_by_input(
     return values_by_variable
 
 
+def write_metric_summary_csv(summary_rows, output_file):
+    """Write metric summary rows to a CSV file.
+
+    Parameters
+    ----------
+    summary_rows : Sequence[Mapping[str, object]]
+        Metric summary rows, as produced by create_metric_summary_rows.
+    output_file : str or Path
+        CSV file to write.
+
+    Returns
+    -------
+    Path
+        Written CSV file.
+    """
+    output_file = Path(output_file)
+    pd.DataFrame(summary_rows).to_csv(output_file, index=False)
+    return output_file
+
+
 def write_metric_plots(  # noqa: PLR0913
     input_paths: Sequence[str],
     variables: Sequence[str],
@@ -685,7 +705,8 @@ def write_metric_plots(  # noqa: PLR0913
     Returns
     -------
     list[Path]
-        Written PNG files.
+        Written files: per-plot PNGs, ``metric_plots_overview.pdf`` (whenever there is
+        anything to show), and ``metric_summary.csv``.
     """
     if plot_types is None:
         plot_types = ["cdf", "violin"]
@@ -709,14 +730,24 @@ def write_metric_plots(  # noqa: PLR0913
         label_metadata=label_metadata,
         style_by=style_by,
     )
-    values_by_variable = {}
-    if "cdf" in plot_types or "violin" in plot_types:
+    try:
         values_by_variable = get_metric_values_by_input(
             input_paths=input_paths,
             input_names=input_names,
             variables=variables,
             file_names=file_names,
         )
+    except ValueError:
+        values_by_variable = {}
+        if "cdf" in plot_types or "violin" in plot_types:
+            raise
+        logger.warning("Could not compute metric summary statistics.")
+
+    summary_rows = create_metric_summary_rows(values_by_variable)
+    summary_csv_file = write_metric_summary_csv(
+        summary_rows, output_dir / "metric_summary.csv"
+    )
+    logger.info(f"Wrote metric summary CSV to {summary_csv_file}")
 
     output_files = []
     if "cdf" in plot_types:
@@ -776,23 +807,7 @@ def write_metric_plots(  # noqa: PLR0913
                 input_names=input_names,
             )
         )
-    if _should_write_metric_overview_pdf(
-        variables=variables,
-        plot_types=plot_types,
-        output_files=output_files,
-        group_by=group_by,
-    ):
-        if not values_by_variable:
-            try:
-                values_by_variable = get_metric_values_by_input(
-                    input_paths=input_paths,
-                    input_names=input_names,
-                    variables=variables,
-                    file_names=file_names,
-                )
-            except ValueError as exc:
-                logger.warning(f"Could not create metric summary table: {exc}")
-        summary_rows = create_metric_summary_rows(values_by_variable)
+    if output_files or summary_rows:
         overview_file = write_metric_plot_overview_pdf(
             output_file=output_dir / "metric_plots_overview.pdf",
             plot_files=output_files,
@@ -802,35 +817,10 @@ def write_metric_plots(  # noqa: PLR0913
         )
         output_files.append(overview_file)
         logger.info(f"Wrote metric plot overview PDF to {overview_file}")
+    else:
+        logger.warning("No plots or summary rows available; skipping overview PDF.")
+    output_files.append(summary_csv_file)
     return output_files
-
-
-def _should_write_metric_overview_pdf(
-    variables, plot_types, output_files, group_by=None
-):
-    """Check whether a metric overview PDF should be written.
-
-    Parameters
-    ----------
-    variables : Sequence[str]
-        Selected metric variables.
-    plot_types : Sequence[str]
-        Selected plot types.
-    output_files : Sequence[str or Path]
-        Plot files returned by plot writers.
-    group_by : Sequence[str], optional
-        Grouping fields that create extra plots.
-
-    Returns
-    -------
-    bool
-        True when an overview PDF should be written.
-    """
-    if group_by:
-        return any(Path(output_file).is_file() for output_file in output_files)
-    if len(variables) <= 1 and len(plot_types) <= 1:
-        return False
-    return any(Path(output_file).is_file() for output_file in output_files)
 
 
 def write_metric_catchment_maps(

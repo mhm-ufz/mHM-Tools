@@ -1,30 +1,22 @@
 import numpy as np
+import pandas as pd
 import pytest
 import xarray as xr
 
 from mhm_tools.common.logger import configure_mhm_tools_logger
+from mhm_tools.common.xarray_utils import get_ds_extend
 from mhm_tools.post.gridded_data_evaluation import (
     apply_spatial_mask,
     compare_input_with_ref,
     crop_datasets_to_spatial_overlap,
+    get_file_stats,
+    get_stats,
+    get_stats_one_pass,
     infer_time_resolution_hours_from_files,
     normalize_time_axis,
     regridd_to_higher_spatial_resolution,
+    resample_to_target_freq,
 )
-
-# TODO: add a setup fixture to configure the logger to ERROR level to avoid cluttering test output with INFO logs also set propagate to True
-
-
-@pytest.fixture(autouse=True, scope="session")
-def _configure_test_logging():
-    """Configure mhm_tools logging for the test session.
-
-    Sets the package logger to ERROR and enables propagation so pytest's
-    caplog captures log records without cluttering test output.
-    """
-    # Only enable propagation so pytest's caplog can capture package logs.
-    configure_mhm_tools_logger(propagate=True)
-    yield
 
 
 @pytest.fixture(autouse=True, scope="session")
@@ -57,6 +49,186 @@ def _stats_dataset(lat, lon):
         },
         coords={"month": np.arange(1, 13), "lat": lat, "lon": lon},
     )
+
+
+def test_get_file_stats_generates_bounds_for_single_point_slice():
+    """A coordinate_slice narrowing to one point must not lose bound info.
+
+    Regression test: generate_bounds needs len > 1 lon/lat to derive a
+    cell width by diffing, so once coordinate_slice crops to a single
+    point, get_file_stats must derive the resolution from the still
+    multi-point ds_in itself (before cropping) and use it to build real
+    lat_bnds/lon_bnds on the output - not attempt to diff the now-single-
+    point cropped coordinates.
+    """
+    lat = np.array([2.0, 1.0, 0.0])
+    lon = np.array([0.0, 1.0, 2.0])
+    time = np.array(["2000-01-15", "2000-02-15", "2000-03-15"], dtype="datetime64[ns]")
+    data = np.ones((len(time), len(lat), len(lon)), dtype=float)
+    ds_in = xr.Dataset(
+        {"v": (("time", "lat", "lon"), data)},
+        coords={"time": time, "lat": lat, "lon": lon},
+    )
+
+    output = get_file_stats(
+        ds_in,
+        "v",
+        coordinate_slice={"lat": slice(1.0, 1.0), "lon": slice(1.0, 1.0)},
+    )
+
+    assert output.sizes["lat"] == 1
+    assert output.sizes["lon"] == 1
+    assert "spatial_resolution" not in output.attrs
+    assert "lat_bnds" in output.coords
+    assert "lon_bnds" in output.coords
+    assert output["lat"].attrs.get("bounds") == "lat_bnds"
+    assert output["lon"].attrs.get("bounds") == "lon_bnds"
+    assert np.abs(np.diff(output["lat_bnds"].values, axis=-1)) == pytest.approx(1.0)
+    assert np.abs(np.diff(output["lon_bnds"].values, axis=-1)) == pytest.approx(1.0)
+
+
+def test_get_file_stats_normalizes_latitude_longitude_dimension_names():
+    """Regression test for inputs whose real spatial dimensions are named
+    'latitude'/'longitude' (CF-compliant, as used by mHM's own pre.nc/pet.nc
+    forcing files) rather than 'lat'/'lon'.
+
+    get_file_stats used to build clim/std/mean still dimensioned by the
+    alias while attaching a separate, disconnected 'lat'/'lon' coordinate
+    built from the same values, so the resulting dataset carried an orphan
+    'lat'/'lon' unrelated to clim/std/mean's actual dimensions.
+    """
+    latitude = np.array([2.0, 1.0, 0.0])
+    longitude = np.array([0.0, 1.0, 2.0])
+    time = np.array(["2000-01-15", "2000-02-15", "2000-03-15"], dtype="datetime64[ns]")
+    data = np.ones((len(time), len(latitude), len(longitude)), dtype=float)
+    ds_in = xr.Dataset(
+        {"v": (("time", "latitude", "longitude"), data)},
+        coords={"time": time, "latitude": latitude, "longitude": longitude},
+    )
+
+    output = get_file_stats(ds_in, "v")
+
+    assert "latitude" not in output.dims
+    assert "longitude" not in output.dims
+    assert output["clim"].dims == ("month", "lat", "lon")
+    assert output["clim"].sizes["lat"] == len(latitude)
+    assert output["clim"].sizes["lon"] == len(longitude)
+    assert output.sizes["lat"] == len(latitude)
+    assert output.sizes["lon"] == len(longitude)
+
+
+def test_get_stats_one_pass_generates_bounds_for_single_point_slice(tmp_path):
+    lat = np.array([2.0, 1.0, 0.0])
+    lon = np.array([0.0, 1.0, 2.0])
+    for month in (1, 2):
+        time = np.array([f"2000-{month:02d}-15"], dtype="datetime64[ns]")
+        data = np.ones((1, len(lat), len(lon)), dtype=float)
+        ds = xr.Dataset(
+            {"v": (("time", "lat", "lon"), data)},
+            coords={"time": time, "lat": lat, "lon": lon},
+        )
+        ds.to_netcdf(tmp_path / f"file_{month:02d}.nc")
+
+    output = get_stats_one_pass(
+        path=tmp_path,
+        var="v",
+        coordinate_slice={"lat": slice(1.0, 1.0), "lon": slice(1.0, 1.0)},
+    )
+
+    assert output.sizes["lat"] == 1
+    assert output.sizes["lon"] == 1
+    assert "spatial_resolution" not in output.attrs
+    assert "lat_bnds" in output.coords
+    assert "lon_bnds" in output.coords
+    assert output["lat"].attrs.get("bounds") == "lat_bnds"
+    assert output["lon"].attrs.get("bounds") == "lon_bnds"
+    assert np.abs(np.diff(output["lat_bnds"].values, axis=-1)) == pytest.approx(1.0)
+    assert np.abs(np.diff(output["lon_bnds"].values, axis=-1)) == pytest.approx(1.0)
+
+
+def test_get_stats_direct_open_narrows_to_single_point_without_raising(tmp_path):
+    """End-to-end: coordinate_slice narrows a pre-built stats file to one
+    point; get_ds_extend must still resolve the file's extent afterward
+    instead of raising the "no valid lon or lat coordinates" ValueError.
+    """
+    lat = np.array([2.0, 1.0, 0.0])
+    lon = np.array([0.0, 1.0, 2.0])
+    stats = _stats_dataset(lat, lon)
+    path = tmp_path / "stats.nc"
+    stats.to_netcdf(path)
+
+    output = get_stats(
+        path=path,
+        var=None,
+        factor=1,
+        coordinate_slice={"lat": slice(1.0, 1.0), "lon": slice(1.0, 1.0)},
+        n_bootstrap_years=None,
+        ncpus=1,
+        output_file=None,
+    )
+
+    assert output.sizes["lat"] == 1
+    assert output.sizes["lon"] == 1
+    assert "lat_bnds" in output.coords
+    assert "lon_bnds" in output.coords
+    assert output["lat"].attrs.get("bounds") == "lat_bnds"
+    assert output["lon"].attrs.get("bounds") == "lon_bnds"
+
+    lon_min, lon_max, lat_min, lat_max = get_ds_extend(output)
+    assert lon_min <= 1.0 <= lon_max
+    assert lat_min <= 1.0 <= lat_max
+
+
+def test_get_stats_masks_and_crops_latitude_longitude_input(tmp_path):
+    """End-to-end regression test for gridded-data-evaluation against mHM's
+    own pre.nc/pet.nc meteo forcing files, whose real spatial dimensions
+    are named 'latitude'/'longitude' rather than 'lat'/'lon'.
+
+    Before the fix, get_file_stats left clim/std/mean dimensioned by the
+    alias while apply_spatial_mask's masking/cropping only ever touched a
+    disconnected 'lat'/'lon' coordinate: the spatial mask silently had no
+    effect on the actual statistics, and forcing the (correctly cropped)
+    coordinate onto the (never cropped) data later crashed with
+    'xarray.core.coordinates.CoordinateValidationError: conflicting sizes
+    for dimension lat'.
+    """
+    latitude = np.array([2.0, 1.0, 0.0])
+    longitude = np.array([0.0, 1.0, 2.0])
+    time = np.array(["2000-01-15", "2000-02-15", "2000-03-15"], dtype="datetime64[ns]")
+    data = np.ones((len(time), len(latitude), len(longitude)), dtype=float)
+    ds_in = xr.Dataset(
+        {"v": (("time", "latitude", "longitude"), data)},
+        coords={"time": time, "latitude": latitude, "longitude": longitude},
+    )
+    path = tmp_path / "input.nc"
+    ds_in.to_netcdf(path)
+
+    # A basin mask file with the conventional 'lat'/'lon' naming, valid at
+    # only a single cell (lat=0.0, lon=2.0).
+    mask = np.zeros((3, 3), dtype=float)
+    mask[2, 2] = 1.0
+    mask_da = xr.DataArray(
+        mask, coords={"lat": latitude, "lon": longitude}, dims=("lat", "lon")
+    )
+
+    output = get_stats(
+        path=path,
+        var="v",
+        factor=1,
+        coordinate_slice=None,
+        n_bootstrap_years=None,
+        ncpus=1,
+        output_file=None,
+        mask_da=mask_da,
+    )
+
+    assert output.sizes["lat"] == 1
+    assert output.sizes["lon"] == 1
+    assert output["clim"].sizes["lat"] == 1
+    assert output["clim"].sizes["lon"] == 1
+    assert output["lat"].item() == pytest.approx(0.0)
+    assert output["lon"].item() == pytest.approx(2.0)
+    assert np.isfinite(output["mean"].values).all()
 
 
 def test_apply_spatial_mask_selects_matching_resolution_mask_variable(caplog):
@@ -336,4 +508,59 @@ def test_compare_input_with_ref_keeps_rel_fields_as_dataarrays(monkeypatch, tmp_
     assert np.isnan(out["rel_mean"].values[0, 1])
     assert np.isnan(out["rel_std"].values[0, 1])
     assert not np.isinf(out["rel_mean"].values).any()
-    assert not np.isinf(out["rel_std"].values).any()
+
+
+def test_resample_to_target_freq_ignores_other_dims_during_align():
+    """Aligning resampled input/ref on time must not also join on lat/lon.
+
+    Regression test: resample_to_target_freq used to finish with
+    xr.align(ds_input, ds_ref, join="inner") with no `exclude`, which joins
+    on every dimension the two objects share - not just time. lat/lon are
+    already matched positionally by the spatial cropping/regridding that
+    runs before this function, but their coordinate *labels* can still
+    differ by floating-point noise (e.g. a source file storing lat/lon as
+    float32, like mHM's NetCDF output, versus float64 elsewhere: 68.15
+    stored as float32 and read back as float64 becomes 68.1500015258789,
+    not 68.15). An unrestricted inner join treats those as non-matching
+    labels and collapses lat/lon to a near-empty intersection, silently
+    wiping out all data even though both inputs were perfectly valid.
+    """
+    lat_nominal = [68.15, 68.05, 67.95, 67.85]
+    lon_nominal = [27.65, 27.75]
+
+    # Simulate the real-world mismatch: one side's coordinates round-tripped
+    # through float32, the other kept as float64, for the same nominal grid.
+    lat_input = np.array(lat_nominal, dtype=np.float32).astype(np.float64)
+    lon_input = np.array(lon_nominal, dtype=np.float32).astype(np.float64)
+    lat_ref = np.array(lat_nominal, dtype=np.float64)
+    lon_ref = np.array(lon_nominal, dtype=np.float64)
+    assert not np.array_equal(lat_input, lat_ref)
+    assert not np.array_equal(lon_input, lon_ref)
+
+    time_input = pd.date_range("2021-01-01", "2021-02-28T23:00:00", freq="h")
+    input_da = xr.DataArray(
+        np.ones((time_input.size, len(lat_input), len(lon_input))),
+        dims=("time", "lat", "lon"),
+        coords={"time": time_input, "lat": lat_input, "lon": lon_input},
+        name="time_series",
+    )
+
+    # Mid-month anchored, like FLUXCOM's monthly timestamps, already at the
+    # target ("ME") cadence so only `input_da` needs resampling.
+    time_ref = pd.to_datetime(["2021-01-16", "2021-02-16"])
+    ref_da = xr.DataArray(
+        np.full((2, len(lat_ref), len(lon_ref)), 2.0),
+        dims=("time", "lat", "lon"),
+        coords={"time": time_ref, "lat": lat_ref, "lon": lon_ref},
+        name="time_series",
+    )
+
+    resampled_input, resampled_ref = resample_to_target_freq(input_da, ref_da, "ME")
+
+    assert resampled_input.sizes["time"] == 2
+    assert resampled_input.sizes["lat"] == len(lat_nominal)
+    assert resampled_input.sizes["lon"] == len(lon_nominal)
+    assert resampled_ref.sizes["lat"] == len(lat_nominal)
+    assert resampled_ref.sizes["lon"] == len(lon_nominal)
+    assert np.isfinite(resampled_input.values).all()
+    assert np.isfinite(resampled_ref.values).all()

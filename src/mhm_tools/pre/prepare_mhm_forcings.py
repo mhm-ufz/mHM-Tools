@@ -69,6 +69,7 @@ def convert_units(ds: Union[xr.Dataset, xr.DataArray], var: str) -> xr.DataArray
     if not units:
         msg = f"Variable '{var}' missing 'units' attribute."
         raise ValueError(msg)
+    original_attrs = dict(da.attrs)
     normalized_units = _normalize_unit_string(units)
     logger.info(f"units are: {units} (normalized: {normalized_units})")
     # Temperature
@@ -77,11 +78,13 @@ def convert_units(ds: Union[xr.Dataset, xr.DataArray], var: str) -> xr.DataArray
             da = da - 273.15
         elif normalized_units in ["f", "°f", "degf", "fahrenheit"]:
             da = (da - 32) * (5 / 9)
+        da.attrs = original_attrs
         da.attrs["units"] = "degC"
     # Total precipitation
     elif normalized_units in [_normalize_unit_string(u) for u in PRECIPITATION_UNITS]:
         if normalized_units in ["m", "kg m-2"]:
             da = da * 1000
+        da.attrs = original_attrs
         da.attrs["units"] = "mm"
 
     # Precipitation rate
@@ -110,6 +113,7 @@ def convert_units(ds: Union[xr.Dataset, xr.DataArray], var: str) -> xr.DataArray
                 90000 if freq.startswith("D") else 3600 if freq.startswith("h") else 1
             )
         da = da * factor
+        da.attrs = original_attrs
         da.attrs["units"] = "mm"
     else:
         msg = f"Unexpected units '{units}' for variable '{var}'."
@@ -168,7 +172,7 @@ def prepare_forcings(
             )
 
         # Convert units and get DataArray
-        da, encoding = convert_units(ds, var)
+        da, _encoding = convert_units(ds, var)
 
         if out_var:
             da = da.rename(out_var)

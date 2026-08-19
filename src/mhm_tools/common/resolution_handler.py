@@ -160,6 +160,10 @@ def get_file_res(lon=None, lat=None, resolutions=None):
             error_msg = "Cannot determine file resolution: no valid lon or lat coordinates provided (need len > 1)."
             raise ValueError(error_msg)
 
+    # a resolution is a magnitude; descending coordinates would otherwise
+    # yield a negative diff and break the abs()-based matching below
+    file_res = abs(file_res)
+
     # if file_res is close to a resolution in resolutions, use that one to avoid floating point issues
     if resolutions.l0 is not None and abs(file_res - resolutions.l0) < 1e-5:
         logger.debug(

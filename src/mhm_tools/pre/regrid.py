@@ -131,8 +131,8 @@ def regrid_file(input, mask, output, l2, method="nearest", var=None):
 
         # l2_dx, l2_dy = _parse_res(l2)
 
-        okx, kx = _check_integer_multiple(l2, l0_dx)
-        oky, ky = _check_integer_multiple(l2, l0_dy)
+        okx, _kx = _check_integer_multiple(l2, l0_dx)
+        oky, _ky = _check_integer_multiple(l2, l0_dy)
         if not (okx and oky):
             msg = (
                 "L2 "

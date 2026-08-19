@@ -28,7 +28,7 @@ from mhm_tools.common.file_handler import (
     write_xarray_to_file,
 )
 from mhm_tools.common.logger import ErrorLogger, log_arguments
-from mhm_tools.common.netcdf import generate_bounds
+from mhm_tools.common.netcdf import add_variable_hard_link, generate_bounds
 from mhm_tools.common.provenance import apply_output_provenance
 from mhm_tools.common.resolution_handler import Resolution
 from mhm_tools.common.utils import (
@@ -2389,10 +2389,18 @@ class Catchment:
                     "axis": "X",
                 }
             )
+            mask_da.attrs.update(
+                {
+                    "units": "1",
+                    "long_name": "catchment mask",
+                    "flag_values": np.array([0, 1], dtype=mask_da.dtype),
+                    "flag_meanings": "outside_catchment inside_catchment",
+                }
+            )
             logger.debug(
                 f"Created mask dataarray with shape {mask_da.shape} and stats min {mask_da.min().item()}, max {mask_da.max().item()}"
             )
-            mask_ds = xr.Dataset({"land_mask": mask_da, "mask": mask_da})
+            mask_ds = xr.Dataset({"mask": mask_da})
             mask_upscaled = None
             if self.do_upscale:
                 mask_upscaled = mask_da
@@ -2401,6 +2409,14 @@ class Catchment:
 
             if mask_upscaled is not None:
                 mask_upscaled = mask_upscaled.rename({"lat": "lat_l2", "lon": "lon_l2"})
+                mask_upscaled.attrs.update(
+                    {
+                        "units": "1",
+                        "long_name": "catchment mask at L2 resolution",
+                        "flag_values": np.array([0, 1], dtype=mask_upscaled.dtype),
+                        "flag_meanings": "outside_catchment inside_catchment",
+                    }
+                )
                 mask_ds["mask_l2"] = mask_upscaled
             dims = set(mask_ds.dims)
             all_coords = set(mask_ds.coords)
@@ -2417,6 +2433,9 @@ class Catchment:
                 for v in mask_ds.data_vars
             }
             write_xarray_to_file(mask_ds, mask_file, encoding=encoding)
+            add_variable_hard_link(
+                mask_file, existing_var="mask", alias_var="land_mask"
+            )
             logger.info(f"Mask file has been written to {mask_file}")
         else:
             logger.info("No mask file path specified.")
@@ -2453,7 +2472,11 @@ def merge_catchment(path1, path2, out_path):
     ds2["basin"] = ds2["basin"] + ds1["basin"].max().item() + 1
 
     # in the border area, use the rolled data, else the original
+    var_attrs = {var: dict(ds1[var].attrs) for var in ds1.data_vars}
     merged = xr.where(mask, ds2.reindex_like(ds1, method="nearest"), ds1)
+    for var, attrs in var_attrs.items():
+        if var in merged.data_vars:
+            merged[var].attrs = attrs
     write_xarray_to_file(merged, out_path)
 
 

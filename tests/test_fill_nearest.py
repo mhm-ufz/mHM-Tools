@@ -17,7 +17,6 @@ def _configure_test_logging():
     """
     # Only enable propagation so pytest's caplog can capture package logs.
     configure_mhm_tools_logger(propagate=True)
-    yield
 
 
 def test_fill_dataarray_with_nearest_handles_no_valid_source_cells(caplog):

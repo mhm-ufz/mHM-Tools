@@ -40,9 +40,10 @@ def link_folder_tree(
     for file in input_dir.rglob(file_name):
         relative_path = file.relative_to(input_dir)
         output_file = output_dir / relative_path
-        if output_file.exists() and not overwrite:
+        already_linked = output_file.exists() or output_file.is_symlink()
+        if already_linked and not overwrite:
             continue
-        if output_file.exists() and overwrite:
+        if already_linked and overwrite:
             logger.debug(f"Overwriting existing file {output_file}")
             output_file.unlink()
         output_file.parent.mkdir(parents=True, exist_ok=True)

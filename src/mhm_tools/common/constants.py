@@ -8,6 +8,7 @@ Constants
     NC_ENCODE_DEFAULTS
     ESRI_TYPES
     ESRI_REQ
+    GREENLAND_COORDS
 
 ----
 
@@ -18,7 +19,11 @@ Constants
 .. autodata:: ESRI_TYPES
 
 .. autodata:: ESRI_REQ
+
+.. autodata:: GREENLAND_COORDS
 """
+
+import numpy as np
 
 __all__ = ["NC_ENCODE_DEFAULTS", "NO_DATA"]
 
@@ -74,3 +79,12 @@ WILDCARDS = ("*", "?", "[", "]")
 LAT_KEYS = ["lat", "latitude", "northing", "y", "new_y", "Y", "geo_y", "lat_l2"]
 LON_KEYS = ["lon", "longitude", "easting", "x", "new_x", "X", "geo_x", "lon_l2"]
 TIME_KEYS = ["time", "month_of_year", "valid_time"]
+
+# Coordinate array for the shape of Greenland in lons, lats
+GREENLAND_COORDS = np.array(
+    [
+        [-43.65, -17.25, -7.05, -56.05, -60.05, -69.85, -73.65, -71.85, -46.65],
+        [58.25, 69.85, 84.65, 85.85, 82.65, 79.45, 79.05, 75.25, 57.65],
+    ]
+).T
+"""Polygon vertices (lon, lat) approximating Greenland's coastline."""

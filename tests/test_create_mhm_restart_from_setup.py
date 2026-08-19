@@ -16,7 +16,6 @@ from mhm_tools.pre import MHMRunner
 from mhm_tools.pre.create_mhm_restart_from_setup import (
     MHMSetupTile,
     _collect_restart_files_for_tiles,
-    _merge_restart_files,
     _move_restart_files,
     _restore_recreated_fill_files_from_original,
     _tile_has_active_mask_cell,
@@ -24,7 +23,7 @@ from mhm_tools.pre.create_mhm_restart_from_setup import (
     create_mhm_restart_from_setup,
     create_setup_tiles,
     get_crop_slices,
-    merge_mhm_restart_files,
+    merge_restart_files,
 )
 from mhm_tools.pre.crop_mhm_setup import LatlonFiles, crop_mhm_setup
 
@@ -297,6 +296,7 @@ def test_create_mhm_restart_from_setup_cli_loops_masks_and_parameters(
         merged_restart_file=tmp_path / "final.nc",
         fill_nearest_files=None,
         l0_mask_files=None,
+        update_tile_masks=False,
     )
 
     run(args)
@@ -998,8 +998,9 @@ def test_fill_recreated_restart_inputs_uses_nearest_for_meteo(tmp_path, monkeypa
     ]
     assert all(call["mask_file"] is None for call in fill_calls)
     assert all(call["mask_var"] is None for call in fill_calls)
-    assert [call["fill_value"] for call in fill_calls] == [2.2, 2.2, 2.2, 1]
-    assert all("default_value" not in call for call in fill_calls)
+    assert all("fill_value" not in call for call in fill_calls[:3])
+    assert fill_calls[3]["fill_value"] == -9999.0
+    assert [call["default_value"] for call in fill_calls] == [2.2, 2.2, 2.2, 1]
     assert (meteo_dir / "pre.nc").read_text() == "filled"
     assert soil_file.read_text() == "filled"
 
@@ -1106,7 +1107,11 @@ def test_create_mhm_restart_from_setup_uses_mask_only_to_select_tiles(
     def fake_run_mhm(self, setup_path):  # noqa: ARG001
         restart_dir = Path(setup_path) / "output"
         restart_dir.mkdir(parents=True, exist_ok=True)
-        (restart_dir / "mHM_restart_001.nc").write_text("restart")
+        # Real (if minimal) NetCDF file with no ncols*/nrows* dims, so the
+        # tile-masking step opens it fine but has nothing L1-shaped to mask.
+        xr.Dataset(data_vars={"dummy": (("x",), np.array([1.0]))}).to_netcdf(
+            restart_dir / "mHM_restart_001.nc"
+        )
 
     mask_ds = xr.Dataset(
         data_vars={
@@ -1408,7 +1413,11 @@ def test_create_mhm_restart_from_setup_considers_all_positive_mask_tiles(
 
     def fake_run_mhm(self, setup_path):  # noqa: ARG001
         restart_dir = Path(setup_path) / "output"
-        (restart_dir / "mHM_restart_001.nc").write_text("restart")
+        # Real (if minimal) NetCDF file with no ncols*/nrows* dims, so the
+        # tile-masking step opens it fine but has nothing L1-shaped to mask.
+        xr.Dataset(data_vars={"dummy": (("x",), np.array([1.0]))}).to_netcdf(
+            restart_dir / "mHM_restart_001.nc"
+        )
 
     monkeypatch.setattr(
         "mhm_tools.pre.create_mhm_restart_from_setup.crop_mhm_setup",
@@ -1523,39 +1532,6 @@ def test_mhm_runner_uses_module_paths_before_loading_modules():
     assert 'namelist_mhm_param="FinalParam.nml"' in command
 
 
-def test_merge_mhm_restart_files_reindexes_to_global_domain(tmp_path):
-    restart_file = tmp_path / "tile_restart.nc"
-    output_file = tmp_path / "mHM_restart_001.nc"
-    ds = xr.Dataset(
-        data_vars={
-            "L1_state": (
-                ("lat", "lon"),
-                np.array([[1.0, 2.0], [3.0, 4.0]]),
-            )
-        },
-        coords={
-            "lat": np.array([1.5, 0.5]),
-            "lon": np.array([0.5, 1.5]),
-        },
-    )
-    ds.to_netcdf(restart_file)
-
-    merge_mhm_restart_files(
-        restart_files=[restart_file],
-        output_file=output_file,
-        lon_min_bound=0.0,
-        lon_max_bound=3.0,
-        lat_min_bound=0.0,
-        lat_max_bound=2.0,
-        l1_resolution=1.0,
-    )
-
-    with xr.open_dataset(output_file) as merged:
-        assert list(merged["lon"].values) == [0.5, 1.5, 2.5]
-        assert list(merged["lat"].values) == [1.5, 0.5]
-        assert bool(np.isnan(merged["L1_state"].sel(lat=1.5, lon=2.5)).item())
-
-
 def test_merge_restart_files_writes_cf_lat_lon_without_flipping_native_rows(
     tmp_path,
 ):
@@ -1570,7 +1546,7 @@ def test_merge_restart_files_writes_cf_lat_lon_without_flipping_native_rows(
                 ("ncols1", "nrows1"),
                 np.array([[1.0, 2.0], [3.0, 4.0]]),
             ),
-            "L1_Max_Canopy_Intercept": (
+            "L1_maxInter": (
                 ("L1_LAITimesteps", "ncols1", "nrows1"),
                 np.array([[[5.0, 6.0], [7.0, 8.0]]]),
             ),
@@ -1592,7 +1568,7 @@ def test_merge_restart_files_writes_cf_lat_lon_without_flipping_native_rows(
     west.to_netcdf(west_file)
     east.to_netcdf(east_file)
 
-    merged = _merge_restart_files(
+    merged = merge_restart_files(
         restart_file_paths=[west_file, east_file],
         lon_min=0.0,
         lon_max=4.0,
@@ -1625,6 +1601,67 @@ def test_merge_restart_files_writes_cf_lat_lon_without_flipping_native_rows(
     assert merged["lon"].attrs["axis"] == "X"
     assert merged["lat"].attrs["axis"] == "Y"
     assert merged.attrs["coordinates"] == "lat_bnds lon_bnds"
+
+
+def test_merge_restart_files_preserves_valid_cells_across_overlapping_tiles(tmp_path):
+    """Two "continent" runs can both select the same border tile.
+
+    Each restart file only has real values for the cells it owns (its own
+    tile mask already applied upstream) and NaN elsewhere in that same tile
+    box. The later-sorted file's NaN cells must not wipe out the
+    earlier-sorted file's valid cells at the same position - regression test
+    for the border-clobbering bug in _merge_native_restart_files.
+    """
+    first_file = tmp_path / "000_mask_a" / "slice_0_0" / "output" / "mHM_restart_001.nc"
+    second_file = (
+        tmp_path / "001_mask_b" / "slice_0_0" / "output" / "mHM_restart_001.nc"
+    )
+    first_file.parent.mkdir(parents=True)
+    second_file.parent.mkdir(parents=True)
+    output_file = tmp_path / "merged.nc"
+
+    attrs = {
+        "xllcorner_L1": 0.0,
+        "yllcorner_L1": 0.0,
+        "cellsize_L1": 1.0,
+        "ncols_L1": 2,
+        "nrows_L1": 2,
+    }
+    first = xr.Dataset(
+        data_vars={
+            "L1_fAsp": (
+                ("ncols1", "nrows1"),
+                np.array([[1.0, np.nan], [3.0, 4.0]]),
+            ),
+        },
+        attrs=dict(attrs),
+    )
+    second = xr.Dataset(
+        data_vars={
+            "L1_fAsp": (
+                ("ncols1", "nrows1"),
+                np.array([[np.nan, 20.0], [np.nan, np.nan]]),
+            ),
+        },
+        attrs=dict(attrs),
+    )
+    first.to_netcdf(first_file)
+    second.to_netcdf(second_file)
+
+    merged = merge_restart_files(
+        restart_file_paths=[first_file, second_file],
+        lon_min=0.0,
+        lon_max=2.0,
+        lat_min=0.0,
+        lat_max=2.0,
+        l1_resolution=1.0,
+        output_file=output_file,
+    )
+
+    np.testing.assert_array_equal(
+        merged["L1_fAsp"].values,
+        np.array([[1.0, 20.0], [3.0, 4.0]]),
+    )
 
 
 def test_merge_restart_files_writes_merged_tile_mask(tmp_path):
@@ -1664,7 +1701,7 @@ def test_merge_restart_files_writes_merged_tile_mask(tmp_path):
     west_mask.to_netcdf(west_file.parents[1] / "mask_tile.nc")
     east_mask.to_netcdf(east_file.parents[1] / "mask_tile.nc")
 
-    merged = _merge_restart_files(
+    merged = merge_restart_files(
         restart_file_paths=[west_file, east_file],
         lon_min=0.0,
         lon_max=4.0,
@@ -1708,7 +1745,7 @@ def test_merge_restart_files_places_tiles_from_yllcorner(tmp_path):
     south.to_netcdf(south_file)
     north.to_netcdf(north_file)
 
-    merged = _merge_restart_files(
+    merged = merge_restart_files(
         restart_file_paths=[south_file, north_file],
         lon_min=0.0,
         lon_max=1.0,
@@ -1723,19 +1760,43 @@ def test_merge_restart_files_places_tiles_from_yllcorner(tmp_path):
 
 
 def test_merge_restart_files_allows_six_soil_horizons(tmp_path):
+    """Regression test for two bugs that corrupted L1_SoilHorizons_bnds.
+
+    (1) The merge code looked up the native tile's soil-horizon coordinate
+    and bounds under invented names ("horizon_out"/"horizon_out_bnds")
+    instead of mHM's real native names ("L1_SoilHorizons"/
+    "L1_SoilHorizons_bnds", per mo_common_constants.f90's
+    soilHorizonsVarName), so it always missed the tile's real depths.
+    (2) _bounds_or_default's six-horizon default branch was missing its
+    `return`, so it always fell through to a meaningless index-based
+    fallback ([[0,1],[1,2],...]) regardless of (1). Either bug alone
+    corrupted the boundary values mHM validates against the namelist
+    config on restart, causing mHM to reject the restart file.
+    """
     restart_file = tmp_path / "slice_0_0" / "output" / "mHM_restart_001.nc"
     restart_file.parent.mkdir(parents=True)
     output_file = tmp_path / "merged.nc"
+    horizon_bounds = np.array(
+        [
+            [0.0, 50.0],
+            [50.0, 150.0],
+            [150.0, 300.0],
+            [300.0, 600.0],
+            [600.0, 1000.0],
+            [1000.0, 2000.0],
+        ]
+    )
     ds = xr.Dataset(
         data_vars={
             "L1_soilMoist": (
-                ("L1_LandCoverPeriods", "horizon_out", "ncols1", "nrows1"),
+                ("L1_LandCoverPeriods", "L1_SoilHorizons", "ncols1", "nrows1"),
                 np.ones((1, 6, 1, 1), dtype=float),
             ),
+            "L1_SoilHorizons_bnds": (("L1_SoilHorizons", "bnds"), horizon_bounds),
         },
         coords={
             "L1_LandCoverPeriods": np.array([2000]),
-            "horizon_out": np.arange(6),
+            "L1_SoilHorizons": np.array([50, 150, 300, 600, 1000, 2000]),
         },
         attrs={
             "xllcorner_L1": 0.0,
@@ -1747,7 +1808,7 @@ def test_merge_restart_files_allows_six_soil_horizons(tmp_path):
     )
     ds.to_netcdf(restart_file)
 
-    merged = _merge_restart_files(
+    merged = merge_restart_files(
         restart_file_paths=[restart_file],
         lon_min=0.0,
         lon_max=1.0,
@@ -1759,387 +1820,10 @@ def test_merge_restart_files_allows_six_soil_horizons(tmp_path):
 
     assert merged.sizes["L1_SoilHorizons"] == 6
     assert merged["L1_SoilHorizons_bnds"].shape == (6, 2)
+    np.testing.assert_array_equal(merged["L1_SoilHorizons_bnds"].values, horizon_bounds)
     assert merged["L1_soilMoist"].dims == (
         "L1_LandCoverPeriods",
         "L1_SoilHorizons",
         "lat",
         "lon",
     )
-
-
-def test_merge_mhm_restart_files_prepares_tiles_in_parallel_batches(tmp_path):
-    restart_files = []
-    for index in range(3):
-        restart_file = tmp_path / f"tile_restart_{index}.nc"
-        ds = xr.Dataset(
-            data_vars={
-                "L1_state": (
-                    ("lat", "lon"),
-                    np.array([[float(index + 1)]]),
-                )
-            },
-            coords={
-                "lat": np.array([0.5]),
-                "lon": np.array([index + 0.5]),
-            },
-        )
-        ds.to_netcdf(restart_file)
-        restart_files.append(restart_file)
-
-    output_file = tmp_path / "mHM_restart_001.nc"
-    merge_mhm_restart_files(
-        restart_files=restart_files,
-        output_file=output_file,
-        lon_min_bound=0.0,
-        lon_max_bound=3.0,
-        lat_min_bound=0.0,
-        lat_max_bound=1.0,
-        l1_resolution=1.0,
-        n_jobs=2,
-    )
-
-    with xr.open_dataset(output_file) as merged:
-        assert merged["L1_state"].sel(lat=0.5, lon=0.5).item() == 1.0
-        assert merged["L1_state"].sel(lat=0.5, lon=1.5).item() == 2.0
-        assert merged["L1_state"].sel(lat=0.5, lon=2.5).item() == 3.0
-
-
-def test_merge_mhm_restart_files_tolerates_restart_coordinate_roundoff(tmp_path):
-    restart_file = tmp_path / "tile_restart.nc"
-    output_file = tmp_path / "mHM_restart_001.nc"
-    ds = xr.Dataset(
-        data_vars={
-            "L1_state": (
-                ("ncols1", "nrows1"),
-                np.array([[1.0, 2.0], [3.0, 4.0]]),
-            )
-        },
-        attrs={
-            "xllcorner_L1": 0.3,
-            "yllcorner_L1": 0.0,
-            "cellsize_L1": 0.1,
-            "ncols_L1": 2,
-            "nrows_L1": 2,
-        },
-    )
-    ds.to_netcdf(restart_file)
-
-    merge_mhm_restart_files(
-        restart_files=[restart_file],
-        output_file=output_file,
-        lon_min_bound=0.0,
-        lon_max_bound=0.5,
-        lat_min_bound=0.0,
-        lat_max_bound=0.2,
-        l1_resolution=0.1,
-    )
-
-    with xr.open_dataset(output_file) as merged:
-        assert merged["L1_state"].isel(lon=3, lat=0).item() == 1.0
-        assert merged["L1_state"].isel(lon=4, lat=0).item() == 2.0
-        assert merged["L1_state"].isel(lon=3, lat=1).item() == 3.0
-        assert merged["L1_state"].isel(lon=4, lat=1).item() == 4.0
-
-
-def test_merge_mhm_restart_files_preserves_requested_lower_left_attrs(tmp_path):
-    restart_file = tmp_path / "tile_restart.nc"
-    output_file = tmp_path / "mHM_restart_001.nc"
-    ds = xr.Dataset(
-        data_vars={
-            "L1_state": (
-                ("ncols1", "nrows1"),
-                np.array([[1.0]]),
-            )
-        },
-        attrs={
-            "xllcorner_L1": 4.0,
-            "yllcorner_L1": -60.0,
-            "cellsize_L1": 1.0 / 240.0,
-            "ncols_L1": 1,
-            "nrows_L1": 1,
-        },
-    )
-    ds.to_netcdf(restart_file)
-
-    merge_mhm_restart_files(
-        restart_files=[restart_file],
-        output_file=output_file,
-        lon_min_bound=4.0,
-        lon_max_bound=4.0 + 1.0 / 240.0,
-        lat_min_bound=-60.0,
-        lat_max_bound=-60.0 + 1.0 / 240.0,
-        l1_resolution=1.0 / 240.0,
-    )
-
-    with xr.open_dataset(output_file) as merged:
-        assert merged.attrs["xllcorner_L1"] == 4.0
-        assert merged.attrs["yllcorner_L1"] == -60.0
-
-
-def test_merge_mhm_restart_files_transforms_restart_grid_metadata(tmp_path):
-    restart_file_west = tmp_path / "tile_restart_west.nc"
-    restart_file_east = tmp_path / "tile_restart_east.nc"
-    output_file = tmp_path / "mHM_restart_001.nc"
-    west = xr.Dataset(
-        data_vars={
-            "L1_state": (
-                ("ncols1", "nrows1"),
-                np.array([[1.0], [3.0]]),
-            )
-        },
-        attrs={
-            "xllcorner_L1": 0.0,
-            "yllcorner_L1": 0.0,
-            "cellsize_L1": 1.0,
-            "ncols_L1": 2,
-            "nrows_L1": 1,
-        },
-    )
-    east = xr.Dataset(
-        data_vars={
-            "L1_state": (
-                ("ncols1", "nrows1"),
-                np.array([[2.0], [4.0]]),
-            )
-        },
-        attrs={
-            "xllcorner_L1": 1.0,
-            "yllcorner_L1": 0.0,
-            "cellsize_L1": 1.0,
-            "ncols_L1": 2,
-            "nrows_L1": 1,
-        },
-    )
-    west.to_netcdf(restart_file_west)
-    east.to_netcdf(restart_file_east)
-
-    merge_mhm_restart_files(
-        restart_files=[restart_file_west, restart_file_east],
-        output_file=output_file,
-        lon_min_bound=0.0,
-        lon_max_bound=2.0,
-        lat_min_bound=0.0,
-        lat_max_bound=2.0,
-        l1_resolution=1.0,
-    )
-
-    with xr.open_dataset(output_file) as merged:
-        assert list(merged["lon"].values) == [0.5, 1.5]
-        assert list(merged["lat"].values) == [1.5, 0.5]
-        assert merged["L1_state"].sel(lon=0.5, lat=1.5).item() == 1.0
-        assert merged["L1_state"].sel(lon=1.5, lat=1.5).item() == 2.0
-        assert merged["L1_state"].sel(lon=0.5, lat=0.5).item() == 3.0
-        assert merged["L1_state"].sel(lon=1.5, lat=0.5).item() == 4.0
-        assert merged.attrs["xllcorner_L1"] == 0.0
-        assert merged.attrs["yllcorner_L1"] == 0.0
-        assert merged.attrs["ncols_L1"] == 2
-        assert merged.attrs["nrows_L1"] == 2
-
-
-def test_merge_mhm_restart_files_masks_each_tile_with_tile_mask(tmp_path):
-    tile_path = tmp_path / "slice_0_0"
-    restart_file = tile_path / "output" / "mHM_restart_001.nc"
-    output_file = tmp_path / "mHM_restart_001.nc"
-    restart_file.parent.mkdir(parents=True)
-    ds = xr.Dataset(
-        data_vars={
-            "L1_state": (
-                ("ncols1", "nrows1"),
-                np.array([[1.0, 2.0], [3.0, 4.0]]),
-            )
-        },
-        attrs={
-            "xllcorner_L1": 0.0,
-            "yllcorner_L1": 0.0,
-            "cellsize_L1": 1.0,
-            "ncols_L1": 2,
-            "nrows_L1": 2,
-        },
-    )
-    mask = xr.Dataset(
-        data_vars={
-            "land_mask": (
-                ("lat", "lon"),
-                np.array([[1, 0], [1, 1]]),
-            )
-        },
-        coords={
-            "lat": np.array([1.5, 0.5]),
-            "lon": np.array([0.5, 1.5]),
-        },
-    )
-    ds.to_netcdf(restart_file)
-    mask.to_netcdf(tile_path / "mask_tile.nc")
-
-    merge_mhm_restart_files(
-        restart_files=[restart_file],
-        output_file=output_file,
-        lon_min_bound=0.0,
-        lon_max_bound=2.0,
-        lat_min_bound=0.0,
-        lat_max_bound=2.0,
-        l1_resolution=1.0,
-        mask_var="land_mask",
-    )
-
-    with xr.open_dataset(output_file) as merged:
-        assert bool(np.isnan(merged["L1_state"].sel(lon=1.5, lat=1.5)).item())
-        assert merged["L1_state"].sel(lon=0.5, lat=1.5).item() == 1.0
-        assert merged["L1_state"].sel(lon=0.5, lat=0.5).item() == 3.0
-        assert merged["L1_state"].sel(lon=1.5, lat=0.5).item() == 4.0
-
-
-def test_merge_mhm_restart_files_masks_final_result(tmp_path):
-    restart_file = tmp_path / "tile_restart.nc"
-    output_file = tmp_path / "mHM_restart_001.nc"
-    ds = xr.Dataset(
-        data_vars={
-            "L1_state": (
-                ("lat", "lon"),
-                np.array([[1.0, 2.0], [3.0, 4.0]]),
-            ),
-            "scalar_state": ((), 5.0),
-        },
-        coords={
-            "lat": np.array([1.5, 0.5]),
-            "lon": np.array([0.5, 1.5]),
-        },
-    )
-    mask_ds = xr.Dataset(
-        data_vars={
-            "land_mask": (
-                ("lat", "lon"),
-                np.array([[1, 0], [1, 1]]),
-            )
-        },
-        coords={
-            "lat": np.array([1.5, 0.5]),
-            "lon": np.array([0.5, 1.5]),
-        },
-    )
-    ds.to_netcdf(restart_file)
-
-    merge_mhm_restart_files(
-        restart_files=[restart_file],
-        output_file=output_file,
-        lon_min_bound=0.0,
-        lon_max_bound=2.0,
-        lat_min_bound=0.0,
-        lat_max_bound=2.0,
-        l1_resolution=1.0,
-        mask_ds=mask_ds,
-        mask_var="land_mask",
-    )
-
-    with xr.open_dataset(output_file) as merged:
-        assert bool(np.isnan(merged["L1_state"].sel(lat=1.5, lon=1.5)).item())
-        assert merged["L1_state"].sel(lat=0.5, lon=1.5).item() == 4.0
-        assert merged["scalar_state"].item() == 5.0
-
-
-def test_merge_mhm_restart_files_snaps_final_mask_coordinate_roundoff(tmp_path):
-    restart_file = tmp_path / "tile_restart.nc"
-    output_file = tmp_path / "mHM_restart_001.nc"
-    ds = xr.Dataset(
-        data_vars={
-            "L1_state": (
-                ("lat", "lon"),
-                np.array([[1.0, 2.0], [3.0, 4.0]]),
-            )
-        },
-        coords={
-            "lat": np.array([1.5, 0.5]),
-            "lon": np.array([0.5, 1.5]),
-        },
-    )
-    mask_ds = xr.Dataset(
-        data_vars={
-            "land_mask": (
-                ("lat", "lon"),
-                np.array([[1, 0], [1, 1]]),
-            )
-        },
-        coords={
-            "lat": np.array([1.5000000000000002, 0.5000000000000002]),
-            "lon": np.array([0.5000000000000001, 1.5000000000000002]),
-        },
-    )
-    ds.to_netcdf(restart_file)
-
-    merge_mhm_restart_files(
-        restart_files=[restart_file],
-        output_file=output_file,
-        lon_min_bound=0.0,
-        lon_max_bound=2.0,
-        lat_min_bound=0.0,
-        lat_max_bound=2.0,
-        l1_resolution=1.0,
-        mask_ds=mask_ds,
-        mask_var="land_mask",
-    )
-
-    with xr.open_dataset(output_file) as merged:
-        assert bool(np.isnan(merged["L1_state"].sel(lat=1.5, lon=1.5)).item())
-        assert merged["L1_state"].sel(lat=0.5, lon=1.5).item() == 4.0
-        assert merged.attrs["nCells_L1"] == 3
-
-
-def test_merge_mhm_restart_files_combines_final_masks_on_target_grid(tmp_path):
-    restart_file = tmp_path / "tile_restart.nc"
-    output_file = tmp_path / "mHM_restart_001.nc"
-    ds = xr.Dataset(
-        data_vars={
-            "L1_state": (
-                ("lat", "lon"),
-                np.array([[1.0, 2.0], [3.0, 4.0]]),
-            )
-        },
-        coords={
-            "lat": np.array([1.5, 0.5]),
-            "lon": np.array([0.5, 1.5]),
-        },
-    )
-    mask_west = xr.Dataset(
-        data_vars={
-            "land_mask": (
-                ("lat", "lon"),
-                np.array([[1, 0], [0, 0]]),
-            )
-        },
-        coords={
-            "lat": np.array([1.5, 0.5]),
-            "lon": np.array([0.5, 1.5]),
-        },
-    )
-    mask_east = xr.Dataset(
-        data_vars={
-            "land_mask": (
-                ("lat", "lon"),
-                np.array([[0, 0], [0, 1]]),
-            )
-        },
-        coords={
-            "lat": np.array([1.5, 0.5]),
-            "lon": np.array([0.5, 1.5]),
-        },
-    )
-    ds.to_netcdf(restart_file)
-
-    merge_mhm_restart_files(
-        restart_files=[restart_file],
-        output_file=output_file,
-        lon_min_bound=0.0,
-        lon_max_bound=2.0,
-        lat_min_bound=0.0,
-        lat_max_bound=2.0,
-        l1_resolution=1.0,
-        mask_ds=[mask_west, mask_east],
-        mask_var="land_mask",
-    )
-
-    with xr.open_dataset(output_file) as merged:
-        assert merged["L1_state"].sel(lat=1.5, lon=0.5).item() == 1.0
-        assert bool(np.isnan(merged["L1_state"].sel(lat=1.5, lon=1.5)).item())
-        assert bool(np.isnan(merged["L1_state"].sel(lat=0.5, lon=0.5)).item())
-        assert merged["L1_state"].sel(lat=0.5, lon=1.5).item() == 4.0
-        assert merged.attrs["nCells_L1"] == 2

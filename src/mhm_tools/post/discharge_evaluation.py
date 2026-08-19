@@ -2361,14 +2361,6 @@ def plot_cdf(df, output_path, boostrap_iterations=None):
             global_cdf = np.arange(1, len(global_sorted) + 1) / len(global_sorted)
             global_sorted["cdf"] = global_cdf
             fig, ax = plt.subplots(figsize=(6, 4))
-            plot_cdf_values(
-                ax,
-                values,
-                label="all stations",
-                color="lightgray",
-                cdf_values=global_cdf,
-                draw_points=False,
-            )
             for region_name in regions.values():
                 region_df = global_sorted[global_sorted["region"] == region_name]
                 if region_df.empty:
@@ -2381,6 +2373,16 @@ def plot_cdf(df, output_path, boostrap_iterations=None):
                     cdf_values=region_df["cdf"].values,
                     draw_line=False,
                 )
+            # Draw the global reference line last so it stays visible on top
+            # of the per-region points instead of being buried under them.
+            plot_cdf_values(
+                ax,
+                values,
+                label="all stations",
+                color="lightgray",
+                cdf_values=global_cdf,
+                draw_points=False,
+            )
             med = float(np.nanmedian(values))
             ax.axvline(
                 med,

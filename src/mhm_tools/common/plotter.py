@@ -60,9 +60,12 @@ METRIC_SUMMARY_VALUE_COLUMNS = {"value", "min", "max", "mean", "median"}
 try:  # cartopy is optional
     import cartopy.crs as ccrs
     import cartopy.feature as cfeature
+    from cartopy.mpl.ticker import LatitudeFormatter, LongitudeFormatter
 except ImportError:  # pragma: no cover - cartopy may be absent in some installs
     ccrs = None
     cfeature = None
+    LatitudeFormatter = None
+    LongitudeFormatter = None
 
 
 def _require_cartopy() -> None:
@@ -100,7 +103,7 @@ def plot_cdf_values(
     color: Optional[str] = None,
     linestyle="-",
     cdf_values: Optional[Sequence[float]] = None,
-    marker_size: int = 16,
+    marker_size: int = 8,
     draw_line: bool = True,
     draw_points: bool = True,
 ):
@@ -199,6 +202,7 @@ def plot_metric_cdf_comparison(
     series_count = len(values_by_label)
     tab20_colors = plt.get_cmap("tab20").colors
     continuous_cmap = plt.get_cmap("nipy_spectral")
+    series_to_draw = []
     for color_index, (label, values) in enumerate(values_by_label.items()):
         values_array = np.asarray(values, dtype=float)
         values_array = values_array[np.isfinite(values_array)]
@@ -221,12 +225,33 @@ def plot_metric_cdf_comparison(
         linestyle = "-"
         if linestyles is not None and label in linestyles:
             linestyle = linestyles[label]
-        plot_cdf_values(
+        sorted_values, cdf_values = plot_cdf_values(
             ax,
             values_array,
             label=label_with_count,
             color=color,
             linestyle=linestyle,
+            draw_line=False,
+            draw_points=True,
+        )
+        series_to_draw.append(
+            (sorted_values, cdf_values, color, linestyle, median_value)
+        )
+        plotted_any = True
+    if not plotted_any:
+        plt.close(fig)
+        msg = f"No finite values available for {variable_name}."
+        raise ValueError(msg)
+
+    # Draw every line after every point so no series' line is obscured by
+    # another series' points when many CDFs overlap (e.g. per-continent plots).
+    for sorted_values, cdf_values, color, linestyle, median_value in series_to_draw:
+        ax.plot(
+            sorted_values,
+            cdf_values,
+            color=color,
+            linestyle=linestyle,
+            linewidth=1.0,
         )
         if show_median_line:
             ax.axvline(
@@ -235,11 +260,6 @@ def plot_metric_cdf_comparison(
                 linestyle="dotted",
                 linewidth=1,
             )
-        plotted_any = True
-    if not plotted_any:
-        plt.close(fig)
-        msg = f"No finite values available for {variable_name}."
-        raise ValueError(msg)
 
     ax.set_title(title or f"CDF of {variable_name}")
     ax.set_xlabel(variable_name)
@@ -1003,9 +1023,6 @@ def plot_map(
     lat = data["lat"].values
     arr = np.squeeze(data.values)  # remove singleton dimension (e.g., time)
 
-    # Create 2D grids of lon/lat for plotting
-    lon2d, lat2d = np.meshgrid(lon, lat)
-
     # Determine color limits if not provided
     if vmin is None:
         vmin = float(np.nanmin(arr))
@@ -1043,3 +1060,130 @@ def plot_map(
             y_min=y_min,
             y_max=y_max,
         )
+
+
+def _add_map_panel_features(ax, extent):
+    """Add coastlines, borders, ticks, and gridlines to one cartopy panel axis."""
+    ax.add_feature(cfeature.COASTLINE.with_scale("110m"), linewidth=0.6, zorder=3)
+    ax.add_feature(
+        cfeature.BORDERS.with_scale("110m"), linewidth=0.4, alpha=0.7, zorder=3
+    )
+    ax.set_extent(extent, crs=ccrs.PlateCarree())
+    ax.set_xticks(np.arange(-180, 181, 60), crs=ccrs.PlateCarree())
+    ax.set_yticks(np.arange(-90, 91, 30), crs=ccrs.PlateCarree())
+    ax.xaxis.set_major_formatter(LongitudeFormatter())
+    ax.yaxis.set_major_formatter(LatitudeFormatter())
+    ax.gridlines(
+        crs=ccrs.PlateCarree(),
+        draw_labels=False,
+        linewidth=0.3,
+        color="gray",
+        alpha=0.5,
+        linestyle="--",
+    )
+
+
+def plot_categorical_map_panels(
+    grids: Sequence[Optional[xr.DataArray]],
+    titles: Sequence[str],
+    category_colors: Mapping[int, str],
+    category_names: Mapping[int, str],
+    out_path: Path,
+    ncols: int = 2,
+    panel_figsize: tuple = (7.0, 5.0),
+) -> None:
+    """Plot several categorical lat/lon maps as panels sharing one legend.
+
+    Parameters
+    ----------
+    grids : Sequence[xarray.DataArray or None]
+        2D `(lat, lon)` categorical data arrays, one per panel. A `None` entry
+        leaves its panel blank with a "not available" title instead of failing.
+    titles : Sequence[str]
+        Panel titles, same length and order as `grids`.
+    category_colors : Mapping[int, str]
+        Color per category id.
+    category_names : Mapping[int, str]
+        Legend label per category id.
+    out_path : Path
+        PNG file to write.
+    ncols : int, optional
+        Number of columns in the panel grid, by default 2.
+    panel_figsize : tuple[float, float], optional
+        Figure size per panel before scaling by the grid shape.
+
+    Returns
+    -------
+    None
+    """
+    _require_cartopy()
+
+    category_ids = sorted(category_colors)
+    cmap = ListedColormap([category_colors[cid] for cid in category_ids])
+    boundaries = np.arange(category_ids[0] - 0.5, category_ids[-1] + 1.5, 1.0)
+    norm = BoundaryNorm(boundaries, cmap.N)
+
+    reference_grid = next((grid for grid in grids if grid is not None), None)
+    if reference_grid is None:
+        msg = "At least one grid is required to plot categorical map panels."
+        raise ValueError(msg)
+    extent = [
+        float(reference_grid["lon"].min()),
+        float(reference_grid["lon"].max()),
+        float(reference_grid["lat"].min()),
+        float(reference_grid["lat"].max()),
+    ]
+
+    n_panels = len(grids)
+    nrows = int(np.ceil(n_panels / ncols))
+    fig, axes = plt.subplots(
+        nrows,
+        ncols,
+        figsize=(panel_figsize[0] * ncols, panel_figsize[1] * nrows),
+        subplot_kw={"projection": ccrs.PlateCarree()},
+    )
+    axes = np.atleast_1d(axes).ravel()
+
+    for ax, grid, title in zip(axes, grids, titles):
+        if grid is None:
+            logger.warning(f"Skipping panel {title!r}: no data available.")
+            ax.set_title(f"{title} (not available)")
+            ax.axis("off")
+            continue
+        values = np.ma.masked_where(
+            ~np.isfinite(grid.values) | (grid.values < category_ids[0]), grid.values
+        )
+        ax.imshow(
+            values,
+            cmap=cmap,
+            norm=norm,
+            origin="upper",
+            extent=extent,
+            transform=ccrs.PlateCarree(),
+            interpolation="nearest",
+        )
+        _add_map_panel_features(ax, extent)
+        ax.set_title(title)
+
+    for ax in axes[n_panels:]:
+        ax.axis("off")
+
+    handles = [
+        mpatches.Patch(
+            facecolor=category_colors[cid],
+            edgecolor="none",
+            label=category_names.get(cid, str(cid)),
+        )
+        for cid in category_ids
+    ]
+    fig.legend(
+        handles=handles,
+        ncol=min(len(category_ids), 6),
+        frameon=True,
+        loc="lower center",
+        bbox_to_anchor=(0.5, -0.02),
+    )
+    plt.subplots_adjust(bottom=0.1)
+    fig.savefig(out_path, dpi=150, bbox_inches="tight", pad_inches=0.12)
+    plt.close(fig)
+    logger.info(f"Wrote {out_path}")

@@ -33,7 +33,7 @@ from mhm_tools.common.xarray_utils import (
     get_single_data_var,
     induce_data_var_from_file_name,
     normalize_lat_lon,
-    snap_to_target,
+    regrid_mask,
 )
 from mhm_tools.pre.latlon import create_latlon
 
@@ -97,135 +97,6 @@ class LatlonFiles:
                 self.set_dem_output_file(dem_output_file)
             if meteo_header_path is not None:
                 self.set_meteo_header_path(meteo_header_path)
-
-
-def regrid_mask(
-    mask_ds,
-    lon_key_mask,
-    lat_key_mask,
-    target_lon,
-    target_lat,
-    mask_key=None,
-    lon_key_target=None,
-    lat_key_target=None,
-    target_res=None,
-    mask_res=None,
-):
-    """Regrid a xarray mask dataset mask_ds to the resolution of a second dataset ds2."""
-
-    def _select_mask_var(mask_obj):
-        if isinstance(mask_obj, xr.DataArray):
-            return mask_obj
-        if isinstance(mask_obj, xr.Dataset):
-            key = mask_key or get_single_data_var(mask_obj)
-            if key is None:
-                no_key_msg = "Mask dataset has multiple data_vars; provide mask_key."
-                with ErrorLogger(logger):
-                    raise ValueError(no_key_msg)
-            return mask_obj[key]
-        wrong_type_msg = f"Unsupported mask type: {type(mask_obj)}"
-        with ErrorLogger(logger):
-            raise ValueError(wrong_type_msg)
-
-    if lon_key_target is None:
-        lon_key_target = lon_key_mask
-    if lat_key_target is None:
-        lat_key_target = lat_key_mask
-    mask_lon = mask_ds[lon_key_mask].data
-    mask_lat = mask_ds[lat_key_mask].data
-    mask_res = abs(mask_lon[1] - mask_lon[0])
-    target_res = abs(target_lon[1] - target_lon[0])
-    if (target_res - mask_res) > 1e-5:
-        if target_res % mask_res > 1e-5:
-            logger.warning(
-                f"Target resolution {target_res} is not an integer muptiple of mask resolution {mask_res}. Factor: {target_res / mask_res}"
-            )
-        results = np.full((len(target_lat), len(target_lon)), 0.0)
-        for i, lat in enumerate(target_lat):
-            for j, lon in enumerate(target_lon):
-                for n, mlat in enumerate(mask_lat):
-                    if mlat < (lat - target_res / 2) or mlat > (lat + target_res / 2):
-                        continue
-                    for m, mlon in enumerate(mask_lon):
-                        if mlon < lon - target_res / 2 or mlon > lon + target_res / 2:
-                            continue
-                        if mask_key is not None:
-                            results[i][j] += mask_ds[mask_key].data[n, m]
-                        else:
-                            results[i][j] += mask_ds.data[n, m]
-        results = np.where(np.isfinite(results), results, 0.0)
-        max_result = np.max(results) if results.size else 0.0
-        if max_result <= 0:
-            logger.warning("Regridded mask has no positive cells on target grid.")
-            return xr.DataArray(
-                results,
-                dims=[lat_key_target, lon_key_target],
-                coords={lat_key_target: target_lat, lon_key_target: target_lon},
-            )
-        results /= max_result
-        mask = results > 1e-3
-        results[mask] = 1
-        results[~mask] = 0
-        return xr.DataArray(
-            results,
-            dims=[lat_key_target, lon_key_target],
-            coords={lat_key_target: target_lat, lon_key_target: target_lon},
-        )
-    if abs(target_res - mask_res) <= 1e-5:
-        logger.debug("Target resolution equals mask resolution (within tolerance).")
-
-        try:
-            # quick path: if coords are almost equal, reuse data but snap labels
-            if (
-                len(mask_lon) == len(target_lon)
-                and len(mask_lat) == len(target_lat)
-                and np.allclose(mask_lon, target_lon, rtol=0, atol=1e-9)
-                and np.allclose(mask_lat, target_lat, rtol=0, atol=1e-9)
-            ):
-                return snap_to_target(
-                    _select_mask_var(mask_ds),
-                    lat_key=lat_key_mask,
-                    lon_key=lon_key_mask,
-                    target_lat_array=target_lat,
-                    target_lon_array=target_lon,
-                    new_lat_key=lat_key_target,
-                    new_lon_key=lon_key_target,
-                )
-
-            tol = max(mask_res, target_res) * 1e-3  # generous but safe snapping tol
-            reindexed = mask_ds.reindex(
-                {
-                    lat_key_mask: np.asarray(target_lat),
-                    lon_key_mask: np.asarray(target_lon),
-                },
-                method="nearest",
-                tolerance=tol,
-            )
-            min_lon = min(len(mask_lon), len(target_lon))
-            min_lat = min(len(mask_lat), len(target_lat))
-            logger.debug(
-                f"Reindexed mask to target grid with tolerance {tol}; "
-                f"delta lon={float(np.nanmax(np.abs(mask_lon[:min_lon] - target_lon[:min_lon]))):.3g}, "
-                f"delta lat={float(np.nanmax(np.abs(mask_lat[:min_lat] - target_lat[:min_lat]))):.3g}"
-            )
-            return snap_to_target(
-                _select_mask_var(reindexed),
-                lat_key=lat_key_mask,
-                lon_key=lon_key_mask,
-                target_lat_array=target_lat,
-                target_lon_array=target_lon,
-                new_lat_key=lat_key_target,
-                new_lon_key=lon_key_target,
-            )
-        except Exception:
-            logger.debug(
-                "Mask reindex to target grid failed; using original mask", exc_info=True
-            )
-            return _select_mask_var(mask_ds)
-    else:
-        msg = "mask coarser than file not yet implemented"
-        with ErrorLogger(logger):
-            raise Exception(msg)
 
 
 def crop_file_with_header(ds_in, file_path, output_path, lonslice, latslice):
@@ -579,7 +450,9 @@ def crop_file(  # noqa: PLR0912 PLR0915 PLR0913
             # apply mask only to data variables that share both spatial dims
             for var in ds_cropped.data_vars:
                 if {lat_key, lon_key}.issubset(ds_cropped[var].dims):
+                    original_attrs = dict(ds_cropped[var].attrs)
                     ds_cropped[var] = ds_cropped[var].where(mask_regridded == 1, np.nan)
+                    ds_cropped[var].attrs = original_attrs
             logger.debug(f"dem ds after masking: {ds_cropped}")
         else:
             logger.info("Can't mask dem file because no mask was provided.")
