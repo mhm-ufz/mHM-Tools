@@ -175,11 +175,24 @@ def add_args(parser):
             "For multiple gauges, pass a comma-separated list."
         ),
     )
-    optional_args.add_argument(
+    distance_args = optional_args.add_mutually_exclusive_group()
+    distance_args.add_argument(
         "--max-distance-cells",
-        default=5,
+        default=None,
         type=int,
-        help=("""Maximum distance in cells to search for the outlet cell."""),
+        help="Maximum square distance in cells to search for the outlet cell.",
+    )
+    distance_args.add_argument(
+        "--max-distance-m",
+        default=None,
+        type=float,
+        help="Maximum radial cell-center distance in meters for outlet candidates.",
+    )
+    optional_args.add_argument(
+        "--no-area-delimiter",
+        action="store_false",
+        dest="use_area_delimiter",
+        help="Do not exclude outlet candidates based on catchment-area error.",
     )
     optional_args.add_argument(
         "--max-error",
@@ -443,7 +456,9 @@ def run(args):  # noqa: PLR0912,PLR0915
         available_mem=available_mem,
         ref_catchment_area=ref_catchment_area,
         max_distance_cells=args.max_distance_cells,
+        max_distance_m=args.max_distance_m,
         max_error=args.max_error,
+        use_area_delimiter=args.use_area_delimiter,
         gauge_ids=gauge_ids,
         ncpus=args.ncpus,
         output_vars=(

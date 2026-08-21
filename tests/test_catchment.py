@@ -10,7 +10,11 @@ import mhm_tools.common.utils
 from mhm_tools import __version__
 from mhm_tools.common.file_handler import get_xarray_ds_from_file
 from mhm_tools.common.provenance import CREATED_ATTR, HISTORY_ATTR, VERSION_ATTR
-from mhm_tools.common.utils import distance_100m_units, find_best_gauge_location_by_area
+from mhm_tools.common.utils import (
+    distance_100m_units,
+    find_best_gauge_location_by_area,
+    get_candidate_search_window,
+)
 from mhm_tools.common.xarray_utils import get_coord_key
 from mhm_tools.pre import catchment
 
@@ -444,6 +448,105 @@ class TestCatchment(unittest.TestCase):
         self.assertAlmostEqual(error_basinex, 0.0)
         self.assertEqual(best_coord_burek, (2, 1))
         self.assertAlmostEqual(error_burek, 0.0)
+
+    def test_area_delimiter_can_be_disabled(self):
+        """Select the best candidate inside the radius despite its area error."""
+        c = self._make_small_catchment()
+        upstream_area = np.full((5, 5), np.nan)
+        upstream_area[2, 2] = 50.0
+        upstream_area[2, 3] = 80.0
+
+        with self.assertRaises(ValueError):
+            find_best_gauge_location_by_area(
+                ds=c.ds,
+                upstream_area=upstream_area,
+                gauge_coords=(2.0, 2.0),
+                ref_catchment_area=100.0,
+                resolutions=c.resolutions,
+                max_distance_m=1.5,
+                max_error=0.1,
+                raise_on_fallback=True,
+            )
+
+        best_coord, error, _ = find_best_gauge_location_by_area(
+            ds=c.ds,
+            upstream_area=upstream_area,
+            gauge_coords=(2.0, 2.0),
+            ref_catchment_area=100.0,
+            resolutions=c.resolutions,
+            max_distance_m=1.5,
+            max_error=0.1,
+            use_area_delimiter=False,
+            raise_on_fallback=True,
+        )
+
+        self.assertEqual(best_coord, (2, 3))
+        self.assertAlmostEqual(error, 0.2)
+
+    def test_max_distance_m_uses_strict_radial_mask(self):
+        """Exclude square-window corners beyond the meter radius."""
+        c = self._make_small_catchment()
+        upstream_area = np.full((5, 5), np.nan)
+        upstream_area[1, 1] = 100.0
+        upstream_area[1, 2] = 90.0
+
+        best_coord, _, _ = find_best_gauge_location_by_area(
+            ds=c.ds,
+            upstream_area=upstream_area,
+            gauge_coords=(2.0, 2.0),
+            ref_catchment_area=100.0,
+            resolutions=c.resolutions,
+            max_distance_m=1.1,
+            use_area_delimiter=False,
+            raise_on_fallback=True,
+        )
+
+        self.assertEqual(best_coord, (1, 2))
+
+    def test_latlon_max_distance_m_is_coordinate_aware(self):
+        """Apply a radial meter limit to a latitude/longitude grid."""
+        coordinates = np.array([-0.01, 0.0, 0.01])
+        _, _, _, _, distance_mask, distances_m = get_candidate_search_window(
+            lat_values=coordinates,
+            lon_values=coordinates,
+            gauge_row=1,
+            gauge_col=1,
+            max_distance_m=1200,
+            latlon=True,
+        )
+
+        self.assertTrue(distance_mask[0, 1])
+        self.assertFalse(distance_mask[0, 0])
+        self.assertGreater(distances_m[0, 0], 1200)
+
+    def test_candidate_distance_arguments_are_validated(self):
+        """Reject conflicting and negative candidate distance limits."""
+        coordinates = np.arange(3, dtype=float)
+        with self.assertRaises(ValueError):
+            get_candidate_search_window(
+                coordinates,
+                coordinates,
+                1,
+                1,
+                max_distance_cells=1,
+                max_distance_m=1,
+            )
+        with self.assertRaises(ValueError):
+            get_candidate_search_window(
+                coordinates, coordinates, 1, 1, max_distance_m=-1
+            )
+
+    def test_zero_meter_distance_selects_only_gauge_cell(self):
+        """Restrict a zero-meter candidate search to the gauge cell."""
+        coordinates = np.arange(3, dtype=float)
+
+        _, _, _, _, distance_mask, distances_m = get_candidate_search_window(
+            coordinates, coordinates, 1, 1, max_distance_m=0
+        )
+
+        self.assertEqual(distance_mask.shape, (1, 1))
+        self.assertTrue(distance_mask[0, 0])
+        self.assertEqual(distances_m[0, 0], 0)
 
     def test_distance_100m_units_3_arcsec(self):
         res = 1.0 / 1200.0  # 3 arc sec in degrees

@@ -150,24 +150,200 @@ def coord_to_index(ds, lat, lon):
 
 
 def distance_100m_units(di, dj, l0_resolution, lat_deg=None, latlon=False):
-    """Convert index deltas to distance in ~100 m units using l0_resolution."""
-    res = float(abs(l0_resolution))
-    if latlon or lat_deg is not None:
-        if lat_deg is None:
-            lat_deg = 0.0
-        # approximate meters per degree
-        meters_per_deg_lat = 111_132.92
-        dy_m = meters_per_deg_lat * res
-        # Not used since burek assumes square cell sizes:
-        # lat_rad = np.deg2rad(lat_deg)
-        # meters_per_deg_lon = 111_320.0 * np.cos(lat_rad)
-        # dx_m = meters_per_deg_lon * res
-        dx_m = dy_m
+    """Convert index deltas to 100 m units using coordinate-aware distances."""
+    resolution = float(abs(l0_resolution))
+    delta_rows, delta_cols = np.broadcast_arrays(di, dj)
+    gauge_latitude = 0.0 if lat_deg is None else float(lat_deg)
+    use_latlon = latlon or lat_deg is not None
+    candidate_latitudes = gauge_latitude + delta_rows.flatten() * resolution
+    candidate_longitudes = delta_cols.flatten() * resolution
+    lat_values = np.concatenate(([gauge_latitude], candidate_latitudes))
+    lon_values = np.concatenate(([0.0], candidate_longitudes))
+    candidate_indices = np.arange(1, candidate_latitudes.size + 1)
+    distances_100m = (
+        calculate_coordinate_distances_m(
+            lat_values,
+            lon_values,
+            gauge_row=0,
+            gauge_col=0,
+            candidate_rows=candidate_indices,
+            candidate_cols=candidate_indices,
+            latlon=use_latlon,
+            paired=True,
+        ).reshape(delta_rows.shape)
+        / 100
+    )
+    return distances_100m.item() if distances_100m.ndim == 0 else distances_100m
+
+
+def calculate_coordinate_distances_m(
+    lat_values,
+    lon_values,
+    gauge_row,
+    gauge_col,
+    candidate_rows,
+    candidate_cols,
+    latlon=False,
+    paired=False,
+):
+    """Calculate cell-center distances from a gauge in meters.
+
+    Args:
+        lat_values: Grid y-coordinate values.
+        lon_values: Grid x-coordinate values.
+        gauge_row: Row index of the gauge cell.
+        gauge_col: Column index of the gauge cell.
+        candidate_rows: Candidate row indices.
+        candidate_cols: Candidate column indices.
+        latlon: Whether coordinates are geographic latitude and longitude.
+        paired: Whether candidate rows and columns describe coordinate pairs.
+
+    Returns
+    -------
+        A distance array broadcast from candidate rows and columns.
+    """
+    candidate_latitudes = np.asarray(lat_values)[candidate_rows]
+    candidate_longitudes = np.asarray(lon_values)[candidate_cols]
+    gauge_latitude = float(np.asarray(lat_values)[gauge_row])
+    gauge_longitude = float(np.asarray(lon_values)[gauge_col])
+    if paired:
+        candidate_latitudes, candidate_longitudes = np.broadcast_arrays(
+            candidate_latitudes, candidate_longitudes
+        )
+        delta_y = candidate_latitudes - gauge_latitude
+        delta_x = candidate_longitudes - gauge_longitude
     else:
-        # assume resolution already in meters for projected grids
-        dy_m = res
-        dx_m = res
-    return np.sqrt((di * dy_m) ** 2 + (dj * dx_m) ** 2) / 100.0
+        delta_y = candidate_latitudes[:, None] - gauge_latitude
+        delta_x = candidate_longitudes[None, :] - gauge_longitude
+    if not latlon:
+        return np.hypot(delta_y, delta_x)
+
+    earth_radius_m = 6_371_008.8
+    latitude_radians = np.deg2rad(candidate_latitudes)
+    longitude_radians = np.deg2rad(candidate_longitudes)
+    if not paired:
+        latitude_radians = latitude_radians[:, None]
+        longitude_radians = longitude_radians[None, :]
+    gauge_latitude_radians = np.deg2rad(gauge_latitude)
+    gauge_longitude_radians = np.deg2rad(gauge_longitude)
+    delta_latitude = latitude_radians - gauge_latitude_radians
+    delta_longitude = longitude_radians - gauge_longitude_radians
+    haversine_value = (
+        np.sin(delta_latitude / 2) ** 2
+        + np.cos(gauge_latitude_radians)
+        * np.cos(latitude_radians)
+        * np.sin(delta_longitude / 2) ** 2
+    )
+    return 2 * earth_radius_m * np.arcsin(np.sqrt(haversine_value))
+
+
+def get_candidate_search_window(
+    lat_values,
+    lon_values,
+    gauge_row,
+    gauge_col,
+    max_distance_cells=None,
+    max_distance_m=None,
+    latlon=False,
+):
+    """Get candidate bounds and a strict distance mask for an outlet search.
+
+    Args:
+        lat_values: Grid y-coordinate values.
+        lon_values: Grid x-coordinate values.
+        gauge_row: Row index of the gauge cell.
+        gauge_col: Column index of the gauge cell.
+        max_distance_cells: Maximum square search radius in grid cells.
+        max_distance_m: Maximum radial cell-center distance in meters.
+        latlon: Whether coordinates are geographic latitude and longitude.
+
+    Returns
+    -------
+        Window bounds, distance mask, and distances in meters when requested.
+    """
+    if max_distance_cells is not None and max_distance_m is not None:
+        msg = "Only one of max_distance_cells and max_distance_m may be provided."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    if max_distance_cells is not None and max_distance_cells < 0:
+        msg = "max_distance_cells must be non-negative."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    if max_distance_m is not None and max_distance_m < 0:
+        msg = "max_distance_m must be non-negative."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+
+    lat_values = np.asarray(lat_values)
+    lon_values = np.asarray(lon_values)
+    if max_distance_m is None:
+        max_cells = round(5 if max_distance_cells is None else max_distance_cells)
+        row_min = max(0, gauge_row - max_cells)
+        row_max = min(len(lat_values) - 1, gauge_row + max_cells)
+        col_min = max(0, gauge_col - max_cells)
+        col_max = min(len(lon_values) - 1, gauge_col + max_cells)
+        distance_mask = np.ones(
+            (row_max - row_min + 1, col_max - col_min + 1), dtype=bool
+        )
+        return row_min, row_max, col_min, col_max, distance_mask, None
+
+    all_rows = np.arange(len(lat_values))
+    all_cols = np.arange(len(lon_values))
+    if latlon:
+        row_distances_m = calculate_coordinate_distances_m(
+            lat_values,
+            lon_values,
+            gauge_row,
+            gauge_col,
+            all_rows,
+            np.array([gauge_col]),
+            latlon=True,
+        )[:, 0]
+    else:
+        row_distances_m = np.abs(lat_values - lat_values[gauge_row])
+    candidate_rows = all_rows[row_distances_m <= max_distance_m]
+    row_min = int(candidate_rows.min())
+    row_max = int(candidate_rows.max())
+
+    if latlon:
+        row_window = np.arange(row_min, row_max + 1)
+        longitude_distances_m = calculate_coordinate_distances_m(
+            lat_values,
+            lon_values,
+            gauge_row,
+            gauge_col,
+            row_window,
+            all_cols,
+            latlon=True,
+        )
+        candidate_cols = all_cols[
+            np.any(longitude_distances_m <= max_distance_m, axis=0)
+        ]
+    else:
+        col_distances_m = np.abs(lon_values - lon_values[gauge_col])
+        candidate_cols = all_cols[col_distances_m <= max_distance_m]
+    col_min = int(candidate_cols.min())
+    col_max = int(candidate_cols.max())
+
+    window_rows = np.arange(row_min, row_max + 1)
+    window_cols = np.arange(col_min, col_max + 1)
+    distances_m = calculate_coordinate_distances_m(
+        lat_values,
+        lon_values,
+        gauge_row,
+        gauge_col,
+        window_rows,
+        window_cols,
+        latlon=latlon,
+    )
+    return (
+        row_min,
+        row_max,
+        col_min,
+        col_max,
+        distances_m <= max_distance_m,
+        distances_m,
+    )
 
 
 def find_best_gauge_location_by_area(  # noqa: PLR0915
@@ -176,8 +352,10 @@ def find_best_gauge_location_by_area(  # noqa: PLR0915
     gauge_coords,
     ref_catchment_area,
     resolutions,
-    max_distance_cells=5,
+    max_distance_cells=None,
+    max_distance_m=None,
     max_error=0.25,
+    use_area_delimiter=True,
     recursion=False,
     method="basinex",
     raise_on_fallback=True,
@@ -188,28 +366,38 @@ def find_best_gauge_location_by_area(  # noqa: PLR0915
     lat_vals = ds.lat.data
     lon_vals = ds.lon.data
     gi, gj = coord_to_index(ds, gauge_coords[0], gauge_coords[1])
+    if max_distance_cells is None and max_distance_m is None:
+        max_distance_cells = 5
 
     logger.debug(f"Gauge index (row, col): {(gi, gj)}")
+    distance_description = (
+        f"{max_distance_m} m"
+        if max_distance_m is not None
+        else f"{max_distance_cells} cells"
+    )
+    logger.info(
+        f"Selecting outlet candidates within {distance_description}; "
+        f"area delimiter enabled: {use_area_delimiter}."
+    )
 
     # We will search for candidate outlet cells within a bbox around the gauge
     # (in degrees). These parameters are conservative defaults and can be
     # tuned later or exposed as args.
-    max_cells = int(max(0, round(max_distance_cells)))
-
-    # find index window (clamp to domain)
-    i_min = max(0, gi - max_cells)
-    i_max = min(len(lat_vals) - 1, gi + max_cells)
-    j_min = max(0, gj - max_cells)
-    j_max = min(len(lon_vals) - 1, gj + max_cells)
-
-    # Ensure min <= max
-    if i_min > i_max:
-        i_min, i_max = i_max, i_min
-    if j_min > j_max:
-        j_min, j_max = j_max, j_min
+    i_min, i_max, j_min, j_max, distance_mask, distances_m = (
+        get_candidate_search_window(
+            lat_vals,
+            lon_vals,
+            gi,
+            gj,
+            max_distance_cells=max_distance_cells,
+            max_distance_m=max_distance_m,
+            latlon=latlon,
+        )
+    )
 
     # Extract subgrid around the gauge
     sub = upstream_area[i_min : i_max + 1, j_min : j_max + 1]
+    sub = np.where(distance_mask, sub, np.nan)
 
     # If subgrid is empty fallback to whole domain
     if sub.size == 0:
@@ -233,7 +421,9 @@ def find_best_gauge_location_by_area(  # noqa: PLR0915
 
         sub_error = np.abs(sub - size) / size
         finite_mask = np.isfinite(sub_error)
-        within_tol = finite_mask & (sub_error <= max_error)
+        within_tol = finite_mask & (
+            (sub_error <= max_error) if use_area_delimiter else True
+        )
         if np.any(within_tol):
             min_error = float(np.min(sub_error[within_tol]))
             candidates = np.where(within_tol & np.isclose(sub_error, min_error))
@@ -264,12 +454,16 @@ def find_best_gauge_location_by_area(  # noqa: PLR0915
             logger.info(
                 f"Selected outlet candidate {best_coord} with upstream area {upstream_area[best_coord]} km2 (tolerance {error:.3f})"
             )
-            distanance_100m = distance_100m_units(
-                cand_i[k] - gi,
-                cand_j[k] - gj,
-                l0_resolution=resolutions.l0,
-                lat_deg=lat_deg,
-                latlon=latlon,
+            distanance_100m = (
+                distances_m[candidates[0][k], candidates[1][k]] / 100
+                if distances_m is not None
+                else distance_100m_units(
+                    cand_i[k] - gi,
+                    cand_j[k] - gj,
+                    l0_resolution=resolutions.l0,
+                    lat_deg=lat_deg,
+                    latlon=latlon,
+                )
             )
             return (
                 best_coord,
@@ -288,15 +482,20 @@ def find_best_gauge_location_by_area(  # noqa: PLR0915
         )
         candidates_error = 1 - ratio
         candidates_indices = np.where(
-            np.isfinite(candidates_error) & (candidates_error <= max_error)
+            np.isfinite(candidates_error)
+            & ((candidates_error <= max_error) if use_area_delimiter else True)
         )
         if len(candidates_indices[0]) > 0:
             cand_i = candidates_indices[0] + i_min
             cand_j = candidates_indices[1] + j_min
             di = cand_i - gi
             dj = cand_j - gj
-            candidates_distance = distance_100m_units(
-                di, dj, l0_resolution=resolutions.l0, lat_deg=lat_deg
+            candidates_distance = (
+                distances_m[candidates_indices] / 100
+                if distances_m is not None
+                else distance_100m_units(
+                    di, dj, l0_resolution=resolutions.l0, lat_deg=lat_deg
+                )
             )
             # change error to percent
             candidates_error = (
@@ -316,7 +515,7 @@ def find_best_gauge_location_by_area(  # noqa: PLR0915
         with ErrorLogger(logger):
             raise ValueError(msg)
 
-    if not recursion:
+    if not recursion and max_distance_m is None:
         logger.warning(
             f"No suitable outlet candidate found within {max_distance_cells} cells and {max_error*100:.2f}% area error. Retrying with doubled search radius."
         )
@@ -327,33 +526,46 @@ def find_best_gauge_location_by_area(  # noqa: PLR0915
             ref_catchment_area,
             resolutions,
             max_distance_cells=max_distance_cells * 2,
+            max_distance_m=None,
             max_error=max_error,
+            use_area_delimiter=use_area_delimiter,
             recursion=True,
             method=method,
             raise_on_fallback=raise_on_fallback,
             latlon=latlon,
         )
     if raise_on_fallback:
+        area_error_description = (
+            f" and {max_error*100:.2f}% area error" if use_area_delimiter else ""
+        )
         msg = (
-            f"No suitable outlet candidate found within {max_distance_cells} cells and {max_error*100:.2f}% area error. "
-            "Consider increasing max_distance_cells or max_error."
+            "No suitable outlet candidate found within the configured distance "
+            f"limit{area_error_description}."
         )
         with ErrorLogger(logger):
             raise ValueError(msg)
 
     # fallback: pick the cell in bbox with upstream area closest to target
     flat = np.abs(sub - size)
-    idx = int(np.argmin(flat))
+    if not np.any(np.isfinite(flat)):
+        msg = "No finite outlet candidate exists within the distance limit."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    idx = int(np.nanargmin(flat))
     ri, rj = np.unravel_index(idx, sub.shape)
     best_coord = (ri + i_min, rj + j_min)
     logger.info(
         f"The selected outlet candidate is {best_coord} with upstream area {upstream_area[best_coord]} km2 resulting in error {(ref_catchment_area - upstream_area[best_coord]) / ref_catchment_area:.3f}."
     )
-    distance_100m = distance_100m_units(
-        best_coord[0] - gi,
-        best_coord[1] - gj,
-        l0_resolution=resolutions.l0,
-        lat_deg=lat_deg,
+    distance_100m = (
+        distances_m[ri, rj] / 100
+        if distances_m is not None
+        else distance_100m_units(
+            best_coord[0] - gi,
+            best_coord[1] - gj,
+            l0_resolution=resolutions.l0,
+            lat_deg=lat_deg,
+        )
     )
     return best_coord, abs(upstream_area[best_coord] - size) / size, distance_100m
 
