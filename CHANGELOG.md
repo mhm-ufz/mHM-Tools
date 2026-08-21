@@ -11,11 +11,17 @@
 - `plot_metric_violin_comparison` gains a `y_limits` parameter (mirroring `plot_metric_cdf_comparison`'s existing `x_limits`), and `write_metric_plots` gains `axis_limits_by_variable` to set both from one per-variable mapping; both plot functions default their lower axis limit to -1 (or slightly below the data's own minimum when it never reaches -1) instead of auto-scaling to extreme outliers, and draw a black-ish gridline plus a dashed per-series median line.
 - `write_catchment_median_maps`/`plot_catchment_metric_maps` gain an optional `extent` override, so a map's view can be framed explicitly instead of always auto-fitting to the matched geometries' own (sometimes unreliable) bounds.
 - `discharge-evaluation`'s gauge map, and `discharge-eval-comparison`'s map-diff and catchment-map plots, draw lat/lon gridlines with axis labels, shade the ocean a visible light gray (`0.85`) while keeping land near-white (`0.97`) instead of both being within 0.02 of each other and reading as one flat background, and color catchments worse than the display floor (e.g. `kge` below -0.5) black instead of light gray.
+- Add `create-catchment` options to select outlet candidates within a strict radial distance in meters and to disable catchment-area error as a candidate delimiter.
 
 ### Changed
 
 - Move `_normalize_cli_sequence` out of `_cli/_metric_plots.py` into `common/cli_utils.py` as `normalize_cli_sequence`, shared with the new `discharge-eval-comparison` CLI.
 - CDF plotts are plotted with a small low opacity `+` marker instead of large high opacity `o` markers. 
+- Make cell-based and meter-based maximum outlet distances mutually exclusive while retaining the existing five-cell default.
+- Deliberately move away from the Burek implementation's square-cell distance approximation in favor of a more correct coordinate-aware distance calculation, including latitude-dependent distances on geographic grids.
+
+### Tests
+- Add catchment candidate-selection and CLI coverage for meter limits, radial filtering, optional area delimiting, coordinate-aware distances, and distance argument validation.
 
 ## [v0.2.3]
 

@@ -36,6 +36,7 @@ from mhm_tools.common.utils import (
     cut_to_filled_area,
     distance_100m_units,
     find_best_gauge_location_by_area,
+    get_candidate_search_window,
     get_upscaling_factor,
 )
 from mhm_tools.common.xarray_utils import get_dtype
@@ -1078,12 +1079,16 @@ class Catchment:
         self,
         l0_shape_gdf,
         gauge_coords,
-        max_distance_cells=5,
+        max_distance_cells=None,
+        max_distance_m=None,
         max_error=0.5,
+        use_area_delimiter=True,
         ref_catchment_area=None,
         reference_upstream_area=None,
     ):
         """Correct gauge coordinates at L1 using L0 shape similarity and upstream area."""
+        if max_distance_cells is None and max_distance_m is None:
+            max_distance_cells = 5
         if ref_catchment_area is None and reference_upstream_area is not None:
             ref_catchment_area = reference_upstream_area
         if l0_shape_gdf is None or l0_shape_gdf.empty:
@@ -1112,7 +1117,9 @@ class Catchment:
             shape_folder=None,
             gauge_id=None,
             max_distance_cells=max_distance_cells,
+            max_distance_m=max_distance_m,
             max_error=max_error,
+            use_area_delimiter=use_area_delimiter,
             reference_shape_gdf=l0_shape_gdf,
             lat_values=lat_coords,
             lon_values=lon_coords,
@@ -1245,15 +1252,18 @@ class Catchment:
         ref_catchment_area,
         shape_folder,
         gauge_id,
-        max_distance_cells=2,
+        max_distance_cells=None,
+        max_distance_m=None,
         max_error=0.25,
         reference_shape_gdf=None,
         lat_values=None,
         lon_values=None,
-        limit_by_error=True,
+        use_area_delimiter=True,
         started_from_shape=False,
     ):
         """Find best gauge location using shape similarity."""
+        if max_distance_cells is None and max_distance_m is None:
+            max_distance_cells = 2
         if upstream_area is None:
             logger.warning("Upstream area grid missing for shape-based correction.")
             return None
@@ -1321,34 +1331,33 @@ class Catchment:
                 lat_vals=lat_values,
                 lon_vals=lon_values,
             )
-        max_cells = (
-            int(max(0, round(max_distance_cells)))
-            if max_distance_cells is not None
-            else 0
+        row_min, row_max, col_min, col_max, distance_mask, distances_m = (
+            get_candidate_search_window(
+                lat_values,
+                lon_values,
+                gauge_row,
+                gauge_col,
+                max_distance_cells=max_distance_cells,
+                max_distance_m=max_distance_m,
+                latlon=self.latlon,
+            )
         )
-        row_min = max(0, gauge_row - max_cells)
-        row_max = min(len(lat_values) - 1, gauge_row + max_cells)
-        col_min = max(0, gauge_col - max_cells)
-        col_max = min(len(lon_values) - 1, gauge_col + max_cells)
-        if row_min > row_max:
-            row_min, row_max = row_max, row_min
-        if col_min > col_max:
-            col_min, col_max = col_max, col_min
 
         # Limit candidate search to a local neighborhood around the gauge
         sub = upstream_area[row_min : row_max + 1, col_min : col_max + 1]
-        if ref_catchment_area is not None and limit_by_error:
+        if ref_catchment_area is not None and use_area_delimiter:
             candidate_indices = np.where(
-                (sub >= ref_catchment_area * (1 - max_error))
+                distance_mask
+                & (sub >= ref_catchment_area * (1 - max_error))
                 & (sub <= ref_catchment_area * (1 + max_error))
             )
             if candidate_indices[0].size == 0:
                 logger.warning(
                     "No candidates within area error bounds; expanding search to all finite upstream area values."
                 )
-                candidate_indices = np.where(np.isfinite(sub))
+                candidate_indices = np.where(distance_mask & np.isfinite(sub))
         else:
-            candidate_indices = np.where(np.isfinite(sub))
+            candidate_indices = np.where(distance_mask & np.isfinite(sub))
 
         logger.debug(
             f"Shape-based candidate count: {len(candidate_indices[0])}",
@@ -1380,11 +1389,15 @@ class Catchment:
             )
             shape_overlap_ratio = _shape_iou(reference_shape, gdf)
             upstream_value = upstream_area[row_idx, col_idx]
-            distance_100m = distance_100m_units(
-                row_idx - gauge_row,
-                col_idx - gauge_col,
-                l0_resolution=self.upscaled_resolution,
-                lat_deg=lat_deg,
+            distance_100m = (
+                distances_m[cand_row, cand_col] / 100
+                if distances_m is not None
+                else distance_100m_units(
+                    row_idx - gauge_row,
+                    col_idx - gauge_col,
+                    l0_resolution=self.upscaled_resolution,
+                    lat_deg=lat_deg,
+                )
             )
             if ref_catchment_area:
                 upstream_area_ratio = (
@@ -1444,14 +1457,17 @@ class Catchment:
                 shape_folder,
                 gauge_id,
                 max_distance_cells=max_distance_cells,
+                max_distance_m=max_distance_m,
                 max_error=max_error,
                 reference_shape_gdf=reference_shape,
                 lat_values=lat_values,
                 lon_values=lon_values,
-                limit_by_error=limit_by_error,
+                use_area_delimiter=use_area_delimiter,
                 started_from_shape=True,
             )
-        if best_candidate_index is None or best_candidate_score > max_error:
+        if best_candidate_index is None or (
+            use_area_delimiter and best_candidate_score > max_error
+        ):
             logger.warning("No suitable candidate found for shape-based correction.")
             logger.warning(
                 f"Score {best_candidate_score:.3f} > {max_error} from IoU {best_candidate_shape_iou:.3f};  and area {best_candidate_upstream_area:.0f}km^2 / {ref_catchment_area:.0f}km^2."
@@ -1476,19 +1492,23 @@ class Catchment:
             used_method,
         )
 
-    def get_best_gauge_coordinate(
+    def get_best_gauge_coordinate(  # noqa: PLR0915
         self,
         upstream_area,
         gauge_coords,
         ref_catchment_area,
-        max_distance_cells,
-        max_error,
-        method,
+        max_distance_cells=None,
+        max_distance_m=None,
+        max_error=0.25,
+        use_area_delimiter=True,
+        method="basinex",
         shape_folder=None,
         gauge_id=None,
         raise_on_fallback=True,
     ):
         """Get best gauge coordinates given target catchment area."""
+        if max_distance_cells is None and max_distance_m is None:
+            max_distance_cells = 5
         shape_result = None
         score = np.nan
         shape_error = np.nan
@@ -1502,7 +1522,9 @@ class Catchment:
                     shape_folder,
                     gauge_id,
                     max_distance_cells=max_distance_cells,
+                    max_distance_m=max_distance_m,
                     max_error=max_error,
+                    use_area_delimiter=use_area_delimiter,
                 )
             except Exception as exc:
                 logger.warning(
@@ -1542,9 +1564,12 @@ class Catchment:
                     ref_catchment_area=ref_catchment_area,
                     resolutions=self.resolutions,
                     max_distance_cells=max_distance_cells,
+                    max_distance_m=max_distance_m,
                     max_error=max_error,
+                    use_area_delimiter=use_area_delimiter,
                     method=method,
                     raise_on_fallback=raise_on_fallback,
+                    latlon=self.latlon,
                 )
                 used_method = f"area-{method}"
                 score = error * 100 + 2 * distance_error if method == "burek" else error
@@ -1557,9 +1582,12 @@ class Catchment:
                         ref_catchment_area=ref_catchment_area,
                         resolutions=self.resolutions,
                         max_distance_cells=max_distance_cells,
+                        max_distance_m=max_distance_m,
                         max_error=max_error,
+                        use_area_delimiter=use_area_delimiter,
                         method="basinex",
                         raise_on_fallback=True,
+                        latlon=self.latlon,
                     )
                 )
                 outlet_idx_bu, error_bu, distance_error_bu = (
@@ -1570,9 +1598,12 @@ class Catchment:
                         ref_catchment_area=ref_catchment_area,
                         resolutions=self.resolutions,
                         max_distance_cells=max_distance_cells,
+                        max_distance_m=max_distance_m,
                         max_error=max_error,
+                        use_area_delimiter=use_area_delimiter,
                         method="burek",
                         raise_on_fallback=True,
+                        latlon=self.latlon,
                     )
                 )
                 logger.info("Results of basin correction:")
@@ -1654,6 +1685,7 @@ class Catchment:
         max_error,
         raise_on_sanity_check,
         gauge_id,
+        use_area_delimiter=True,
     ):
         """Perform sanity checks on the delineated basin."""
         try:
@@ -1694,9 +1726,9 @@ class Catchment:
                     f"{delineated_area:.2f} km2; reference area = "
                     f"{ref_catchment_area:.2f} km2; error = {area_error * 100.0:.2f}%"
                 )
-                if abs(area_error) > max_error * 2:
+                if use_area_delimiter and abs(area_error) > max_error * 2:
                     with ErrorLogger(logger):
-                        msg = f"Delineated basin area ({delineated_area:2f} km2) differs from reference area ({ref_catchment_area:2f} km2) by more than twice the max error {max_error*100:.2f}%. Adjust max_error or max_distance_cells."
+                        msg = f"Delineated basin area ({delineated_area:2f} km2) differs from reference area ({ref_catchment_area:2f} km2) by more than twice the max error {max_error*100:.2f}%. Adjust max_error or the maximum distance."
                         if raise_on_sanity_check:
                             raise ValueError(msg)
                         logger.warning(msg)
@@ -1726,8 +1758,10 @@ class Catchment:
     def delineate_basin(
         self,
         gauge,
-        max_distance_cells=5,
+        max_distance_cells=None,
+        max_distance_m=None,
         max_error=0.25,
+        use_area_delimiter=True,
         raise_on_sanity_check=True,
         upstream_area=None,
         mask_catchment: Optional[bool] = True,
@@ -1776,7 +1810,9 @@ class Catchment:
             gauge_coords=gauge_coords,
             ref_catchment_area=ref_catchment_area,
             max_distance_cells=max_distance_cells,
+            max_distance_m=max_distance_m,
             max_error=max_error,
+            use_area_delimiter=use_area_delimiter,
             method=gauge_opti_method,
             shape_folder=shape_folder,
             gauge_id=gauge_id,
@@ -1814,6 +1850,7 @@ class Catchment:
             max_error,
             raise_on_sanity_check,
             gauge_id,
+            use_area_delimiter=use_area_delimiter,
         )
 
         if np.all(catchment_mask):
@@ -2547,8 +2584,10 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
     latlon=True,
     available_mem=None,
     ref_catchment_area=None,
-    max_distance_cells=5,
+    max_distance_cells=None,
+    max_distance_m=None,
     max_error=0.1,
+    use_area_delimiter=True,
     gauge_ids=None,
     ncpus=1,
     output_vars=None,
@@ -2579,10 +2618,25 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
         if isinstance(ref_catchment_area, list):
             if len(ref_catchment_area) != 1:
                 msg = "If gauge_coords is a list of one tuple, ref_catchment_area (if provided) must be a single value or a list of one value."
-                raise ValueError(msg)
+                with ErrorLogger(logger):
+                    raise ValueError(msg)
             ref_catchment_area = ref_catchment_area[0]
     if resolutions is None:
         resolutions = Resolution()
+    if max_distance_cells is not None and max_distance_m is not None:
+        msg = "Only one of max_distance_cells and max_distance_m may be provided."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    if max_distance_cells is not None and max_distance_cells < 0:
+        msg = "max_distance_cells must be non-negative."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    if max_distance_m is not None and max_distance_m < 0:
+        msg = "max_distance_m must be non-negative."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    if max_distance_cells is None and max_distance_m is None:
+        max_distance_cells = 5
     if var not in {"fdir", "dem"}:
         with ErrorLogger(logger):
             msg = f"Unexpected value for var={var}, must be 'fdir' or 'dem'"
@@ -2797,7 +2851,9 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
             gauge = c.delineate_basin(
                 gauge,
                 max_distance_cells=max_distance_cells,
+                max_distance_m=max_distance_m,
                 max_error=max_error,
+                use_area_delimiter=use_area_delimiter,
                 gauge_opti_method=gauge_opti_method,
                 shape_folder=shape_folder,
                 raise_on_fallback=raise_on_fallback,
@@ -2830,7 +2886,9 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                     l0_shape_gdf,
                     (c.gauge_lats[-1], c.gauge_lons[-1]),
                     max_distance_cells=max_distance_cells,
+                    max_distance_m=max_distance_m,
                     max_error=max_error,
+                    use_area_delimiter=use_area_delimiter,
                     ref_catchment_area=ref_catchment_area,
                 )
                 if new_coords is not None:
@@ -2917,7 +2975,9 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                     gauge_coords=gc,
                     ref_catchment_area=ref_area,
                     max_distance_cells=max_distance_cells,
+                    max_distance_m=max_distance_m,
                     max_error=max_error,
+                    use_area_delimiter=use_area_delimiter,
                     method=gauge_opti_method,
                     shape_folder=shape_folder,
                     gauge_id=gauge_ids[i],
@@ -3004,6 +3064,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                         max_error,
                         False,
                         gi["gauge_id"],
+                        use_area_delimiter=use_area_delimiter,
                     )
                     if failed:
                         continue
@@ -3073,7 +3134,9 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                     l0_shape_gdf,
                     (gauge.lat, gauge.lon),
                     max_distance_cells=max_distance_cells,
+                    max_distance_m=max_distance_m,
                     max_error=max_error,
+                    use_area_delimiter=use_area_delimiter,
                     ref_catchment_area=gi.get("ref_area"),
                 )
                 if new_coords is not None:

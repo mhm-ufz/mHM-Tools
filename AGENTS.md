@@ -15,6 +15,7 @@
 - When you use terminal commands and ask for permission write one maximum two lines of explenation. What is the goal of the command. Why do you need it. 
 - When you make a commit, update the changelog. 
 - The changelog reflects the cumulative changes since the last tag, not just the current commit's diff. Before adding a new entry, review the existing unreleased entries and revise or merge any that this commit reworks or supersedes, rather than appending a separate entry for the same change.
+
 # Use Module:
 - if writing a function look to `src/mhm-tools/common` to check if there are functions there that can be used. If their usage only slightly differs propose no breaking changes to the existing function. Do not implement it yourself. 
 - all functions that only handle xarray DataArrays or DataSets put them in `src/mhm-tools/common/xarray_utils.md`
