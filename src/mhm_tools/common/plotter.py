@@ -103,9 +103,11 @@ def plot_cdf_values(
     color: Optional[str] = None,
     linestyle="-",
     cdf_values: Optional[Sequence[float]] = None,
-    marker_size: int = 8,
     draw_line: bool = True,
     draw_points: bool = True,
+    point_marker: str = "o",
+    point_marker_size: int = 4,
+    point_opacity: float = 0.7,
 ):
     """Plot one CDF series on an existing axis.
 
@@ -123,12 +125,16 @@ def plot_cdf_values(
         Matplotlib linestyle for the CDF line.
     cdf_values : Sequence[float], optional
         Precomputed CDF coordinates.
-    marker_size : int, optional
-        Scatter marker size.
     draw_line : bool, optional
         Draw the CDF line when true.
     draw_points : bool, optional
         Draw CDF points when true.
+    point_marker : str, optional
+        Matplotlib marker style for CDF points.
+    point_marker_size : int, optional
+        Scatter marker size.
+    point_opacity : float, optional
+        Opacity for CDF points.
 
     Returns
     -------
@@ -152,11 +158,38 @@ def plot_cdf_values(
         ax.scatter(
             sorted_values,
             cdf_values,
-            s=marker_size,
+            s=point_marker_size,
             color=color,
             label=label,
+            alpha=point_opacity,
+            marker=point_marker,
         )
     return sorted_values, cdf_values
+
+
+def _get_lower_axis_limit(values, floor=-1.0):
+    """Get a lower axis limit that cuts off extreme low outliers.
+
+    Parameters
+    ----------
+    values : Sequence[float]
+        Numeric values the axis is drawn from.
+    floor : float, optional
+        Lower limit used once the data reaches at or below it.
+
+    Returns
+    -------
+    float
+        `floor` if the data's minimum is at or below it; otherwise a small
+        padding below the data's own minimum, so metrics that never approach
+        `floor` (e.g. ratios near 1) keep a tightly-fit axis instead of being
+        stretched down to `floor`.
+    """
+    min_value = float(np.nanmin(values))
+    if not np.isfinite(min_value) or min_value <= floor:
+        return floor
+    padding = max(abs(min_value) * 0.05, 0.05)
+    return min_value - padding
 
 
 def plot_metric_cdf_comparison(
@@ -233,6 +266,9 @@ def plot_metric_cdf_comparison(
             linestyle=linestyle,
             draw_line=False,
             draw_points=True,
+            point_marker="+",
+            point_marker_size=4,
+            point_opacity=0.3,
         )
         series_to_draw.append(
             (sorted_values, cdf_values, color, linestyle, median_value)
@@ -257,7 +293,7 @@ def plot_metric_cdf_comparison(
             ax.axvline(
                 median_value,
                 color=color,
-                linestyle="dotted",
+                linestyle="dashed",
                 linewidth=1,
             )
 
@@ -267,6 +303,12 @@ def plot_metric_cdf_comparison(
     ax.set_ylim(0.0, 1.01)
     if x_limits is not None:
         ax.set_xlim(x_limits[0], x_limits[1])
+    else:
+        all_values = np.concatenate(
+            [sorted_values for sorted_values, *_ in series_to_draw]
+        )
+        ax.set_xlim(left=_get_lower_axis_limit(all_values))
+    ax.grid(True, color="black", linestyle=":", linewidth=0.4, alpha=0.3)
     ax.legend()
     fig.tight_layout()
     fig.savefig(output_file, dpi=dpi)
@@ -278,6 +320,7 @@ def plot_metric_violin_comparison(
     variable_name: str,
     output_file: Path,
     title: Optional[str] = None,
+    y_limits: Optional[Sequence[float]] = None,
     dpi: int = 450,
     colors: Optional[Mapping[str, str]] = None,
 ) -> None:
@@ -293,6 +336,8 @@ def plot_metric_violin_comparison(
         PNG file to write.
     title : str, optional
         Plot title. Defaults to a violin title for the variable.
+    y_limits : Sequence[float], optional
+        Lower and upper y-axis limits.
     dpi : int, optional
         Output image resolution.
     colors : Mapping[str, str], optional
@@ -312,7 +357,20 @@ def plot_metric_violin_comparison(
             continue
         median_value = float(np.nanmedian(values_array))
         labels.append(f"{label}\n(n={values_array.size}, median={median_value:.3f})")
-        finite_values.append(values_array)
+        # The KDE's bandwidth/shape is computed from every value handed to
+        # it, so a handful of values far outside the displayed y_limits can
+        # squash the in-range shape flat even though those points are never
+        # actually visible - restrict the density estimate to the displayed
+        # range (falling back to the full data if that would empty it) so
+        # the rendered shape matches what a reader can actually see, the
+        # same way an explicit x_limits keeps a CDF plot's visible curve
+        # from being distorted by off-screen outliers.
+        display_values = values_array
+        if y_limits is not None:
+            within_range = (values_array >= y_limits[0]) & (values_array <= y_limits[1])
+            if within_range.any():
+                display_values = values_array[within_range]
+        finite_values.append(display_values)
         violin_colors.append(colors.get(label) if colors is not None else None)
     if not finite_values:
         msg = f"No finite values available for {variable_name}."
@@ -334,7 +392,11 @@ def plot_metric_violin_comparison(
     ax.set_xticklabels(labels, rotation=30, ha="right")
     ax.set_ylabel(variable_name)
     ax.set_title(title or f"Distribution of {variable_name}")
-    ax.grid(axis="y", linestyle=":", linewidth=0.5)
+    if y_limits is not None:
+        ax.set_ylim(y_limits[0], y_limits[1])
+    else:
+        ax.set_ylim(bottom=_get_lower_axis_limit(np.concatenate(finite_values)))
+    ax.grid(axis="y", color="black", linestyle=":", linewidth=0.5, alpha=0.3)
     fig.tight_layout()
     fig.savefig(output_file, dpi=dpi)
     plt.close(fig)

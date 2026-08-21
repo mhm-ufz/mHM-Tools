@@ -1,5 +1,7 @@
 """Create metric comparison plots from metric CSV files."""
 
+from mhm_tools.common.cli_utils import normalize_cli_sequence
+
 METRIC_PLOT_TYPES = ("cdf", "violin", "catchment-map")
 
 
@@ -137,34 +139,6 @@ def add_args(parser):
     )
 
 
-def _normalize_cli_sequence(values):
-    """Normalize repeated and comma-separated CLI values.
-
-    Parameters
-    ----------
-    values : str or Sequence[str] or None
-        CLI value or values to normalize.
-
-    Returns
-    -------
-    list[str] or None
-        Normalized values, or None when no values were supplied.
-    """
-    if values is None:
-        return None
-    if isinstance(values, str):
-        values = [values]
-    normalized_values = []
-    for value in values:
-        for part in str(value).split(","):
-            striped_part = part.strip()
-            if striped_part:
-                normalized_values.append(striped_part)
-    if not normalized_values:
-        return None
-    return normalized_values
-
-
 def _validate_metric_plot_types(plot_types):
     """Validate metric plot type names.
 
@@ -201,14 +175,14 @@ def run(args):
     """
     from mhm_tools.post.metric_plots import write_metric_plots
 
-    input_paths = _normalize_cli_sequence(args.input_paths)
-    input_names = _normalize_cli_sequence(args.input_names)
-    variables = _normalize_cli_sequence(args.variables)
-    plot_types = _validate_metric_plot_types(_normalize_cli_sequence(args.plot_types))
-    shape_paths = _normalize_cli_sequence(args.shape_paths)
-    mask_paths = _normalize_cli_sequence(args.mask_paths)
-    name_fields = _normalize_cli_sequence(args.name_fields)
-    group_by = _normalize_cli_sequence(args.group_by)
+    input_paths = normalize_cli_sequence(args.input_paths)
+    input_names = normalize_cli_sequence(args.input_names)
+    variables = normalize_cli_sequence(args.variables)
+    plot_types = _validate_metric_plot_types(normalize_cli_sequence(args.plot_types))
+    shape_paths = normalize_cli_sequence(args.shape_paths)
+    mask_paths = normalize_cli_sequence(args.mask_paths)
+    name_fields = normalize_cli_sequence(args.name_fields)
+    group_by = normalize_cli_sequence(args.group_by)
     write_metric_plots(
         input_paths=input_paths,
         input_names=input_names,

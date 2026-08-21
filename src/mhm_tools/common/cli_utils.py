@@ -20,6 +20,34 @@ from mhm_tools.common.xarray_utils import get_coord_key, get_ds_extend
 logger = logging.getLogger(__name__)
 
 
+def normalize_cli_sequence(values):
+    """Normalize repeated and comma-separated CLI values.
+
+    Parameters
+    ----------
+    values : str or Sequence[str] or None
+        CLI value or values to normalize.
+
+    Returns
+    -------
+    list[str] or None
+        Normalized values, or None when no values were supplied.
+    """
+    if values is None:
+        return None
+    if isinstance(values, str):
+        values = [values]
+    normalized_values = []
+    for value in values:
+        for part in str(value).split(","):
+            striped_part = part.strip()
+            if striped_part:
+                normalized_values.append(striped_part)
+    if not normalized_values:
+        return None
+    return normalized_values
+
+
 def parse_coords(coords_str):
     """Split the input string of 'lat,lon' by comma and convert each part to a float."""
     try:
