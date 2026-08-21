@@ -1,7 +1,17 @@
 import numpy as np
 import xarray as xr
 
-from mhm_tools.common.cli_utils import get_coords_from_mask
+from mhm_tools.common.cli_utils import get_coords_from_mask, normalize_cli_sequence
+
+
+def test_normalize_cli_sequence_splits_repeated_and_comma_separated_values():
+    assert normalize_cli_sequence(["a,b", " c "]) == ["a", "b", "c"]
+
+
+def test_normalize_cli_sequence_returns_none_for_none_or_empty():
+    assert normalize_cli_sequence(None) is None
+    assert normalize_cli_sequence([]) is None
+    assert normalize_cli_sequence([" ", ","]) is None
 
 
 def test_get_coords_from_mask_with_bounds(tmp_path):

@@ -1,9 +1,21 @@
 # Changelog
+
 ## [Unreleased]
 
 ### Added
 - Add `create-wmo-region-masks`, a new tool that delineates (or reuses) global basins, rasterizes the 6 WMO regions from a shapefile set and a GeoJSON, maps every basin to exactly one region using a basin-adjacency graph seeded from anchor basins covered by the original shapefiles (instead of a context-free per-basin raster vote), excludes Greenland, and writes one mask per region plus a 4-panel overview plot (shapes / GeoJSON / combined / final). The anchor-seeded region growing keeps regions contiguous and stops endorheic basins from forming isolated islands of the wrong region, which the previous per-basin majority vote (`legacy create-subdomain-masks`) could not guarantee.
 - Add `combine_region_grids`, `create_mask_from_polygon`, and `create_valid_data_mask` to `mhm_tools.common.xarray_utils`; `plot_categorical_map_panels` to `mhm_tools.common.plotter`; and `write_mask_to_file` to `mhm_tools.common.file_handler`, extracted for reuse by `create-wmo-region-masks` (`CreateSubdomainMasks.get_mask_from_polygon` now delegates to the relocated `create_mask_from_polygon`, and `GREENLAND_COORDS` moved to `mhm_tools.common.constants`, both without changing existing behavior).
+- Add `discharge-eval-comparison` to compare two or more `discharge-evaluation` `results.csv` files: CDF, violin, catchment-map, and a new per-gauge spatial `map-diff` plot (metric difference between a reference run and one or more other runs), built on the existing `metric-plots` machinery with discharge-specific defaults (variables and axis ranges matching `discharge-evaluation`'s own conventions).
+- Break every comparison plot type (cdf/violin/map-diff/catchment-map) down per GRDC region for whichever regions have data - derived from each gauge's id via the new `discharge_evaluation.get_region_from_id` - with each region's catchment-map/map-diff view framed by that region's prescribed `discharge_evaluation.region_bounds` extent, and collect everything into one comparison overview PDF, global plots first then each region's plots grouped together.
+- Discard out-of-range and physically-impossible metric values (e.g. `kge`/`nse` above 1, which cannot occur by construction) before any comparison plot is drawn, so one diverged run can't distort axis scales or a violin's KDE shape.
+- `plot_metric_violin_comparison` gains a `y_limits` parameter (mirroring `plot_metric_cdf_comparison`'s existing `x_limits`), and `write_metric_plots` gains `axis_limits_by_variable` to set both from one per-variable mapping; both plot functions default their lower axis limit to -1 (or slightly below the data's own minimum when it never reaches -1) instead of auto-scaling to extreme outliers, and draw a black-ish gridline plus a dashed per-series median line.
+- `write_catchment_median_maps`/`plot_catchment_metric_maps` gain an optional `extent` override, so a map's view can be framed explicitly instead of always auto-fitting to the matched geometries' own (sometimes unreliable) bounds.
+- `discharge-evaluation`'s gauge map, and `discharge-eval-comparison`'s map-diff and catchment-map plots, draw lat/lon gridlines with axis labels, shade the ocean a visible light gray (`0.85`) while keeping land near-white (`0.97`) instead of both being within 0.02 of each other and reading as one flat background, and color catchments worse than the display floor (e.g. `kge` below -0.5) black instead of light gray.
+
+### Changed
+
+- Move `_normalize_cli_sequence` out of `_cli/_metric_plots.py` into `common/cli_utils.py` as `normalize_cli_sequence`, shared with the new `discharge-eval-comparison` CLI.
+- CDF plotts are plotted with a small low opacity `+` marker instead of large high opacity `o` markers. 
 
 ## [v0.2.3]
 

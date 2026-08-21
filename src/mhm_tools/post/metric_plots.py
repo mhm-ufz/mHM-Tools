@@ -8,7 +8,7 @@ Authors
 
 import logging
 from pathlib import Path
-from typing import List, Optional, Sequence
+from typing import List, Mapping, Optional, Sequence
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -658,6 +658,7 @@ def write_metric_plots(  # noqa: PLR0913
     group_by: Optional[Sequence[str]] = None,
     color_by: Optional[str] = None,
     style_by: Optional[str] = None,
+    axis_limits_by_variable: Optional[Mapping[str, Sequence[float]]] = None,
 ) -> List[Path]:
     """Write metric comparison plots from metric CSV files.
 
@@ -701,6 +702,9 @@ def write_metric_plots(  # noqa: PLR0913
         Metadata field used for plot colors.
     style_by : str, optional
         Metadata field used for CDF line styles.
+    axis_limits_by_variable : Mapping[str, Sequence[float]], optional
+        Explicit value-axis limits by variable (x-axis for CDF, y-axis for
+        violin plots), overriding the shared plotter's own default.
 
     Returns
     -------
@@ -757,6 +761,7 @@ def write_metric_plots(  # noqa: PLR0913
                 values_by_label=values_by_input,
                 variable_name=variable,
                 output_file=output_file,
+                x_limits=(axis_limits_by_variable or {}).get(variable),
                 dpi=dpi,
                 colors=colors_by_label,
                 linestyles=linestyles_by_label,
@@ -771,6 +776,7 @@ def write_metric_plots(  # noqa: PLR0913
                 values_by_label=values_by_input,
                 variable_name=variable,
                 output_file=output_file,
+                y_limits=(axis_limits_by_variable or {}).get(variable),
                 dpi=dpi,
                 colors=colors_by_label,
             )

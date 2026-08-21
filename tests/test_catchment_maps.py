@@ -146,3 +146,40 @@ def test_geometries_are_sorted_largest_first():
     sorted_gdf = catchment_maps.sort_geodataframe_by_area_desc(gdf)
 
     assert sorted_gdf["id"].tolist() == ["large", "small"]
+
+
+def test_write_catchment_median_maps_passes_extent_through(tmp_path, monkeypatch):
+    """An explicit extent must reach plot_catchment_metric_maps unchanged.
+
+    A malformed or wrongly-projected shapefile can make a catchment's own
+    bounds balloon out to (near) the whole globe; passing an explicit
+    extent (e.g. a region's prescribed bounding box) lets a caller override
+    that regardless of what the matched geometries' own bounds are.
+    """
+    shape_dir = tmp_path / "shapes"
+    shape_dir.mkdir()
+    gpd.GeoDataFrame(
+        {"name": ["one"], "geometry": [box(0, 0, 1, 1)]},
+        geometry="geometry",
+        crs="EPSG:4326",
+    ).to_file(shape_dir / "basin_1.shp")
+    metric_df = pd.DataFrame({"id": [1], "kge": [0.5]})
+
+    captured = {}
+
+    def fake_plot_catchment_metric_maps(**kwargs):
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr(
+        catchment_maps, "plot_catchment_metric_maps", fake_plot_catchment_metric_maps
+    )
+
+    catchment_maps.write_catchment_median_maps(
+        metric_df=metric_df,
+        output_dir=tmp_path,
+        shape_folder=shape_dir,
+        extent=(25.0, 180.0, 0.0, 55.0),
+    )
+
+    assert captured["extent"] == (25.0, 180.0, 0.0, 55.0)

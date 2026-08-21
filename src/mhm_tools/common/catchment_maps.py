@@ -380,6 +380,7 @@ def write_catchment_median_maps(
     output_prefix="catchment_map",
     dpi=200,
     title_context=None,
+    extent=None,
 ):
     """Write catchment median maps for metric rows.
 
@@ -409,6 +410,11 @@ def write_catchment_median_maps(
         Output image resolution.
     title_context : str, optional
         Context added to map titles.
+    extent : tuple[float, float, float, float], optional
+        Explicit (lon_min, lon_max, lat_min, lat_max) map extent. Defaults
+        to the matched geometries' own bounds, padded by 10% - which can
+        balloon out to (near) the whole globe if a matched geometry is
+        malformed or not in the expected lon/lat CRS.
 
     Returns
     -------
@@ -443,6 +449,7 @@ def write_catchment_median_maps(
         output_prefix=output_prefix,
         dpi=dpi,
         title_context=title_context,
+        extent=extent,
     )
 
 
@@ -454,6 +461,7 @@ def plot_catchment_metric_maps(
     cmap="viridis",
     dpi=200,
     title_context=None,
+    extent=None,
 ):
     """Plot metric values on catchment polygons.
 
@@ -473,6 +481,10 @@ def plot_catchment_metric_maps(
         Output image resolution.
     title_context : str, optional
         Context added to map titles.
+    extent : tuple[float, float, float, float], optional
+        Explicit (lon_min, lon_max, lat_min, lat_max) map extent, e.g. a
+        region's prescribed bounding box. Defaults to the plotted
+        geometries' own bounds, padded by 10%.
 
     Returns
     -------
@@ -489,9 +501,16 @@ def plot_catchment_metric_maps(
     output_dir = Path(output_dir)
     output_files = []
     plot_gdf = sort_geodataframe_by_area_desc(metric_gdf)
-    min_lon, min_lat, max_lon, max_lat = plot_gdf.total_bounds
-    lon_pad = (max_lon - min_lon) * 0.1 if max_lon > min_lon else 0.1
-    lat_pad = (max_lat - min_lat) * 0.1 if max_lat > min_lat else 0.1
+    if extent is None:
+        min_lon, min_lat, max_lon, max_lat = plot_gdf.total_bounds
+        lon_pad = (max_lon - min_lon) * 0.1 if max_lon > min_lon else 0.1
+        lat_pad = (max_lat - min_lat) * 0.1 if max_lat > min_lat else 0.1
+        extent = (
+            min_lon - lon_pad,
+            max_lon + lon_pad,
+            min_lat - lat_pad,
+            max_lat + lat_pad,
+        )
 
     for variable in variables:
         if variable not in plot_gdf.columns:
@@ -506,26 +525,19 @@ def plot_catchment_metric_maps(
         vmin, vmax, extend = _get_metric_color_limits(variable, values.to_numpy())
         cmap_obj = plt.get_cmap(cmap).copy()
         if extend in ["min", "both"]:
-            cmap_obj.set_under("lightgray")
+            cmap_obj.set_under("black")
         if extend in ["max", "both"]:
             cmap_obj.set_over("darkred")
         norm = mcolors.Normalize(vmin=vmin, vmax=vmax, clip=False)
 
         fig = plt.figure(figsize=(7, 5))
         ax = plt.axes(projection=ccrs.PlateCarree())
-        ax.set_extent(
-            [
-                min_lon - lon_pad,
-                max_lon + lon_pad,
-                min_lat - lat_pad,
-                max_lat + lat_pad,
-            ],
-            crs=ccrs.PlateCarree(),
-        )
+        ax.set_extent(extent, crs=ccrs.PlateCarree())
         ax.add_feature(cfeature.BORDERS, linewidth=0.6)
         ax.add_feature(cfeature.COASTLINE, linewidth=0.5)
-        ax.add_feature(cfeature.LAND, facecolor="0.95")
-        ax.add_feature(cfeature.OCEAN, facecolor="0.97")
+        ax.add_feature(cfeature.LAND, facecolor="0.97")
+        ax.add_feature(cfeature.OCEAN, facecolor="0.85")
+        ax.gridlines(draw_labels=True, linewidth=0.2, linestyle="--")
         plot_gdf.assign(**{variable: values}).plot(
             column=variable,
             ax=ax,
