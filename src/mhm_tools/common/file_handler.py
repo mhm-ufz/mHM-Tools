@@ -626,6 +626,7 @@ def get_xarray_ds_from_file(  # noqa: PLR0912
             use_mfdataset=use_mfdataset,
             engine=engine,
             decode_coords=decode_coords,
+            variables=[var_name] if var_name else None,
         )
     elif suffix in {".tif", ".tiff"}:
         import rioxarray as rxr
@@ -1175,7 +1176,12 @@ def get_dataset_from_path(
             with ErrorLogger(logger):
                 msg = "Multi-file loading supports NetCDF files only."
                 raise ValueError(msg)
-        ds_out = read_dataset(file_list, use_mfdataset=use_mfdataset, engine=engine)
+        ds_out = read_dataset(
+            file_list,
+            use_mfdataset=use_mfdataset,
+            engine=engine,
+            variables=[var_name] if var_name else None,
+        )
         return _postprocess(ds_out)
 
     path_in = path
@@ -1200,7 +1206,12 @@ def get_dataset_from_path(
 
     path_str = str(path_in)
     if any(w in path_str for w in ("*", "?", "[", "]")) and path_str.endswith(".nc"):
-        ds_out = read_dataset(path_str, use_mfdataset=use_mfdataset, engine=engine)
+        ds_out = read_dataset(
+            path_str,
+            use_mfdataset=use_mfdataset,
+            engine=engine,
+            variables=[var_name] if var_name else None,
+        )
         return _postprocess(ds_out)
 
     with ErrorLogger(logger):

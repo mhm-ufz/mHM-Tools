@@ -4,6 +4,10 @@ import pytest
 import xarray as xr
 
 from mhm_tools.common.logger import configure_mhm_tools_logger
+from mhm_tools.common.time_utils import (
+    normalize_time_axis,
+    resample_to_target_freq,
+)
 from mhm_tools.common.xarray_utils import get_ds_extend
 from mhm_tools.post.gridded_data_evaluation import (
     apply_spatial_mask,
@@ -13,9 +17,7 @@ from mhm_tools.post.gridded_data_evaluation import (
     get_stats,
     get_stats_one_pass,
     infer_time_resolution_hours_from_files,
-    normalize_time_axis,
     regridd_to_higher_spatial_resolution,
-    resample_to_target_freq,
 )
 
 

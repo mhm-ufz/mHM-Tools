@@ -10,12 +10,10 @@
 - Keep code clear and concise. Do not create unnecessary functions. Also do not make it to short but keep it easily human readable. 
 - When using comments to explain the following code, keep them concise and to three lines maximum.
 - When I ask you to commit changes allways commit in small sections with meaningful commit messages and add the changes to the change log, ask for approval and then commit these as well in a seperate commit. 
+- The changelog reflects the cumulative changes since the last tag, not just the current commit's diff. Before adding a new entry, review the existing unreleased entries and revise or merge any that this commit reworks or supersedes, rather than appending a separate entry for the same change.
 - Commit messages are plain descriptive sentences (e.g. "Fix off-by-one bug in cut_to_filled_area's crop slices"), never conventional-commit prefixes like `fix:` or `feat:`. They  allways have active verbs in the beginning as if the sentence was: This commit will COMMIT_MESSAGE.
 - Commit messages should be specific. e.g. when adding tests, state that you are adding tests. 
 - When you use terminal commands and ask for permission write one maximum two lines of explenation. What is the goal of the command. Why do you need it. 
-- When you make a commit, update the changelog. 
-- The changelog reflects the cumulative changes since the last tag, not just the current commit's diff. Before adding a new entry, review the existing unreleased entries and revise or merge any that this commit reworks or supersedes, rather than appending a separate entry for the same change.
-
 # Use Module:
 - if writing a function look to `src/mhm-tools/common` to check if there are functions there that can be used. If their usage only slightly differs propose no breaking changes to the existing function. Do not implement it yourself. 
 - all functions that only handle xarray DataArrays or DataSets put them in `src/mhm-tools/common/xarray_utils.md`
@@ -36,3 +34,4 @@ Function names can for example start with:
     - `_file` discribes a file path
     - `_path` discribes a path that could either be a file or a directory. In this case there needs to be a point where it is checked what it is and is handled respectively. From then on `_dir` or `_file` name parts should be used again.
 - CLI arguemtns should allways be dash seperated and python arguments by underscore
+- Follow Python naming convention PEP 8

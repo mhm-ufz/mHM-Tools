@@ -1409,7 +1409,7 @@ class CreateWmoRegionMasks:
         Force recomputation of the matching cached artifact.
     """
 
-    def __init__( # noqa: PLR0913
+    def __init__(
         self,
         output_dir,
         mask_file,

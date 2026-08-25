@@ -14,6 +14,21 @@ from mhm_tools.common.resolution_handler import Resolution
 logger = logging.getLogger(__name__)
 
 
+def sanitize_name(value):
+    """Create a filesystem-safe name part for output file names.
+
+    Args:
+        value: Value used in an output file name.
+
+    Returns
+    -------
+        The safe file name part, "unknown" when nothing is left.
+    """
+    safe_name = str(value).strip().replace("/", "_").replace("\\", "_")
+    safe_name = safe_name.replace(" ", "_")
+    return safe_name or "unknown"
+
+
 def dict_to_multiline_string(d: dict, spacing: int = 12) -> str:
     r"""
     Convert a dictionary into a formatted multiline string.

@@ -102,11 +102,41 @@ def _fallback_open(
         raise exc
 
 
+def select_dataset_variables(ds, variables):
+    """Keep only the requested data variables, plus any coordinate bounds.
+
+    A model output file often holds dozens of variables while a tool needs one.
+    Dropping the rest at open time keeps them out of the combine and out of
+    memory.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        Dataset to reduce.
+    variables : Sequence[str] or None
+        Names to keep. None or an empty sequence returns the dataset unchanged.
+
+    Returns
+    -------
+    xr.Dataset
+        The reduced dataset.
+    """
+    if not variables:
+        return ds
+    keep = [name for name in variables if name in ds.data_vars]
+    if not keep:
+        return ds
+    # bounds are tiny and describe the coordinates, so they are worth keeping
+    keep += [name for name in ds.data_vars if name.endswith(("_bnds", "_bounds"))]
+    return ds[list(dict.fromkeys(keep))]
+
+
 def read_dataset(
     file_path: Union[str, Path, List[Union[str, Path]]],
     use_mfdataset: bool = False,
     engine: str = "netcdf4",
     decode_coords: str = "coordinates",
+    variables=None,
 ) -> xr.Dataset:
     """
     Load one or more NetCDF files into a single xarray.Dataset.
@@ -193,6 +223,11 @@ def read_dataset(
                     paths=paths,
                     engine=engine,
                     decode_coords=decode_coords,
+                    preprocess=(
+                        None
+                        if not variables
+                        else lambda part: select_dataset_variables(part, variables)
+                    ),
                 )
             except Exception as exc:
                 logger.error(f"open_mfdataset failed on {paths!r}: {exc}")
@@ -211,7 +246,7 @@ def read_dataset(
             except Exception as exc:
                 logger.error(f"Failed opening {p}: {exc}")
                 raise
-            arrays.append(ds_tmp)
+            arrays.append(select_dataset_variables(ds_tmp, variables))
         try:
             return xr.combine_by_coords(
                 arrays,
@@ -235,7 +270,7 @@ def read_dataset(
     except Exception as exc:
         logger.error(f"Failed opening {single}: {exc}")
         raise
-    return ds
+    return select_dataset_variables(ds, variables)
 
 
 def set_netcdf_encoding(
