@@ -25,6 +25,7 @@ from matplotlib import colors as mcolors
 from scipy.spatial import cKDTree
 
 from mhm_tools.common.catchment_maps import write_catchment_median_maps
+from mhm_tools.common.constants import WMO_INDEX_TO_REGION
 from mhm_tools.common.file_handler import (
     get_dataset_from_path,
     write_xarray_to_file,
@@ -52,24 +53,6 @@ from mhm_tools.post.hydrograph import gen_hydrograph_by_data_sets
 
 logger = logging.getLogger(__name__)
 
-index_to_region = {
-    1: "Africa",
-    2: "Asia",
-    3: "South America",
-    4: "North/Central America",
-    5: "SW Pacific",
-    6: "Europe",
-}
-region_to_index = {v: k for k, v in index_to_region.items()}
-region_bounds = {
-    "Africa": {"lon_slice": slice(-20, 55), "lat_slice": slice(-35, 38)},
-    "Asia": {"lon_slice": slice(25, 180), "lat_slice": slice(0, 85)},
-    "South America": {"lon_slice": slice(-82, -34), "lat_slice": slice(-56, 13)},
-    "North/Central America": {"lon_slice": slice(-168, -52), "lat_slice": slice(5, 84)},
-    "SW Pacific": {"lon_slice": slice(95, 180), "lat_slice": slice(-50, 25)},
-    "Europe": {"lon_slice": slice(-25, 60), "lat_slice": slice(35, 82)},
-}
-
 
 def get_region_from_id(gauge_id):
     """Get the discharge region name from a GRDC-style gauge id.
@@ -77,7 +60,7 @@ def get_region_from_id(gauge_id):
     Parameters
     ----------
     gauge_id : int or str
-        Gauge identifier whose leading digit is a `index_to_region` region code.
+        Gauge identifier whose leading digit is a `WMO_INDEX_TO_REGION` region code.
 
     Returns
     -------
@@ -85,7 +68,7 @@ def get_region_from_id(gauge_id):
         Region name, or "Unknown" if the id matches no region code.
     """
     gauge_id_str = str(gauge_id)
-    for region_id, region_name in index_to_region.items():
+    for region_id, region_name in WMO_INDEX_TO_REGION.items():
         if gauge_id_str.startswith(str(region_id)):
             return region_name
     return "Unknown"
@@ -2307,7 +2290,7 @@ def plot_cdf(df, output_path, boostrap_iterations=None):
     plot_modes = ["global", "global_color_by_region", "regions"]
     region_colors = {
         region: cb_colors[i % len(cb_colors)]
-        for i, region in enumerate(index_to_region.values())
+        for i, region in enumerate(WMO_INDEX_TO_REGION.values())
     }
     output_files = []
 
@@ -2348,7 +2331,7 @@ def plot_cdf(df, output_path, boostrap_iterations=None):
 
             if plot == "regions":
                 region_values = {}
-                for region_name in index_to_region.values():
+                for region_name in WMO_INDEX_TO_REGION.values():
                     region_df = var_df[var_df["region"] == region_name]
                     if not region_df.empty:
                         region_values[region_name] = region_df[var].values
@@ -2373,7 +2356,7 @@ def plot_cdf(df, output_path, boostrap_iterations=None):
             global_cdf = np.arange(1, len(global_sorted) + 1) / len(global_sorted)
             global_sorted["cdf"] = global_cdf
             fig, ax = plt.subplots(figsize=(6, 4))
-            for region_name in index_to_region.values():
+            for region_name in WMO_INDEX_TO_REGION.values():
                 region_df = global_sorted[global_sorted["region"] == region_name]
                 if region_df.empty:
                     continue

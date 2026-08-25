@@ -15,6 +15,7 @@ from mhm_tools.common.netcdf import (
     generate_bounds_for_all_coords,
     get_netcdf_metadata_data_vars,
 )
+from mhm_tools.common.time_utils import timedelta_to_alias
 
 logger = logging.getLogger(__name__)
 
@@ -432,44 +433,6 @@ def induce_data_var_from_file_name(ds, file_path):
     return None
 
 
-def timedelta_to_alias(ds: xr.DataArray) -> str:
-    """Map a median timedelta to a pandas frequency alias.
-
-    - ~1 day -> 'D'
-    - ~7 days -> 'W'
-    - ~28-31 days -> 'ME'
-    - otherwise: fall back to '<N>h'
-
-    """
-    time = getattr(ds, "time", None)
-    if time is None:
-        msg = "Object has no 'time' coordinate."
-        with ErrorLogger(logger):
-            raise ValueError(msg)
-    if time.size < 2:
-        msg = (
-            "Cannot infer time frequency because only "
-            f"{time.size} timestamp{'s' if time.size != 1 else ''} are present."
-        )
-        raise ValueError(msg)
-    try:
-        median_delta = ds.time.diff("time").median()
-    except Exception as e:
-        logger.error(ds)
-        with ErrorLogger(logger):
-            raise e
-    days = median_delta / np.timedelta64(1, "D")
-    hours = int(median_delta / np.timedelta64(1, "h"))
-    if abs(days - 1) < 0.5:
-        return hours, "D"
-    if abs(days - 7) < 1:
-        return hours, "W"
-    if 27 < days < 32:
-        return hours, "ME"
-    # fallback: integer hours (lowercase for pandas >= 3.0)
-    return hours, f"{hours}h"
-
-
 def get_overlapping_time_slice(input_ds, ref_ds):
     """Return the inclusive overlapping time window of two time-indexed objects.
 
@@ -737,7 +700,16 @@ def get_ds_extend(ds, var=None, recursive_search=True, resolutions=None):
     lon_bnds_key = lon.attrs.get("bounds", None)
     lat_bnds_key = lat.attrs.get("bounds", None)
     res = _coord_bound_resolution(ds, lon_key, lat_key, lon_bnds_key, lat_bnds_key)
-    if lon_bnds_key is not None and lat_bnds_key is not None:
+    # a coordinate can name a bounds variable that is not there, for instance
+    # after selecting one variable out of a bounded dataset, so check both.
+    # `in` on a DataArray tests its values, hence the explicit container.
+    present = getattr(ds, "variables", ds.coords)
+    if (
+        lon_bnds_key is not None
+        and lat_bnds_key is not None
+        and lon_bnds_key in present
+        and lat_bnds_key in present
+    ):
         lon_min = float(ds[lon_bnds_key].values.min())
         lon_max = float(ds[lon_bnds_key].values.max())
         lat_min = float(ds[lat_bnds_key].values.min())

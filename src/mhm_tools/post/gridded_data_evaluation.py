@@ -34,6 +34,10 @@ from mhm_tools.common.logger import ErrorLogger, log_arguments, log_errors
 from mhm_tools.common.metrics.metrics_handler import create_results_csv
 from mhm_tools.common.netcdf import generate_bounds_for_all_coords
 from mhm_tools.common.resolution_handler import Resolution, get_file_res
+from mhm_tools.common.time_utils import (
+    resample_to_target_freq,
+    timedelta_to_alias,
+)
 from mhm_tools.common.utils import cut_to_filled_area
 from mhm_tools.common.xarray_utils import (
     crop_ds,
@@ -44,7 +48,6 @@ from mhm_tools.common.xarray_utils import (
     normalize_lat_lon,
     regrid_mask,
     spearman_correlation,
-    timedelta_to_alias,
 )
 
 logger = logging.getLogger(__name__)
@@ -626,7 +629,7 @@ def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None)
             raise ValueError(msg)
     logger.debug(files)
     with get_xarray_ds_from_file(
-        files[0], engine="netcdf4", force_decending_y=True
+        files[0], var_name=input_var, engine="netcdf4", force_decending_y=True
     ) as ds:
         # Apply coordinate slicing if needed
         if coordinate_slice is not None:
@@ -644,7 +647,7 @@ def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None)
     monthly_counts = np.zeros((12, *da.shape[1:]))
     for f, file in enumerate(files):
         with get_xarray_ds_from_file(
-            file, engine="netcdf4", force_decending_y=True
+            file, var_name=input_var, engine="netcdf4", force_decending_y=True
         ) as ds:
             logger.info(f"timestep {count} in file {f+1} / {len(files)} from {file}")
             if coordinate_slice is not None:
@@ -749,6 +752,7 @@ def get_stats_one_pass(
     climatology = np.where(monthly_counts > 0, climatology, np.nan)
     with get_dataset_from_path(
         files[0],
+        var_name=var,
         engine="netcdf4",
         force_decending_y=True,
     ) as ds_in:
@@ -970,33 +974,6 @@ def resample_to_coarser_calendar(
     return resample_to_target_freq(ds_input, ds_ref, target_alias)
 
 
-def resample_to_target_freq(
-    ds_input: xr.Dataset, ds_ref: xr.Dataset, target_freq
-) -> Tuple[xr.Dataset, xr.Dataset]:
-    """Resample both datasets to the provided target freq."""
-    _hours_in, alias_in = timedelta_to_alias(ds_input)
-    _hours_ref, alias_ref = timedelta_to_alias(ds_ref)
-
-    if target_freq != alias_ref:
-        # input is coarser (e.g. monthly) → bring ref up to that
-        logger.info(f"Resampling ref from {alias_ref} to {target_freq}")
-        ds_ref = ds_ref.resample(time=target_freq).mean()
-    if target_freq != alias_in:
-        # ref is coarser → bring input up to that
-        logger.info(f"Resampling input from {alias_in} to {target_freq}")
-        ds_input = ds_input.resample(time=target_freq).mean()
-
-    # Normalize anchors so both datasets share identical timestamps.
-    ds_input = normalize_time_axis(ds_input, target_freq)
-    ds_ref = normalize_time_axis(ds_ref, target_freq)
-
-    # Align the two datasets along the time dimension ensuring that they match exactly, while ignoring any other dimensions
-    non_time_dims = (set(ds_input.dims) | set(ds_ref.dims)) - {"time"}
-    ds_input, ds_ref = xr.align(ds_input, ds_ref, join="inner", exclude=non_time_dims)
-    # logger.debug(f"Input file after align {ds_input}")
-    return ds_input, ds_ref
-
-
 def crop_data_to_overlapping_time(input_ds, ref_ds):
     """Crop data to overlapping time."""
     time_slice = get_overlapping_time_slice(input_ds, ref_ds)
@@ -1014,49 +991,6 @@ def crop_data_to_overlapping_time(input_ds, ref_ds):
     # # Ensure identical time axis after slicing (e.g. monthly midpoints can differ)
     # input_ds, ref_ds = xr.align(input_ds, ref_ds, join="inner")
     return input_ds, ref_ds, time_slice
-
-
-def normalize_time_axis(ds: xr.Dataset, alias: str) -> xr.Dataset:
-    """Normalize time stamps to a consistent anchor for the given frequency alias."""
-
-    def _period_timestamp_index(period_freq: str, timestamp_freq: str):
-        time_index = ds.indexes.get("time")
-        if time_index is None:
-            return None
-        try:
-            period_index = time_index.to_period(period_freq)
-        except Exception:
-            try:
-                period_index = time_index.to_datetimeindex().to_period(period_freq)
-            except Exception:
-                return None
-        try:
-            return period_index.to_timestamp(timestamp_freq)
-        except Exception:
-            return period_index.to_timestamp(freq=timestamp_freq)
-
-    alias = alias.upper()
-    if "time" not in ds.coords:
-        ds_out = ds
-    elif alias.endswith("H"):
-        try:
-            ds_out = ds.assign_coords(time=ds.time.dt.floor("h"))
-        except ValueError:
-            ds_out = ds.assign_coords(time=ds.time.dt.floor("h"))
-    elif alias == "D":
-        ds_out = ds.assign_coords(time=ds.time.dt.floor("D"))
-    elif alias.startswith("W"):
-        new_time = _period_timestamp_index("W-MON", "W-MON")
-        ds_out = ds.assign_coords(time=new_time) if new_time is not None else ds
-    elif alias == "ME":
-        new_time = _period_timestamp_index("M", "M")
-        ds_out = ds.assign_coords(time=new_time) if new_time is not None else ds
-    elif alias == "MS":
-        new_time = _period_timestamp_index("M", "MS")
-        ds_out = ds.assign_coords(time=new_time) if new_time is not None else ds
-    else:
-        ds_out = ds
-    return ds_out
 
 
 @log_errors(raise_exceptions=True)
@@ -1768,6 +1702,7 @@ def get_stats(
                 )
                 with get_dataset_from_path(
                     file_list,
+                    var_name=var,
                     available_mem=available_mem,
                     file_name=file_name,
                 ) as ds_in:
@@ -1787,6 +1722,7 @@ def get_stats(
     else:
         with get_dataset_from_path(
             path,
+            var_name=var,
             engine="netcdf4",
             force_decending_y=True,
             create_bounds=True,

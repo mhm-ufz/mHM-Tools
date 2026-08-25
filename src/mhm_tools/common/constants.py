@@ -88,3 +88,20 @@ GREENLAND_COORDS = np.array(
     ]
 ).T
 """Polygon vertices (lon, lat) approximating Greenland's coastline."""
+WMO_REGION_BOUNDS = {
+    "Africa": {"lon_slice": slice(-20, 55), "lat_slice": slice(-35, 38)},
+    "Asia": {"lon_slice": slice(25, 180), "lat_slice": slice(0, 85)},
+    "South America": {"lon_slice": slice(-82, -34), "lat_slice": slice(-56, 13)},
+    "North/Central America": {"lon_slice": slice(-168, -52), "lat_slice": slice(5, 84)},
+    "SW Pacific": {"lon_slice": slice(95, 180), "lat_slice": slice(-50, 25)},
+    "Europe": {"lon_slice": slice(-25, 60), "lat_slice": slice(35, 82)},
+}
+WMO_INDEX_TO_REGION = {
+    1: "Africa",
+    2: "Asia",
+    3: "South America",
+    4: "North/Central America",
+    5: "SW Pacific",
+    6: "Europe",
+}
+WMO_REGION_TO_INDEX = {v: k for k, v in WMO_INDEX_TO_REGION.items()}

@@ -30,10 +30,10 @@ from mhm_tools.common.file_handler import (
     write_xarray_to_file,
 )
 from mhm_tools.common.logger import ErrorLogger, log_arguments
+from mhm_tools.common.time_utils import timedelta_to_alias
 from mhm_tools.common.xarray_utils import (
     get_coord_key,
     get_single_data_var,
-    timedelta_to_alias,
 )
 
 logger = logging.getLogger(__name__)

@@ -18,7 +18,9 @@ import numpy as np
 import pandas as pd
 from matplotlib import colors as mcolors
 
+from mhm_tools.common.constants import WMO_REGION_BOUNDS
 from mhm_tools.common.logger import ErrorLogger
+from mhm_tools.common.utils import sanitize_name
 
 logger = logging.getLogger(__name__)
 
@@ -41,9 +43,7 @@ def _sanitize_name(value):
     str
         Safe filename part.
     """
-    safe_name = str(value).strip().replace("/", "_").replace("\\", "_")
-    safe_name = safe_name.replace(" ", "_")
-    return safe_name or "unknown"
+    return sanitize_name(value)
 
 
 def _read_dfs_by_name(input_paths, input_names, file_names):
@@ -166,7 +166,7 @@ def _sort_region_files_by_region(files):
     `write_discharge_metric_diff_region_maps` (map-diff) each loop over
     every region independently, so their combined output is grouped by
     function/plot-type first. This regroups it by region instead - all of
-    one region's plots together - matching `region_bounds`' order, so
+    one region's plots together - matching `WMO_REGION_BOUNDS`' order, so
     e.g. "Africa: cdf, violin, map-diff" appears as one block in the
     overview PDF instead of being split across separate cdf/violin/map-diff
     sections.
@@ -179,13 +179,15 @@ def _sort_region_files_by_region(files):
     Returns
     -------
     list[Path]
-        The same files, grouped by region (region_bounds order) and then
+        The same files, grouped by region (WMO_REGION_BOUNDS order) and then
         by plot type (cdf, violin, map-diff).
     """
-    from mhm_tools.post.discharge_evaluation import region_bounds
+    from mhm_tools.common.constants import WMO_REGION_BOUNDS
 
-    region_order = {region: index for index, region in enumerate(region_bounds)}
-    sanitized_to_region = {_sanitize_name(region): region for region in region_bounds}
+    region_order = {region: index for index, region in enumerate(WMO_REGION_BOUNDS)}
+    sanitized_to_region = {
+        _sanitize_name(region): region for region in WMO_REGION_BOUNDS
+    }
     plot_type_order = {"cdf": 0, "violin": 1, "map_diff": 2, "catchment_map": 3}
 
     def sort_key(file_path):
@@ -243,16 +245,16 @@ def _get_region_extent(region):
     Parameters
     ----------
     region : str
-        Region name, a key of `discharge_evaluation.region_bounds`.
+        Region name, a key of `constants.WMO_REGION_BOUNDS`.
 
     Returns
     -------
     tuple[float, float, float, float]
         Lon min, lon max, lat min, lat max.
     """
-    from mhm_tools.post.discharge_evaluation import region_bounds
+    from mhm_tools.common.constants import WMO_REGION_BOUNDS
 
-    bounds = region_bounds[region]
+    bounds = WMO_REGION_BOUNDS[region]
     lon_slice, lat_slice = bounds["lon_slice"], bounds["lat_slice"]
     return lon_slice.start, lon_slice.stop, lat_slice.start, lat_slice.stop
 
@@ -532,7 +534,7 @@ def write_discharge_metric_diff_region_maps(
 
     Each gauge's region is derived from its id (see
     `discharge_evaluation.get_region_from_id`); each region's map is zoomed
-    to that region's `discharge_evaluation.region_bounds` extent instead of
+    to that region's `constants.WMO_REGION_BOUNDS` extent instead of
     auto-fitting to the (possibly sparse) gauge locations within it.
 
     Parameters
@@ -562,7 +564,7 @@ def write_discharge_metric_diff_region_maps(
         Written PNG files, one per region/other-run/variable combination
         that has overlapping data.
     """
-    from mhm_tools.post.discharge_evaluation import get_region_from_id, region_bounds
+    from mhm_tools.post.discharge_evaluation import get_region_from_id
     from mhm_tools.post.metric_plots import get_metric_input_names
 
     variables = (
@@ -580,7 +582,7 @@ def write_discharge_metric_diff_region_maps(
     reference_df = dfs_by_name[reference_name]
 
     output_files = []
-    for region in region_bounds:
+    for region in WMO_REGION_BOUNDS:
         extent = _get_region_extent(region)
         region_reference_df = reference_df[reference_df["region"] == region]
         for other_name, other_df in dfs_by_name.items():
@@ -653,7 +655,7 @@ def write_discharge_eval_comparison_region_plots(
         plot_metric_cdf_comparison,
         plot_metric_violin_comparison,
     )
-    from mhm_tools.post.discharge_evaluation import get_region_from_id, region_bounds
+    from mhm_tools.post.discharge_evaluation import get_region_from_id
     from mhm_tools.post.metric_plots import (
         _create_metric_label_metadata,
         _get_metric_plot_colors_by_label,
@@ -676,7 +678,7 @@ def write_discharge_eval_comparison_region_plots(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     output_files = []
-    for region in region_bounds:
+    for region in WMO_REGION_BOUNDS:
         for variable in variables:
             values_by_label = {}
             for name, df in dfs_by_name.items():
@@ -745,7 +747,7 @@ def write_discharge_eval_comparison_region_catchment_maps(
     are aggregated (median by id, via `write_catchment_median_maps`) and
     plotted independently, matching how the global catchment-map is one map
     per run rather than a run-to-run comparison. Each map is framed by that
-    region's `discharge_evaluation.region_bounds` extent rather than
+    region's `constants.WMO_REGION_BOUNDS` extent rather than
     auto-fitting to the matched catchment geometries' own bounds, which can
     balloon out to (near) the whole globe if a matched geometry is
     malformed or not in the expected lon/lat CRS.
@@ -779,7 +781,7 @@ def write_discharge_eval_comparison_region_catchment_maps(
         has data and a matching shape/mask.
     """
     from mhm_tools.common.catchment_maps import write_catchment_median_maps
-    from mhm_tools.post.discharge_evaluation import get_region_from_id, region_bounds
+    from mhm_tools.post.discharge_evaluation import get_region_from_id
     from mhm_tools.post.metric_plots import get_metric_input_names
 
     variables = (
@@ -794,7 +796,7 @@ def write_discharge_eval_comparison_region_catchment_maps(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     output_files = []
-    for region in region_bounds:
+    for region in WMO_REGION_BOUNDS:
         region_extent = _get_region_extent(region)
         for name in input_names:
             region_df = dfs_by_name[name]
