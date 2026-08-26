@@ -60,13 +60,33 @@ def _finite_number(value: object, field: object, row_number: int) -> float:
     return number
 
 
-def _required_field(field_lookup: dict, field_name: str):
+def _required_field(field_lookup: dict, field_name: str, *aliases: str):
     """Return a required normalized geology field."""
-    field = field_lookup.get(_normalise_field_name(field_name))
-    if field is None:
-        msg = f"Geology lookup table is missing required field {field_name!r}."
-        raise ValueError(msg)
-    return field
+    for name in (field_name, *aliases):
+        field = field_lookup.get(_normalise_field_name(name))
+        if field is not None:
+            return field
+    expected = ", ".join(repr(name) for name in (field_name, *aliases))
+    raise ValueError(f"Geology lookup table is missing required field {expected}.")
+
+
+def _optional_field(field_lookup: dict, *field_names: str):
+    for name in field_names:
+        field = field_lookup.get(_normalise_field_name(name))
+        if field is not None:
+            return field
+    return None
+
+
+def _visible_table(table):
+    """Drop lookup columns explicitly marked as ignored with ``*``."""
+    return table[
+        [
+            column
+            for column in table.columns
+            if not str(column).strip().startswith("*")
+        ]
+    ]
 
 
 def _required_int(value: object, row_number: int, field: object) -> int:
@@ -108,9 +128,12 @@ def _classdefinition_rows(table, class_field: str) -> list:
     """Validate and sort geology class-definition rows."""
     field_lookup = {}
     for field_name in table.columns:
+        if str(field_name).strip().startswith("*"):
+            continue
         field_lookup.setdefault(_normalise_field_name(field_name), field_name)
     geology_class_field = _required_field(field_lookup, class_field)
-    geo_class_field = _required_field(field_lookup, "GEO_CLASS")
+    geo_class_field = _optional_field(field_lookup, "GEO_CLASS", "GEO_ID")
+    geo_class_field = geo_class_field or geology_class_field
     karstic_field = _required_field(field_lookup, "KARSTIC")
 
     rows = []
@@ -185,7 +208,7 @@ def write_geology_classdefinition(
     if not lookup_table.is_file():
         msg = f"Lookup table does not exist: {lookup_table}"
         raise ValueError(msg)
-    table = read_lookup_table(lookup_table)
+    table = _visible_table(read_lookup_table(lookup_table))
     return _write_classdefinition_text(
         _classdefinition_text(table, class_field), output_file
     )
@@ -203,8 +226,16 @@ def format_geology_data(
     input_crs: str | None = None,
     dem_crs: str | None = None,
     resampling="nearest",
+    fill_nodata: bool = True,
 ) -> Path:
-    """Map a categorical raster and write its mHM geology definition."""
+    """Map a categorical raster and write its mHM geology definition.
+
+    Parameters
+    ----------
+    fill_nodata : bool, default True
+        Restrict the output to the DEM domain and take its remaining nodata
+        cells from the nearest classified neighbour.
+    """
     input_file = Path(input_file)
     dem_file = Path(dem_file)
     output_path = Path(output_path)
@@ -229,7 +260,7 @@ def format_geology_data(
         )
         raise ValueError(msg)
 
-    table = read_lookup_table(lookup_table)
+    table = _visible_table(read_lookup_table(lookup_table))
     definition_text = _classdefinition_text(table, class_field)
     format_categorical_data(
         input_file,
@@ -242,6 +273,7 @@ def format_geology_data(
         input_crs=input_crs,
         dem_crs=dem_crs,
         resampling=resampling,
+        fill_nodata=fill_nodata,
     )
     _write_classdefinition_text(definition_text, definition_output)
     return raster_output

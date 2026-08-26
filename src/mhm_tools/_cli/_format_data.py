@@ -87,6 +87,17 @@ def add_args(parser: ArgumentParser) -> None:
             "classes and average/bilinear for continuous soil layers."
         ),
     )
+    optional.add_argument(
+        "--no-fill-nodata",
+        dest="fill_nodata",
+        action="store_false",
+        help=(
+            "Keep input nodata gaps instead of taking them from their nearest "
+            "valid neighbour. Soil gaps are filled per input layer, so a hole "
+            "in one of clay, sand, silt, or bulk density no longer drops the "
+            "cell from every horizon."
+        ),
+    )
 
 
 def _require_lookup_options(args: Namespace) -> None:
@@ -147,4 +158,5 @@ def run(args: Namespace) -> None:
         kwargs["input_file"] = kwargs.pop("input_path")
     if args.resampling is not None:
         kwargs["resampling"] = args.resampling
+    kwargs["fill_nodata"] = args.fill_nodata
     formatter(**kwargs)

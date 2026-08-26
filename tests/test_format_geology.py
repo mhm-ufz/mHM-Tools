@@ -70,8 +70,8 @@ def _convert_raster(source: Path, output: Path) -> None:
 def _write_lookup(path: Path) -> None:
     table = gpd.GeoDataFrame(
         {
-            "*Map-code [id]": [10, 20, 30],
-            "*Mapped Geology Unit [id]": [3, 1, 2],
+            "Map-code [id]": [10, 20, 30],
+            "Mapped Geology Unit [id]": [3, 1, 2],
             "Geo Class [count]": [2, 1, 2],
             "Karstic [flag]": ["yes", "0", "TRUE"],
         }
@@ -122,6 +122,7 @@ def test_format_geology_data_writes_nc_asc_and_tif(tmp_path: Path):
         "map code",
         _CLASS_FIELD,
         output_type="nc",
+        fill_nodata=False,
     )
 
     assert nc_file == tmp_path / "nc" / "geology_class.nc"
@@ -145,6 +146,7 @@ def test_format_geology_data_writes_nc_asc_and_tif(tmp_path: Path):
         "map code",
         _CLASS_FIELD,
         output_type="asc",
+        fill_nodata=False,
     )
 
     assert asc_file == tmp_path / "asc" / "geology_class.asc"
@@ -168,6 +170,7 @@ def test_format_geology_data_writes_nc_asc_and_tif(tmp_path: Path):
         "map code",
         _CLASS_FIELD,
         output_type="tif",
+        fill_nodata=False,
     )
     assert tif_file == tmp_path / "tif" / "geology_class.tif"
     assert (tmp_path / "tif" / "geology_classdefinition.txt").read_text() == (
@@ -181,6 +184,33 @@ def test_format_geology_data_writes_nc_asc_and_tif(tmp_path: Path):
             100.0, 220.0, 10.0, 10.0
         )
         np.testing.assert_array_equal(dataset.read(1), expected)
+
+
+def test_format_geology_data_fills_nodata_inside_the_dem_domain(tmp_path: Path):
+    """Unmapped and nodata cells default to their nearest classified neighbour."""
+    input_file = tmp_path / "geology_raw.tif"
+    dem_file = tmp_path / "dem.tif"
+    lookup_file = tmp_path / "geology_lookup.gpkg"
+    _write_category_raster(input_file)
+    _write_dem(dem_file)
+    _write_lookup(lookup_file)
+
+    output = format_geology_data(
+        input_file,
+        dem_file,
+        tmp_path / "output",
+        lookup_file,
+        "map code",
+        _CLASS_FIELD,
+    )
+
+    # The nodata cell and the unmapped category 99 both take the class of
+    # their nearest classified neighbour instead of staying -9999.
+    with xr.open_dataset(output, decode_cf=False) as dataset:
+        np.testing.assert_array_equal(
+            dataset["geology_class"].values,
+            [[3, 1, 1], [2, 3, 3]],
+        )
 
 
 @pytest.mark.parametrize(
@@ -209,6 +239,7 @@ def test_format_geology_data_accepts_mixed_raster_formats(
         lookup_file,
         "map code",
         _CLASS_FIELD,
+        fill_nodata=False,
     )
 
     with xr.open_dataset(output, decode_cf=False) as dataset:
@@ -232,6 +263,44 @@ def test_write_geology_classdefinition_normalizes_sorts_and_parses_karstic(
     )
 
     assert output_file.read_text() == _expected_classdefinition()
+
+
+def test_write_geology_classdefinition_accepts_geo_id_alias(tmp_path: Path):
+    lookup_file = tmp_path / "geology_lookup.gpkg"
+    gpd.GeoDataFrame(
+        {
+            "GEOLOGY_CLASS": [1],
+            "GEO_ID": [2],
+            "KARSTIC": [0],
+        }
+    ).to_file(lookup_file, driver="GPKG")
+
+    output = write_geology_classdefinition(
+        lookup_file,
+        tmp_path / "geology_classdefinition.txt",
+        "GEOLOGY_CLASS",
+    )
+
+    assert "         2\t         1" in output.read_text(encoding="utf-8")
+
+
+def test_write_geology_classdefinition_ignores_starred_geo_id(tmp_path: Path):
+    lookup_file = tmp_path / "geology_lookup.gpkg"
+    gpd.GeoDataFrame(
+        {
+            "GEOLOGY_CLASS": [1],
+            "*GEO_ID": [2],
+            "KARSTIC": [0],
+        }
+    ).to_file(lookup_file, driver="GPKG")
+
+    output = write_geology_classdefinition(
+        lookup_file,
+        tmp_path / "geology_classdefinition.txt",
+        "GEOLOGY_CLASS",
+    )
+
+    assert "         1\t         1" in output.read_text(encoding="utf-8")
 
 
 def test_format_geology_data_requires_at_least_one_mapping(tmp_path: Path):
@@ -315,6 +384,7 @@ def test_format_geology_data_uses_exact_dem_grid(tmp_path: Path):
         lookup_file,
         "map code",
         _CLASS_FIELD,
+        fill_nodata=False,
     )
 
     expected = np.repeat(

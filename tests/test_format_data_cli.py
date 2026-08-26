@@ -89,6 +89,7 @@ def test_format_data_dispatches_with_shared_options(
         "output_type": extension,
         "input_crs": "EPSG:32632",
         "dem_crs": "EPSG:32633",
+        "fill_nodata": True,
     }
 
 
@@ -267,6 +268,7 @@ def test_format_data_dispatches_directory_manifests(
     assert result.exit_code == 0, result.output
     assert captured["input_path"] == input_path
     assert captured["resampling"] == "auto"
+    assert captured["fill_nodata"] is True
     assert "input_file" not in captured
     if data_type == "soil":
         assert "lookup_table" not in captured

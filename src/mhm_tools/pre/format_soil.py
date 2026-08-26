@@ -10,12 +10,23 @@ from __future__ import annotations
 
 import logging
 import re
+import sqlite3
+import tempfile
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Union
 
 import numpy as np
 import pandas as pd
+import rasterio
 import xarray as xr
+from netCDF4 import Dataset
+from rasterio.crs import CRS
+from rasterio.enums import Resampling
+from rasterio.shutil import copy as copy_raster
+from rasterio.vrt import WarpedVRT
+from rasterio.warp import transform_bounds
+from rasterio.windows import Window
 
 from mhm_tools.common.constants import NO_DATA
 from mhm_tools.common.file_handler import (
@@ -26,6 +37,7 @@ from mhm_tools.common.file_handler import (
     write_xarray_to_file,
 )
 from mhm_tools.common.format_data import (
+    fill_grid_nodata,
     format_categorical_data,
     get_categorical_output_path,
     get_format_manifest_path,
@@ -295,6 +307,7 @@ def format_soil_data(
     input_crs: str | None = None,
     dem_crs: str | None = None,
     resampling="nearest",
+    fill_nodata: bool = True,
 ) -> Path:
     """Map a categorical raster and write its mHM soil definition.
 
@@ -316,6 +329,9 @@ def format_soil_data(
         Output raster format.
     input_crs, dem_crs : str, optional
         CRS to assign only when the corresponding raster has no CRS metadata.
+    fill_nodata : bool, default True
+        Restrict the output to the DEM domain and take its remaining nodata
+        cells from the nearest classified neighbour.
 
     Returns
     -------
@@ -354,6 +370,7 @@ def format_soil_data(
         input_crs=input_crs,
         dem_crs=dem_crs,
         resampling=resampling,
+        fill_nodata=fill_nodata,
     )
     _write_soil_classdefinition_text(definition_text, definition_output)
     return raster_output
@@ -835,6 +852,512 @@ def _horizon_soil_outputs(
     return raster_output, definition_output
 
 
+_SOIL_BLOCK_ROWS = 64
+
+
+def _open_raster(stack: ExitStack, path: Path):
+    """Open one single-band raster, including a single NetCDF subdataset."""
+    dataset = stack.enter_context(rasterio.open(path))
+    if dataset.count == 0 and len(dataset.subdatasets) == 1:
+        dataset = stack.enter_context(rasterio.open(dataset.subdatasets[0]))
+    if dataset.count != 1:
+        raise ValueError(f"Soil raster must contain exactly one data band: {path}")
+    return dataset
+
+
+def _soil_resampling(source, reference, source_crs, reference_crs, requested):
+    """Resolve continuous-data resampling without loading either raster."""
+    if isinstance(requested, Resampling):
+        return requested
+    method = str(requested).strip().lower()
+    if method != "auto":
+        try:
+            return Resampling[method]
+        except KeyError as exc:
+            choices = ", ".join(item.name for item in Resampling)
+            raise ValueError(
+                f"Unsupported resampling method {requested!r}; expected {choices}."
+            ) from exc
+    bounds = transform_bounds(source_crs, reference_crs, *source.bounds)
+    source_area = abs((bounds[2] - bounds[0]) * (bounds[3] - bounds[1]))
+    source_pixel_area = source_area / (source.width * source.height)
+    reference_pixel_area = abs(
+        reference.transform.a * reference.transform.e
+        - reference.transform.b * reference.transform.d
+    )
+    return (
+        Resampling.average
+        if source_pixel_area < reference_pixel_area
+        else Resampling.bilinear
+    )
+
+
+def _open_soil_grid(
+    stack: ExitStack,
+    dem_file: Path,
+    horizons,
+    *,
+    input_crs,
+    dem_crs,
+    resampling,
+):
+    """Open the DEM and lightweight warped views of all soil inputs."""
+    reference = _open_raster(stack, dem_file)
+    reference_crs = reference.crs or (CRS.from_user_input(dem_crs) if dem_crs else None)
+    if reference_crs is None:
+        raise ValueError(f"DEM raster has no CRS metadata: {dem_file}")
+
+    warped = []
+    for horizon in horizons:
+        properties = {}
+        for name in ("clay", "sand", "silt", "bulk_density"):
+            source = _open_raster(stack, horizon[name])
+            source_crs = source.crs or (
+                CRS.from_user_input(input_crs) if input_crs else None
+            )
+            if source_crs is None:
+                raise ValueError(f"Soil raster has no CRS metadata: {horizon[name]}")
+            method = _soil_resampling(
+                source, reference, source_crs, reference_crs, resampling
+            )
+            options = {
+                "crs": reference_crs,
+                "transform": reference.transform,
+                "width": reference.width,
+                "height": reference.height,
+                "resampling": method,
+                "nodata": np.nan,
+                "dtype": "float32",
+            }
+            if source.crs is None:
+                options["src_crs"] = source_crs
+            properties[name] = stack.enter_context(WarpedVRT(source, **options))
+        warped.append(properties)
+    return reference, reference_crs, warped
+
+
+def _dem_valid(reference, window=None):
+    """Return the boolean mask of DEM cells that carry data."""
+    dem = reference.read(1, window=window, masked=True)
+    values = np.ma.getdata(dem)
+    valid = ~np.ma.getmaskarray(dem)
+    if np.issubdtype(values.dtype, np.floating):
+        valid = valid & np.isfinite(values)
+    return valid
+
+
+def _grid_coordinates(reference):
+    """Return the cell-centre coordinates of a north-up reference grid."""
+    transform = reference.transform
+    x = transform.c + (np.arange(reference.width) + 0.5) * transform.a
+    y = transform.f + (np.arange(reference.height) + 0.5) * transform.e
+    return x, y
+
+
+def _soil_windows(reference):
+    for row in range(0, reference.height, _SOIL_BLOCK_ROWS):
+        height = min(_SOIL_BLOCK_ROWS, reference.height - row)
+        yield Window(0, row, reference.width, height)
+
+
+def _read_float(dataset, window):
+    return dataset.read(1, window=window, masked=True, out_dtype="float32").filled(
+        np.nan
+    )
+
+
+def _fill_soil_layers(stack, reference, reference_crs, warped, horizons, temp_path):
+    """Replace the warped soil views with nodata-filled copies of themselves.
+
+    Every physical property of every horizon is materialized on the DEM grid
+    and its remaining nodata cells inside the DEM domain are taken from the
+    nearest valid cell of the same layer. Valid cells outside the DEM domain
+    stay available as fill sources, but are written as nodata so that the
+    filled layer covers exactly the modelled domain.
+    """
+    dem_valid = _dem_valid(reference)
+    if not np.any(dem_valid):
+        raise ValueError("The DEM has no valid cell to define the soil domain.")
+    outside = ~dem_valid
+    x, y = _grid_coordinates(reference)
+    profile = {
+        "driver": "GTiff",
+        "height": reference.height,
+        "width": reference.width,
+        "count": 1,
+        "dtype": "float32",
+        "crs": reference_crs,
+        "transform": reference.transform,
+        "nodata": np.nan,
+        "compress": "deflate",
+        "tiled": True,
+        "blockxsize": 256,
+        "blockysize": _SOIL_BLOCK_ROWS,
+        "BIGTIFF": "IF_SAFER",
+    }
+
+    filled = []
+    for horizon, properties in zip(horizons, warped):
+        replacements = {}
+        for name, source in properties.items():
+            values = _read_float(source, None)
+            missing = int(np.count_nonzero(~np.isfinite(values) & dem_valid))
+            count = fill_grid_nodata(
+                values,
+                x=x,
+                y=y,
+                mask=outside,
+                fill_value=np.nan,
+                name=f"{name}_horizon_{horizon['horizon']}",
+                source_file=horizon[name],
+            )
+            if missing:
+                logger.info(
+                    "Filled %d of %d nodata cells of the %s layer of horizon "
+                    "%d from nearest valid neighbours (%s).",
+                    count,
+                    missing,
+                    name,
+                    horizon["horizon"],
+                    horizon[name],
+                )
+            layer_path = temp_path / f"filled_h{horizon['horizon']}_{name}.tif"
+            with rasterio.open(layer_path, "w", **profile) as target:
+                target.write(values, 1)
+            replacements[name] = stack.enter_context(rasterio.open(layer_path))
+        filled.append(replacements)
+    return filled
+
+
+def _quantized_soil_block(
+    properties,
+    window,
+    dem_valid,
+    *,
+    density_factor,
+    composition_step,
+    density_step,
+):
+    """Normalize and quantize one horizon in one target-grid window."""
+    clay = _read_float(properties["clay"], window)
+    sand = _read_float(properties["sand"], window)
+    silt = _read_float(properties["silt"], window)
+    density = _read_float(properties["bulk_density"], window)
+    density *= density_factor
+    total = clay + sand + silt
+    valid = (
+        dem_valid
+        & np.isfinite(total)
+        & (total > 0)
+        & np.isfinite(clay)
+        & (clay >= 0)
+        & np.isfinite(sand)
+        & (sand >= 0)
+        & np.isfinite(silt)
+        & (silt >= 0)
+        & np.isfinite(density)
+        & (density > 0)
+        & (density <= 5)
+    )
+    clay_percent = np.full(clay.shape, np.nan, dtype=np.float32)
+    sand_percent = np.full(sand.shape, np.nan, dtype=np.float32)
+    np.divide(clay, total, out=clay_percent, where=valid)
+    np.divide(sand, total, out=sand_percent, where=valid)
+    clay = _quantized_bins(clay_percent * 100.0, valid, composition_step)
+    sand = _quantized_bins(sand_percent * 100.0, valid, composition_step)
+    density = _quantized_bins(density, valid, density_step)
+    return valid, clay, sand, density
+
+
+def _profile_block(
+    warped,
+    reference,
+    window,
+    *,
+    density_factor,
+    composition_step,
+    density_step,
+):
+    dem_valid = _dem_valid(reference, window)
+    layers = []
+    valid = dem_valid
+    for properties in warped:
+        layer = _quantized_soil_block(
+            properties,
+            window,
+            dem_valid,
+            density_factor=density_factor,
+            composition_step=composition_step,
+            density_step=density_step,
+        )
+        layers.append(layer)
+        valid = valid & layer[0]
+    profiles = np.empty((int(valid.sum()), len(layers) * 3), dtype=np.int32)
+    for index, (_, clay, sand, density) in enumerate(layers):
+        profiles[:, index * 3 : index * 3 + 3] = np.column_stack(
+            (clay[valid], sand[valid], density[valid])
+        )
+    return valid, profiles
+
+
+def _stream_classic_soil(
+    reference,
+    reference_crs,
+    warped,
+    horizons,
+    output_path,
+    temp_path,
+    *,
+    density_factor,
+    composition_step,
+    density_step,
+):
+    """Write v5 profile classes with memory bounded by one raster window."""
+    columns = [f"v{index} INTEGER" for index in range(len(horizons) * 3)]
+    names = [f"v{index}" for index in range(len(columns))]
+    database = sqlite3.connect(temp_path / "profiles.sqlite")
+    try:
+        database.execute(
+            f"CREATE TABLE profiles ({', '.join(columns)}, "
+            f"PRIMARY KEY ({', '.join(names)})) WITHOUT ROWID"
+        )
+        placeholders = ", ".join("?" for _ in names)
+        insert = f"INSERT OR IGNORE INTO profiles VALUES ({placeholders})"
+        found = False
+        for window in _soil_windows(reference):
+            _, profiles = _profile_block(
+                warped,
+                reference,
+                window,
+                density_factor=density_factor,
+                composition_step=composition_step,
+                density_step=density_step,
+            )
+            if profiles.size:
+                found = True
+                unique = np.unique(profiles, axis=0)
+                database.executemany(insert, map(tuple, unique.tolist()))
+            database.commit()
+        if not found:
+            raise ValueError("No cell has valid soil data in every horizon.")
+        rows = database.execute(
+            f"SELECT {', '.join(names)} FROM profiles ORDER BY {', '.join(names)}"
+        ).fetchall()
+    finally:
+        database.close()
+    if len(rows) > np.iinfo(np.int32).max:
+        raise ValueError("Too many soil profile classes for int32 output.")
+    class_ids = {tuple(row): index for index, row in enumerate(rows, start=1)}
+
+    temporary_raster = temp_path / "soil_class.tif"
+    profile = reference.profile.copy()
+    profile.update(
+        driver="GTiff",
+        count=1,
+        dtype="int32",
+        nodata=int(NO_DATA),
+        crs=reference_crs,
+        compress="deflate",
+        tiled=True,
+        blockxsize=256,
+        blockysize=_SOIL_BLOCK_ROWS,
+    )
+    with rasterio.open(temporary_raster, "w", **profile) as target:
+        for window in _soil_windows(reference):
+            valid, profiles = _profile_block(
+                warped,
+                reference,
+                window,
+                density_factor=density_factor,
+                composition_step=composition_step,
+                density_step=density_step,
+            )
+            classes = np.full(valid.shape, int(NO_DATA), dtype=np.int32)
+            if profiles.size:
+                unique, inverse = np.unique(profiles, axis=0, return_inverse=True)
+                ids = np.asarray(
+                    [class_ids[tuple(row)] for row in unique.tolist()], dtype=np.int32
+                )
+                classes[valid] = ids[inverse]
+            target.write(classes, 1, window=window)
+
+    raster_output = output_path / "soil_class.asc"
+    definition_output = output_path / "soil_classdefinition.txt"
+    copy_raster(temporary_raster, raster_output, driver="AAIGrid")
+    lines = [
+        f"nSoil_Types {len(rows)}\n",
+        "MU_GLOBAL\tHORIZON\tUD[mm]\tLD[mm]\tCLAY[%]\tSAND[%]\tBD[gcm-3]\n",
+    ]
+    for class_index, row in enumerate(rows, start=1):
+        for layer_index, horizon in enumerate(horizons):
+            offset = layer_index * 3
+            lines.append(
+                f"{class_index}\t{horizon['horizon']}\t"
+                f"{_format_soil_value(horizon['upper'])}\t"
+                f"{_format_soil_value(horizon['lower'])}\t"
+                f"{_format_soil_value(row[offset] * composition_step)}\t"
+                f"{_format_soil_value(row[offset + 1] * composition_step)}\t"
+                f"{_format_soil_value(row[offset + 2] * density_step)}\n"
+            )
+    _write_soil_classdefinition_text("".join(lines), definition_output)
+    return raster_output, definition_output
+
+
+def _create_soil_netcdf(path, reference, reference_crs, horizons):
+    """Create the CF structure needed for block-wise v6 output."""
+    dataset = Dataset(path, "w", format="NETCDF4")
+    dataset.createDimension("z", len(horizons))
+    dataset.createDimension("y", reference.height)
+    dataset.createDimension("x", reference.width)
+    dataset.createDimension("bnds", 2)
+    transform = reference.transform
+    x = dataset.createVariable("x", "f8", ("x",))
+    y = dataset.createVariable("y", "f8", ("y",))
+    z = dataset.createVariable("z", "f8", ("z",))
+    z_bnds = dataset.createVariable("z_bnds", "f8", ("z", "bnds"))
+    x[:] = transform.c + (np.arange(reference.width) + 0.5) * transform.a
+    y[:] = transform.f + (np.arange(reference.height) + 0.5) * transform.e
+    z[:] = [item["lower"] for item in horizons]
+    z_bnds[:] = [[item["upper"], item["lower"]] for item in horizons]
+    x.setncatts({"standard_name": "projection_x_coordinate", "axis": "X"})
+    y.setncatts({"standard_name": "projection_y_coordinate", "axis": "Y"})
+    z.setncatts(
+        {
+            "long_name": "soil horizon lower boundary depth",
+            "standard_name": "depth",
+            "units": "mm",
+            "positive": "down",
+            "axis": "Z",
+            "bounds": "z_bnds",
+        }
+    )
+    z_bnds.long_name = "soil horizon depth bounds"
+    crs = dataset.createVariable("crs", "i4")
+    crs.setncatts(
+        {
+            "spatial_ref": reference_crs.to_wkt(),
+            "crs_wkt": reference_crs.to_wkt(),
+            "GeoTransform": " ".join(str(value) for value in transform.to_gdal()),
+        }
+    )
+    classes = dataset.createVariable(
+        "soil_class",
+        "i4",
+        ("z", "y", "x"),
+        fill_value=int(NO_DATA),
+        zlib=True,
+        complevel=4,
+        shuffle=True,
+        chunksizes=(
+            1,
+            min(_SOIL_BLOCK_ROWS, reference.height),
+            min(512, reference.width),
+        ),
+    )
+    classes.setncatts(
+        {
+            "long_name": "mHM soil class by horizon",
+            "units": "1",
+            "nodata_value": int(NO_DATA),
+            "grid_mapping": "crs",
+        }
+    )
+    dataset.setncatts(
+        {
+            "Conventions": "CF-1.8",
+            "title": "Horizon-specific soil classes for mHM",
+            "source": "mhm-tools format-data soil manifest",
+        }
+    )
+    return dataset, classes
+
+
+def _stream_horizon_soil(
+    reference,
+    reference_crs,
+    warped,
+    horizons,
+    output_path,
+    *,
+    density_factor,
+    composition_step,
+    density_step,
+):
+    """Write v6 horizon classes with memory bounded by one raster window."""
+    observed = set()
+    for window in _soil_windows(reference):
+        dem_valid = _dem_valid(reference, window)
+        for properties in warped:
+            valid, clay, sand, _ = _quantized_soil_block(
+                properties,
+                window,
+                dem_valid,
+                density_factor=density_factor,
+                composition_step=composition_step,
+                density_step=density_step,
+            )
+            packed = (clay[valid].astype(np.uint64) << np.uint64(32)) | sand[
+                valid
+            ].astype(np.uint32)
+            observed.update(np.unique(packed).tolist())
+    if not observed:
+        raise ValueError("No valid soil cells were found in any horizon.")
+    keys = np.asarray(sorted(observed), dtype=np.uint64)
+    density_sum = np.zeros(keys.size, dtype=np.float64)
+    counts = np.zeros(keys.size, dtype=np.int64)
+    raster_output = output_path / "soil_horizon_class.nc"
+    definition_output = output_path / "soil_classdefinition_iFlag_soilDB_1.txt"
+    dataset, output = _create_soil_netcdf(
+        raster_output, reference, reference_crs, horizons
+    )
+    try:
+        for window in _soil_windows(reference):
+            row = int(window.row_off)
+            height = int(window.height)
+            dem_valid = _dem_valid(reference, window)
+            for horizon_index, properties in enumerate(warped):
+                valid, clay, sand, density = _quantized_soil_block(
+                    properties,
+                    window,
+                    dem_valid,
+                    density_factor=density_factor,
+                    composition_step=composition_step,
+                    density_step=density_step,
+                )
+                packed = (clay[valid].astype(np.uint64) << np.uint64(32)) | sand[
+                    valid
+                ].astype(np.uint32)
+                positions = np.searchsorted(keys, packed)
+                classes = np.full(valid.shape, int(NO_DATA), dtype=np.int32)
+                classes[valid] = positions.astype(np.int32) + 1
+                output[horizon_index, row : row + height, :] = classes
+                density_sum += np.bincount(
+                    positions,
+                    weights=density[valid].astype(np.float64),
+                    minlength=keys.size,
+                )
+                counts += np.bincount(positions, minlength=keys.size)
+    finally:
+        dataset.close()
+    density_bins = np.floor(density_sum / counts + 0.5).astype(np.int32)
+    clay_bins = (keys >> np.uint64(32)).astype(np.int32)
+    sand_bins = (keys & np.uint64(0xFFFFFFFF)).astype(np.int32)
+    lines = [
+        f"nSoil_Types {keys.size}\n",
+        "ID\tCLAY[%]\tSAND[%]\tBD[gcm-3]\n",
+    ]
+    for class_index, (clay, sand, density) in enumerate(
+        zip(clay_bins, sand_bins, density_bins), start=1
+    ):
+        lines.append(
+            f"{class_index}\t{_format_soil_value(clay * composition_step)}\t"
+            f"{_format_soil_value(sand * composition_step)}\t"
+            f"{_format_soil_value(density * density_step)}\n"
+        )
+    _write_soil_classdefinition_text("".join(lines), definition_output)
+    return raster_output, definition_output
+
+
 def format_soil_horizons(
     input_path: PathLike,
     dem_file: PathLike,
@@ -846,8 +1369,17 @@ def format_soil_horizons(
     resampling="auto",
     composition_step: float = 5.0,
     bulk_density_step: float = 0.1,
+    fill_nodata: bool = True,
 ) -> tuple[Path, Path]:
-    """Classify multi-horizon physical soil rasters from a directory manifest."""
+    """Classify multi-horizon physical soil rasters from a directory manifest.
+
+    Parameters
+    ----------
+    fill_nodata : bool, default True
+        Take the nodata cells of every clay, sand, silt, and bulk-density
+        layer from their nearest valid neighbour before classification, so
+        that gaps in one input layer do not drop cells from the output.
+    """
     output_type = str(output_type).lower().lstrip(".")
     if output_type not in {"asc", "nc"}:
         msg = "Multi-horizon soil output extension must be 'asc' or 'nc'."
@@ -877,57 +1409,70 @@ def format_soil_horizons(
         msg = f"Output path must be a directory: {output_path}"
         raise ValueError(msg)
 
-    reference = get_raster_data(dem_file, crs=dem_crs)
-    try:
-        layers = _prepare_soil_layers(
-            horizons,
-            reference,
-            bulk_density_factor=density_factor,
-            composition_step=steps["composition_step"],
-            bulk_density_step=steps["bulk_density_step"],
-            input_crs=input_crs,
-            resampling=resampling,
+    protected = {manifest.resolve(), dem_file.resolve()}
+    for horizon in horizons:
+        protected.update(
+            horizon[name].resolve()
+            for name in ("clay", "sand", "silt", "bulk_density")
         )
-        protected = {manifest.resolve(), dem_file.resolve()}
-        for horizon in horizons:
-            protected.update(
-                horizon[name].resolve()
-                for name in ("clay", "sand", "silt", "bulk_density")
-            )
-        expected = (
-            (output_path / "soil_class.asc", output_path / "soil_classdefinition.txt")
-            if output_type == "asc"
-            else (
-                output_path / "soil_horizon_class.nc",
-                output_path / "soil_classdefinition_iFlag_soilDB_1.txt",
-            )
+    expected = (
+        (output_path / "soil_class.asc", output_path / "soil_classdefinition.txt")
+        if output_type == "asc"
+        else (
+            output_path / "soil_horizon_class.nc",
+            output_path / "soil_classdefinition_iFlag_soilDB_1.txt",
         )
-        if any(path.resolve() in protected for path in expected):
-            msg = "Soil outputs must differ from all manifest input files."
-            raise ValueError(msg)
-        output_path.mkdir(parents=True, exist_ok=True)
+    )
+    if any(path.resolve() in protected for path in expected):
+        raise ValueError("Soil outputs must differ from all manifest input files.")
+    output_path.mkdir(parents=True, exist_ok=True)
 
-        if output_type == "asc":
-            outputs = _classic_soil_outputs(
-                layers,
-                reference,
-                output_path,
-                composition_step=steps["composition_step"],
-                bulk_density_step=steps["bulk_density_step"],
+    with tempfile.TemporaryDirectory(prefix="mhm-soil-", dir=output_path) as temporary:
+        with ExitStack() as stack:
+            stack.enter_context(rasterio.Env(GDAL_CACHEMAX=128 * 1024 * 1024))
+            reference, reference_crs, warped = _open_soil_grid(
+                stack,
+                dem_file,
+                horizons,
+                input_crs=input_crs,
+                dem_crs=dem_crs,
+                resampling=resampling,
             )
-        else:
-            outputs = _horizon_soil_outputs(
-                layers,
-                reference,
-                output_path,
-                composition_step=steps["composition_step"],
-                bulk_density_step=steps["bulk_density_step"],
-            )
+            if fill_nodata:
+                warped = _fill_soil_layers(
+                    stack,
+                    reference,
+                    reference_crs,
+                    warped,
+                    horizons,
+                    Path(temporary),
+                )
+            if output_type == "asc":
+                outputs = _stream_classic_soil(
+                    reference,
+                    reference_crs,
+                    warped,
+                    horizons,
+                    output_path,
+                    Path(temporary),
+                    density_factor=density_factor,
+                    composition_step=steps["composition_step"],
+                    density_step=steps["bulk_density_step"],
+                )
+            else:
+                outputs = _stream_horizon_soil(
+                    reference,
+                    reference_crs,
+                    warped,
+                    horizons,
+                    output_path,
+                    density_factor=density_factor,
+                    composition_step=steps["composition_step"],
+                    density_step=steps["bulk_density_step"],
+                )
         logger.info(
             "Formatted %d soil horizons with bulk density converted from %s.",
             len(horizons),
             unit,
         )
         return outputs
-    finally:
-        reference.close()

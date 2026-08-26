@@ -232,6 +232,130 @@ def test_format_soil_horizons_writes_v6_horizon_classes_and_mode1_lut(tmp_path):
     ]
 
 
+def _write_gapped_soil_manifest(input_path: Path) -> None:
+    (input_path / "format-data.txt").write_text(
+        "Bulk Density Unit = kg/m3\n"
+        "Horizon,Upper Depth,Lower Depth,Clay Layer,Sand Layer,Silt Layer,"
+        "Bulk Density Layer\n"
+        "1,0,100,clay1.tif,sand1.tif,silt1.tif,bd1.tif\n"
+        "2,100,300,clay2.tif,sand2.tif,silt2.tif,bd2.tif\n",
+        encoding="utf-8",
+    )
+
+
+def _write_gapped_soil_inputs(input_path: Path) -> None:
+    """Write a 1x3 profile whose first horizon misses clay in the last cell."""
+    values = {
+        "clay1": [[20, 40, -9999]],
+        "sand1": [[30, 20, 20]],
+        "silt1": [[50, 40, 40]],
+        "bd1": [[1300, 1400, 1400]],
+        "clay2": [[10, 10, 10]],
+        "sand2": [[40, 40, 40]],
+        "silt2": [[50, 50, 50]],
+        "bd2": [[1500, 1500, 1500]],
+    }
+    for name, data in values.items():
+        _write_raster(input_path / f"{name}.tif", np.asarray(data, dtype=np.float32))
+
+
+@pytest.mark.parametrize("output_type", ["nc", "asc"])
+def test_format_soil_horizons_fills_layer_nodata_from_nearest(tmp_path, output_type):
+    """A hole in one input layer no longer drops the cell from the output."""
+    input_path = tmp_path / "soil"
+    input_path.mkdir()
+    _write_gapped_soil_manifest(input_path)
+    _write_gapped_soil_inputs(input_path)
+    dem = tmp_path / "dem.tif"
+    _write_raster(dem, np.ones((1, 3), dtype=np.float32))
+
+    raster, _ = format_soil_horizons(
+        input_path,
+        dem,
+        tmp_path / "filled",
+        output_type,
+        resampling="nearest",
+    )
+
+    if output_type == "asc":
+        with rasterio.open(raster) as dataset:
+            # The gap takes clay from its nearest neighbour and shares its class.
+            np.testing.assert_array_equal(dataset.read(1), [[1, 2, 2]])
+    else:
+        with xr.open_dataset(raster, decode_cf=False) as dataset:
+            np.testing.assert_array_equal(
+                dataset["soil_class"].values,
+                [[[2, 3, 3]], [[1, 1, 1]]],
+            )
+
+
+@pytest.mark.parametrize("output_type", ["nc", "asc"])
+def test_format_soil_horizons_keeps_layer_nodata_when_filling_is_off(
+    tmp_path, output_type
+):
+    """Opting out of filling keeps the historical hole in the output."""
+    input_path = tmp_path / "soil"
+    input_path.mkdir()
+    _write_gapped_soil_manifest(input_path)
+    _write_gapped_soil_inputs(input_path)
+    dem = tmp_path / "dem.tif"
+    _write_raster(dem, np.ones((1, 3), dtype=np.float32))
+
+    raster, _ = format_soil_horizons(
+        input_path,
+        dem,
+        tmp_path / "unfilled",
+        output_type,
+        resampling="nearest",
+        fill_nodata=False,
+    )
+
+    if output_type == "asc":
+        with rasterio.open(raster) as dataset:
+            np.testing.assert_array_equal(dataset.read(1), [[1, 2, -9999]])
+    else:
+        with xr.open_dataset(raster, decode_cf=False) as dataset:
+            np.testing.assert_array_equal(
+                dataset["soil_class"].values,
+                [[[2, 3, -9999]], [[1, 1, 1]]],
+            )
+
+
+@pytest.mark.parametrize("fill_nodata", [True, False])
+def test_format_lc_periods_fills_period_nodata_from_nearest(tmp_path, fill_nodata):
+    """Land-cover gaps inside the DEM domain follow the fill-nodata switch."""
+    input_path = tmp_path / "land-cover"
+    input_path.mkdir()
+    period = input_path / "first.tif"
+    dem = tmp_path / "dem.tif"
+    lookup = tmp_path / "lookup.gpkg"
+    _write_raster(period, np.array([[10, 20, -9999]], dtype=np.int16))
+    _write_raster(dem, np.ones((1, 3), dtype=np.float32))
+    gpd.GeoDataFrame({"source": [10, 20], "class": [1, 2]}).to_file(
+        lookup, driver="GPKG"
+    )
+    (input_path / "format-data.csv").write_text(
+        "StartYear,EndYear,FilePath\n2000,2004,first.tif\n",
+        encoding="utf-8",
+    )
+
+    (output,) = format_lc_periods(
+        input_path,
+        dem,
+        tmp_path / f"output-{fill_nodata}",
+        lookup,
+        "source",
+        "class",
+        "asc",
+        resampling="nearest",
+        fill_nodata=fill_nodata,
+    )
+
+    expected = [[1, 2, 2]] if fill_nodata else [[1, 2, -9999]]
+    with rasterio.open(output) as dataset:
+        np.testing.assert_array_equal(dataset.read(1), expected)
+
+
 @pytest.mark.parametrize(
     ("unit", "canonical", "factor"),
     [

@@ -13,7 +13,9 @@ import pandas as pd
 import xarray as xr
 
 from mhm_tools.common.constants import NO_DATA
+from mhm_tools.common.crs_handler import _set_spatial_dims
 from mhm_tools.common.file_handler import (
+    _raster_nodata_values,
     align_raster_to_reference,
     get_grid,
     get_raster_data,
@@ -320,6 +322,132 @@ def reclassify_categorical_raster(
     return result.rio.write_nodata(int(_NODATA), inplace=False)
 
 
+def fill_grid_nodata(
+    values: np.ndarray,
+    *,
+    x=None,
+    y=None,
+    mask=None,
+    missing_value=None,
+    fill_value=np.nan,
+    name: str = "data",
+    source_file: PathLike | None = None,
+) -> int:
+    """Fill the nodata cells of one raster block from nearest valid neighbours.
+
+    The block is wrapped in a labelled data array so that the shared
+    :func:`mhm_tools.pre.fill_nearest.fill_dataarray_with_nearest`
+    interpolator can be reused as is.
+
+    Parameters
+    ----------
+    values : numpy.ndarray
+        Two-dimensional ``(y, x)`` array modified in place.
+    x, y : numpy.ndarray, optional
+        Cell-centre coordinates along each axis. Cell indices are used when a
+        coordinate vector is omitted, which is only correct for square cells.
+    mask : numpy.ndarray, optional
+        Boolean array where true cells are excluded from filling and set to
+        ``fill_value``. Cells inside the mask still act as fill sources.
+    missing_value : float, optional
+        Missing-value marker to fill. NaNs are always treated as missing.
+    fill_value : float, default numpy.nan
+        Value written to masked cells and, when no valid source cell exists,
+        to the target cells.
+    name : str, default "data"
+        Variable name used in the log messages of the interpolator.
+    source_file : path-like, optional
+        File path used only for diagnostic log messages.
+
+    Returns
+    -------
+    int
+        Number of unmasked cells filled from a nearest valid neighbour.
+    """
+    from mhm_tools.pre.fill_nearest import fill_dataarray_with_nearest
+
+    values = np.asarray(values)
+    if values.ndim != 2:
+        msg = (
+            "Nearest-neighbour grid filling requires a two-dimensional array; "
+            f"got shape {values.shape}."
+        )
+        raise ValueError(msg)
+
+    rows, columns = values.shape
+    array = xr.DataArray(
+        values,
+        dims=("y", "x"),
+        coords={
+            "y": np.arange(rows, dtype=np.float64)
+            if y is None
+            else np.asarray(y, dtype=np.float64),
+            "x": np.arange(columns, dtype=np.float64)
+            if x is None
+            else np.asarray(x, dtype=np.float64),
+        },
+        name=name,
+    )
+    return fill_dataarray_with_nearest(
+        array,
+        along_time=False,
+        missing_value=missing_value,
+        mask=mask,
+        fill_value=fill_value,
+        source_file=source_file,
+    )
+
+
+def _reference_valid(reference: xr.DataArray) -> np.ndarray:
+    """Return the boolean mask of reference cells that carry data."""
+    values = np.asarray(reference.values)
+    valid = np.ones(values.shape, dtype=bool)
+    if np.issubdtype(values.dtype, np.floating):
+        valid &= np.isfinite(values)
+    for nodata in _raster_nodata_values(reference):
+        valid &= values != nodata
+    return valid
+
+
+def _fill_aligned_nodata(
+    values: np.ndarray,
+    reference: xr.DataArray,
+    *,
+    variable_name: str,
+    input_file: PathLike,
+) -> np.ndarray:
+    """Restrict classes to the reference domain and close their nodata gaps."""
+    # Aligned values follow the (y, x) order that align_raster_to_reference uses.
+    reference = _set_spatial_dims(reference)
+    y_dim, x_dim = reference.rio.y_dim, reference.rio.x_dim
+    reference = reference.transpose(y_dim, x_dim)
+    valid = _reference_valid(reference)
+    if not np.any(valid):
+        msg = "The reference raster has no valid cell to define the domain."
+        raise ValueError(msg)
+    y_values = np.asarray(reference[y_dim].values, dtype=np.float64)
+    x_values = np.asarray(reference[x_dim].values, dtype=np.float64)
+    missing = int(np.count_nonzero((values == _NODATA) & valid))
+    filled = fill_grid_nodata(
+        values,
+        x=x_values,
+        y=y_values,
+        mask=~valid,
+        missing_value=float(_NODATA),
+        fill_value=int(_NODATA),
+        name=variable_name,
+        source_file=input_file,
+    )
+    if missing:
+        logger.info(
+            "Filled %d of %d nodata cells of %s from nearest valid neighbours.",
+            filled,
+            missing,
+            variable_name,
+        )
+    return values
+
+
 def prepare_categorical_data(
     input_file: PathLike,
     reference: xr.DataArray,
@@ -331,8 +459,14 @@ def prepare_categorical_data(
     input_crs: str | None = None,
     resampling="nearest",
     mask_reference: bool = False,
+    fill_nodata: bool = False,
 ) -> xr.Dataset:
-    """Classify one source raster and align it to an open reference raster."""
+    """Classify one source raster and align it to an open reference raster.
+
+    When ``fill_nodata`` is true the aligned classes are cut to the reference
+    domain and their remaining nodata cells are taken from the nearest
+    classified neighbour, which may lie outside that domain.
+    """
     input_file = Path(input_file)
     if not input_file.is_file():
         msg = f"Input raster does not exist: {input_file}"
@@ -359,8 +493,16 @@ def prepare_categorical_data(
             data_kind="categorical",
             mask_reference=mask_reference,
         )
+        values = np.asarray(aligned.values, dtype=np.int32)
+        if fill_nodata:
+            values = _fill_aligned_nodata(
+                values,
+                reference,
+                variable_name=variable_name,
+                input_file=input_file,
+            )
         return set_grid(
-            np.asarray(aligned.values, dtype=np.int32),
+            values,
             get_grid(reference.to_dataset(name="_dem"), "_dem"),
             variable_name,
             data_attrs={
@@ -385,6 +527,7 @@ def format_categorical_data(
     input_crs: str | None = None,
     dem_crs: str | None = None,
     resampling="nearest",
+    fill_nodata: bool = False,
 ) -> Path:
     """Map a categorical raster to classes on the exact DEM grid."""
     input_file = Path(input_file)
@@ -426,6 +569,7 @@ def format_categorical_data(
             variable_name=variable_name,
             input_crs=input_crs,
             resampling=resampling,
+            fill_nodata=fill_nodata,
         )
         encoding = {
             variable_name: {

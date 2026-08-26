@@ -113,6 +113,7 @@ def test_format_soil_data_writes_nc_asc_and_tif(tmp_path: Path):
         "map code",
         "target class",
         output_type="nc",
+        fill_nodata=False,
     )
 
     assert nc_file == tmp_path / "nc" / "soil_class.nc"
@@ -136,6 +137,7 @@ def test_format_soil_data_writes_nc_asc_and_tif(tmp_path: Path):
         "map code",
         "target class",
         output_type="asc",
+        fill_nodata=False,
     )
     assert asc_file == tmp_path / "asc" / "soil_class.asc"
     assert asc_file.with_suffix(".prj").is_file()
@@ -156,6 +158,7 @@ def test_format_soil_data_writes_nc_asc_and_tif(tmp_path: Path):
         "map code",
         "target class",
         output_type="tif",
+        fill_nodata=False,
     )
     assert tif_file == tmp_path / "tif" / "soil_class.tif"
     assert (
@@ -197,6 +200,7 @@ def test_format_soil_data_accepts_mixed_raster_formats(
         lookup_file,
         "map code",
         "target class",
+        fill_nodata=False,
     )
 
     with xr.open_dataset(output, decode_cf=False) as dataset:
@@ -351,6 +355,7 @@ def test_format_soil_data_uses_exact_dem_grid(tmp_path: Path):
         lookup_file,
         "map code",
         "target class",
+        fill_nodata=False,
     )
 
     assert result == tmp_path / "output" / "soil_class.nc"
