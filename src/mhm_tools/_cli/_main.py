@@ -67,6 +67,10 @@ _COMMAND_GROUPS: List[Tuple[str, str, List[Tuple[str, object]]]] = [
             ("crop-mhm-setup", "mhm_tools._cli._crop_mhm_setup"),
             ("latlon", "mhm_tools._cli._latlon"),
             ("create-header", "mhm_tools._cli._create_header"),
+            (
+                "create-dem-derivatives",
+                "mhm_tools._cli._create_dem_derivatives",
+            ),
             ("calculate-pet", "mhm_tools._cli._calculate_pet"),
             ("prepare-mhm-forcings", "mhm_tools._cli._prepare_mhm_forcings"),
         ],

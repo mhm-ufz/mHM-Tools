@@ -24,11 +24,11 @@ from rasterio.transform import from_origin
 from rasterio.warp import calculate_default_transform
 
 from mhm_tools.common.constants import NC_ENCODE_DEFAULTS, NO_DATA
-from mhm_tools.common.crs_handler import MissingCRSError as _MissingCRSError
 from mhm_tools.common.crs_handler import (
-    _set_spatial_dims,
-    _write_object_crs,
+    MissingCRSError,
     resolve_crs,
+    set_spatial_dims,
+    write_object_crs,
 )
 from mhm_tools.common.esri_grid import standardize_header, write_grid, write_header
 from mhm_tools.common.logger import ErrorLogger, log_arguments
@@ -49,7 +49,8 @@ from mhm_tools.common.xarray_utils import (
 )
 
 logger = logging.getLogger(__name__)
-MissingCRSError = _MissingCRSError
+# Re-exported so raster callers need only this module.
+__all__ = ["MissingCRSError", "get_nodata"]
 
 
 @dataclass
@@ -62,11 +63,10 @@ class GridDefinition:
 
 def get_raster_data(file_path, var_name=None, crs=None) -> xr.DataArray:
     """Read one two-dimensional, georeferenced raster payload."""
-    decode_coords = "all" if Path(file_path).suffix.lower() == ".nc" else "coordinates"
     ds = get_xarray_ds_from_file(
         file_path,
         var_name=var_name,
-        decode_coords=decode_coords,
+        load_crs=Path(file_path).suffix.lower() == ".nc",
     )
     try:
         name = var_name or get_single_data_var(ds)
@@ -77,7 +77,7 @@ def get_raster_data(file_path, var_name=None, crs=None) -> xr.DataArray:
         if data.ndim != 2:
             msg = f"Raster payload {name!r} must be two-dimensional, got {data.ndim}."
             raise ValueError(msg)
-        data = _set_spatial_dims(data)
+        data = set_spatial_dims(data)
         dataset_crs = resolve_crs(ds, crs)
         resolved = resolve_crs(data, dataset_crs, required=True)
         result = data.rio.write_crs(resolved, inplace=False)
@@ -98,19 +98,11 @@ def align_raster_to_reference(
     mask_reference=False,
 ) -> xr.DataArray:
     """Match a raster to a reference grid with explicit or automatic resampling."""
-    data = _set_spatial_dims(data)
-    reference = _set_spatial_dims(reference)
-    data_y, data_x = data.rio.y_dim, data.rio.x_dim
-    reference_y, reference_x = reference.rio.y_dim, reference.rio.x_dim
-    data = data.transpose(data_y, data_x).rio.set_spatial_dims(
-        x_dim=data_x, y_dim=data_y
-    )
-    reference = reference.transpose(reference_y, reference_x).rio.set_spatial_dims(
-        x_dim=reference_x, y_dim=reference_y
-    )
+    data = _as_yx(data)
+    reference = _as_yx(reference)
     resolve_crs(data, required=True)
     reference_crs = resolve_crs(reference, required=True)
-    source_nodata = _get_nodata(data)
+    source_nodata = get_nodata(data)
     data = _ensure_nodata_dtype(data, nodata)
     resampling = _resolve_raster_resampling(
         data,
@@ -120,28 +112,15 @@ def align_raster_to_reference(
     )
 
     if _same_raster_grid(data, reference):
-        normalized = data
-        if source_nodata is not None and not _is_nan(source_nodata):
-            normalized = normalized.where(normalized != source_nodata, nodata)
-        if np.issubdtype(data.dtype, np.integer):
-            values = normalized.astype(data.dtype).data
-        else:
-            values = normalized.where(normalized.notnull(), nodata).data
+        values = _restated_nodata(data, source_nodata, nodata)
     else:
         values = data.rio.reproject_match(
             reference,
             resampling=resampling,
             nodata=nodata,
         ).data
-
     if mask_reference:
-        reference_values = np.asarray(reference.values)
-        reference_valid = np.ones(reference.shape, dtype=bool)
-        if np.issubdtype(reference_values.dtype, np.floating):
-            reference_valid &= np.isfinite(reference_values)
-        for reference_nodata in _raster_nodata_values(reference):
-            reference_valid &= reference_values != reference_nodata
-        values = np.where(reference_valid, values, nodata)
+        values = _blank_outside_reference(values, reference, nodata)
 
     coords = {
         name: coord
@@ -159,10 +138,38 @@ def align_raster_to_reference(
         name=data.name,
         attrs=attrs,
     )
-    result = _set_spatial_dims(result).rio.write_crs(reference_crs, inplace=False)
+    result = set_spatial_dims(result).rio.write_crs(reference_crs, inplace=False)
     result = result.rio.write_transform(reference.rio.transform(), inplace=False)
     result.attrs["nodata_value"] = nodata
     return result.rio.write_nodata(nodata, inplace=False)
+
+
+def _as_yx(data: xr.DataArray) -> xr.DataArray:
+    """Return a raster tagged as spatial and transposed to ``(y, x)`` order."""
+    data = set_spatial_dims(data)
+    y_dim, x_dim = data.rio.y_dim, data.rio.x_dim
+    return data.transpose(y_dim, x_dim).rio.set_spatial_dims(x_dim=x_dim, y_dim=y_dim)
+
+
+def _restated_nodata(data, source_nodata, nodata):
+    """Return the values of an already aligned raster on the requested nodata."""
+    normalized = data
+    if source_nodata is not None and not _is_nan(source_nodata):
+        normalized = normalized.where(normalized != source_nodata, nodata)
+    if np.issubdtype(data.dtype, np.integer):
+        return normalized.astype(data.dtype).data
+    return normalized.where(normalized.notnull(), nodata).data
+
+
+def _blank_outside_reference(values, reference, nodata):
+    """Set the cells the reference itself marks as nodata back to nodata."""
+    reference_values = np.asarray(reference.values)
+    valid = np.ones(reference.shape, dtype=bool)
+    if np.issubdtype(reference_values.dtype, np.floating):
+        valid &= np.isfinite(reference_values)
+    for reference_nodata in _raster_nodata_values(reference):
+        valid &= reference_values != reference_nodata
+    return np.where(valid, values, nodata)
 
 
 def _resolve_raster_resampling(data, reference, *, resampling, data_kind):
@@ -228,8 +235,8 @@ def _is_raster_downsampling(data, reference) -> bool:
     )
 
 
-def _raster_nodata_values(data):
-    """Yield finite nodata sentinels declared by a raster."""
+def _declared_nodata(data):
+    """Return every nodata sentinel a raster declares, most authoritative first."""
     values = []
     with contextlib.suppress(Exception):
         values.extend([data.rio.encoded_nodata, data.rio.nodata])
@@ -237,8 +244,18 @@ def _raster_nodata_values(data):
         data.attrs.get(key) for key in ("nodata_value", "_FillValue", "missing_value")
     )
     values.extend(data.encoding.get(key) for key in ("_FillValue", "missing_value"))
+    return values
+
+
+def get_nodata(data):
+    """Return the first nodata value a raster declares, preserving zero."""
+    return next((value for value in _declared_nodata(data) if value is not None), None)
+
+
+def _raster_nodata_values(data):
+    """Yield the distinct finite nodata sentinels a raster declares."""
     seen = set()
-    for value in values:
+    for value in _declared_nodata(data):
         if value is None or _is_nan(value):
             continue
         try:
@@ -260,24 +277,34 @@ def _same_raster_grid(data: xr.DataArray, reference: xr.DataArray) -> bool:
     return data.rio.transform().almost_equals(reference.rio.transform())
 
 
-def _ensure_nodata_dtype(data: xr.DataArray, nodata) -> xr.DataArray:
-    """Promote integer data when needed to represent the requested nodata."""
-    if nodata is None or not np.issubdtype(data.dtype, np.integer):
-        return data
-    dtype = np.dtype(data.dtype)
+def _dtype_holding_nodata(dtype, nodata):
+    """Return the narrowest dtype holding both the range of ``dtype`` and ``nodata``.
+
+    Falls back to float64 for a non-integral nodata, and raises when no integer
+    dtype can represent both.
+    """
+    dtype = np.dtype(dtype)
     info = np.iinfo(dtype)
     if info.min <= nodata <= info.max:
-        return data
+        return dtype
     if not np.isfinite(nodata) or float(nodata) != int(nodata):
-        return data.astype(np.float64)
+        return np.dtype("float64")
     minimum = min(info.min, int(nodata))
     maximum = max(info.max, int(nodata))
     for candidate in (np.int8, np.int16, np.int32, np.int64):
         candidate_info = np.iinfo(candidate)
         if candidate_info.min <= minimum and maximum <= candidate_info.max:
-            return data.astype(candidate)
+            return np.dtype(candidate)
     msg = f"Raster dtype {dtype} and nodata {nodata} have no safe integer dtype."
     raise ValueError(msg)
+
+
+def _ensure_nodata_dtype(data: xr.DataArray, nodata) -> xr.DataArray:
+    """Promote integer data when needed to represent the requested nodata."""
+    if nodata is None or not np.issubdtype(data.dtype, np.integer):
+        return data
+    dtype = _dtype_holding_nodata(data.dtype, nodata)
+    return data if dtype == data.dtype else data.astype(dtype)
 
 
 def _is_nan(value):
@@ -285,18 +312,6 @@ def _is_nan(value):
     with contextlib.suppress(TypeError):
         return bool(np.isnan(value))
     return False
-
-
-def _get_nodata(data):
-    """Return the first nodata value present, preserving zero."""
-    values = []
-    with contextlib.suppress(Exception):
-        values.extend([data.rio.encoded_nodata, data.rio.nodata])
-    values.extend(
-        data.attrs.get(key) for key in ("nodata_value", "_FillValue", "missing_value")
-    )
-    values.extend(data.encoding.get(key) for key in ("_FillValue", "missing_value"))
-    return next((value for value in values if value is not None), None)
 
 
 def get_grid(
@@ -390,7 +405,10 @@ def create_header(
                 if x_size > 0 and np.isclose(x_size, y_size):
                     cellsize = x_size
             if cellsize is None:
-                msg = "Cannot determine cellsize from dataset with only one x and one y value. Please provide cellsize as an argument."
+                msg = (
+                    "Cannot determine cellsize from dataset with only one x "
+                    "and one y value. Please provide cellsize as an argument."
+                )
                 with ErrorLogger(logger):
                     raise ValueError(msg)
     if xllcorner is None:
@@ -696,9 +714,13 @@ def get_xarray_ds_from_file(  # noqa: PLR0912
     landcover=False,
     landcover_year_start=None,
     create_bounds=False,
-    decode_coords="coordinates",
+    load_crs=False,
 ):
-    """Read file and return xarray dataset."""
+    """Read file and return xarray dataset.
+
+    Set ``load_crs`` to also decode the grid-mapping variable that carries the
+    CRS; it is left out by default because it is not payload data.
+    """
     file_path = Path(file_path)
     logger.debug(f"Reading {file_path} to xarray with chunking = {chunking}")
     ds_out = None
@@ -727,7 +749,7 @@ def get_xarray_ds_from_file(  # noqa: PLR0912
             file_path=file_path,
             use_mfdataset=use_mfdataset,
             engine=engine,
-            decode_coords=decode_coords,
+            decode_coords="all" if load_crs else "coordinates",
         )
     elif suffix in {".tif", ".tiff"}:
         import rioxarray as rxr
@@ -836,7 +858,7 @@ def write_xarray_to_file(
         if crs is not None:
             resolved = resolve_crs(ds, crs)
             if resolved is not None:
-                ds = _write_object_crs(ds, resolved)
+                ds = write_object_crs(ds, resolved)
         write_xarray_to_netcdf(ds, file_path, var_name, encoding, engine)
     else:
         write_xarray_to_geotiff(ds, file_path, var_name, crs=crs)
@@ -861,9 +883,8 @@ def write_xarray_to_ascii(
             return
     # get the data from the dataset
     data = dataset[data_var] if isinstance(dataset, xr.Dataset) else dataset
-    data = _set_spatial_dims(data)
+    data = _as_yx(data)
     x_dim, y_dim = data.rio.x_dim, data.rio.y_dim
-    data = data.transpose(y_dim, x_dim)
     _validate_ascii_grid(data)
     if data.sizes[x_dim] > 1 and data[x_dim].values[0] > data[x_dim].values[-1]:
         data = data.isel({x_dim: slice(None, None, -1)})
@@ -874,7 +895,7 @@ def write_xarray_to_ascii(
     # set the nodata value
     dtype = get_dtype(data)
     if nodata_value is None:
-        nodata_value = _get_nodata(data)
+        nodata_value = get_nodata(data)
         if nodata_value is None:
             is_int = issubclass(np.dtype(dtype).type, (np.integer, np.unsignedinteger))
             typ = int if is_int else float
@@ -911,7 +932,7 @@ def _validate_ascii_grid(data):
     if data.ndim != 2:
         msg = f"ASCII output requires two-dimensional data, got {data.ndim}."
         raise ValueError(msg)
-    spatial = _set_spatial_dims(data)
+    spatial = set_spatial_dims(data)
     transform = spatial.rio.transform()
     scale = max(abs(transform.a), abs(transform.e), 1.0)
     tolerance = scale * 1e-10
@@ -945,11 +966,10 @@ def write_xarray_to_geotiff(
         msg = f"GeoTIFF output requires two-dimensional data, got {data.ndim}."
         raise ValueError(msg)
 
-    data = _set_spatial_dims(data)
-    data = data.transpose(data.rio.y_dim, data.rio.x_dim)
+    data = _as_yx(data)
     resolved = resolve_crs(data, crs, required=True)
     data = data.rio.write_crs(resolved, inplace=False)
-    nodata_value = _get_nodata(data) if nodata_value is None else nodata_value
+    nodata_value = get_nodata(data) if nodata_value is None else nodata_value
     has_missing = bool(data.isnull().any().compute().item())
     if nodata_value is None and has_missing:
         nodata_value = NO_DATA
@@ -979,16 +999,7 @@ def _geotiff_dtype(data, nodata_value):
         dtype = data.dtype if data.dtype.kind in "iuf" else np.dtype("float64")
     if nodata_value is None or dtype.kind == "f":
         return np.dtype(dtype)
-    if not np.isfinite(nodata_value) or float(nodata_value) != int(nodata_value):
-        return np.dtype("float64")
-    info = np.iinfo(dtype)
-    if info.min <= nodata_value <= info.max:
-        return np.dtype(dtype)
-    promoted = np.promote_types(dtype, np.asarray(int(nodata_value)).dtype)
-    if promoted.kind == "f":
-        msg = f"Raster dtype {dtype} and nodata {nodata_value} have no safe integer dtype."
-        raise ValueError(msg)
-    return promoted
+    return _dtype_holding_nodata(dtype, nodata_value)
 
 
 def read_ascii_to_xarray(
@@ -1059,7 +1070,7 @@ def read_ascii_to_xarray(
         name=name,
         attrs={"nodata_value": nodata_value, "_FillValue": nodata_value},
     )
-    da = _set_spatial_dims(da).rio.write_transform(
+    da = set_spatial_dims(da).rio.write_transform(
         from_origin(
             xllcorner,
             yllcorner + nrows * cellsize,

@@ -13,7 +13,7 @@ import pandas as pd
 import xarray as xr
 
 from mhm_tools.common.constants import NO_DATA
-from mhm_tools.common.crs_handler import _set_spatial_dims
+from mhm_tools.common.crs_handler import set_spatial_dims
 from mhm_tools.common.file_handler import (
     _raster_nodata_values,
     align_raster_to_reference,
@@ -418,7 +418,7 @@ def _fill_aligned_nodata(
 ) -> np.ndarray:
     """Restrict classes to the reference domain and close their nodata gaps."""
     # Aligned values follow the (y, x) order that align_raster_to_reference uses.
-    reference = _set_spatial_dims(reference)
+    reference = set_spatial_dims(reference)
     y_dim, x_dim = reference.rio.y_dim, reference.rio.x_dim
     reference = reference.transpose(y_dim, x_dim)
     valid = _reference_valid(reference)
