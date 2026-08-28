@@ -7,14 +7,23 @@ import numpy as np
 import pytest
 import rasterio
 import xarray as xr
-
 from mhm_tools import pre
 from mhm_tools.pre.format_lc_data import format_lc_periods
 from mhm_tools.pre.format_soil import _bulk_density_unit, format_soil_horizons
 
 
-def _write_raster(path: Path, values, *, cellsize: float = 1.0) -> None:
+def _write_raster(
+    path: Path,
+    values,
+    *,
+    cellsize: float = 1.0,
+    crs="EPSG:32632",
+    transform=None,
+) -> None:
     values = np.asarray(values)
+    transform = transform or rasterio.transform.from_origin(
+        0.0, values.shape[0] * cellsize, cellsize, cellsize
+    )
     with rasterio.open(
         path,
         "w",
@@ -23,10 +32,8 @@ def _write_raster(path: Path, values, *, cellsize: float = 1.0) -> None:
         height=values.shape[0],
         count=1,
         dtype=values.dtype,
-        crs="EPSG:32632",
-        transform=rasterio.transform.from_origin(
-            0.0, values.shape[0] * cellsize, cellsize, cellsize
-        ),
+        crs=crs,
+        transform=transform,
         nodata=-9999,
     ) as dataset:
         dataset.write(values, 1)
@@ -109,6 +116,60 @@ def test_format_lc_periods_maps_before_majority_and_writes_both_formats(tmp_path
         assert dataset["time"].attrs["standard_name"] == "time"
         assert dataset["land_cover"].attrs["units"] == "1"
         assert dataset.attrs["Conventions"].startswith("CF-")
+
+
+@pytest.mark.parametrize("output_type", ["asc", "nc"])
+def test_format_lc_periods_reprojects_to_dem_crs(tmp_path, output_type):
+    """Historical land cover is warped to the exact DEM grid without osgeo."""
+    input_path = tmp_path / "land-cover"
+    input_path.mkdir()
+    source = input_path / "period.tif"
+    dem = tmp_path / "dem.tif"
+    lookup = tmp_path / "lookup.gpkg"
+    _write_raster(source, [[10, 20], [30, 40]], crs="EPSG:4326")
+    bounds = rasterio.warp.transform_bounds("EPSG:4326", "EPSG:3857", 0, 0, 2, 2)
+    dem_transform = rasterio.transform.from_bounds(*bounds, 2, 2)
+    _write_raster(
+        dem,
+        np.ones((2, 2), dtype=np.float32),
+        crs="EPSG:3857",
+        transform=dem_transform,
+    )
+    gpd.GeoDataFrame(
+        {"source": [10, 20, 30, 40], "class": [1, 2, 3, 4]}
+    ).to_file(lookup, driver="GPKG")
+    manifest = input_path / "periods.csv"
+    manifest.write_text(
+        "StartYear,EndYear,FilePath\n2000,2000,period.tif\n",
+        encoding="utf-8",
+    )
+
+    (output,) = format_lc_periods(
+        manifest,
+        dem,
+        tmp_path / output_type,
+        lookup,
+        "source",
+        "class",
+        output_type,
+        resampling="nearest",
+        fill_nodata=False,
+    )
+
+    if output_type == "asc":
+        with rasterio.open(output) as dataset:
+            assert dataset.crs.to_epsg() == 3857
+            assert dataset.transform.almost_equals(dem_transform)
+            np.testing.assert_array_equal(dataset.read(1), [[1, 2], [3, 4]])
+    else:
+        with xr.open_dataset(output, decode_cf=False) as dataset:
+            output_crs = rasterio.crs.CRS.from_wkt(
+                dataset["crs"].attrs["spatial_ref"]
+            )
+            assert output_crs.to_epsg() == 3857
+            np.testing.assert_array_equal(
+                dataset["land_cover"].values, [[[1, 2], [3, 4]]]
+            )
 
 
 def test_format_lc_periods_rejects_gaps(tmp_path):

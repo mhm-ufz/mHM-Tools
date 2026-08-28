@@ -15,6 +15,12 @@ from typing import Union
 
 import numpy as np
 import pandas as pd
+import rasterio
+from rasterio.crs import CRS
+from rasterio.enums import Resampling
+from rasterio.shutil import copy as copy_raster
+from rasterio.vrt import WarpedVRT
+from rasterio.windows import Window
 
 from mhm_tools.common.constants import NO_DATA
 from mhm_tools.common.format_data import (
@@ -141,6 +147,175 @@ def _read_lc_manifest(input_file: PathLike):
     return manifest, periods
 
 
+_LC_BLOCK_ROWS = 256
+
+
+def _raster_crs(dataset, override, label: str) -> CRS:
+    """Return raster CRS metadata or its explicit fallback."""
+    crs = dataset.crs or (CRS.from_user_input(override) if override else None)
+    if crs is None:
+        msg = f"{label} raster has no CRS metadata: {dataset.name}"
+        raise ValueError(msg)
+    return crs
+
+
+def _lc_resampling(requested) -> Resampling:
+    """Return categorical resampling for a Rasterio virtual warp."""
+    if isinstance(requested, Resampling):
+        return requested
+    method = str(getattr(requested, "name", requested)).strip().lower()
+    method = {"auto": "mode", "near": "nearest"}.get(method, method)
+    try:
+        return Resampling[method]
+    except KeyError as exc:
+        choices = "nearest, bilinear, cubic, average, or mode"
+        msg = f"Unsupported raster resampling method {requested!r}; expected {choices}."
+        raise ValueError(msg) from exc
+
+
+def _lc_windows(dataset):
+    for row in range(0, dataset.height, _LC_BLOCK_ROWS):
+        height = min(_LC_BLOCK_ROWS, dataset.height - row)
+        yield Window(0, row, dataset.width, height)
+
+
+def _reference_valid(reference, window=None):
+    values = reference.read(1, window=window, masked=True)
+    valid = ~np.ma.getmaskarray(values)
+    data = np.ma.getdata(values)
+    if np.issubdtype(data.dtype, np.floating):
+        valid &= np.isfinite(data)
+    return valid
+
+
+def _write_mapped_lc(source, source_crs, mapped_path, mapping):
+    """Map source categories to int32 classes before spatial resampling."""
+    profile = {
+        "driver": "GTiff",
+        "height": source.height,
+        "width": source.width,
+        "count": 1,
+        "dtype": "int32",
+        "crs": source_crs,
+        "transform": source.transform,
+        "nodata": int(NO_DATA),
+        "compress": "lzw",
+        "tiled": True,
+        "blockxsize": 256,
+        "blockysize": 256,
+        "BIGTIFF": "IF_SAFER",
+    }
+    matched = False
+    with rasterio.open(mapped_path, "w", **profile) as target:
+        for _, window in source.block_windows(1):
+            source_values = source.read(1, window=window, masked=True)
+            values = np.ma.getdata(source_values)
+            valid = ~np.ma.getmaskarray(source_values) & np.isfinite(values)
+            result = np.full(values.shape, int(NO_DATA), dtype=np.int32)
+            for source_value, class_value in mapping.items():
+                selected = valid & (values == source_value)
+                if np.any(selected):
+                    result[selected] = int(class_value)
+                    matched = True
+            target.write(result, 1, window=window)
+    if not matched:
+        msg = "No valid raster category matched the selected lookup mapping field."
+        raise ValueError(msg)
+
+
+def _write_aligned_lc_period(
+    source_path,
+    reference,
+    reference_crs,
+    aligned_path,
+    mapping,
+    *,
+    input_crs,
+    resampling,
+    fill_nodata,
+):
+    """Map and align one land-cover period to the exact DEM grid."""
+    mapped_path = aligned_path.with_name(f"{aligned_path.stem}_mapped.tif")
+    with rasterio.open(source_path) as source:
+        if source.count != 1:
+            msg = "Land-cover inputs must contain exactly one raster band."
+            raise ValueError(msg)
+        source_crs = _raster_crs(source, input_crs, "Land-cover")
+        _write_mapped_lc(source, source_crs, mapped_path, mapping)
+
+    profile = {
+        "driver": "GTiff",
+        "height": reference.height,
+        "width": reference.width,
+        "count": 1,
+        "dtype": "int32",
+        "crs": reference_crs,
+        "transform": reference.transform,
+        "nodata": int(NO_DATA),
+        "compress": "lzw",
+        "tiled": True,
+        "blockxsize": 256,
+        "blockysize": 256,
+        "BIGTIFF": "IF_SAFER",
+    }
+    with rasterio.open(mapped_path) as mapped:  # noqa: SIM117
+        with WarpedVRT(
+            mapped,
+            crs=reference_crs,
+            transform=reference.transform,
+            width=reference.width,
+            height=reference.height,
+            src_nodata=int(NO_DATA),
+            nodata=int(NO_DATA),
+            dtype="int32",
+            resampling=_lc_resampling(resampling),
+        ) as warped:
+            with rasterio.open(aligned_path, "w", **profile) as target:
+                if fill_nodata:
+                    valid = _reference_valid(reference)
+                    if not np.any(valid):
+                        msg = "The DEM has no valid cell to define the land-cover domain."
+                        raise ValueError(msg)
+                    values = warped.read(1, out_dtype="int32")
+                    missing = int(
+                        np.count_nonzero((values == int(NO_DATA)) & valid)
+                    )
+                    transform = reference.transform
+                    filled = fill_grid_nodata(
+                        values,
+                        x=transform.c
+                        + (np.arange(reference.width) + 0.5) * transform.a,
+                        y=transform.f
+                        + (np.arange(reference.height) + 0.5) * transform.e,
+                        mask=~valid,
+                        missing_value=float(NO_DATA),
+                        fill_value=int(NO_DATA),
+                        name="land_cover",
+                        source_file=source_path,
+                    )
+                    if missing:
+                        logger.info(
+                            "Filled %d of %d nodata cells of %s from nearest "
+                            "valid neighbours.",
+                            filled,
+                            missing,
+                            source_path,
+                        )
+                    target.write(values, 1)
+                else:
+                    for window in _lc_windows(reference):
+                        values = warped.read(1, window=window, out_dtype="int32")
+                        values[~_reference_valid(reference, window)] = int(NO_DATA)
+                        target.write(values, 1, window=window)
+    return aligned_path
+
+
+def _validate_reference_grid(reference):
+    if reference.transform.b or reference.transform.d:
+        msg = "Rotated DEM grids are not supported for historical land cover."
+        raise ValueError(msg)
+
+
 def _format_lc_period_asc_streaming(
     source_path,
     dem_path,
@@ -152,183 +327,36 @@ def _format_lc_period_asc_streaming(
     resampling="auto",
     fill_nodata=True,
 ):
-    """Reclassify and align one large period with bounded memory.
-
-    Cells outside the DEM domain are always written as nodata. When
-    ``fill_nodata`` is true the nodata cells left inside the DEM domain are
-    taken from their nearest classified neighbour, which requires the aligned
-    period to be held in memory once.
-    """
-    from osgeo import gdal, osr
-
-    source = gdal.Open(str(source_path))
-    reference = gdal.Open(str(dem_path))
-    if source is None or reference is None:
-        raise ValueError("Land-cover source and DEM must be GDAL-readable rasters.")
-    if source.RasterCount != 1:
-        raise ValueError("Land-cover inputs must contain exactly one raster band.")
-    transform = reference.GetGeoTransform()
-    if transform[2] or transform[4]:
-        raise ValueError("Rotated DEM grids cannot be written as mHM ASCII files.")
+    """Reclassify and align one period with Rasterio and bounded memory."""
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    with TemporaryDirectory(prefix="mhm_tools_lc_", dir=output_path.parent) as temp:
-        temp = Path(temp)
-        mapped_path = temp / "mapped.tif"
-        aligned_path = temp / "aligned.tif"
-        driver = gdal.GetDriverByName("GTiff")
-        mapped = driver.Create(
-            str(mapped_path),
-            source.RasterXSize,
-            source.RasterYSize,
-            1,
-            gdal.GDT_Int32,
-            options=["TILED=YES", "COMPRESS=LZW", "BIGTIFF=IF_SAFER"],
-        )
-        mapped.SetGeoTransform(source.GetGeoTransform())
-        projection = source.GetProjection()
-        if not projection and input_crs:
-            spatial_ref = osr.SpatialReference()
-            if spatial_ref.SetFromUserInput(str(input_crs)) == 0:
-                projection = spatial_ref.ExportToWkt()
-        if projection:
-            mapped.SetProjection(projection)
-        source_band = source.GetRasterBand(1)
-        mapped_band = mapped.GetRasterBand(1)
-        mapped_band.SetNoDataValue(int(NO_DATA))
-        nodata = source_band.GetNoDataValue()
-        block_x, block_y = source_band.GetBlockSize()
-        block_x = max(1, min(source.RasterXSize, block_x or 1024))
-        block_y = max(1, min(source.RasterYSize, block_y or 256))
-        matched = False
-        for yoff in range(0, source.RasterYSize, block_y):
-            height = min(block_y, source.RasterYSize - yoff)
-            for xoff in range(0, source.RasterXSize, block_x):
-                width = min(block_x, source.RasterXSize - xoff)
-                values = source_band.ReadAsArray(xoff, yoff, width, height)
-                valid = np.isfinite(values)
-                if nodata is not None and np.isfinite(nodata):
-                    valid &= values != nodata
-                result = np.full(values.shape, int(NO_DATA), dtype=np.int32)
-                for source_value, class_value in mapping.items():
-                    selected = valid & (values == source_value)
-                    if np.any(selected):
-                        result[selected] = int(class_value)
-                        matched = True
-                mapped_band.WriteArray(result, xoff, yoff)
-        mapped_band.FlushCache()
-        mapped_band = None
-        mapped = None
-        source_band = None
-        source = None
-        if not matched:
-            raise ValueError(
-                "No valid raster category matched the selected lookup mapping field."
+    with rasterio.open(dem_path) as reference:
+        reference_crs = _raster_crs(reference, dem_crs, "DEM")
+        _validate_reference_grid(reference)
+        with TemporaryDirectory(
+            prefix="mhm_tools_lc_", dir=output_path.parent
+        ) as temp_name:
+            aligned_path = Path(temp_name) / "aligned.tif"
+            _write_aligned_lc_period(
+                source_path,
+                reference,
+                reference_crs,
+                aligned_path,
+                mapping,
+                input_crs=input_crs,
+                resampling=resampling,
+                fill_nodata=fill_nodata,
             )
-
-        min_x = transform[0]
-        max_y = transform[3]
-        max_x = min_x + transform[1] * reference.RasterXSize
-        min_y = max_y + transform[5] * reference.RasterYSize
-        target_projection = reference.GetProjection()
-        if not target_projection and dem_crs:
-            spatial_ref = osr.SpatialReference()
-            if spatial_ref.SetFromUserInput(str(dem_crs)) == 0:
-                target_projection = spatial_ref.ExportToWkt()
-        method = getattr(resampling, "name", resampling)
-        method = str(method).lower()
-        method = "mode" if method == "auto" else method
-        if method not in {"near", "nearest", "bilinear", "cubic", "average", "mode"}:
-            raise ValueError(f"Unsupported raster resampling method: {resampling}")
-        if method == "nearest":
-            method = "near"
-        warped = gdal.Warp(
-            str(aligned_path),
-            str(mapped_path),
-            format="GTiff",
-            outputBounds=(min_x, min_y, max_x, max_y),
-            width=reference.RasterXSize,
-            height=reference.RasterYSize,
-            srcSRS=projection or None,
-            dstSRS=target_projection or None,
-            srcNodata=int(NO_DATA),
-            dstNodata=int(NO_DATA),
-            resampleAlg=method,
-            multithread=False,
-            creationOptions=["TILED=YES", "COMPRESS=LZW", "BIGTIFF=IF_SAFER"],
-        )
-        if warped is None:
-            raise RuntimeError("Could not align the land-cover period to the DEM grid.")
-        warped = None
-
-        aligned = gdal.Open(str(aligned_path), gdal.GA_Update)
-        aligned_band = aligned.GetRasterBand(1)
-        dem_band = reference.GetRasterBand(1)
-        dem_nodata = dem_band.GetNoDataValue()
-        if fill_nodata:
-            dem_values = dem_band.ReadAsArray()
-            valid = np.isfinite(dem_values)
-            if dem_nodata is not None and np.isfinite(dem_nodata):
-                valid &= dem_values != dem_nodata
-            if not np.any(valid):
-                raise ValueError(
-                    "The DEM has no valid cell to define the land-cover domain."
-                )
-            values = aligned_band.ReadAsArray()
-            missing = int(np.count_nonzero((values == int(NO_DATA)) & valid))
-            filled = fill_grid_nodata(
-                values,
-                x=transform[0] + (np.arange(reference.RasterXSize) + 0.5) * transform[1],
-                y=transform[3] + (np.arange(reference.RasterYSize) + 0.5) * transform[5],
-                mask=~valid,
-                missing_value=float(NO_DATA),
-                fill_value=int(NO_DATA),
-                name="land_cover",
-                source_file=source_path,
+            copy_raster(
+                aligned_path,
+                output_path,
+                driver="AAIGrid",
+                DECIMAL_PRECISION=0,
             )
-            if missing:
-                logger.info(
-                    "Filled %d of %d nodata cells of %s from nearest valid "
-                    "neighbours.",
-                    filled,
-                    missing,
-                    source_path,
-                )
-            aligned_band.WriteArray(values, 0, 0)
-        else:
-            _, block_y = dem_band.GetBlockSize()
-            block_y = max(1, min(reference.RasterYSize, block_y or 256))
-            for yoff in range(0, reference.RasterYSize, block_y):
-                height = min(block_y, reference.RasterYSize - yoff)
-                dem_values = dem_band.ReadAsArray(
-                    0, yoff, reference.RasterXSize, height
-                )
-                valid = np.isfinite(dem_values)
-                if dem_nodata is not None and np.isfinite(dem_nodata):
-                    valid &= dem_values != dem_nodata
-                values = aligned_band.ReadAsArray(
-                    0, yoff, reference.RasterXSize, height
-                )
-                values[~valid] = int(NO_DATA)
-                aligned_band.WriteArray(values, 0, yoff)
-        aligned_band.FlushCache()
-        aligned_band = None
-        aligned = None
-        dem_band = None
-        reference = None
-        translated = gdal.Translate(
-            str(output_path),
-            str(aligned_path),
-            format="AAIGrid",
-            creationOptions=["DECIMAL_PRECISION=0"],
-        )
-        if translated is None:
-            raise RuntimeError(f"Could not write land-cover ASCII file: {output_path}")
-        translated = None
     return output_path
 
 
-def _format_lc_periods_netcdf_streaming(
+def _format_lc_periods_netcdf_streaming(  # noqa: PLR0915
     periods,
     dem_file,
     output,
@@ -343,28 +371,22 @@ def _format_lc_periods_netcdf_streaming(
     import datetime as dt
 
     import netCDF4
-    from osgeo import gdal, osr
 
-    reference = gdal.Open(str(dem_file))
-    if reference is None:
-        raise ValueError(f"DEM raster does not exist: {dem_file}")
-    transform = reference.GetGeoTransform()
-    if transform[2] or transform[4]:
-        raise ValueError("Rotated DEM grids cannot be written as a CF rectilinear grid.")
-    rows, cols = reference.RasterYSize, reference.RasterXSize
-    projection = reference.GetProjection()
-    spatial_ref = osr.SpatialReference()
-    geographic = bool(
-        projection
-        and spatial_ref.ImportFromWkt(projection) == 0
-        and spatial_ref.IsGeographic()
-    )
-    x_values = transform[0] + (np.arange(cols) + 0.5) * transform[1]
-    y_values = transform[3] + (np.arange(rows) + 0.5) * transform[5]
+    reference = rasterio.open(dem_file)
+    reference_crs = _raster_crs(reference, dem_crs, "DEM")
+    _validate_reference_grid(reference)
+    transform = reference.transform
+    rows, cols = reference.height, reference.width
+    projection = reference_crs.to_wkt()
+    geographic = reference_crs.is_geographic
+    x_values = transform.c + (np.arange(cols) + 0.5) * transform.a
+    y_values = transform.f + (np.arange(rows) + 0.5) * transform.e
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
-    with TemporaryDirectory(prefix="mhm_tools_lc_stack_", dir=output.parent) as temp:
-        temp = Path(temp)
+    with TemporaryDirectory(
+        prefix="mhm_tools_lc_stack_", dir=output.parent
+    ) as temp_name:
+        temp = Path(temp_name)
         dataset = netCDF4.Dataset(output, "w", format="NETCDF4")
         try:
             dataset.createDimension("time", len(periods))
@@ -406,10 +428,10 @@ def _format_lc_periods_netcdf_streaming(
             time_bounds.long_name = "land-cover period bounds"
             x[:] = x_values
             y[:] = y_values
-            x_bounds[:, 0] = x_values - abs(transform[1]) / 2.0
-            x_bounds[:, 1] = x_values + abs(transform[1]) / 2.0
-            y_bounds[:, 0] = y_values - abs(transform[5]) / 2.0
-            y_bounds[:, 1] = y_values + abs(transform[5]) / 2.0
+            x_bounds[:, 0] = x_values - abs(transform.a) / 2.0
+            x_bounds[:, 1] = x_values + abs(transform.a) / 2.0
+            y_bounds[:, 0] = y_values - abs(transform.e) / 2.0
+            y_bounds[:, 1] = y_values + abs(transform.e) / 2.0
             x.standard_name = "longitude" if geographic else "projection_x_coordinate"
             y.standard_name = "latitude" if geographic else "projection_y_coordinate"
             x.units = "degrees_east" if geographic else "m"
@@ -421,7 +443,9 @@ def _format_lc_periods_netcdf_streaming(
             if projection:
                 crs.spatial_ref = projection
                 crs.crs_wkt = projection
-            crs.GeoTransform = " ".join(str(value) for value in transform)
+            crs.GeoTransform = " ".join(
+                str(value) for value in transform.to_gdal()
+            )
             land_cover.long_name = "mHM land cover"
             land_cover.units = "1"
             land_cover.nodata_value = int(NO_DATA)
@@ -431,30 +455,27 @@ def _format_lc_periods_netcdf_streaming(
             dataset.source = "mhm-tools format-data land-cover manifest"
 
             for index, period in enumerate(periods):
-                aligned = temp / f"period_{index}.asc"
-                _format_lc_period_asc_streaming(
+                aligned = temp / f"period_{index}.tif"
+                _write_aligned_lc_period(
                     period["path"],
-                    dem_file,
+                    reference,
+                    reference_crs,
                     aligned,
                     mapping,
                     input_crs=input_crs,
-                    dem_crs=dem_crs,
                     resampling=resampling,
                     fill_nodata=fill_nodata,
                 )
-                raster = gdal.Open(str(aligned))
-                band = raster.GetRasterBand(1)
-                block_rows = min(256, rows)
-                for yoff in range(0, rows, block_rows):
-                    height = min(block_rows, rows - yoff)
-                    land_cover[index, yoff : yoff + height, :] = band.ReadAsArray(
-                        0, yoff, cols, height
-                    )
-                band = None
-                raster = None
+                with rasterio.open(aligned) as raster:
+                    for window in _lc_windows(raster):
+                        row = int(window.row_off)
+                        height = int(window.height)
+                        land_cover[index, row : row + height, :] = raster.read(
+                            1, window=window
+                        )
         finally:
             dataset.close()
-            reference = None
+            reference.close()
     return output
 
 

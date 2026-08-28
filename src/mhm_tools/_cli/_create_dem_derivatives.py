@@ -1,6 +1,6 @@
 """Create DEM derivatives (filled DEM, slope, aspect, facc, fdir) from a DEM.
 
-The tool creates a filled DEM, slope, aspect, flow accumulation, and flow direction from a DEM. 
+The tool creates a filled DEM, slope, aspect, flow accumulation, and flow direction from a DEM.
 The output can be written to a single netCDF file or to multiple files in ASCII or GeoTIFF format.
 
 Authors

@@ -37,7 +37,8 @@ def _required_field(field_lookup: dict, field_name: str, *aliases: str):
         if field is not None:
             return field
     expected = ", ".join(repr(name) for name in (field_name, *aliases))
-    raise ValueError(f"Geology lookup table is missing required field {expected}.")
+    msg = f"Geology lookup table is missing required field {expected}."
+    raise ValueError(msg)
 
 
 def _optional_field(field_lookup: dict, *field_names: str):

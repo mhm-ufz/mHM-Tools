@@ -111,7 +111,8 @@ def _require_lookup_options(args: Namespace) -> None:
     ]
     if missing:
         names = ", ".join(missing)
-        raise click.UsageError(f"Missing required option(s): {names}")
+        msg = f"Missing required option(s): {names}"
+        raise click.UsageError(msg)
 
 
 def run(args: Namespace) -> None:
@@ -140,14 +141,14 @@ def run(args: Namespace) -> None:
         _require_lookup_options(args)
         from mhm_tools.pre.format_lc_data import format_lc_data as formatter
 
-    kwargs = dict(
-        input_file=input_file,
-        dem_file=Path(args.dem_file),
-        output_path=Path(args.output_path),
-        output_type=args.extension,
-        input_crs=args.input_crs,
-        dem_crs=args.dem_crs,
-    )
+    kwargs = {
+        "input_file": input_file,
+        "dem_file": Path(args.dem_file),
+        "output_path": Path(args.output_path),
+        "output_type": args.extension,
+        "input_crs": args.input_crs,
+        "dem_crs": args.dem_crs,
+    }
     if args.data_type != "soil" or not is_manifest_input:
         kwargs.update(
             lookup_table=Path(args.lookup_table),

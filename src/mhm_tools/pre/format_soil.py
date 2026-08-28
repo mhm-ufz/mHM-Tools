@@ -336,7 +336,7 @@ def _bulk_density_unit(unit: str) -> tuple[str, float]:
         .lower()
         .replace("³", "3")
         .replace("⁻", "-")
-        .replace("−", "-")
+        .replace("\N{MINUS SIGN}", "-")
         .replace("^", "")
         .replace("·", "")
         .replace(" ", "")
@@ -487,7 +487,8 @@ def _open_raster(stack: ExitStack, path: Path):
     if dataset.count == 0 and len(dataset.subdatasets) == 1:
         dataset = stack.enter_context(rasterio.open(dataset.subdatasets[0]))
     if dataset.count != 1:
-        raise ValueError(f"Soil raster must contain exactly one data band: {path}")
+        msg = f"Soil raster must contain exactly one data band: {path}"
+        raise ValueError(msg)
     return dataset
 
 
@@ -501,9 +502,8 @@ def _soil_resampling(source, reference, source_crs, reference_crs, requested):
             return Resampling[method]
         except KeyError as exc:
             choices = ", ".join(item.name for item in Resampling)
-            raise ValueError(
-                f"Unsupported resampling method {requested!r}; expected {choices}."
-            ) from exc
+            msg = f"Unsupported resampling method {requested!r}; expected {choices}."
+            raise ValueError(msg) from exc
     bounds = transform_bounds(source_crs, reference_crs, *source.bounds)
     source_area = abs((bounds[2] - bounds[0]) * (bounds[3] - bounds[1]))
     source_pixel_area = source_area / (source.width * source.height)
@@ -531,7 +531,8 @@ def _open_soil_grid(
     reference = _open_raster(stack, dem_file)
     reference_crs = reference.crs or (CRS.from_user_input(dem_crs) if dem_crs else None)
     if reference_crs is None:
-        raise ValueError(f"DEM raster has no CRS metadata: {dem_file}")
+        msg = f"DEM raster has no CRS metadata: {dem_file}"
+        raise ValueError(msg)
 
     warped = []
     for horizon in horizons:
@@ -542,7 +543,8 @@ def _open_soil_grid(
                 CRS.from_user_input(input_crs) if input_crs else None
             )
             if source_crs is None:
-                raise ValueError(f"Soil raster has no CRS metadata: {horizon[name]}")
+                msg = f"Soil raster has no CRS metadata: {horizon[name]}"
+                raise ValueError(msg)
             method = _soil_resampling(
                 source, reference, source_crs, reference_crs, resampling
             )
@@ -603,7 +605,8 @@ def _fill_soil_layers(stack, reference, reference_crs, warped, horizons, temp_pa
     """
     dem_valid = _dem_valid(reference)
     if not np.any(dem_valid):
-        raise ValueError("The DEM has no valid cell to define the soil domain.")
+        msg = "The DEM has no valid cell to define the soil domain."
+        raise ValueError(msg)
     outside = ~dem_valid
     x, y = _grid_coordinates(reference)
     profile = {
@@ -765,14 +768,16 @@ def _stream_classic_soil(
                 database.executemany(insert, map(tuple, unique.tolist()))
             database.commit()
         if not found:
-            raise ValueError("No cell has valid soil data in every horizon.")
+            msg = "No cell has valid soil data in every horizon."
+            raise ValueError(msg)
         rows = database.execute(
             f"SELECT {', '.join(names)} FROM profiles ORDER BY {', '.join(names)}"
         ).fetchall()
     finally:
         database.close()
     if len(rows) > np.iinfo(np.int32).max:
-        raise ValueError("Too many soil profile classes for int32 output.")
+        msg = "Too many soil profile classes for int32 output."
+        raise ValueError(msg)
     class_ids = {tuple(row): index for index, row in enumerate(rows, start=1)}
 
     temporary_raster = temp_path / "soil_class.tif"
@@ -927,7 +932,8 @@ def _stream_horizon_soil(
             ].astype(np.uint32)
             observed.update(np.unique(packed).tolist())
     if not observed:
-        raise ValueError("No valid soil cells were found in any horizon.")
+        msg = "No valid soil cells were found in any horizon."
+        raise ValueError(msg)
     keys = np.asarray(sorted(observed), dtype=np.uint64)
     density_sum = np.zeros(keys.size, dtype=np.float64)
     counts = np.zeros(keys.size, dtype=np.int64)
@@ -1050,7 +1056,8 @@ def format_soil_horizons(
         )
     )
     if any(path.resolve() in protected for path in expected):
-        raise ValueError("Soil outputs must differ from all manifest input files.")
+        msg = "Soil outputs must differ from all manifest input files."
+        raise ValueError(msg)
     output_path.mkdir(parents=True, exist_ok=True)
 
     with tempfile.TemporaryDirectory(prefix="mhm-soil-", dir=output_path) as temporary:
