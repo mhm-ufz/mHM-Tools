@@ -51,7 +51,8 @@ def test_format_lc_periods_maps_before_majority_and_writes_both_formats(tmp_path
     gpd.GeoDataFrame({"source": [10, 20, 30], "class": [1, 1, 2]}).to_file(
         lookup, driver="GPKG"
     )
-    (input_path / "format-data.csv").write_text(
+    manifest = input_path / "historical-land-cover.csv"
+    manifest.write_text(
         "StartYear,EndYear,FilePath\n"
         "2000,2004,first.tif\n"
         "2005,2009,second.tif\n",
@@ -59,7 +60,7 @@ def test_format_lc_periods_maps_before_majority_and_writes_both_formats(tmp_path
     )
 
     ascii_outputs = format_lc_periods(
-        input_path,
+        manifest,
         dem,
         tmp_path / "ascii",
         lookup,
@@ -78,7 +79,7 @@ def test_format_lc_periods_maps_before_majority_and_writes_both_formats(tmp_path
         np.testing.assert_array_equal(dataset.read(1), [[2]])
 
     netcdf_outputs = format_lc_periods(
-        input_path,
+        manifest,
         dem,
         tmp_path / "netcdf",
         lookup,
@@ -116,7 +117,8 @@ def test_format_lc_periods_rejects_gaps(tmp_path):
     input_path.mkdir()
     _write_raster(input_path / "first.tif", np.ones((1, 1), dtype=np.int16))
     _write_raster(input_path / "second.tif", np.ones((1, 1), dtype=np.int16))
-    (input_path / "format-data.csv").write_text(
+    manifest = input_path / "format-data.csv"
+    manifest.write_text(
         "StartYear,EndYear,FilePath\n"
         "2000,2004,first.tif\n"
         "2006,2009,second.tif\n",
@@ -125,7 +127,7 @@ def test_format_lc_periods_rejects_gaps(tmp_path):
 
     with pytest.raises(ValueError, match="gap between 2004 and 2006"):
         format_lc_periods(
-            input_path,
+            manifest,
             tmp_path / "missing-dem.tif",
             tmp_path / "output",
             tmp_path / "missing-lookup.gpkg",
@@ -134,19 +136,18 @@ def test_format_lc_periods_rejects_gaps(tmp_path):
         )
 
 
-def _write_soil_manifest(input_path: Path) -> None:
+def _write_soil_manifest(input_path: Path, name: str = "format-data.txt") -> Path:
     header = (
         "Horizon,Upper Depth,Lower Depth,Clay Layer,Sand Layer,Silt Layer,"
-        "Bulk Density Layer\n"
+        "Bulk Density Layer,Bulk Density Unit\n"
     )
     rows = (
-        "1,0,100,clay1.tif,sand1.tif,silt1.tif,bd1.tif\n"
-        "2,100,300,clay2.tif,sand2.tif,silt2.tif,bd2.tif\n"
+        "1,0,100,clay1.tif,sand1.tif,silt1.tif,bd1.tif,kg/m3\n"
+        "2,100,300,clay2.tif,sand2.tif,silt2.tif,bd2.tif,kg/m3\n"
     )
-    (input_path / "format-data.txt").write_text(
-        "Bulk Density Unit = kg/m3\n" + header + rows,
-        encoding="utf-8",
-    )
+    manifest = input_path / name
+    manifest.write_text(header + rows, encoding="utf-8")
+    return manifest
 
 
 def _write_soil_inputs(input_path: Path) -> None:
@@ -170,14 +171,12 @@ def test_format_soil_horizons_writes_v5_profiles_and_normalizes_composition(
     """v5 classes describe full profiles and preserve an invalid component sum."""
     input_path = tmp_path / "soil"
     input_path.mkdir()
-    _write_soil_manifest(input_path)
+    manifest = _write_soil_manifest(input_path, "soil-horizons.txt")
     _write_soil_inputs(input_path)
     dem = tmp_path / "dem.tif"
     _write_raster(dem, np.ones((2, 2), dtype=np.float32))
 
-    raster, definition = format_soil_horizons(
-        input_path, dem, tmp_path / "v5", "asc"
-    )
+    raster, definition = format_soil_horizons(manifest, dem, tmp_path / "v5", "asc")
 
     assert raster.name == "soil_class.asc"
     assert definition.name == "soil_classdefinition.txt"
@@ -198,13 +197,13 @@ def test_format_soil_horizons_writes_v6_horizon_classes_and_mode1_lut(tmp_path):
     """v6 retains per-horizon validity, depth bounds, and a mode-1 LUT."""
     input_path = tmp_path / "soil"
     input_path.mkdir()
-    _write_soil_manifest(input_path)
+    manifest = _write_soil_manifest(input_path)
     _write_soil_inputs(input_path)
     dem = tmp_path / "dem.tif"
     _write_raster(dem, np.ones((2, 2), dtype=np.float32))
 
     raster, definition = format_soil_horizons(
-        input_path, dem, tmp_path / "v6", "nc"
+        manifest, dem, tmp_path / "v6", "nc"
     )
 
     assert raster.name == "soil_horizon_class.nc"
@@ -232,15 +231,16 @@ def test_format_soil_horizons_writes_v6_horizon_classes_and_mode1_lut(tmp_path):
     ]
 
 
-def _write_gapped_soil_manifest(input_path: Path) -> None:
-    (input_path / "format-data.txt").write_text(
-        "Bulk Density Unit = kg/m3\n"
+def _write_gapped_soil_manifest(input_path: Path) -> Path:
+    manifest = input_path / "format-data.txt"
+    manifest.write_text(
         "Horizon,Upper Depth,Lower Depth,Clay Layer,Sand Layer,Silt Layer,"
-        "Bulk Density Layer\n"
-        "1,0,100,clay1.tif,sand1.tif,silt1.tif,bd1.tif\n"
-        "2,100,300,clay2.tif,sand2.tif,silt2.tif,bd2.tif\n",
+        "Bulk Density Layer,Bulk Density Unit\n"
+        "1,0,100,clay1.tif,sand1.tif,silt1.tif,bd1.tif,kg/m3\n"
+        "2,100,300,clay2.tif,sand2.tif,silt2.tif,bd2.tif,kg/m3\n",
         encoding="utf-8",
     )
+    return manifest
 
 
 def _write_gapped_soil_inputs(input_path: Path) -> None:
@@ -264,13 +264,13 @@ def test_format_soil_horizons_fills_layer_nodata_from_nearest(tmp_path, output_t
     """A hole in one input layer no longer drops the cell from the output."""
     input_path = tmp_path / "soil"
     input_path.mkdir()
-    _write_gapped_soil_manifest(input_path)
+    manifest = _write_gapped_soil_manifest(input_path)
     _write_gapped_soil_inputs(input_path)
     dem = tmp_path / "dem.tif"
     _write_raster(dem, np.ones((1, 3), dtype=np.float32))
 
     raster, _ = format_soil_horizons(
-        input_path,
+        manifest,
         dem,
         tmp_path / "filled",
         output_type,
@@ -296,13 +296,13 @@ def test_format_soil_horizons_keeps_layer_nodata_when_filling_is_off(
     """Opting out of filling keeps the historical hole in the output."""
     input_path = tmp_path / "soil"
     input_path.mkdir()
-    _write_gapped_soil_manifest(input_path)
+    manifest = _write_gapped_soil_manifest(input_path)
     _write_gapped_soil_inputs(input_path)
     dem = tmp_path / "dem.tif"
     _write_raster(dem, np.ones((1, 3), dtype=np.float32))
 
     raster, _ = format_soil_horizons(
-        input_path,
+        manifest,
         dem,
         tmp_path / "unfilled",
         output_type,
@@ -334,13 +334,14 @@ def test_format_lc_periods_fills_period_nodata_from_nearest(tmp_path, fill_nodat
     gpd.GeoDataFrame({"source": [10, 20], "class": [1, 2]}).to_file(
         lookup, driver="GPKG"
     )
-    (input_path / "format-data.csv").write_text(
+    manifest = input_path / "format-data.csv"
+    manifest.write_text(
         "StartYear,EndYear,FilePath\n2000,2004,first.tif\n",
         encoding="utf-8",
     )
 
     (output,) = format_lc_periods(
-        input_path,
+        manifest,
         dem,
         tmp_path / f"output-{fill_nodata}",
         lookup,

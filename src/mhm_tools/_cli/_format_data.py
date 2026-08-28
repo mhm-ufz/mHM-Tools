@@ -11,6 +11,8 @@ from pathlib import Path
 
 import click
 
+_MANIFEST_SUFFIXES = {".csv", ".txt"}
+
 
 def add_args(parser: ArgumentParser) -> None:
     """Add CLI arguments for the ``format-data`` command."""
@@ -26,14 +28,10 @@ def add_args(parser: ArgumentParser) -> None:
     )
     required.add_argument(
         "-i",
-        "--input-path",
         "--input-file",
-        dest="input_path",
+        dest="input_file",
         required=True,
-        help=(
-            "Path to one input raster or to a directory containing "
-            "format-data.csv or format-data.txt."
-        ),
+        help="Path to one input raster or a CSV/TXT manifest file.",
     )
     required.add_argument(
         "-d",
@@ -118,8 +116,11 @@ def _require_lookup_options(args: Namespace) -> None:
 
 def run(args: Namespace) -> None:
     """Dispatch categorical formatting to the selected data formatter."""
-    input_path = Path(args.input_path)
-    is_manifest_input = input_path.is_dir()
+    input_file = Path(args.input_file)
+    if input_file.is_dir():
+        msg = "--input-file must be a raster, CSV, or TXT file, not a directory."
+        raise click.UsageError(msg)
+    is_manifest_input = input_file.suffix.lower() in _MANIFEST_SUFFIXES
 
     if is_manifest_input and args.data_type == "soil":
         from mhm_tools.pre.format_soil import format_soil_horizons as formatter
@@ -127,9 +128,8 @@ def run(args: Namespace) -> None:
         _require_lookup_options(args)
         from mhm_tools.pre.format_lc_data import format_lc_periods as formatter
     elif is_manifest_input:
-        raise click.UsageError(
-            "Directory manifests are supported only for --type lc or soil."
-        )
+        msg = "Manifest inputs are supported only for --type lc or soil."
+        raise click.UsageError(msg)
     elif args.data_type == "soil":
         _require_lookup_options(args)
         from mhm_tools.pre.format_soil import format_soil_data as formatter
@@ -141,7 +141,7 @@ def run(args: Namespace) -> None:
         from mhm_tools.pre.format_lc_data import format_lc_data as formatter
 
     kwargs = dict(
-        input_path=input_path,
+        input_file=input_file,
         dem_file=Path(args.dem_file),
         output_path=Path(args.output_path),
         output_type=args.extension,
@@ -154,8 +154,6 @@ def run(args: Namespace) -> None:
             mapping_field=args.mapping_field,
             class_field=args.class_field,
         )
-    if not is_manifest_input:
-        kwargs["input_file"] = kwargs.pop("input_path")
     if args.resampling is not None:
         kwargs["resampling"] = args.resampling
     kwargs["fill_nodata"] = args.fill_nodata

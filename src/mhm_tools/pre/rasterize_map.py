@@ -174,9 +174,7 @@ def rasterize_map_data(
         output_field = vector_field
         if lookup_path is not None:
             lookup = _read_lookup_mapping(lookup_path, mapping_field, burn_field)
-            output_field = "__mhm_tools_raster_value__"
-            while output_field in frame.columns:
-                output_field = f"_{output_field}"
+            output_field = burn_field
             frame = frame.copy()
             frame[output_field] = _map_vector_values(frame, vector_field, lookup)
 

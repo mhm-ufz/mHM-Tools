@@ -103,14 +103,14 @@ def test_format_data_help_and_alias():
     assert alias_result.exit_code == 0, alias_result.output
     assert "-t, --type" in result.output
     assert "[soil|geology|lc]" in result.output
-    assert "-i, --input-path" in result.output
+    assert "-i, --input-file" in result.output
     assert "-c, --class-field" in result.output
     assert "-e, --extension" in result.output
     assert "[nc|asc|tif]" in result.output
 
 
-def test_format_data_accepts_input_file_as_a_legacy_alias(monkeypatch):
-    """Existing callers may keep using the old --input-file spelling."""
+def test_format_data_accepts_input_file(monkeypatch):
+    """The input-file option forwards a single raster."""
     captured = {}
 
     def fake_formatter(**kwargs):
@@ -126,41 +126,6 @@ def test_format_data_accepts_input_file_as_a_legacy_alias(monkeypatch):
             "-t",
             "lc",
             "--input-file",
-            "input.tif",
-            "-d",
-            "dem.tif",
-            "-o",
-            "output",
-            "-l",
-            "lookup.gpkg",
-            "-m",
-            "source",
-            "-c",
-            "target",
-        ],
-    )
-
-    assert result.exit_code == 0, result.output
-    assert captured["input_file"] == Path("input.tif")
-
-
-def test_format_data_accepts_underscore_input_path_alias(monkeypatch):
-    """The documented underscore spelling remains accepted by the CLI."""
-    captured = {}
-
-    def fake_formatter(**kwargs):
-        captured.update(kwargs)
-
-    module = importlib.import_module("mhm_tools.pre.format_lc_data")
-    monkeypatch.setattr(module, "format_lc_data", fake_formatter)
-    result = CliRunner().invoke(
-        cli,
-        [
-            "data-converter",
-            "format-data",
-            "-t",
-            "lc",
-            "--input_path",
             "input.tif",
             "-d",
             "dem.tif",
@@ -228,7 +193,7 @@ def test_format_data_forwards_explicit_resampling_to_single_files(monkeypatch):
         ("soil", "mhm_tools.pre.format_soil", "format_soil_horizons", []),
     ],
 )
-def test_format_data_dispatches_directory_manifests(
+def test_format_data_dispatches_manifest_files(
     tmp_path,
     monkeypatch,
     data_type,
@@ -236,9 +201,10 @@ def test_format_data_dispatches_directory_manifests(
     function_name,
     lookup_options,
 ):
-    """A directory selects the multi-period or multi-horizon public API."""
-    input_path = tmp_path / data_type
-    input_path.mkdir()
+    """A directly supplied manifest selects the corresponding public API."""
+    suffix = ".txt" if data_type == "soil" else ".csv"
+    input_file = tmp_path / f"custom-{data_type}-inputs{suffix}"
+    input_file.touch()
     captured = {}
 
     def fake_formatter(**kwargs):
@@ -253,8 +219,8 @@ def test_format_data_dispatches_directory_manifests(
             "format-data",
             "-t",
             data_type,
-            "--input-path",
-            str(input_path),
+            "--input-file",
+            str(input_file),
             "-d",
             "dem.tif",
             "-o",
@@ -266,12 +232,36 @@ def test_format_data_dispatches_directory_manifests(
     )
 
     assert result.exit_code == 0, result.output
-    assert captured["input_path"] == input_path
+    assert captured["input_file"] == input_file
     assert captured["resampling"] == "auto"
     assert captured["fill_nodata"] is True
-    assert "input_file" not in captured
     if data_type == "soil":
         assert "lookup_table" not in captured
+
+
+def test_format_data_rejects_directory_input(tmp_path):
+    """The CLI accepts files only, not manifest-containing directories."""
+    input_directory = tmp_path / "inputs"
+    input_directory.mkdir()
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "data-converter",
+            "format-data",
+            "-t",
+            "soil",
+            "--input-file",
+            str(input_directory),
+            "-d",
+            "dem.tif",
+            "-o",
+            "output",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "not a directory" in result.output
 
 
 @pytest.mark.parametrize(

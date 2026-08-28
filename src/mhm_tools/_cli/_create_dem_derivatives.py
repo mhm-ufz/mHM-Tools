@@ -1,4 +1,12 @@
-"""Create DEM derivatives (filled DEM, slope, aspect, facc, fdir) from a DEM."""
+"""Create DEM derivatives (filled DEM, slope, aspect, facc, fdir) from a DEM.
+
+The tool creates a filled DEM, slope, aspect, flow accumulation, and flow direction from a DEM. 
+The output can be written to a single netCDF file or to multiple files in ASCII or GeoTIFF format.
+
+Authors
+-------
+- Sanjeev Bashyal
+"""
 
 from mhm_tools.pre.dem_derivatives import OUTPUT_EXTENSIONS
 
@@ -38,6 +46,7 @@ def add_args(parser):
         help="CRS to use when the input has none (e.g. 'EPSG:4326').",
     )
     optional.add_argument(
+        "-v",
         "--varname",
         default=None,
         help="Elevation variable to read when the input holds several.",

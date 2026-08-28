@@ -21,9 +21,12 @@ from mhm_tools.common.format_data import (
     fill_grid_nodata,
     format_categorical_data,
     get_categorical_output_path,
+)
+from mhm_tools.common.lookup_handler import (
+    _lookup_mapping,
+    _required_integer,
     read_format_manifest,
     read_lookup_table,
-    _lookup_mapping,
 )
 
 logger = logging.getLogger(__name__)
@@ -81,19 +84,6 @@ def format_lc_data(
     )
 
 
-def _manifest_year(value, column: str, row_number: int) -> int:
-    """Return one required integer year from a manifest row."""
-    try:
-        number = float(value)
-    except (TypeError, ValueError) as exc:
-        msg = f"Manifest row {row_number} has invalid {column} value {value!r}."
-        raise ValueError(msg) from exc
-    if not np.isfinite(number) or not number.is_integer():
-        msg = f"Manifest row {row_number} has invalid {column} value {value!r}."
-        raise ValueError(msg)
-    return int(number)
-
-
 def _manifest_raster_path(manifest: Path, value, row_number: int) -> Path:
     """Resolve one manifest raster path relative to its manifest."""
     if pd.isna(value) or not str(value).strip():
@@ -109,16 +99,18 @@ def _manifest_raster_path(manifest: Path, value, row_number: int) -> Path:
     return path
 
 
-def _read_lc_manifest(input_path: PathLike):
+def _read_lc_manifest(input_file: PathLike):
     """Read validated, chronological land-cover period records."""
     manifest, table = read_format_manifest(
-        input_path,
+        input_file,
         ("StartYear", "EndYear", "FilePath"),
     )
     periods = []
     for row_number, row in enumerate(table.itertuples(index=False), start=2):
-        start = _manifest_year(row.StartYear, "StartYear", row_number)
-        end = _manifest_year(row.EndYear, "EndYear", row_number)
+        start = _required_integer(
+            row.StartYear, "StartYear", row_number, "Manifest"
+        )
+        end = _required_integer(row.EndYear, "EndYear", row_number, "Manifest")
         if start > end:
             msg = (
                 f"Manifest row {row_number} has StartYear {start} after EndYear {end}."
@@ -467,7 +459,7 @@ def _format_lc_periods_netcdf_streaming(
 
 
 def format_lc_periods(
-    input_path: PathLike,
+    input_file: PathLike,
     dem_file: PathLike,
     output_path: PathLike,
     lookup_table: PathLike,
@@ -480,7 +472,7 @@ def format_lc_periods(
     resampling="auto",
     fill_nodata: bool = True,
 ) -> tuple[Path, ...]:
-    """Format historical land-cover rasters listed by a directory manifest.
+    """Format historical land-cover rasters listed by a manifest.
 
     Parameters
     ----------
@@ -493,7 +485,7 @@ def format_lc_periods(
     if output_type not in {"asc", "nc"}:
         msg = "Historical land-cover output extension must be 'asc' or 'nc'."
         raise ValueError(msg)
-    manifest, periods = _read_lc_manifest(input_path)
+    manifest, periods = _read_lc_manifest(input_file)
     dem_file = Path(dem_file)
     lookup_table = Path(lookup_table)
     output_path = Path(output_path)

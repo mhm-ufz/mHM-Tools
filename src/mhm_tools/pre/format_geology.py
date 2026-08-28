@@ -13,51 +13,21 @@ from pathlib import Path
 from typing import Union
 
 import numpy as np
-import pandas as pd
 
 from mhm_tools.common.format_data import (
     format_categorical_data,
     get_categorical_output_path,
+)
+from mhm_tools.common.lookup_handler import (
+    _is_blank,
+    _normalise_field_name,
+    _required_integer,
     read_lookup_table,
 )
 
 logger = logging.getLogger(__name__)
 
 PathLike = Union[str, Path]
-
-
-def _normalise_field_name(field_name: object) -> str:
-    """Return the field-name normalization used by pymhm lookup tables."""
-    field_text = str(field_name).strip().lstrip("*").strip()
-    if "[" in field_text:
-        field_text = field_text.split("[", 1)[0].strip()
-    return "".join(char.lower() for char in field_text if char.isalnum())
-
-
-def _is_blank(value: object) -> bool:
-    """Return whether a lookup value is empty."""
-    if value is None:
-        return True
-    if isinstance(value, str):
-        return not value.strip()
-    try:
-        missing = pd.isna(value)
-    except (TypeError, ValueError):
-        return False
-    return bool(missing) if np.isscalar(missing) else False
-
-
-def _finite_number(value: object, field: object, row_number: int) -> float:
-    """Convert a lookup value to a finite number."""
-    try:
-        number = float(value)
-    except (TypeError, ValueError) as exc:
-        msg = f"Lookup row {row_number} has a non-numeric {field!r} value: {value!r}."
-        raise ValueError(msg) from exc
-    if not np.isfinite(number):
-        msg = f"Lookup row {row_number} has a non-finite {field!r} value: {value!r}."
-        raise ValueError(msg)
-    return number
 
 
 def _required_field(field_lookup: dict, field_name: str, *aliases: str):
@@ -87,21 +57,6 @@ def _visible_table(table):
             if not str(column).strip().startswith("*")
         ]
     ]
-
-
-def _required_int(value: object, row_number: int, field: object) -> int:
-    """Read one required finite integer lookup value."""
-    if _is_blank(value):
-        msg = f"Row {row_number} has an empty value for required field {field!r}."
-        raise ValueError(msg)
-    number = _finite_number(value, field, row_number)
-    if not number.is_integer():
-        msg = (
-            f"Row {row_number} has non-integer value {value!r} "
-            f"for required field {field!r}."
-        )
-        raise ValueError(msg)
-    return int(number)
 
 
 def _required_bool_int(value: object, row_number: int, field: object) -> int:
@@ -140,11 +95,11 @@ def _classdefinition_rows(table, class_field: str) -> list:
     for row_number, (_, row) in enumerate(table.iterrows(), start=2):
         rows.append(
             {
-                "geo_param": _required_int(
-                    row[geo_class_field], row_number, geo_class_field
+                "geo_param": _required_integer(
+                    row[geo_class_field], geo_class_field, row_number
                 ),
-                "class_unit": _required_int(
-                    row[geology_class_field], row_number, geology_class_field
+                "class_unit": _required_integer(
+                    row[geology_class_field], geology_class_field, row_number
                 ),
                 "karstic": _required_bool_int(
                     row[karstic_field], row_number, karstic_field
