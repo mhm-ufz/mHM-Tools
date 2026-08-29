@@ -27,6 +27,13 @@ from mhm_tools._cli._main import cli
             "nc",
         ),
         (
+            "lai",
+            "mhm_tools.pre.format_lai",
+            "format_lai_data",
+            [],
+            "nc",
+        ),
+        (
             "lc",
             "mhm_tools.pre.format_lc_data",
             "format_lc_data",
@@ -102,7 +109,7 @@ def test_format_data_help_and_alias():
     assert result.exit_code == 0, result.output
     assert alias_result.exit_code == 0, alias_result.output
     assert "-t, --type" in result.output
-    assert "[soil|geology|lc]" in result.output
+    assert "[soil|geology|lai|lc]" in result.output
     assert "-i, --input-file" in result.output
     assert "-c, --class-field" in result.output
     assert "-e, --extension" in result.output

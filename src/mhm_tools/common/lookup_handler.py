@@ -108,13 +108,16 @@ def _is_blank(value: object) -> bool:
 
 
 def read_lookup_table(lookup_table: PathLike):
-    """Read a non-empty OGR-compatible lookup table without geometry."""
+    """Read a non-empty spatial or comma-separated lookup table."""
     lookup_table = Path(lookup_table)
     if not lookup_table.is_file():
         msg = f"Lookup table does not exist: {lookup_table}"
         raise ValueError(msg)
     try:
-        table = gpd.read_file(lookup_table, ignore_geometry=True)
+        if lookup_table.suffix.lower() in {".csv", ".txt"}:
+            table = pd.read_csv(lookup_table)
+        else:
+            table = gpd.read_file(lookup_table, ignore_geometry=True)
     except Exception as exc:
         msg = f"Could not read lookup table {lookup_table}: {exc}"
         raise ValueError(msg) from exc

@@ -1,5 +1,5 @@
 """
-Format categorical soil, geology, or land-cover data for use by mHM.
+Format categorical soil, geology, LAI, or land-cover data for use by mHM.
 
 Authors
 -------
@@ -23,7 +23,7 @@ def add_args(parser: ArgumentParser) -> None:
         "--type",
         dest="data_type",
         required=True,
-        choices=("soil", "geology", "lc"),
+        choices=("soil", "geology", "lai", "lc"),
         help="Categorical data type to format.",
     )
     required.add_argument(
@@ -137,6 +137,9 @@ def run(args: Namespace) -> None:
     elif args.data_type == "geology":
         _require_lookup_options(args)
         from mhm_tools.pre.format_geology import format_geology_data as formatter
+    elif args.data_type == "lai":
+        _require_lookup_options(args)
+        from mhm_tools.pre.format_lai import format_lai_data as formatter
     else:
         _require_lookup_options(args)
         from mhm_tools.pre.format_lc_data import format_lc_data as formatter
