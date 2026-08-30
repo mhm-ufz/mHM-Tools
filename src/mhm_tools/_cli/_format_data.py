@@ -24,7 +24,7 @@ def add_args(parser: ArgumentParser) -> None:
         dest="data_type",
         required=True,
         choices=("soil", "geology", "lai", "lc"),
-        help="Categorical data type to format.",
+        help="Data type to format.",
     )
     required.add_argument(
         "-i",
@@ -86,6 +86,14 @@ def add_args(parser: ArgumentParser) -> None:
         ),
     )
     optional.add_argument(
+        "--output-temporal-resolution",
+        choices=("daily", "monthly", "annual", "long-term-mean-monthly"),
+        help=(
+            "Temporal resolution for gridded LAI NetCDF output. "
+            "Default: long-term-mean-monthly."
+        ),
+    )
+    optional.add_argument(
         "--no-fill-nodata",
         dest="fill_nodata",
         action="store_false",
@@ -116,12 +124,43 @@ def _require_lookup_options(args: Namespace) -> None:
 
 
 def run(args: Namespace) -> None:
-    """Dispatch categorical formatting to the selected data formatter."""
+    """Dispatch formatting to the selected data workflow."""
     input_file = Path(args.input_file)
     if input_file.is_dir():
         msg = "--input-file must be a raster, CSV, or TXT file, not a directory."
         raise click.UsageError(msg)
     is_manifest_input = input_file.suffix.lower() in _MANIFEST_SUFFIXES
+    lookup_values = (args.lookup_table, args.mapping_field, args.class_field)
+    gridded_lai = (
+        args.data_type == "lai"
+        and input_file.suffix.lower() == ".nc"
+        and not any(value is not None for value in lookup_values)
+    )
+    if args.output_temporal_resolution is not None and not gridded_lai:
+        msg = "--output-temporal-resolution is only valid for gridded LAI NetCDF."
+        raise click.UsageError(msg)
+    if gridded_lai:
+        if args.extension != "nc":
+            msg = "Gridded LAI supports only --extension nc."
+            raise click.UsageError(msg)
+        if args.resampling not in {None, "nearest", "bilinear"}:
+            msg = "Gridded LAI supports only nearest or bilinear resampling."
+            raise click.UsageError(msg)
+        from mhm_tools.pre.format_lai import format_lai_netcdf_data
+
+        kwargs = {
+            "input_file": input_file,
+            "dem_file": Path(args.dem_file),
+            "output_path": Path(args.output_path),
+            "output_temporal_resolution": (
+                args.output_temporal_resolution or "long-term-mean-monthly"
+            ),
+            "dem_crs": args.dem_crs,
+        }
+        if args.resampling is not None:
+            kwargs["resampling"] = args.resampling
+        format_lai_netcdf_data(**kwargs)
+        return
 
     if is_manifest_input and args.data_type == "soil":
         from mhm_tools.pre.format_soil import format_soil_horizons as formatter

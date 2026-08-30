@@ -114,6 +114,52 @@ def test_format_data_help_and_alias():
     assert "-c, --class-field" in result.output
     assert "-e, --extension" in result.output
     assert "[nc|asc|tif]" in result.output
+    assert "--output-temporal-resolution" in result.output
+
+
+@pytest.mark.parametrize(
+    ("temporal_args", "expected_resolution"),
+    [
+        ([], "long-term-mean-monthly"),
+        (["--output-temporal-resolution", "monthly"], "monthly"),
+    ],
+)
+def test_format_data_dispatches_gridded_lai_without_lookup(
+    monkeypatch, temporal_args, expected_resolution
+):
+    """A gridded LAI NetCDF needs no lookup or input cadence option."""
+    captured = {}
+
+    def fake_formatter(**kwargs):
+        captured.update(kwargs)
+
+    module = importlib.import_module("mhm_tools.pre.format_lai")
+    monkeypatch.setattr(module, "format_lai_netcdf_data", fake_formatter)
+    arguments = [
+        "data-converter",
+        "format-data",
+        "-t",
+        "lai",
+        "-i",
+        "lai.nc",
+        "-d",
+        "dem.tif",
+        "-o",
+        "output",
+        "--resampling",
+        "bilinear",
+    ]
+    result = CliRunner().invoke(cli, [*arguments, *temporal_args])
+
+    assert result.exit_code == 0, result.output
+    assert captured == {
+        "input_file": Path("lai.nc"),
+        "dem_file": Path("dem.tif"),
+        "output_path": Path("output"),
+        "output_temporal_resolution": expected_resolution,
+        "dem_crs": None,
+        "resampling": "bilinear",
+    }
 
 
 def test_format_data_accepts_input_file(monkeypatch):
