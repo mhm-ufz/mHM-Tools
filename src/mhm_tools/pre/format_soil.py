@@ -1,5 +1,17 @@
 """
-Prepare an mHM soil-class raster from categorical raster data.
+Prepare mHM soil inputs from categorical rasters or physical horizon layers.
+
+Two independent pipelines live here. The categorical one maps a soil raster
+through a lookup table and writes the companion ``soil_classdefinition.txt``.
+The horizon one reads a manifest of clay, sand, silt, and bulk-density rasters
+for each horizon, warps them onto the DEM grid, and classifies them one raster
+window at a time so that peak memory does not grow with the grid size; it
+writes either v5 profile classes as ASCII or v6 per-horizon classes as NetCDF.
+
+The sections below follow the horizon data flow: read the manifest, open and
+warp the rasters onto the DEM grid, quantize each window into soil profiles,
+then stream the classes out. The public entry points of both pipelines come
+last.
 
 Authors
 -------
@@ -44,6 +56,35 @@ from mhm_tools.common.lookup_handler import (
 logger = logging.getLogger(__name__)
 
 PathLike = Union[str, Path]
+
+
+# Shared value formatting and class-definition output
+
+
+def _format_soil_value(value: object) -> str:
+    """Format a numeric value like the pymhm classdefinition writer."""
+    if value is None:
+        return ""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    if number.is_integer():
+        return str(int(number))
+    return f"{number:.6g}"
+
+
+def _write_soil_classdefinition_text(text: str, output_file: Path) -> Path:
+    """Write prevalidated classdefinition text."""
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    output_file.write_text(text, encoding="utf-8")
+    logger.info("Wrote soil class definition to %s", output_file)
+    return output_file
+
+
+# Soil class lookup tables
+
+
 _CLASSDEFINITION_HEADER = (
     "SOIL_NR\tHORIZON\tUD[mm]\tLD[mm]\tClay[%]\tSAND[%]\tBd[gcm-3]\tSilt[%]\n"
 )
@@ -174,19 +215,6 @@ def _soil_classdefinition_rows(table, class_field: str) -> list:
     raise ValueError(msg)
 
 
-def _format_soil_value(value: object) -> str:
-    """Format a numeric value like the pymhm classdefinition writer."""
-    if value is None:
-        return ""
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        return str(value)
-    if number.is_integer():
-        return str(int(number))
-    return f"{number:.6g}"
-
-
 def _soil_classdefinition_text(table, class_field: str) -> str:
     """Validate a lookup table and render its classdefinition text."""
     output_rows = _soil_classdefinition_rows(table, class_field)
@@ -209,111 +237,7 @@ def _soil_classdefinition_text(table, class_field: str) -> str:
     return "".join(lines)
 
 
-def _write_soil_classdefinition_text(text: str, output_file: Path) -> Path:
-    """Write prevalidated classdefinition text."""
-    output_file.parent.mkdir(parents=True, exist_ok=True)
-    output_file.write_text(text, encoding="utf-8")
-    logger.info("Wrote soil class definition to %s", output_file)
-    return output_file
-
-
-def write_soil_classdefinition(
-    lookup_table: PathLike, output_file: PathLike, class_field: str
-) -> Path:
-    """Write an mHM ``soil_classdefinition.txt`` from a lookup table.
-
-    The lookup may contain either one row per soil horizon or one row per soil
-    class with horizon-specific fields suffixed by ``1``, ``2``, and so on.
-    """
-    lookup_table = Path(lookup_table)
-    output_file = Path(output_file)
-    if not lookup_table.is_file():
-        msg = f"Lookup table does not exist: {lookup_table}"
-        raise ValueError(msg)
-    table = read_lookup_table(lookup_table)
-    text = _soil_classdefinition_text(table, class_field)
-    return _write_soil_classdefinition_text(text, output_file)
-
-
-def format_soil_data(
-    input_file: PathLike,
-    dem_file: PathLike,
-    output_path: PathLike,
-    lookup_table: PathLike,
-    mapping_field: str,
-    class_field: str,
-    output_type: str = "nc",
-    *,
-    input_crs: str | None = None,
-    dem_crs: str | None = None,
-    resampling="nearest",
-    fill_nodata: bool = True,
-) -> Path:
-    """Map a categorical raster and write its mHM soil definition.
-
-    Parameters
-    ----------
-    input_file : path-like
-        Single-variable, two-dimensional ASCII, NetCDF, or GeoTIFF raster.
-    dem_file : path-like
-        ASCII, NetCDF, or GeoTIFF DEM providing the exact output grid.
-    output_path : path-like
-        Directory containing the soil-class raster and classdefinition.
-    lookup_table : path-like
-        OGR-readable table containing ``mapping_field`` and ``class_field``.
-    mapping_field : str
-        Numeric lookup-table column corresponding to the input raster values.
-    class_field : str
-        Numeric lookup-table column containing the output soil classes.
-    output_type : {"nc", "asc", "tif"}, default "nc"
-        Output raster format.
-    input_crs, dem_crs : str, optional
-        CRS to assign only when the corresponding raster has no CRS metadata.
-    fill_nodata : bool, default True
-        Restrict the output to the DEM domain and take its remaining nodata
-        cells from the nearest classified neighbour.
-
-    Returns
-    -------
-    pathlib.Path
-        Path to the created soil-class raster.
-    """
-    input_file = Path(input_file)
-    dem_file = Path(dem_file)
-    lookup_table = Path(lookup_table)
-    output_path = Path(output_path)
-    raster_output = get_categorical_output_path(output_path, "soil_class", output_type)
-    definition_output = output_path / "soil_classdefinition.txt"
-
-    protected_inputs = {
-        input_file.resolve(),
-        dem_file.resolve(),
-        lookup_table.resolve(),
-    }
-    for label, path in (
-        ("Raster output", raster_output),
-        ("Classdefinition output", definition_output),
-    ):
-        if path.resolve() in protected_inputs:
-            msg = f"{label} must differ from all input files: {path}"
-            raise ValueError(msg)
-    table = read_lookup_table(lookup_table)
-    definition_text = _soil_classdefinition_text(table, class_field)
-    format_categorical_data(
-        input_file,
-        dem_file,
-        raster_output,
-        table,
-        mapping_field,
-        class_field,
-        variable_name="soil_class",
-        input_crs=input_crs,
-        dem_crs=dem_crs,
-        resampling=resampling,
-        fill_nodata=fill_nodata,
-    )
-    _write_soil_classdefinition_text(definition_text, definition_output)
-    return raster_output
+# Horizon manifest
 
 
 _SOIL_MANIFEST_COLUMNS = (
@@ -467,15 +391,7 @@ def _read_soil_manifest(input_file: PathLike):
     return manifest, unit, factor, horizons
 
 
-def _quantized_bins(values, valid, step: float) -> np.ndarray:
-    """Quantize valid values with deterministic half-up rounding."""
-    bins = np.full(values.shape, -1, dtype=np.int32)
-    rounded = np.floor(values[valid] / step + 0.5)
-    if rounded.size and rounded.max() > np.iinfo(np.int32).max:
-        msg = "Soil quantization exceeds the supported int32 range."
-        raise ValueError(msg)
-    bins[valid] = rounded.astype(np.int32)
-    return bins
+# Raster grid access
 
 
 _SOIL_BLOCK_ROWS = 64
@@ -658,6 +574,20 @@ def _fill_soil_layers(stack, reference, reference_crs, warped, horizons, temp_pa
     return filled
 
 
+# Quantized soil profiles
+
+
+def _quantized_bins(values, valid, step: float) -> np.ndarray:
+    """Quantize valid values with deterministic half-up rounding."""
+    bins = np.full(values.shape, -1, dtype=np.int32)
+    rounded = np.floor(values[valid] / step + 0.5)
+    if rounded.size and rounded.max() > np.iinfo(np.int32).max:
+        msg = "Soil quantization exceeds the supported int32 range."
+        raise ValueError(msg)
+    bins[valid] = rounded.astype(np.int32)
+    return bins
+
+
 def _quantized_soil_block(
     properties,
     window,
@@ -698,6 +628,17 @@ def _quantized_soil_block(
     return valid, clay, sand, density
 
 
+def _packed_texture_keys(clay, sand, valid) -> np.ndarray:
+    """Pack the quantized clay and sand bins of valid cells into one key each.
+
+    The v6 classes are identified by their texture alone, so a single unsigned
+    key per cell lets both passes look a class up with ``np.searchsorted``.
+    """
+    return (clay[valid].astype(np.uint64) << np.uint64(32)) | sand[valid].astype(
+        np.uint32
+    )
+
+
 def _profile_block(
     warped,
     reference,
@@ -727,6 +668,35 @@ def _profile_block(
             (clay[valid], sand[valid], density[valid])
         )
     return valid, profiles
+
+
+# Horizon soil writers
+
+
+def _classic_definition_text(
+    rows, horizons, composition_step: float, density_step: float
+) -> str:
+    """Render the v5 ``soil_classdefinition.txt`` for the profile classes.
+
+    ``rows`` holds one quantized profile per class, as consecutive triples of
+    clay, sand, and bulk-density bins for each horizon in turn.
+    """
+    lines = [
+        f"nSoil_Types {len(rows)}\n",
+        "MU_GLOBAL\tHORIZON\tUD[mm]\tLD[mm]\tCLAY[%]\tSAND[%]\tBD[gcm-3]\n",
+    ]
+    for class_index, row in enumerate(rows, start=1):
+        for layer_index, horizon in enumerate(horizons):
+            offset = layer_index * 3
+            lines.append(
+                f"{class_index}\t{horizon['horizon']}\t"
+                f"{_format_soil_value(horizon['upper'])}\t"
+                f"{_format_soil_value(horizon['lower'])}\t"
+                f"{_format_soil_value(row[offset] * composition_step)}\t"
+                f"{_format_soil_value(row[offset + 1] * composition_step)}\t"
+                f"{_format_soil_value(row[offset + 2] * density_step)}\n"
+            )
+    return "".join(lines)
 
 
 def _stream_classic_soil(
@@ -815,22 +785,10 @@ def _stream_classic_soil(
     raster_output = output_path / "soil_class.asc"
     definition_output = output_path / "soil_classdefinition.txt"
     copy_raster(temporary_raster, raster_output, driver="AAIGrid")
-    lines = [
-        f"nSoil_Types {len(rows)}\n",
-        "MU_GLOBAL\tHORIZON\tUD[mm]\tLD[mm]\tCLAY[%]\tSAND[%]\tBD[gcm-3]\n",
-    ]
-    for class_index, row in enumerate(rows, start=1):
-        for layer_index, horizon in enumerate(horizons):
-            offset = layer_index * 3
-            lines.append(
-                f"{class_index}\t{horizon['horizon']}\t"
-                f"{_format_soil_value(horizon['upper'])}\t"
-                f"{_format_soil_value(horizon['lower'])}\t"
-                f"{_format_soil_value(row[offset] * composition_step)}\t"
-                f"{_format_soil_value(row[offset + 1] * composition_step)}\t"
-                f"{_format_soil_value(row[offset + 2] * density_step)}\n"
-            )
-    _write_soil_classdefinition_text("".join(lines), definition_output)
+    _write_soil_classdefinition_text(
+        _classic_definition_text(rows, horizons, composition_step, density_step),
+        definition_output,
+    )
     return raster_output, definition_output
 
 
@@ -846,8 +804,7 @@ def _create_soil_netcdf(path, reference, reference_crs, horizons):
     y = dataset.createVariable("y", "f8", ("y",))
     z = dataset.createVariable("z", "f8", ("z",))
     z_bnds = dataset.createVariable("z_bnds", "f8", ("z", "bnds"))
-    x[:] = transform.c + (np.arange(reference.width) + 0.5) * transform.a
-    y[:] = transform.f + (np.arange(reference.height) + 0.5) * transform.e
+    x[:], y[:] = _grid_coordinates(reference)
     z[:] = [item["lower"] for item in horizons]
     z_bnds[:] = [[item["upper"], item["lower"]] for item in horizons]
     x.setncatts({"standard_name": "projection_x_coordinate", "axis": "X"})
@@ -903,6 +860,31 @@ def _create_soil_netcdf(path, reference, reference_crs, horizons):
     return dataset, classes
 
 
+def _horizon_definition_text(
+    keys, density_bins, composition_step: float, density_step: float
+) -> str:
+    """Render the v6 ``soil_classdefinition_iFlag_soilDB_1.txt`` lookup.
+
+    ``keys`` are the packed texture keys of :func:`_packed_texture_keys`, one
+    per class, and ``density_bins`` their mean quantized bulk density.
+    """
+    clay_bins = (keys >> np.uint64(32)).astype(np.int32)
+    sand_bins = (keys & np.uint64(0xFFFFFFFF)).astype(np.int32)
+    lines = [
+        f"nSoil_Types {keys.size}\n",
+        "ID\tCLAY[%]\tSAND[%]\tBD[gcm-3]\n",
+    ]
+    for class_index, (clay, sand, density) in enumerate(
+        zip(clay_bins, sand_bins, density_bins), start=1
+    ):
+        lines.append(
+            f"{class_index}\t{_format_soil_value(clay * composition_step)}\t"
+            f"{_format_soil_value(sand * composition_step)}\t"
+            f"{_format_soil_value(density * density_step)}\n"
+        )
+    return "".join(lines)
+
+
 def _stream_horizon_soil(
     reference,
     reference_crs,
@@ -927,9 +909,7 @@ def _stream_horizon_soil(
                 composition_step=composition_step,
                 density_step=density_step,
             )
-            packed = (clay[valid].astype(np.uint64) << np.uint64(32)) | sand[
-                valid
-            ].astype(np.uint32)
+            packed = _packed_texture_keys(clay, sand, valid)
             observed.update(np.unique(packed).tolist())
     if not observed:
         msg = "No valid soil cells were found in any horizon."
@@ -956,9 +936,7 @@ def _stream_horizon_soil(
                     composition_step=composition_step,
                     density_step=density_step,
                 )
-                packed = (clay[valid].astype(np.uint64) << np.uint64(32)) | sand[
-                    valid
-                ].astype(np.uint32)
+                packed = _packed_texture_keys(clay, sand, valid)
                 positions = np.searchsorted(keys, packed)
                 classes = np.full(valid.shape, int(NO_DATA), dtype=np.int32)
                 classes[valid] = positions.astype(np.int32) + 1
@@ -972,22 +950,113 @@ def _stream_horizon_soil(
     finally:
         dataset.close()
     density_bins = np.floor(density_sum / counts + 0.5).astype(np.int32)
-    clay_bins = (keys >> np.uint64(32)).astype(np.int32)
-    sand_bins = (keys & np.uint64(0xFFFFFFFF)).astype(np.int32)
-    lines = [
-        f"nSoil_Types {keys.size}\n",
-        "ID\tCLAY[%]\tSAND[%]\tBD[gcm-3]\n",
-    ]
-    for class_index, (clay, sand, density) in enumerate(
-        zip(clay_bins, sand_bins, density_bins), start=1
-    ):
-        lines.append(
-            f"{class_index}\t{_format_soil_value(clay * composition_step)}\t"
-            f"{_format_soil_value(sand * composition_step)}\t"
-            f"{_format_soil_value(density * density_step)}\n"
-        )
-    _write_soil_classdefinition_text("".join(lines), definition_output)
+    _write_soil_classdefinition_text(
+        _horizon_definition_text(keys, density_bins, composition_step, density_step),
+        definition_output,
+    )
     return raster_output, definition_output
+
+
+# Public entry points
+
+
+def write_soil_classdefinition(
+    lookup_table: PathLike, output_file: PathLike, class_field: str
+) -> Path:
+    """Write an mHM ``soil_classdefinition.txt`` from a lookup table.
+
+    The lookup may contain either one row per soil horizon or one row per soil
+    class with horizon-specific fields suffixed by ``1``, ``2``, and so on.
+    """
+    lookup_table = Path(lookup_table)
+    output_file = Path(output_file)
+    if not lookup_table.is_file():
+        msg = f"Lookup table does not exist: {lookup_table}"
+        raise ValueError(msg)
+    table = read_lookup_table(lookup_table)
+    text = _soil_classdefinition_text(table, class_field)
+    return _write_soil_classdefinition_text(text, output_file)
+
+
+def format_soil_data(
+    input_file: PathLike,
+    dem_file: PathLike,
+    output_path: PathLike,
+    lookup_table: PathLike,
+    mapping_field: str,
+    class_field: str,
+    output_type: str = "nc",
+    *,
+    input_crs: str | None = None,
+    dem_crs: str | None = None,
+    resampling="nearest",
+    fill_nodata: bool = True,
+) -> Path:
+    """Map a categorical raster and write its mHM soil definition.
+
+    Parameters
+    ----------
+    input_file : path-like
+        Single-variable, two-dimensional ASCII, NetCDF, or GeoTIFF raster.
+    dem_file : path-like
+        ASCII, NetCDF, or GeoTIFF DEM providing the exact output grid.
+    output_path : path-like
+        Directory containing the soil-class raster and classdefinition.
+    lookup_table : path-like
+        OGR-readable table containing ``mapping_field`` and ``class_field``.
+    mapping_field : str
+        Numeric lookup-table column corresponding to the input raster values.
+    class_field : str
+        Numeric lookup-table column containing the output soil classes.
+    output_type : {"nc", "asc", "tif"}, default "nc"
+        Output raster format.
+    input_crs, dem_crs : str, optional
+        CRS to assign only when the corresponding raster has no CRS metadata.
+    fill_nodata : bool, default True
+        Restrict the output to the DEM domain and take its remaining nodata
+        cells from the nearest classified neighbour.
+
+    Returns
+    -------
+    pathlib.Path
+        Path to the created soil-class raster.
+    """
+    input_file = Path(input_file)
+    dem_file = Path(dem_file)
+    lookup_table = Path(lookup_table)
+    output_path = Path(output_path)
+    raster_output = get_categorical_output_path(output_path, "soil_class", output_type)
+    definition_output = output_path / "soil_classdefinition.txt"
+
+    protected_inputs = {
+        input_file.resolve(),
+        dem_file.resolve(),
+        lookup_table.resolve(),
+    }
+    for label, path in (
+        ("Raster output", raster_output),
+        ("Classdefinition output", definition_output),
+    ):
+        if path.resolve() in protected_inputs:
+            msg = f"{label} must differ from all input files: {path}"
+            raise ValueError(msg)
+    table = read_lookup_table(lookup_table)
+    definition_text = _soil_classdefinition_text(table, class_field)
+    format_categorical_data(
+        input_file,
+        dem_file,
+        raster_output,
+        table,
+        mapping_field,
+        class_field,
+        variable_name="soil_class",
+        input_crs=input_crs,
+        dem_crs=dem_crs,
+        resampling=resampling,
+        fill_nodata=fill_nodata,
+    )
+    _write_soil_classdefinition_text(definition_text, definition_output)
+    return raster_output
 
 
 def format_soil_horizons(

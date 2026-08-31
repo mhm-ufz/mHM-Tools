@@ -173,12 +173,11 @@ def test_window_copy_pads_an_expanded_grid_with_zero(tmp_path: Path):
         assert np.all(dataset["lai"].values[:, :, -1] == 0)
 
 
-def test_lai_output_guard_checks_disk_and_optional_budget(monkeypatch, tmp_path):
+def test_lai_output_guard_checks_disk(monkeypatch, tmp_path):
     """The streamed writer guards disk volume rather than process memory."""
     import shutil
 
     required = format_lai.lai_grid_byte_size(468, 6120, 13320)
-    monkeypatch.delenv(format_lai.LAI_MAX_BYTES_ENV, raising=False)
     monkeypatch.setattr(
         shutil,
         "disk_usage",
@@ -186,6 +185,10 @@ def test_lai_output_guard_checks_disk_and_optional_budget(monkeypatch, tmp_path)
     )
     assert format_lai.assert_lai_output_fits(468, 6120, 13320, tmp_path) == required
 
-    monkeypatch.setenv(format_lai.LAI_MAX_BYTES_ENV, str(16 * 1024**3))
-    with pytest.raises(MemoryError, match="over the"):
+    monkeypatch.setattr(
+        shutil,
+        "disk_usage",
+        lambda _path: shutil._ntuple_diskusage(0, 0, 1024),
+    )
+    with pytest.raises(MemoryError, match="is free on the output volume"):
         format_lai.assert_lai_output_fits(468, 6120, 13320, tmp_path)

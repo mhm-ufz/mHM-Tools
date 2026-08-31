@@ -1,9 +1,20 @@
-"""Prepare categorical and gridded LAI data for mHM."""
+"""Prepare categorical and gridded LAI data for mHM.
+
+Two independent pipelines live here. The categorical one maps a land-cover
+raster to LAI classes and writes the companion ``LAI_classdefinition.txt``.
+The gridded one aggregates a LAI NetCDF in time and places it on the model
+grid, streaming one block of target rows and one time step at a time so that
+peak memory never grows with the record length or the grid size.
+
+The sections below follow the gridded data flow: aggregate in time, find the
+source variable, build the target grid, refuse a request that cannot fit on
+disk, sample the source onto row blocks, and write. The two gridded pipelines,
+the categorical class definitions, and the public entry points follow.
+"""
 
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple, Union
@@ -24,7 +35,32 @@ logger = logging.getLogger(__name__)
 
 PathLike = Union[str, Path]
 
-# Temporal conversion
+
+# Writer tuning and nodata conventions
+
+
+NODATA = -9999.0
+# Cells the source cube does not reach are padded with a valid LAI instead of
+# nodata, so widening the grid to the model extent leaves no holes for mHM.
+PAD_VALUE = 0.0
+DEFAULT_BLOCK_BYTES = 32 * 1024**2
+CHUNK_ROWS = 128
+CHUNK_COLS = 1024
+# Level 1 compresses an upsampled LAI grid about as well as level 4 (76:1 vs
+# 78:1 on a 100x upsample) in roughly half the time, and the time dominates.
+LAI_COMPRESS_LEVEL = 1
+COORD_COMPRESS_LEVEL = 4
+# Measured on a 100x upsample of real GIMMS LAI: bilinear output compresses only
+# 1.80:1 on the DEM grid and 1.85:1 on the L0 grid, because every cell differs.
+# Nearest-neighbour reached 70:1 on its long runs of repeated values, so do not
+# reuse that figure here. The guard re-reads free space at each stage, so an
+# accurate ratio lets stage 1 through and stops stage 2 once the disk is short.
+LAI_ASSUMED_COMPRESSION = 1.8
+
+
+# Temporal aggregation
+
+
 TARGET_TIMESTEPS = {
     "daily": (-1, "D"),
     "monthly": (-2, "MS"),
@@ -73,6 +109,29 @@ def _target_name(output_temporal_resolution: str) -> str:
 def lai_time_step(output_temporal_resolution: str) -> int:
     """Return the mHM time-step flag for an LAI output resolution."""
     return TARGET_TIMESTEPS[_target_name(output_temporal_resolution)][0]
+
+
+def _source_offset(name):
+    import pandas as pd
+
+    return {
+        "daily": pd.offsets.Day(1),
+        "semi-weekly": pd.Timedelta(days=3, hours=12),
+        "weekly": pd.offsets.Week(1),
+        "biweekly": pd.offsets.Week(2),
+        "monthly": pd.offsets.MonthBegin(1),
+        "annual": pd.offsets.YearBegin(1),
+    }[name]
+
+
+def _target_offset(step):
+    import pandas as pd
+
+    return {
+        -1: pd.offsets.Day(1),
+        -2: pd.offsets.MonthBegin(1),
+        -3: pd.offsets.YearBegin(1),
+    }[step]
 
 
 def _inferred_input_resolution(data, time_dim, time_bounds=None) -> str:
@@ -187,51 +246,267 @@ def prepare_lai_temporal(
     )
 
 
-def _source_offset(name):
-    import pandas as pd
-
-    return {
-        "daily": pd.offsets.Day(1),
-        "semi-weekly": pd.Timedelta(days=3, hours=12),
-        "weekly": pd.offsets.Week(1),
-        "biweekly": pd.offsets.Week(2),
-        "monthly": pd.offsets.MonthBegin(1),
-        "annual": pd.offsets.YearBegin(1),
-    }[name]
+# Source NetCDF discovery
 
 
-def _target_offset(step):
-    import pandas as pd
+class _LaiSource(NamedTuple):
+    """A located LAI cube and the coordinate names it is indexed by."""
 
-    return {
-        -1: pd.offsets.Day(1),
-        -2: pd.offsets.MonthBegin(1),
-        -3: pd.offsets.YearBegin(1),
-    }[step]
-
-
-NODATA = -9999.0
-# Cells the source cube does not reach are padded with a valid LAI instead of
-# nodata, so widening the grid to the model extent leaves no holes for mHM.
-PAD_VALUE = 0.0
-DEFAULT_BLOCK_BYTES = 32 * 1024**2
-CHUNK_ROWS = 128
-CHUNK_COLS = 1024
-# Level 1 compresses an upsampled LAI grid about as well as level 4 (76:1 vs
-# 78:1 on a 100x upsample) in roughly half the time, and the time dominates.
-LAI_COMPRESS_LEVEL = 1
-COORD_COMPRESS_LEVEL = 4
-
-# Memory-bounded spatial placement and NetCDF writing
+    dataset: object
+    data: object
+    lat_coord: str
+    lon_coord: str
+    time_dim: str
 
 
-def block_row_count(ncols: int, block_bytes: int = DEFAULT_BLOCK_BYTES) -> int:
-    """Return how many target rows one working block should cover."""
-    per_row = max(1, int(ncols)) * 8
-    rows = max(1, int(block_bytes) // per_row)
-    # Keep blocks a whole number of chunk rows so no write is a partial chunk.
-    rows = max(CHUNK_ROWS, (rows // CHUNK_ROWS) * CHUNK_ROWS)
-    return min(rows, 4096)
+def locate_lai_cube(dataset, source_variable=None, log=None) -> _LaiSource:
+    """Find the LAI variable in an open dataset and name its three axes.
+
+    Latitude and longitude are promoted to the cube's own dimensions, so the
+    caller can index it by coordinate name instead of by whatever dimension
+    names the source file happened to use.
+    """
+    lat_coord = find_coordinate(dataset, "lat")
+    lon_coord = find_coordinate(dataset, "lon")
+    if lat_coord is None or lon_coord is None:
+        msg = "LAI NetCDF must contain 1D latitude and longitude coordinates."
+        raise ValueError(msg)
+
+    promote = [name for name in (lat_coord, lon_coord) if name in dataset.data_vars]
+    if promote:
+        dataset = dataset.set_coords(promote)
+
+    lat_dim = dataset[lat_coord].dims[0]
+    lon_dim = dataset[lon_coord].dims[0]
+    lai_data = find_variable(dataset, source_variable, lat_dim, lon_dim, log)
+    lai_data, lat_dim, lon_dim = use_coordinate_dimensions(
+        lai_data, lat_coord, lon_coord, lat_dim, lon_dim
+    )
+    time_dim = find_time_dimension(lai_data, lat_dim, lon_dim)
+    if time_dim is None:
+        msg = "LAI variable must contain exactly one temporal dimension."
+        raise ValueError(msg)
+    extra = [dim for dim in lai_data.dims if dim not in (time_dim, lat_dim, lon_dim)]
+    if extra:
+        msg = f"LAI variable has unsupported extra dimension(s): {', '.join(extra)}."
+        raise ValueError(msg)
+    return _LaiSource(dataset, lai_data, lat_coord, lon_coord, time_dim)
+
+
+def source_time_bounds(dataset, time_dim):
+    """Return the CF time-bounds array of a time axis, or None when absent."""
+    bounds_name = dataset[time_dim].attrs.get("bounds")
+    if bounds_name and bounds_name in dataset.variables:
+        return dataset[bounds_name].values
+    return None
+
+
+def find_coordinate(dataset, coordinate_type: str) -> str | None:
+    """Find a 1D latitude or longitude coordinate in a NetCDF dataset."""
+    if coordinate_type == "lat":
+        candidates = ("lat", "latitude", "y")
+        standard_name = "latitude"
+        axis = "Y"
+    else:
+        candidates = ("lon", "longitude", "x")
+        standard_name = "longitude"
+        axis = "X"
+
+    for name in candidates:
+        if name in dataset.variables and dataset[name].ndim == 1:
+            return name
+
+    for name in dataset.variables:
+        variable = dataset[name]
+        if variable.ndim != 1:
+            continue
+        attrs = variable.attrs
+        if str(attrs.get("standard_name", "")).lower() == standard_name:
+            return name
+        if str(attrs.get("axis", "")).upper() == axis:
+            return name
+    return None
+
+
+def find_time_dimension(data_array, lat_dim, lon_dim):
+    """Return the single non-spatial dimension, or None when it is ambiguous."""
+    dimensions = [dim for dim in data_array.dims if dim not in (lat_dim, lon_dim)]
+    if len(dimensions) != 1:
+        return None
+    return dimensions[0]
+
+
+def find_variable(dataset, source_variable, lat_dim: str, lon_dim: str, log=None):
+    """Find the LAI data variable to process."""
+    candidates = []
+    if source_variable:
+        candidates.append(source_variable)
+        basename = Path(source_variable).name
+        if basename not in candidates:
+            candidates.append(basename)
+
+    for candidate in candidates:
+        if candidate in dataset.data_vars:
+            data_array = dataset[candidate]
+            if lat_dim in data_array.dims and lon_dim in data_array.dims:
+                return data_array
+            msg = (
+                f"Selected NetCDF variable '{candidate}' does not use the "
+                "detected latitude/longitude dimensions."
+            )
+            raise ValueError(msg)
+
+    for candidate in ("lai", "LAI", "leaf_area_index", "Leaf_Area_Index"):
+        if candidate in dataset.data_vars:
+            data_array = dataset[candidate]
+            if lat_dim in data_array.dims and lon_dim in data_array.dims:
+                return data_array
+
+    for name, data_array in dataset.data_vars.items():
+        if lat_dim not in data_array.dims or lon_dim not in data_array.dims:
+            continue
+        if find_time_dimension(data_array, lat_dim, lon_dim):
+            if log:
+                log(f"Using LAI variable '{name}'.")
+            return data_array
+
+    msg = (
+        "Could not find a LAI variable with latitude, longitude, and time "
+        "dimensions."
+    )
+    raise ValueError(msg)
+
+
+def use_coordinate_dimensions(data_array, lat_coord, lon_coord, lat_dim, lon_dim):
+    """Use latitude and longitude coordinates as the interpolation dimensions."""
+    swap = {}
+    if lat_coord != lat_dim:
+        swap[lat_dim] = lat_coord
+    if lon_coord != lon_dim:
+        swap[lon_dim] = lon_coord
+    if swap:
+        data_array = data_array.swap_dims(swap)
+        lat_dim, lon_dim = lat_coord, lon_coord
+    return data_array, lat_dim, lon_dim
+
+
+def normalize_longitudes(data_array, lon_dim):
+    """Convert a 0..360 longitude axis to the conventional -180..180 range."""
+    import numpy as np
+
+    longitude = np.asarray(data_array[lon_dim].values, dtype="float64")
+    if longitude.size and np.nanmin(longitude) >= 0 and np.nanmax(longitude) > 180:
+        longitude = (longitude + 180) % 360 - 180
+        data_array = data_array.assign_coords({lon_dim: longitude}).sortby(lon_dim)
+        longitude = np.asarray(data_array[lon_dim].values, dtype="float64")
+        keep = np.concatenate(([True], np.diff(longitude) > 1e-10))
+        data_array = data_array.isel({lon_dim: keep})
+    return data_array
+
+
+# Target grid geometry
+
+
+class _LaiTargetGrid(NamedTuple):
+    """A target raster grid and lazy per-row-block WGS84 coordinates."""
+
+    x_centers: object
+    y_centers: object
+    row_lonlat: object
+    transform: object
+    crs: str
+
+
+def is_geographic_crs_string(crs_string) -> bool:
+    """Return True when a CRS string describes a lon/lat system."""
+    text = str(crs_string or "").strip()
+    if not text:
+        return False
+    if text.upper() in {"EPSG:4326", "OGC:CRS84", "CRS84"}:
+        return True
+    try:
+        from pyproj import CRS
+
+        return bool(CRS.from_user_input(text).is_geographic)
+    except Exception:
+        return False
+
+
+def lazy_target_grid(x_centers, y_centers, transform, crs_string) -> _LaiTargetGrid:
+    """Return target cell centres plus a per-row-block WGS84 mesh generator.
+
+    The full mesh is never built. On a 13320 x 6120 grid it would be two
+    652 MiB arrays before any LAI value has been read.
+    """
+    import numpy as np
+
+    x_centers = np.asarray(x_centers, dtype=np.float64)
+    y_centers = np.asarray(y_centers, dtype=np.float64)
+    geographic = is_geographic_crs_string(crs_string)
+    transformer = None
+    if not geographic:
+        from pyproj import Transformer
+
+        transformer = Transformer.from_crs(crs_string, "EPSG:4326", always_xy=True)
+
+    def row_lonlat(start, stop):
+        rows = y_centers[start:stop]
+        if geographic:
+            lon = np.broadcast_to(x_centers, (rows.size, x_centers.size))
+            lat = np.repeat(rows[:, None], x_centers.size, axis=1)
+            return lon, lat
+        x_grid, y_grid = np.meshgrid(x_centers, rows)
+        lon, lat = transformer.transform(x_grid, y_grid)
+        return np.asarray(lon, dtype=np.float64), np.asarray(lat, dtype=np.float64)
+
+    return _LaiTargetGrid(x_centers, y_centers, row_lonlat, transform, crs_string)
+
+
+def target_grid_from_header(header, crs_string) -> _LaiTargetGrid:
+    """Return the target grid described by an mHM-style header."""
+    import numpy as np
+    from rasterio.transform import from_origin
+
+    ncols = int(header["ncols"])
+    nrows = int(header["nrows"])
+    cellsize = float(header["cellsize"])
+    if ncols <= 0 or nrows <= 0 or cellsize <= 0:
+        msg = "Grid header has invalid dimensions or cell size."
+        raise ValueError(msg)
+    xmin = float(header["xllcorner"])
+    ymax = float(header["yllcorner"]) + nrows * cellsize
+    x_centers = xmin + (np.arange(ncols, dtype=np.float64) + 0.5) * cellsize
+    y_centers = ymax - (np.arange(nrows, dtype=np.float64) + 0.5) * cellsize
+    return lazy_target_grid(
+        x_centers,
+        y_centers,
+        from_origin(xmin, ymax, cellsize, cellsize),
+        crs_string,
+    )
+
+
+def target_grid_from_raster(raster_path, crs_string=None) -> tuple[_LaiTargetGrid, str]:
+    """Return the target grid of a raster file, read without QGIS."""
+    import numpy as np
+    import rasterio
+
+    with rasterio.open(raster_path) as dataset:
+        transform = dataset.transform
+        width, height = dataset.width, dataset.height
+        if width <= 0 or height <= 0:
+            msg = f"Raster has invalid dimensions: {raster_path}"
+            raise ValueError(msg)
+        if transform.b or transform.d:
+            msg = f"Rotated grids are not supported: {raster_path}"
+            raise ValueError(msg)
+        resolved = dataset.crs.to_string() if dataset.crs else str(crs_string or "")
+
+    x_centers = transform.c + (np.arange(width, dtype=np.float64) + 0.5) * transform.a
+    y_centers = transform.f + (np.arange(height, dtype=np.float64) + 0.5) * transform.e
+    if not resolved:
+        msg = f"Could not determine the CRS of {raster_path}"
+        raise ValueError(msg)
+    return lazy_target_grid(x_centers, y_centers, transform, resolved), resolved
 
 
 def _axis_step(values, name):
@@ -292,6 +567,43 @@ def lai_window_offsets(source_x, source_y, target_header):
             msg = f"The staged LAI grid is not aligned to the target {name} grid."
             raise ValueError(msg)
     return int(round(row_offset)), int(round(column_offset))
+
+
+# Output size guard
+
+
+def lai_grid_byte_size(steps: int, nrows: int, ncols: int) -> int:
+    """Return the double-precision byte size of the placed LAI array."""
+    return int(steps) * int(nrows) * int(ncols) * 8
+
+
+def assert_lai_output_fits(steps: int, nrows: int, ncols: int, folder) -> int:
+    """Reject an LAI request that cannot fit on disk, and return its size.
+
+    Memory is bounded by the streaming writer, so the remaining limit is the
+    output file. It is written compressed, but refuse outright when even a
+    generous compression estimate cannot fit in the free space.
+    """
+    import shutil
+
+    required = lai_grid_byte_size(steps, nrows, ncols)
+    try:
+        free = shutil.disk_usage(str(folder)).free
+    except OSError:
+        return required
+    if required / LAI_ASSUMED_COMPRESSION > free:
+        msg = (
+            f"LAI needs about {required / 1024 ** 3:.1f} GiB uncompressed "
+            f"({int(steps)} time step(s) on a {int(ncols)} x {int(nrows)} "
+            f"grid) and only {free / 1024 ** 3:.1f} GiB is free on the output "
+            "volume. Choose 'long-term-mean-monthly' or use a smaller "
+            "model extent."
+        )
+        raise MemoryError(msg)
+    return required
+
+
+# Row-block samplers
 
 
 class _RasterioSampler:
@@ -447,6 +759,78 @@ class _WindowSampler:
         return block
 
 
+# Streaming NetCDF writer
+
+
+def block_row_count(ncols: int, block_bytes: int = DEFAULT_BLOCK_BYTES) -> int:
+    """Return how many target rows one working block should cover."""
+    per_row = max(1, int(ncols)) * 8
+    rows = max(1, int(block_bytes) // per_row)
+    # Keep blocks a whole number of chunk rows so no write is a partial chunk.
+    rows = max(CHUNK_ROWS, (rows // CHUNK_ROWS) * CHUNK_ROWS)
+    return min(rows, 4096)
+
+
+# Attributes describing how the source file stored its values. The writer sets
+# its own, so carrying these over would misdescribe the output.
+_SOURCE_ENCODING_ATTRS = (
+    "_FillValue",
+    "missing_value",
+    "scale_factor",
+    "add_offset",
+    "coordinates",
+    "grid_mapping",
+)
+
+
+def lai_output_attrs(source_attrs) -> dict:
+    """Return the ``lai`` variable attributes to write, from the source ones."""
+    attrs = {
+        key: value
+        for key, value in dict(source_attrs).items()
+        if key not in _SOURCE_ENCODING_ATTRS
+    }
+    attrs.setdefault("long_name", "leaf area index")
+    attrs.setdefault("units", "1")
+    attrs["nodata_value"] = NODATA
+    return attrs
+
+
+def time_attrs_for_step(time_step: int) -> dict:
+    """Return the time-axis attributes for a prepared LAI time step."""
+    if time_step == 1:
+        return {"long_name": "month", "units": "month"}
+    return {"standard_name": "time", "axis": "T"}
+
+
+def coordinate_dataset(
+    x_centers, y_centers, crs_string, description, time_values, time_bounds, time_attrs
+):
+    """Build the small coordinate-only dataset written before the LAI cube."""
+    import numpy as np
+    import xarray as xr
+
+    dataset = xr.Dataset(
+        data_vars={"time_bnds": (("time", "bnds"), time_bounds)},
+        coords={
+            "time": time_values,
+            "yc": np.asarray(y_centers, dtype=np.float64),
+            "xc": np.asarray(x_centers, dtype=np.float64),
+            "bnds": np.arange(2, dtype=np.int8),
+        },
+        attrs={
+            "description": description,
+            "projection": str(crs_string or "").lower(),
+        },
+    )
+    dataset["time"].attrs.update(dict(time_attrs or {}))
+    dataset["time"].attrs["bounds"] = "time_bnds"
+    units = "degrees" if is_geographic_crs_string(crs_string) else "m"
+    dataset["yc"].attrs.update({"axis": "Y", "units": units})
+    dataset["xc"].attrs.update({"axis": "X", "units": units})
+    return dataset
+
+
 def stream_lai_grid(
     output_path,
     *,
@@ -558,304 +942,7 @@ def stream_lai_grid(
     return str(output)
 
 
-LAI_MAX_BYTES_ENV = "MHM_TOOLS_LAI_MAX_BYTES"
-# Measured on a 100x upsample of real GIMMS LAI: bilinear output compresses only
-# 1.80:1 on the DEM grid and 1.85:1 on the L0 grid, because every cell differs.
-# Nearest-neighbour reached 70:1 on its long runs of repeated values, so do not
-# reuse that figure here. The guard re-reads free space at each stage, so an
-# accurate ratio lets stage 1 through and stops stage 2 once the disk is short.
-LAI_ASSUMED_COMPRESSION = 1.8
-
-
-class _LaiTargetGrid(NamedTuple):
-    """A target raster grid and lazy per-row-block WGS84 coordinates."""
-
-    x_centers: object
-    y_centers: object
-    row_lonlat: object
-    transform: object
-    crs: str
-
-
-def is_geographic_crs_string(crs_string) -> bool:
-    """Return True when a CRS string describes a lon/lat system."""
-    text = str(crs_string or "").strip()
-    if not text:
-        return False
-    if text.upper() in {"EPSG:4326", "OGC:CRS84", "CRS84"}:
-        return True
-    try:
-        from pyproj import CRS
-
-        return bool(CRS.from_user_input(text).is_geographic)
-    except Exception:
-        return False
-
-
-def lai_grid_byte_size(steps: int, nrows: int, ncols: int) -> int:
-    """Return the double-precision byte size of the placed LAI array."""
-    return int(steps) * int(nrows) * int(ncols) * 8
-
-
-def assert_lai_output_fits(steps: int, nrows: int, ncols: int, folder) -> int:
-    """Reject an LAI request that cannot fit on disk, and return its size.
-
-    Memory is bounded by the streaming writer, so the remaining limit is the
-    output file. It is written compressed, but refuse outright when even a
-    generous compression estimate cannot fit in the free space.
-    """
-    import shutil
-
-    required = lai_grid_byte_size(steps, nrows, ncols)
-    override = os.environ.get(LAI_MAX_BYTES_ENV, "").strip()
-    if override:
-        try:
-            limit = int(override)
-        except ValueError:
-            limit = 0
-        if limit > 0 and required > limit:
-            msg = (
-                f"LAI would write {required / 1024 ** 3:.1f} GiB: "
-                f"{int(steps)} time step(s) on a {int(ncols)} x {int(nrows)} "
-                f"grid, over the {LAI_MAX_BYTES_ENV} limit of "
-                f"{limit / 1024 ** 3:.1f} GiB."
-            )
-            raise MemoryError(msg)
-        return required
-
-    try:
-        free = shutil.disk_usage(str(folder)).free
-    except OSError:
-        return required
-    if required / LAI_ASSUMED_COMPRESSION > free:
-        msg = (
-            f"LAI needs about {required / 1024 ** 3:.1f} GiB uncompressed "
-            f"({int(steps)} time step(s) on a {int(ncols)} x {int(nrows)} "
-            f"grid) and only {free / 1024 ** 3:.1f} GiB is free on the output "
-            "volume. Choose 'long-term-mean-monthly', use a smaller model "
-            f"extent, or set "
-            f"{LAI_MAX_BYTES_ENV} to override this check."
-        )
-        raise MemoryError(msg)
-    return required
-
-
-def lazy_target_grid(x_centers, y_centers, transform, crs_string) -> _LaiTargetGrid:
-    """Return target cell centres plus a per-row-block WGS84 mesh generator.
-
-    The full mesh is never built. On a 13320 x 6120 grid it would be two
-    652 MiB arrays before any LAI value has been read.
-    """
-    import numpy as np
-
-    x_centers = np.asarray(x_centers, dtype=np.float64)
-    y_centers = np.asarray(y_centers, dtype=np.float64)
-    geographic = is_geographic_crs_string(crs_string)
-    transformer = None
-    if not geographic:
-        from pyproj import Transformer
-
-        transformer = Transformer.from_crs(crs_string, "EPSG:4326", always_xy=True)
-
-    def row_lonlat(start, stop):
-        rows = y_centers[start:stop]
-        if geographic:
-            lon = np.broadcast_to(x_centers, (rows.size, x_centers.size))
-            lat = np.repeat(rows[:, None], x_centers.size, axis=1)
-            return lon, lat
-        x_grid, y_grid = np.meshgrid(x_centers, rows)
-        lon, lat = transformer.transform(x_grid, y_grid)
-        return np.asarray(lon, dtype=np.float64), np.asarray(lat, dtype=np.float64)
-
-    return _LaiTargetGrid(x_centers, y_centers, row_lonlat, transform, crs_string)
-
-
-def target_grid_from_header(header, crs_string) -> _LaiTargetGrid:
-    """Return the target grid described by an mHM-style header."""
-    import numpy as np
-    from rasterio.transform import from_origin
-
-    ncols = int(header["ncols"])
-    nrows = int(header["nrows"])
-    cellsize = float(header["cellsize"])
-    if ncols <= 0 or nrows <= 0 or cellsize <= 0:
-        msg = "Grid header has invalid dimensions or cell size."
-        raise ValueError(msg)
-    xmin = float(header["xllcorner"])
-    ymax = float(header["yllcorner"]) + nrows * cellsize
-    x_centers = xmin + (np.arange(ncols, dtype=np.float64) + 0.5) * cellsize
-    y_centers = ymax - (np.arange(nrows, dtype=np.float64) + 0.5) * cellsize
-    return lazy_target_grid(
-        x_centers,
-        y_centers,
-        from_origin(xmin, ymax, cellsize, cellsize),
-        crs_string,
-    )
-
-
-def target_grid_from_raster(raster_path, crs_string=None) -> tuple[_LaiTargetGrid, str]:
-    """Return the target grid of a raster file, read without QGIS."""
-    import numpy as np
-    import rasterio
-
-    with rasterio.open(raster_path) as dataset:
-        transform = dataset.transform
-        width, height = dataset.width, dataset.height
-        if width <= 0 or height <= 0:
-            msg = f"Raster has invalid dimensions: {raster_path}"
-            raise ValueError(msg)
-        if transform.b or transform.d:
-            msg = f"Rotated grids are not supported: {raster_path}"
-            raise ValueError(msg)
-        resolved = dataset.crs.to_string() if dataset.crs else str(crs_string or "")
-
-    x_centers = transform.c + (np.arange(width, dtype=np.float64) + 0.5) * transform.a
-    y_centers = transform.f + (np.arange(height, dtype=np.float64) + 0.5) * transform.e
-    if not resolved:
-        msg = f"Could not determine the CRS of {raster_path}"
-        raise ValueError(msg)
-    return lazy_target_grid(x_centers, y_centers, transform, resolved), resolved
-
-
-# NetCDF source discovery and gridded workflows
-
-
-def find_coordinate(dataset, coordinate_type: str) -> str | None:
-    """Find a 1D latitude or longitude coordinate in a NetCDF dataset."""
-    if coordinate_type == "lat":
-        candidates = ("lat", "latitude", "y")
-        standard_name = "latitude"
-        axis = "Y"
-    else:
-        candidates = ("lon", "longitude", "x")
-        standard_name = "longitude"
-        axis = "X"
-
-    for name in candidates:
-        if name in dataset.variables and dataset[name].ndim == 1:
-            return name
-
-    for name in dataset.variables:
-        variable = dataset[name]
-        if variable.ndim != 1:
-            continue
-        attrs = variable.attrs
-        if str(attrs.get("standard_name", "")).lower() == standard_name:
-            return name
-        if str(attrs.get("axis", "")).upper() == axis:
-            return name
-    return None
-
-
-def find_time_dimension(data_array, lat_dim, lon_dim):
-    """Return the single non-spatial dimension, or None when it is ambiguous."""
-    dimensions = [dim for dim in data_array.dims if dim not in (lat_dim, lon_dim)]
-    if len(dimensions) != 1:
-        return None
-    return dimensions[0]
-
-
-def find_variable(dataset, source_variable, lat_dim: str, lon_dim: str, log=None):
-    """Find the LAI data variable to process."""
-    candidates = []
-    if source_variable:
-        candidates.append(source_variable)
-        basename = Path(source_variable).name
-        if basename not in candidates:
-            candidates.append(basename)
-
-    for candidate in candidates:
-        if candidate in dataset.data_vars:
-            data_array = dataset[candidate]
-            if lat_dim in data_array.dims and lon_dim in data_array.dims:
-                return data_array
-            msg = (
-                f"Selected NetCDF variable '{candidate}' does not use the "
-                "detected latitude/longitude dimensions."
-            )
-            raise ValueError(msg)
-
-    for candidate in ("lai", "LAI", "leaf_area_index", "Leaf_Area_Index"):
-        if candidate in dataset.data_vars:
-            data_array = dataset[candidate]
-            if lat_dim in data_array.dims and lon_dim in data_array.dims:
-                return data_array
-
-    for name, data_array in dataset.data_vars.items():
-        if lat_dim not in data_array.dims or lon_dim not in data_array.dims:
-            continue
-        if find_time_dimension(data_array, lat_dim, lon_dim):
-            if log:
-                log(f"Using LAI variable '{name}'.")
-            return data_array
-
-    msg = (
-        "Could not find a LAI variable with latitude, longitude, and time "
-        "dimensions."
-    )
-    raise ValueError(msg)
-
-
-def use_coordinate_dimensions(data_array, lat_coord, lon_coord, lat_dim, lon_dim):
-    """Use latitude and longitude coordinates as the interpolation dimensions."""
-    swap = {}
-    if lat_coord != lat_dim:
-        swap[lat_dim] = lat_coord
-    if lon_coord != lon_dim:
-        swap[lon_dim] = lon_coord
-    if swap:
-        data_array = data_array.swap_dims(swap)
-        lat_dim, lon_dim = lat_coord, lon_coord
-    return data_array, lat_dim, lon_dim
-
-
-def normalize_longitudes(data_array, lon_dim):
-    """Convert a 0..360 longitude axis to the conventional -180..180 range."""
-    import numpy as np
-
-    longitude = np.asarray(data_array[lon_dim].values, dtype="float64")
-    if longitude.size and np.nanmin(longitude) >= 0 and np.nanmax(longitude) > 180:
-        longitude = (longitude + 180) % 360 - 180
-        data_array = data_array.assign_coords({lon_dim: longitude}).sortby(lon_dim)
-        longitude = np.asarray(data_array[lon_dim].values, dtype="float64")
-        keep = np.concatenate(([True], np.diff(longitude) > 1e-10))
-        data_array = data_array.isel({lon_dim: keep})
-    return data_array
-
-
-def time_attrs_for_step(time_step: int) -> dict:
-    """Return the time-axis attributes for a prepared LAI time step."""
-    if time_step == 1:
-        return {"long_name": "month", "units": "month"}
-    return {"standard_name": "time", "axis": "T"}
-
-
-def coordinate_dataset(
-    x_centers, y_centers, crs_string, description, time_values, time_bounds, time_attrs
-):
-    """Build the small coordinate-only dataset written before the LAI cube."""
-    import numpy as np
-    import xarray as xr
-
-    dataset = xr.Dataset(
-        data_vars={"time_bnds": (("time", "bnds"), time_bounds)},
-        coords={
-            "time": time_values,
-            "yc": np.asarray(y_centers, dtype=np.float64),
-            "xc": np.asarray(x_centers, dtype=np.float64),
-            "bnds": np.arange(2, dtype=np.int8),
-        },
-        attrs={
-            "description": description,
-            "projection": str(crs_string or "").lower(),
-        },
-    )
-    dataset["time"].attrs.update(dict(time_attrs or {}))
-    dataset["time"].attrs["bounds"] = "time_bnds"
-    units = "degrees" if is_geographic_crs_string(crs_string) else "m"
-    dataset["yc"].attrs.update({"axis": "Y", "units": units})
-    dataset["xc"].attrs.update({"axis": "X", "units": units})
-    return dataset
+# Gridded LAI pipelines
 
 
 def resample_lai_file_to_grid(
@@ -884,49 +971,19 @@ def resample_lai_file_to_grid(
 
     dataset = xr.open_dataset(source_path)
     try:
-        lat_coord = find_coordinate(dataset, "lat")
-        lon_coord = find_coordinate(dataset, "lon")
-        if lat_coord is None or lon_coord is None:
-            msg = "LAI NetCDF must contain 1D latitude and longitude coordinates."
-            raise ValueError(msg)
+        source = locate_lai_cube(dataset, source_variable, log)
+        dataset = source.dataset
+        lat_coord, lon_coord = source.lat_coord, source.lon_coord
 
-        promote = [name for name in (lat_coord, lon_coord) if name in dataset.data_vars]
-        if promote:
-            dataset = dataset.set_coords(promote)
-
-        lat_dim = dataset[lat_coord].dims[0]
-        lon_dim = dataset[lon_coord].dims[0]
-        lai_data = find_variable(dataset, source_variable, lat_dim, lon_dim, log)
-        lai_data, lat_dim, lon_dim = use_coordinate_dimensions(
-            lai_data, lat_coord, lon_coord, lat_dim, lon_dim
-        )
-        time_dim = find_time_dimension(lai_data, lat_dim, lon_dim)
-        if time_dim is None:
-            msg = "LAI variable must contain exactly one temporal dimension."
-            raise ValueError(msg)
-        extra = [
-            dim for dim in lai_data.dims if dim not in (time_dim, lat_dim, lon_dim)
-        ]
-        if extra:
-            msg = (
-                f"LAI variable has unsupported extra dimension(s): {', '.join(extra)}."
-            )
-            raise ValueError(msg)
-
-        bounds_name = dataset[time_dim].attrs.get("bounds")
-        source_bounds = (
-            dataset[bounds_name].values
-            if bounds_name and bounds_name in dataset.variables
-            else None
-        )
         temporal = prepare_lai_temporal(
-            lai_data,
+            source.data,
             output_temporal_resolution,
-            time_dim=time_dim,
-            time_bounds=source_bounds,
+            time_dim=source.time_dim,
+            time_bounds=source_time_bounds(dataset, source.time_dim),
         )
         lai_data = temporal.data.sortby(lat_coord).sortby(lon_coord)
         lai_data = normalize_longitudes(lai_data, lon_coord)
+
         x_centers, y_centers = target_grid.x_centers, target_grid.y_centers
         steps = int(lai_data.sizes.get("time", 1))
         required = assert_lai_output_fits(
@@ -947,19 +1004,6 @@ def resample_lai_file_to_grid(
         source_values = np.asarray(
             lai_data.transpose("time", lat_coord, lon_coord).values
         )
-        attrs = dict(lai_data.attrs)
-        for reserved in (
-            "_FillValue",
-            "missing_value",
-            "scale_factor",
-            "add_offset",
-            "coordinates",
-            "grid_mapping",
-        ):
-            attrs.pop(reserved, None)
-        attrs.setdefault("long_name", "leaf area index")
-        attrs.setdefault("units", "1")
-        attrs["nodata_value"] = NODATA
 
         return stream_lai_grid(
             output_path,
@@ -983,7 +1027,7 @@ def resample_lai_file_to_grid(
             x_centers=x_centers,
             y_centers=y_centers,
             row_lonlat=target_grid.row_lonlat,
-            lai_attrs=attrs,
+            lai_attrs=lai_output_attrs(lai_data.attrs),
             is_cancelled=is_cancelled,
             progress=progress,
             log=log,
@@ -1081,7 +1125,7 @@ def window_copy_lai_file(
         handle.close()
 
 
-# Categorical definitions and public entry points
+# Categorical class definitions
 
 
 _MONTHS = (
@@ -1184,6 +1228,9 @@ def write_lai_classdefinition(
     return _write_classdefinition_text(
         _classdefinition_text(table, class_field), Path(output_file)
     )
+
+
+# Public entry points
 
 
 def format_lai_data(

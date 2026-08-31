@@ -1,5 +1,15 @@
 """
-Prepare an mHM land-cover raster from categorical raster data.
+Prepare mHM land-cover rasters from a single map or a manifest of periods.
+
+Two pipelines live here. The single-raster one maps one categorical raster
+through a lookup table onto the DEM grid. The historical one reads a manifest
+of non-overlapping, gapless year ranges and formats each period, writing
+either one ASCII raster per period or a single CF time stack as NetCDF.
+
+Both share the same two-step placement: categories are reclassified to mHM
+land-cover classes at the source resolution first, then that integer raster is
+warped onto the DEM grid, so no interpolation ever mixes class numbers. The
+sections below follow that flow, and the public entry points come last.
 
 Authors
 -------
@@ -40,54 +50,7 @@ logger = logging.getLogger(__name__)
 PathLike = Union[str, Path]
 
 
-def format_lc_data(
-    input_file: PathLike,
-    dem_file: PathLike,
-    output_path: PathLike,
-    lookup_table: PathLike,
-    mapping_field: str,
-    class_field: str,
-    output_type: str = "nc",
-    *,
-    input_crs: str | None = None,
-    dem_crs: str | None = None,
-    resampling="auto",
-    fill_nodata: bool = True,
-) -> Path:
-    """Map a categorical raster to mHM land-cover classes on the DEM grid.
-
-    Parameters
-    ----------
-    fill_nodata : bool, default True
-        Restrict the output to the DEM domain and take its remaining nodata
-        cells from the nearest classified neighbour.
-    """
-    input_file = Path(input_file)
-    dem_file = Path(dem_file)
-    lookup_table = Path(lookup_table)
-    raster_output = get_categorical_output_path(output_path, "lc", output_type)
-
-    if raster_output.resolve() in {
-        input_file.resolve(),
-        dem_file.resolve(),
-        lookup_table.resolve(),
-    }:
-        msg = f"Raster output must differ from all input files: {raster_output}"
-        raise ValueError(msg)
-
-    return format_categorical_data(
-        input_file,
-        dem_file,
-        raster_output,
-        read_lookup_table(lookup_table),
-        mapping_field,
-        class_field,
-        variable_name="land_cover",
-        input_crs=input_crs,
-        dem_crs=dem_crs,
-        resampling=resampling,
-        fill_nodata=fill_nodata,
-    )
+# Land-cover period manifest
 
 
 def _manifest_raster_path(manifest: Path, value, row_number: int) -> Path:
@@ -147,6 +110,9 @@ def _read_lc_manifest(input_file: PathLike):
     return manifest, periods
 
 
+# Raster grid access
+
+
 _LC_BLOCK_ROWS = 256
 
 
@@ -174,18 +140,38 @@ def _lc_resampling(requested) -> Resampling:
 
 
 def _lc_windows(dataset):
+    """Yield full-width row blocks covering a raster."""
     for row in range(0, dataset.height, _LC_BLOCK_ROWS):
         height = min(_LC_BLOCK_ROWS, dataset.height - row)
         yield Window(0, row, dataset.width, height)
 
 
+def _grid_coordinates(dataset):
+    """Return the cell-centre coordinates of a north-up raster grid."""
+    transform = dataset.transform
+    x = transform.c + (np.arange(dataset.width) + 0.5) * transform.a
+    y = transform.f + (np.arange(dataset.height) + 0.5) * transform.e
+    return x, y
+
+
 def _reference_valid(reference, window=None):
+    """Return the boolean mask of DEM cells that carry data."""
     values = reference.read(1, window=window, masked=True)
     valid = ~np.ma.getmaskarray(values)
     data = np.ma.getdata(values)
     if np.issubdtype(data.dtype, np.floating):
         valid &= np.isfinite(data)
     return valid
+
+
+def _validate_reference_grid(reference):
+    """Reject a rotated DEM, whose cells do not align to the output axes."""
+    if reference.transform.b or reference.transform.d:
+        msg = "Rotated DEM grids are not supported for historical land cover."
+        raise ValueError(msg)
+
+
+# Reclassification and alignment
 
 
 def _write_mapped_lc(source, source_crs, mapped_path, mapping):
@@ -280,13 +266,11 @@ def _write_aligned_lc_period(
                     missing = int(
                         np.count_nonzero((values == int(NO_DATA)) & valid)
                     )
-                    transform = reference.transform
+                    x, y = _grid_coordinates(reference)
                     filled = fill_grid_nodata(
                         values,
-                        x=transform.c
-                        + (np.arange(reference.width) + 0.5) * transform.a,
-                        y=transform.f
-                        + (np.arange(reference.height) + 0.5) * transform.e,
+                        x=x,
+                        y=y,
                         mask=~valid,
                         missing_value=float(NO_DATA),
                         fill_value=int(NO_DATA),
@@ -310,10 +294,7 @@ def _write_aligned_lc_period(
     return aligned_path
 
 
-def _validate_reference_grid(reference):
-    if reference.transform.b or reference.transform.d:
-        msg = "Rotated DEM grids are not supported for historical land cover."
-        raise ValueError(msg)
+# Period writers
 
 
 def _format_lc_period_asc_streaming(
@@ -356,7 +337,94 @@ def _format_lc_period_asc_streaming(
     return output_path
 
 
-def _format_lc_periods_netcdf_streaming(  # noqa: PLR0915
+def _create_lc_netcdf(path, reference, reference_crs, periods):
+    """Create the CF structure needed for period-by-period land-cover output.
+
+    Returns the open dataset and its ``land_cover`` variable; the caller fills
+    one period at a time and is responsible for closing the dataset.
+    """
+    import datetime as dt
+
+    import netCDF4
+
+    transform = reference.transform
+    rows, cols = reference.height, reference.width
+    projection = reference_crs.to_wkt()
+    geographic = reference_crs.is_geographic
+    x_values, y_values = _grid_coordinates(reference)
+
+    dataset = netCDF4.Dataset(path, "w", format="NETCDF4")
+    dataset.createDimension("time", len(periods))
+    dataset.createDimension("y", rows)
+    dataset.createDimension("x", cols)
+    dataset.createDimension("bnds", 2)
+    time = dataset.createVariable("time", "f8", ("time",))
+    time_bounds = dataset.createVariable("time_bnds", "f8", ("time", "bnds"))
+    x = dataset.createVariable("x", "f8", ("x",))
+    y = dataset.createVariable("y", "f8", ("y",))
+    x_bounds = dataset.createVariable("x_bnds", "f8", ("x", "bnds"))
+    y_bounds = dataset.createVariable("y_bnds", "f8", ("y", "bnds"))
+    crs = dataset.createVariable("crs", "i4")
+    land_cover = dataset.createVariable(
+        "land_cover",
+        "i4",
+        ("time", "y", "x"),
+        fill_value=int(NO_DATA),
+        zlib=True,
+        complevel=4,
+        shuffle=True,
+        chunksizes=(1, min(256, rows), min(256, cols)),
+    )
+
+    # Each period spans whole years, so its bounds run from the first instant
+    # of StartYear to the first instant of the year after EndYear.
+    units = "days since 1970-01-01 00:00:00"
+    calendar = "proleptic_gregorian"
+    starts = [dt.datetime(period["start"], 1, 1) for period in periods]
+    ends = [dt.datetime(period["end"] + 1, 1, 1) for period in periods]
+    time[:] = netCDF4.date2num(starts, units, calendar=calendar)
+    time_bounds[:, 0] = netCDF4.date2num(starts, units, calendar=calendar)
+    time_bounds[:, 1] = netCDF4.date2num(ends, units, calendar=calendar)
+    time.units = units
+    time.calendar = calendar
+    time.standard_name = "time"
+    time.long_name = "land-cover period start"
+    time.axis = "T"
+    time.bounds = "time_bnds"
+    time_bounds.units = units
+    time_bounds.calendar = calendar
+    time_bounds.long_name = "land-cover period bounds"
+
+    x[:] = x_values
+    y[:] = y_values
+    x_bounds[:, 0] = x_values - abs(transform.a) / 2.0
+    x_bounds[:, 1] = x_values + abs(transform.a) / 2.0
+    y_bounds[:, 0] = y_values - abs(transform.e) / 2.0
+    y_bounds[:, 1] = y_values + abs(transform.e) / 2.0
+    x.standard_name = "longitude" if geographic else "projection_x_coordinate"
+    y.standard_name = "latitude" if geographic else "projection_y_coordinate"
+    x.units = "degrees_east" if geographic else "m"
+    y.units = "degrees_north" if geographic else "m"
+    x.axis = "X"
+    y.axis = "Y"
+    x.bounds = "x_bnds"
+    y.bounds = "y_bnds"
+
+    if projection:
+        crs.spatial_ref = projection
+        crs.crs_wkt = projection
+    crs.GeoTransform = " ".join(str(value) for value in transform.to_gdal())
+    land_cover.long_name = "mHM land cover"
+    land_cover.units = "1"
+    land_cover.nodata_value = int(NO_DATA)
+    land_cover.grid_mapping = "crs"
+    dataset.Conventions = "CF-1.8"
+    dataset.title = "Temporal land-cover classes for mHM"
+    dataset.source = "mhm-tools format-data land-cover manifest"
+    return dataset, land_cover
+
+
+def _format_lc_periods_netcdf_streaming(
     periods,
     dem_file,
     output,
@@ -368,92 +436,19 @@ def _format_lc_periods_netcdf_streaming(  # noqa: PLR0915
     fill_nodata=True,
 ):
     """Write a CF time stack without retaining full period arrays."""
-    import datetime as dt
-
-    import netCDF4
-
     reference = rasterio.open(dem_file)
     reference_crs = _raster_crs(reference, dem_crs, "DEM")
     _validate_reference_grid(reference)
-    transform = reference.transform
-    rows, cols = reference.height, reference.width
-    projection = reference_crs.to_wkt()
-    geographic = reference_crs.is_geographic
-    x_values = transform.c + (np.arange(cols) + 0.5) * transform.a
-    y_values = transform.f + (np.arange(rows) + 0.5) * transform.e
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory(
         prefix="mhm_tools_lc_stack_", dir=output.parent
     ) as temp_name:
         temp = Path(temp_name)
-        dataset = netCDF4.Dataset(output, "w", format="NETCDF4")
+        dataset, land_cover = _create_lc_netcdf(
+            output, reference, reference_crs, periods
+        )
         try:
-            dataset.createDimension("time", len(periods))
-            dataset.createDimension("y", rows)
-            dataset.createDimension("x", cols)
-            dataset.createDimension("bnds", 2)
-            time = dataset.createVariable("time", "f8", ("time",))
-            time_bounds = dataset.createVariable("time_bnds", "f8", ("time", "bnds"))
-            x = dataset.createVariable("x", "f8", ("x",))
-            y = dataset.createVariable("y", "f8", ("y",))
-            x_bounds = dataset.createVariable("x_bnds", "f8", ("x", "bnds"))
-            y_bounds = dataset.createVariable("y_bnds", "f8", ("y", "bnds"))
-            crs = dataset.createVariable("crs", "i4")
-            land_cover = dataset.createVariable(
-                "land_cover",
-                "i4",
-                ("time", "y", "x"),
-                fill_value=int(NO_DATA),
-                zlib=True,
-                complevel=4,
-                shuffle=True,
-                chunksizes=(1, min(256, rows), min(256, cols)),
-            )
-            units = "days since 1970-01-01 00:00:00"
-            calendar = "proleptic_gregorian"
-            starts = [dt.datetime(period["start"], 1, 1) for period in periods]
-            ends = [dt.datetime(period["end"] + 1, 1, 1) for period in periods]
-            time[:] = netCDF4.date2num(starts, units, calendar=calendar)
-            time_bounds[:, 0] = netCDF4.date2num(starts, units, calendar=calendar)
-            time_bounds[:, 1] = netCDF4.date2num(ends, units, calendar=calendar)
-            time.units = units
-            time.calendar = calendar
-            time.standard_name = "time"
-            time.long_name = "land-cover period start"
-            time.axis = "T"
-            time.bounds = "time_bnds"
-            time_bounds.units = units
-            time_bounds.calendar = calendar
-            time_bounds.long_name = "land-cover period bounds"
-            x[:] = x_values
-            y[:] = y_values
-            x_bounds[:, 0] = x_values - abs(transform.a) / 2.0
-            x_bounds[:, 1] = x_values + abs(transform.a) / 2.0
-            y_bounds[:, 0] = y_values - abs(transform.e) / 2.0
-            y_bounds[:, 1] = y_values + abs(transform.e) / 2.0
-            x.standard_name = "longitude" if geographic else "projection_x_coordinate"
-            y.standard_name = "latitude" if geographic else "projection_y_coordinate"
-            x.units = "degrees_east" if geographic else "m"
-            y.units = "degrees_north" if geographic else "m"
-            x.axis = "X"
-            y.axis = "Y"
-            x.bounds = "x_bnds"
-            y.bounds = "y_bnds"
-            if projection:
-                crs.spatial_ref = projection
-                crs.crs_wkt = projection
-            crs.GeoTransform = " ".join(
-                str(value) for value in transform.to_gdal()
-            )
-            land_cover.long_name = "mHM land cover"
-            land_cover.units = "1"
-            land_cover.nodata_value = int(NO_DATA)
-            land_cover.grid_mapping = "crs"
-            dataset.Conventions = "CF-1.8"
-            dataset.title = "Temporal land-cover classes for mHM"
-            dataset.source = "mhm-tools format-data land-cover manifest"
-
             for index, period in enumerate(periods):
                 aligned = temp / f"period_{index}.tif"
                 _write_aligned_lc_period(
@@ -477,6 +472,59 @@ def _format_lc_periods_netcdf_streaming(  # noqa: PLR0915
             dataset.close()
             reference.close()
     return output
+
+
+# Public entry points
+
+
+def format_lc_data(
+    input_file: PathLike,
+    dem_file: PathLike,
+    output_path: PathLike,
+    lookup_table: PathLike,
+    mapping_field: str,
+    class_field: str,
+    output_type: str = "nc",
+    *,
+    input_crs: str | None = None,
+    dem_crs: str | None = None,
+    resampling="auto",
+    fill_nodata: bool = True,
+) -> Path:
+    """Map a categorical raster to mHM land-cover classes on the DEM grid.
+
+    Parameters
+    ----------
+    fill_nodata : bool, default True
+        Restrict the output to the DEM domain and take its remaining nodata
+        cells from the nearest classified neighbour.
+    """
+    input_file = Path(input_file)
+    dem_file = Path(dem_file)
+    lookup_table = Path(lookup_table)
+    raster_output = get_categorical_output_path(output_path, "lc", output_type)
+
+    if raster_output.resolve() in {
+        input_file.resolve(),
+        dem_file.resolve(),
+        lookup_table.resolve(),
+    }:
+        msg = f"Raster output must differ from all input files: {raster_output}"
+        raise ValueError(msg)
+
+    return format_categorical_data(
+        input_file,
+        dem_file,
+        raster_output,
+        read_lookup_table(lookup_table),
+        mapping_field,
+        class_field,
+        variable_name="land_cover",
+        input_crs=input_crs,
+        dem_crs=dem_crs,
+        resampling=resampling,
+        fill_nodata=fill_nodata,
+    )
 
 
 def format_lc_periods(
@@ -517,18 +565,18 @@ def format_lc_periods(
         msg = f"Output path must be a directory: {output_path}"
         raise ValueError(msg)
     table = read_lookup_table(lookup_table)
+    protected = {
+        manifest.resolve(),
+        dem_file.resolve(),
+        lookup_table.resolve(),
+        *(period["path"].resolve() for period in periods),
+    }
 
     if output_type == "asc":
         outputs = tuple(
             output_path / f"lc_{period['start']}_{period['end']}.asc"
             for period in periods
         )
-        protected = {
-            manifest.resolve(),
-            dem_file.resolve(),
-            lookup_table.resolve(),
-            *(period["path"].resolve() for period in periods),
-        }
         collisions = [output for output in outputs if output.resolve() in protected]
         if collisions:
             msg = "Land-cover outputs must differ from all input files: " + ", ".join(
@@ -551,12 +599,6 @@ def format_lc_periods(
         return outputs
 
     output = output_path / "lc_periods.nc"
-    protected = {
-        manifest.resolve(),
-        dem_file.resolve(),
-        lookup_table.resolve(),
-        *(period["path"].resolve() for period in periods),
-    }
     if output.resolve() in protected:
         msg = f"Land-cover output must differ from all input files: {output}"
         raise ValueError(msg)

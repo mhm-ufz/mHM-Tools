@@ -1,6 +1,11 @@
 """
 Prepare an mHM geology-class raster from categorical raster data.
 
+The lookup table drives both outputs: it maps the input raster categories onto
+geology classes, and it supplies the karstic flag and ordering that the
+companion ``geology_classdefinition.txt`` records. Columns whose name starts
+with ``*`` are treated as comments and ignored throughout.
+
 Authors
 -------
 - Sanjeev Bashyal
@@ -30,6 +35,9 @@ logger = logging.getLogger(__name__)
 PathLike = Union[str, Path]
 
 
+# Lookup table fields
+
+
 def _required_field(field_lookup: dict, field_name: str, *aliases: str):
     """Return a required normalized geology field."""
     for name in (field_name, *aliases):
@@ -42,6 +50,7 @@ def _required_field(field_lookup: dict, field_name: str, *aliases: str):
 
 
 def _optional_field(field_lookup: dict, *field_names: str):
+    """Return the first of several optional fields, or None when absent."""
     for name in field_names:
         field = field_lookup.get(_normalise_field_name(name))
         if field is not None:
@@ -78,6 +87,28 @@ def _required_bool_int(value: object, row_number: int, field: object) -> int:
         f"for required field {field!r}."
     )
     raise ValueError(msg)
+
+
+# Class definition output
+
+
+_CLASSDEFINITION_HEADER = (
+    "GeoParam(i)   ClassUnit     Karstic      Description\n"
+)
+_CLASSDEFINITION_FOOTER = (
+    "!<-END\n"
+    "\n"
+    "\n"
+    "!***********************************\n"
+    "! NOTES\n"
+    "!***********************************\n"
+    "1 = Karstic\n"
+    "0 = Non-karstic\n"
+    "\n"
+    "IMPORTANT ::\n"
+    "   Ordering has to be according to the ordering in mhm_parameter.nml\n"
+    "   (namelist: geoparameter)\n"
+)
 
 
 def _classdefinition_rows(table, class_field: str) -> list:
@@ -117,10 +148,7 @@ def _classdefinition_text(table, class_field: str) -> str:
         msg = "No valid geology classdefinition rows were found."
         raise ValueError(msg)
 
-    lines = [
-        f"nGeo_Formations  {len(rows)}\n",
-        "GeoParam(i)   ClassUnit     Karstic      Description\n",
-    ]
+    lines = [f"nGeo_Formations  {len(rows)}\n", _CLASSDEFINITION_HEADER]
     for row in rows:
         lines.append(
             f"{row['geo_param']:10d}\t"
@@ -128,22 +156,7 @@ def _classdefinition_text(table, class_field: str) -> str:
             f"{row['karstic']:10d}      "
             f"GeoUnit-{row['class_unit']}\n"
         )
-    lines.extend(
-        [
-            "!<-END\n",
-            "\n",
-            "\n",
-            "!***********************************\n",
-            "! NOTES\n",
-            "!***********************************\n",
-            "1 = Karstic\n",
-            "0 = Non-karstic\n",
-            "\n",
-            "IMPORTANT ::\n",
-            "   Ordering has to be according to the ordering in mhm_parameter.nml\n",
-            "   (namelist: geoparameter)\n",
-        ]
-    )
+    lines.append(_CLASSDEFINITION_FOOTER)
     return "".join(lines)
 
 
@@ -153,6 +166,9 @@ def _write_classdefinition_text(text: str, output_file: Path) -> Path:
     output_file.write_text(text, encoding="utf-8")
     logger.info("Wrote geology class definition to %s", output_file)
     return output_file
+
+
+# Public entry points
 
 
 def write_geology_classdefinition(
@@ -206,15 +222,13 @@ def format_geology_data(
         dem_file.resolve(),
         lookup_table.resolve(),
     }
-    if raster_output.resolve() in protected_inputs:
-        msg = f"Raster output must differ from all input files: {raster_output}"
-        raise ValueError(msg)
-    if definition_output.resolve() in protected_inputs:
-        msg = (
-            "Classdefinition output must differ from all input files: "
-            f"{definition_output}"
-        )
-        raise ValueError(msg)
+    for label, path in (
+        ("Raster output", raster_output),
+        ("Classdefinition output", definition_output),
+    ):
+        if path.resolve() in protected_inputs:
+            msg = f"{label} must differ from all input files: {path}"
+            raise ValueError(msg)
 
     table = _visible_table(read_lookup_table(lookup_table))
     definition_text = _classdefinition_text(table, class_field)
