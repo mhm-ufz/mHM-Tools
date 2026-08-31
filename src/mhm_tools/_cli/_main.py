@@ -557,6 +557,9 @@ def _build_click_command(command_name: str, module, prog_path: Optional[str] = N
         callback=_callback,
         params=params,
         help=module.__doc__,
+        # Opt-in: only modules defining a module-level EPILOG get one, so adding
+        # this never surfaces the parser.epilog blocks other modules still set.
+        epilog=getattr(module, "EPILOG", None),
         option_aliases=option_aliases,
         context_settings={"help_option_names": ["-h", "--help"]},
     )

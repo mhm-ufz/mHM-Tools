@@ -13,6 +13,27 @@ import click
 
 _MANIFEST_SUFFIXES = {".csv", ".txt"}
 
+EPILOG = """Manifest input (-i pointing at a .csv or .txt file) formats several rasters in one run. It is a plain comma-separated file with a header row; column names are matched case- and punctuation-insensitively. Relative paths resolve against the folder holding the manifest. Manifests are accepted only for -t lc and -t soil.
+
+-t lc -- historical land-cover periods (needs -l, -m and -c):
+
+\b
+  StartYear,EndYear,FilePath
+  2000,2004,landcover_2000.tif
+  2005,2009,landcover_2005.tif
+
+Periods must not overlap and must leave no gap: each StartYear is the previous EndYear plus one. -e asc writes one lc_<start>_<end>.asc per period; -e nc writes a single lc_periods.nc.
+
+-t soil -- physical horizon layers (no lookup table; -l, -m and -c are ignored):
+
+\b
+  Horizon,Upper Depth,Lower Depth,Clay Layer,Sand Layer,Silt Layer,Bulk Density Layer,Bulk Density Unit
+  1,0,100,clay1.tif,sand1.tif,silt1.tif,bd1.tif,kg/m3
+  2,100,300,clay2.tif,sand2.tif,silt2.tif,bd2.tif,kg/m3
+
+Horizons are numbered from 1 without gaps, the first starts at depth 0, and each Lower Depth is the next Upper Depth. Depths are in mm. Bulk Density Unit must be identical in every row, one of: g/cm3, kg/m3, cg/cm3, mg/cm3, g/dm3, kg/dm3. -e asc writes soil_class.asc plus soil_classdefinition.txt; -e nc writes soil_horizon_class.nc plus soil_classdefinition_iFlag_soilDB_1.txt; -e tif is rejected.
+"""
+
 
 def add_args(parser: ArgumentParser) -> None:
     """Add CLI arguments for the ``format-data`` command."""
@@ -31,7 +52,10 @@ def add_args(parser: ArgumentParser) -> None:
         "--input-file",
         dest="input_file",
         required=True,
-        help="Path to one input raster or a CSV/TXT manifest file.",
+        help=(
+            "Path to one input raster or a CSV/TXT manifest file. The manifest "
+            "layouts are described at the end of this help."
+        ),
     )
     required.add_argument(
         "-d",

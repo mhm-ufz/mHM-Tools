@@ -117,6 +117,32 @@ def test_format_data_help_and_alias():
     assert "--output-temporal-resolution" in result.output
 
 
+def test_format_data_help_documents_manifest_formats():
+    """Help shows both manifest layouts so a user can prepare one."""
+    result = CliRunner().invoke(cli, ["data-converter", "format-data", "--help"])
+
+    assert result.exit_code == 0, result.output
+    # The land-cover and soil headers appear verbatim, so they can be copied.
+    assert "StartYear,EndYear,FilePath" in result.output
+    assert (
+        "Horizon,Upper Depth,Lower Depth,Clay Layer,Sand Layer,Silt Layer,"
+        "Bulk Density Layer,Bulk Density Unit" in result.output
+    )
+    assert "2000,2004,landcover_2000.tif" in result.output
+    assert "1,0,100,clay1.tif,sand1.tif,silt1.tif,bd1.tif,kg/m3" in result.output
+    assert "-i, --input-file" in result.output
+
+
+def test_epilog_is_opt_in_per_command():
+    """Only modules defining EPILOG get one; others keep their help unchanged."""
+    result = CliRunner().invoke(cli, ["visualization", "2d-map", "--help"])
+
+    assert result.exit_code == 0, result.output
+    # _2d_map.py sets parser.epilog, which the builder deliberately ignores.
+    assert "--colorbar-label 'Temp" not in result.output
+    assert "Manifest input" not in result.output
+
+
 @pytest.mark.parametrize(
     ("temporal_args", "expected_resolution"),
     [
