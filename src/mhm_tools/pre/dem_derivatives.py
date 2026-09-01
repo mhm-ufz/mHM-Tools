@@ -79,6 +79,7 @@ def compute_dem_derivatives(dem, crs):
     elevation = np.where(invalid, NO_DATA, elevation)
 
     transform = dem.rio.transform()
+    transform_array = np.asarray(tuple(transform), dtype=np.float64) # affine v3 fix
     latlon = bool(crs.is_geographic)
     filled, _ = pyflwdir.dem.fill_depressions(elevation, nodata=NO_DATA)
     flw = pyflwdir.from_dem(
@@ -89,7 +90,7 @@ def compute_dem_derivatives(dem, crs):
     derivatives = {"dem": _masked(elevation, invalid, "f8")}
     del elevation
     slope = pyflwdir.dem.slope(
-        filled, nodata=NO_DATA, latlon=latlon, transform=transform
+        filled, nodata=NO_DATA, latlon=latlon, transform=transform_array
     )
     slope *= 100.0
     derivatives["slope"] = _masked(slope, invalid, "f8")

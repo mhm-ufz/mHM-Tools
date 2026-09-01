@@ -54,7 +54,7 @@ def add_args(parser):
         "--variables",
         dest="variables",
         nargs="+",
-        default="kge",
+        default=["kge"],
         help="Metric columns to plot. Defaults to kge.",
     )
     optional.add_argument(

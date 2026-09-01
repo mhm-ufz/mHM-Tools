@@ -495,6 +495,11 @@ def _action_to_click_option(action: argparse.Action, option_group: str = "option
             kwargs["multiple"] = True
             if kwargs.get("default") is None and not action.required:
                 kwargs["default"] = ()
+            elif isinstance(kwargs.get("default"), str):
+                # argparse takes a bare string default for nargs="+", but Click
+                # rejects one for a multiple option and would fail at import,
+                # taking the whole CLI with it. Read it as a single value.
+                kwargs["default"] = (kwargs["default"],)
         elif isinstance(action.nargs, int) and action.nargs > 1:
             kwargs["nargs"] = action.nargs
         if action.type in (int, float, str, bool):

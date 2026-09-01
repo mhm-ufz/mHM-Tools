@@ -566,7 +566,7 @@ def lai_window_offsets(source_x, source_y, target_header):
         if abs(value - round(value)) > 1e-6:
             msg = f"The staged LAI grid is not aligned to the target {name} grid."
             raise ValueError(msg)
-    return int(round(row_offset)), int(round(column_offset))
+    return round(row_offset), round(column_offset)
 
 
 # Output size guard
@@ -856,8 +856,8 @@ def stream_lai_grid(
     import numpy as np
     from netCDF4 import Dataset
 
-    nrows = int(len(y_centers))
-    ncols = int(len(x_centers))
+    nrows = len(y_centers)
+    ncols = len(x_centers)
     steps = int(sampler.steps)
     rows_per_block = block_row_count(ncols, block_bytes)
     if hasattr(sampler, "bind"):
