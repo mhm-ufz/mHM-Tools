@@ -67,6 +67,10 @@ _COMMAND_GROUPS: List[Tuple[str, str, List[Tuple[str, object]]]] = [
             ("crop-mhm-setup", "mhm_tools._cli._crop_mhm_setup"),
             ("latlon", "mhm_tools._cli._latlon"),
             ("create-header", "mhm_tools._cli._create_header"),
+            (
+                "create-dem-derivatives",
+                "mhm_tools._cli._create_dem_derivatives",
+            ),
             ("calculate-pet", "mhm_tools._cli._calculate_pet"),
             ("prepare-mhm-forcings", "mhm_tools._cli._prepare_mhm_forcings"),
         ],
@@ -556,6 +560,9 @@ def _build_click_command(command_name: str, module, prog_path: Optional[str] = N
         callback=_callback,
         params=params,
         help=module.__doc__,
+        # Opt-in: only modules defining a module-level EPILOG get one, so adding
+        # this never surfaces the parser.epilog blocks other modules still set.
+        epilog=getattr(module, "EPILOG", None),
         option_aliases=option_aliases,
         context_settings={"help_option_names": ["-h", "--help"]},
     )

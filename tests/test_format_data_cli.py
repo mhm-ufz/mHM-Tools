@@ -27,6 +27,13 @@ from mhm_tools._cli._main import cli
             "nc",
         ),
         (
+            "lai",
+            "mhm_tools.pre.format_lai",
+            "format_lai_data",
+            [],
+            "nc",
+        ),
+        (
             "lc",
             "mhm_tools.pre.format_lc_data",
             "format_lc_data",
@@ -89,6 +96,7 @@ def test_format_data_dispatches_with_shared_options(
         "output_type": extension,
         "input_crs": "EPSG:32632",
         "dem_crs": "EPSG:32633",
+        "fill_nodata": True,
     }
 
 
@@ -101,10 +109,238 @@ def test_format_data_help_and_alias():
     assert result.exit_code == 0, result.output
     assert alias_result.exit_code == 0, alias_result.output
     assert "-t, --type" in result.output
-    assert "[soil|geology|lc]" in result.output
+    assert "[soil|geology|lai|lc]" in result.output
+    assert "-i, --input-file" in result.output
     assert "-c, --class-field" in result.output
     assert "-e, --extension" in result.output
     assert "[nc|asc|tif]" in result.output
+    assert "--output-temporal-resolution" in result.output
+
+
+def test_format_data_help_documents_manifest_formats():
+    """Help shows both manifest layouts so a user can prepare one."""
+    result = CliRunner().invoke(cli, ["data-converter", "format-data", "--help"])
+
+    assert result.exit_code == 0, result.output
+    # The land-cover and soil headers appear verbatim, so they can be copied.
+    assert "StartYear,EndYear,FilePath" in result.output
+    assert (
+        "Horizon,Upper Depth,Lower Depth,Clay Layer,Sand Layer,Silt Layer,"
+        "Bulk Density Layer,Bulk Density Unit" in result.output
+    )
+    assert "2000,2004,landcover_2000.tif" in result.output
+    assert "1,0,100,clay1.tif,sand1.tif,silt1.tif,bd1.tif,kg/m3" in result.output
+    assert "-i, --input-file" in result.output
+
+
+def test_epilog_is_opt_in_per_command():
+    """Only modules defining EPILOG get one; others keep their help unchanged."""
+    result = CliRunner().invoke(cli, ["visualization", "2d-map", "--help"])
+
+    assert result.exit_code == 0, result.output
+    # _2d_map.py sets parser.epilog, which the builder deliberately ignores.
+    assert "--colorbar-label 'Temp" not in result.output
+    assert "Manifest input" not in result.output
+
+
+@pytest.mark.parametrize(
+    ("temporal_args", "expected_resolution"),
+    [
+        ([], "long-term-mean-monthly"),
+        (["--output-temporal-resolution", "monthly"], "monthly"),
+    ],
+)
+def test_format_data_dispatches_gridded_lai_without_lookup(
+    monkeypatch, temporal_args, expected_resolution
+):
+    """A gridded LAI NetCDF needs no lookup or input cadence option."""
+    captured = {}
+
+    def fake_formatter(**kwargs):
+        captured.update(kwargs)
+
+    module = importlib.import_module("mhm_tools.pre.format_lai")
+    monkeypatch.setattr(module, "format_lai_netcdf_data", fake_formatter)
+    arguments = [
+        "data-converter",
+        "format-data",
+        "-t",
+        "lai",
+        "-i",
+        "lai.nc",
+        "-d",
+        "dem.tif",
+        "-o",
+        "output",
+        "--resampling",
+        "bilinear",
+    ]
+    result = CliRunner().invoke(cli, [*arguments, *temporal_args])
+
+    assert result.exit_code == 0, result.output
+    assert captured == {
+        "input_file": Path("lai.nc"),
+        "dem_file": Path("dem.tif"),
+        "output_path": Path("output"),
+        "output_temporal_resolution": expected_resolution,
+        "dem_crs": None,
+        "resampling": "bilinear",
+    }
+
+
+def test_format_data_accepts_input_file(monkeypatch):
+    """The input-file option forwards a single raster."""
+    captured = {}
+
+    def fake_formatter(**kwargs):
+        captured.update(kwargs)
+
+    module = importlib.import_module("mhm_tools.pre.format_lc_data")
+    monkeypatch.setattr(module, "format_lc_data", fake_formatter)
+    result = CliRunner().invoke(
+        cli,
+        [
+            "data-converter",
+            "format-data",
+            "-t",
+            "lc",
+            "--input-file",
+            "input.tif",
+            "-d",
+            "dem.tif",
+            "-o",
+            "output",
+            "-l",
+            "lookup.gpkg",
+            "-m",
+            "source",
+            "-c",
+            "target",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["input_file"] == Path("input.tif")
+
+
+def test_format_data_forwards_explicit_resampling_to_single_files(monkeypatch):
+    """The shared resampling option also applies to legacy file inputs."""
+    captured = {}
+
+    def fake_formatter(**kwargs):
+        captured.update(kwargs)
+
+    module = importlib.import_module("mhm_tools.pre.format_geology")
+    monkeypatch.setattr(module, "format_geology_data", fake_formatter)
+    result = CliRunner().invoke(
+        cli,
+        [
+            "data-converter",
+            "format-data",
+            "-t",
+            "geology",
+            "-i",
+            "input.tif",
+            "-d",
+            "dem.tif",
+            "-o",
+            "output",
+            "-l",
+            "lookup.gpkg",
+            "-m",
+            "source",
+            "-c",
+            "target",
+            "--resampling",
+            "mode",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["resampling"] == "mode"
+
+
+@pytest.mark.parametrize(
+    ("data_type", "module_name", "function_name", "lookup_options"),
+    [
+        (
+            "lc",
+            "mhm_tools.pre.format_lc_data",
+            "format_lc_periods",
+            ["-l", "lookup.gpkg", "-m", "source", "-c", "target"],
+        ),
+        ("soil", "mhm_tools.pre.format_soil", "format_soil_horizons", []),
+    ],
+)
+def test_format_data_dispatches_manifest_files(
+    tmp_path,
+    monkeypatch,
+    data_type,
+    module_name,
+    function_name,
+    lookup_options,
+):
+    """A directly supplied manifest selects the corresponding public API."""
+    suffix = ".txt" if data_type == "soil" else ".csv"
+    input_file = tmp_path / f"custom-{data_type}-inputs{suffix}"
+    input_file.touch()
+    captured = {}
+
+    def fake_formatter(**kwargs):
+        captured.update(kwargs)
+
+    module = importlib.import_module(module_name)
+    monkeypatch.setattr(module, function_name, fake_formatter)
+    result = CliRunner().invoke(
+        cli,
+        [
+            "data-converter",
+            "format-data",
+            "-t",
+            data_type,
+            "--input-file",
+            str(input_file),
+            "-d",
+            "dem.tif",
+            "-o",
+            "output",
+            "--resampling",
+            "auto",
+            *lookup_options,
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["input_file"] == input_file
+    assert captured["resampling"] == "auto"
+    assert captured["fill_nodata"] is True
+    if data_type == "soil":
+        assert "lookup_table" not in captured
+
+
+def test_format_data_rejects_directory_input(tmp_path):
+    """The CLI accepts files only, not manifest-containing directories."""
+    input_directory = tmp_path / "inputs"
+    input_directory.mkdir()
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "data-converter",
+            "format-data",
+            "-t",
+            "soil",
+            "--input-file",
+            str(input_directory),
+            "-d",
+            "dem.tif",
+            "-o",
+            "output",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "not a directory" in result.output
 
 
 @pytest.mark.parametrize(

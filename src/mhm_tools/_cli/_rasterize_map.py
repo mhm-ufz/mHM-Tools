@@ -80,13 +80,12 @@ def run(args: Namespace) -> None:
         "input_file": Path(args.input_file),
         "dem_file": Path(args.dem_file),
         "output_file": Path(args.output_file),
-        "mapping_field": args.mapping_field or args.burn_field,
+        "burn_field": args.burn_field,
     }
     if args.lookup_table is not None:
         kwargs.update(
             lookup_table=Path(args.lookup_table),
-            lookup_mapping_field=args.mapping_field,
-            lookup_value_field=args.burn_field,
+            mapping_field=args.mapping_field,
         )
     if args.input_crs is not None:
         kwargs["input_crs"] = args.input_crs

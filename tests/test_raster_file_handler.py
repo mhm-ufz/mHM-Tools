@@ -281,6 +281,52 @@ def test_align_raster_matches_exact_reference_grid():
     np.testing.assert_array_equal(result["lon"], reference["lon"])
 
 
+def test_align_raster_auto_averages_continuous_downsampling():
+    """Auto resampling averages continuous source cells on a coarser grid."""
+    source = xr.DataArray(
+        np.array(
+            [
+                [1, 1, 3, 3],
+                [1, 1, 3, 3],
+                [5, 5, 7, 7],
+                [5, 5, 7, 7],
+            ],
+            dtype=np.float32,
+        ),
+        dims=("y", "x"),
+        coords={"y": [3.5, 2.5, 1.5, 0.5], "x": [0.5, 1.5, 2.5, 3.5]},
+        name="soil_property",
+    ).rio.write_crs("EPSG:32632")
+    reference = xr.DataArray(
+        np.ones((2, 2), dtype=np.float32),
+        dims=("y", "x"),
+        coords={"y": [3.0, 1.0], "x": [1.0, 3.0]},
+        name="dem",
+    ).rio.write_crs("EPSG:32632")
+
+    result = align_raster_to_reference(
+        source,
+        reference,
+        nodata=np.nan,
+        resampling="auto",
+        data_kind="continuous",
+    )
+
+    np.testing.assert_allclose(result.values, [[1, 3], [5, 7]])
+    assert result.rio.transform() == reference.rio.transform()
+
+
+def test_align_raster_can_mask_the_exact_dem_footprint():
+    """Reference nodata masks output even when source and target grids match."""
+    source = _raster()
+    reference = source.rename("dem").copy()
+    reference.values[1, 2] = -9999
+
+    result = align_raster_to_reference(source, reference, mask_reference=True)
+
+    assert result.values[1, 2] == -9999
+
+
 def test_align_raster_exact_grid_uses_reference_dimension_names():
     """An already matching grid still adopts reference dimension names."""
     source = _raster()

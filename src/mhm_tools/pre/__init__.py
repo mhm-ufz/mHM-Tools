@@ -14,6 +14,7 @@ Files
    ~mhm_tools.pre.crop_mhm_setup
    ~mhm_tools.pre.fill_nearest
    ~mhm_tools.pre.format_geology
+   ~mhm_tools.pre.format_lai
    ~mhm_tools.pre.format_lc_data
    ~mhm_tools.pre.format_soil
    ~mhm_tools.pre.landcover_ascii_to_nc
@@ -29,7 +30,7 @@ Files
 
 import importlib
 
-from .format_lc_data import format_lc_data
+from .format_lc_data import format_lc_data, format_lc_periods
 
 _MODULE_EXPORTS = {
     "catchment": "catchment",
@@ -37,6 +38,7 @@ _MODULE_EXPORTS = {
     "create_mhm_restart_file": "create_mhm_restart_file",
     "fill_nearest": "fill_nearest",
     "format_geology": "format_geology",
+    "format_lai": "format_lai",
     "format_soil": "format_soil",
     "latlon": "latlon",
     "rasterize_map": "rasterize_map",
@@ -64,7 +66,17 @@ _ATTR_EXPORTS = {
         "format_geology",
         "write_geology_classdefinition",
     ),
+    "format_lai_data": ("format_lai", "format_lai_data"),
+    "format_lai_netcdf_data": ("format_lai", "format_lai_netcdf_data"),
+    "format_lai_netcdf_file": ("format_lai", "format_lai_netcdf_file"),
+    "copy_lai_netcdf_to_grid": ("format_lai", "copy_lai_netcdf_to_grid"),
+    "lai_time_step": ("format_lai", "lai_time_step"),
+    "write_lai_classdefinition": (
+        "format_lai",
+        "write_lai_classdefinition",
+    ),
     "format_soil_data": ("format_soil", "format_soil_data"),
+    "format_soil_horizons": ("format_soil", "format_soil_horizons"),
     "write_soil_classdefinition": (
         "format_soil",
         "write_soil_classdefinition",
@@ -85,21 +97,30 @@ __all__ = [
     "create_mhm_restart_file",
     "create_mhm_restart_from_setup",
     "create_subdomain_masks",
+    "copy_lai_netcdf_to_grid",
     "create_wmo_region_masks",
     "crop_mhm_setup",
     "fill_nearest",
     "format_geology",
     "format_geology_data",
+    "format_lai",
+    "format_lai_data",
+    "format_lai_netcdf_data",
+    "format_lai_netcdf_file",
     "format_lc_data",
+    "format_lc_periods",
     "format_soil",
     "format_soil_data",
+    "format_soil_horizons",
     "latlon",
+    "lai_time_step",
     "link_folder_tree",
     "merge_catchment",
     "rasterize_map",
     "rasterize_map_data",
     "subdomain_masks",
     "write_geology_classdefinition",
+    "write_lai_classdefinition",
     "write_soil_classdefinition",
     "xy_to_latlon",
 ]

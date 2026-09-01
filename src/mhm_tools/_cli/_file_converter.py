@@ -101,14 +101,12 @@ def run(args):
         var_name = input.stem
     elif args.varname_eq_out_filename:
         var_name = output.stem
-    decode_coords = (
-        "all" if output.suffix.lower() in {".asc", ".tif", ".tiff"} else "coordinates"
-    )
+    # The georeferenced output formats need the CRS; NetCDF carries it already.
     ds = get_xarray_ds_from_file(
         input,
         var_name=var_name,
         normalize_latlon_coords=args.latlon,
-        decode_coords=decode_coords,
+        load_crs=output.suffix.lower() in {".asc", ".tif", ".tiff"},
     )
     try:
         if args.only_header:

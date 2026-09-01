@@ -50,6 +50,7 @@ def test_format_lc_data_maps_and_aligns_to_dem(tmp_path: Path):
         lookup_file,
         "Grid value",
         "Numeric class",
+        fill_nodata=False,
     )
 
     assert output == tmp_path / "output" / "lc.nc"
@@ -70,6 +71,34 @@ def test_format_lc_data_maps_and_aligns_to_dem(tmp_path: Path):
         np.testing.assert_array_equal(dataset["land_cover"].values, expected)
         np.testing.assert_allclose(dataset["x"].values, np.arange(102.5, 130, 5))
         np.testing.assert_allclose(dataset["y"].values, np.arange(217.5, 200, -5))
+
+
+def test_format_lc_data_fills_nodata_inside_the_dem_domain(tmp_path: Path):
+    """Unmapped and nodata cells default to their nearest classified neighbour."""
+    input_file = tmp_path / "land_cover.tif"
+    dem_file = tmp_path / "dem.tif"
+    lookup_file = tmp_path / "lookup.gpkg"
+    _write_raster(
+        input_file,
+        np.array([[10, 20, -9999, 99]], dtype=np.int32),
+        cellsize=10,
+    )
+    _write_raster(dem_file, np.ones((1, 4), dtype=np.float32), cellsize=10)
+    gpd.GeoDataFrame({"Grid value": [10, 20], "Numeric class": [1, 2]}).to_file(
+        lookup_file, driver="GPKG"
+    )
+
+    output = format_lc_data(
+        input_file,
+        dem_file,
+        tmp_path / "output",
+        lookup_file,
+        "Grid value",
+        "Numeric class",
+    )
+
+    with xr.open_dataset(output, decode_cf=False) as dataset:
+        np.testing.assert_array_equal(dataset["land_cover"].values, [[1, 2, 2, 2]])
 
 
 def test_format_lc_data_requires_numeric_classes(tmp_path: Path):
