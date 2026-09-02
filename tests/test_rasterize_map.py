@@ -194,7 +194,7 @@ def test_rasterize_map_does_not_prevalidate_geometry(tmp_path: Path):
         assert np.any(output.read(1) == 7)
 
 
-def test_rasterize_map_rejects_non_integral_mapping_values(tmp_path: Path):
+def test_rasterize_map_rejects_non_integral_burn_values(tmp_path: Path):
     """Categorical values must be integral before they are burned."""
     dem_file = tmp_path / "dem.tif"
     vector_file = tmp_path / "soil.gpkg"
@@ -236,9 +236,9 @@ def test_rasterize_map_applies_lookup_to_text_categories(tmp_path: Path, suffix:
         vector_file,
         dem_file,
         output_file,
-        "map code",
+        "SOIL_CLASS",
         lookup_table=lookup_file,
-        lookup_mapping_field="map_code",
+        mapping_field="map code",
     )
 
     output = get_raster_data(output_file)
@@ -306,8 +306,9 @@ def test_rasterize_map_normalizes_integral_text_and_numeric_keys(tmp_path: Path)
         vector_file,
         dem_file,
         output_file,
-        "map_code",
+        "SOIL_CLASS",
         lookup_table=lookup_file,
+        mapping_field="map_code",
     )
 
     with rasterio.open(output_file) as output:
@@ -351,7 +352,7 @@ def test_rasterize_map_cli_registration_and_short_options(monkeypatch):
         "input_file": Path("soil.gpkg"),
         "dem_file": Path("dem.tif"),
         "output_file": Path("soil.tif"),
-        "mapping_field": "map_code",
+        "burn_field": "map_code",
     }
     alias_result = runner.invoke(cli, ["data-converter", "rasterize_map", "--help"])
     assert alias_result.exit_code == 0
@@ -395,10 +396,9 @@ def test_rasterize_map_cli_lookup_options(monkeypatch):
         "input_file": Path("soil.gpkg"),
         "dem_file": Path("dem.tif"),
         "output_file": Path("soil.tif"),
-        "mapping_field": "map_code",
+        "burn_field": "SOIL_CLASS",
         "lookup_table": Path("lookup.csv"),
-        "lookup_mapping_field": "map_code",
-        "lookup_value_field": "SOIL_CLASS",
+        "mapping_field": "map_code",
     }
 
 

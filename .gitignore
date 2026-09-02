@@ -125,6 +125,7 @@ docs/source/api/
 *.zip
 
 .vscode
+.scripts
 .ruff_cache
 tests/tmp
 cov.xml
