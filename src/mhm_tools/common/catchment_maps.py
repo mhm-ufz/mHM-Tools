@@ -10,6 +10,7 @@ import xarray as xr
 from matplotlib import colors as mcolors
 from matplotlib import pyplot as plt
 
+from mhm_tools.common.resolution_handler import calculate_coordinate_resolution
 from mhm_tools.common.xarray_utils import get_coord_key, get_single_data_var
 
 logger = logging.getLogger(__name__)
@@ -153,8 +154,8 @@ def read_mask_geometry(mask_file, mask_var=None, geometry_id=None):
         values = np.fliplr(values)
         lon_values = lon_values[::-1]
 
-    lat_res = float(np.nanmedian(np.abs(np.diff(lat_values))))
-    lon_res = float(np.nanmedian(np.abs(np.diff(lon_values))))
+    lat_res = calculate_coordinate_resolution(lat_values)
+    lon_res = calculate_coordinate_resolution(lon_values)
     transform = from_origin(
         float(np.nanmin(lon_values) - lon_res / 2.0),
         float(np.nanmax(lat_values) + lat_res / 2.0),

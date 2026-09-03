@@ -61,9 +61,7 @@ def test_netcdf_holds_every_derivative_with_grid_and_crs(tmp_path):
 
 
 def test_geographic_dem_writes_lonlat_without_projected_axes(tmp_path):
-    dem = _write_dem(
-        tmp_path / "dem.tif", _slope_dem(), crs="EPSG:4326", cellsize=0.01
-    )
+    dem = _write_dem(tmp_path / "dem.tif", _slope_dem(), crs="EPSG:4326", cellsize=0.01)
     (output,) = create_dem_derivatives(dem, tmp_path / "out.nc")
 
     assert output.name == "out.nc"
@@ -96,9 +94,7 @@ def test_ascii_output_carries_the_grid_header_and_projection(tmp_path):
     written = create_dem_derivatives(dem, tmp_path / "out", "asc")
 
     slope = next(p for p in written if p.stem == "slope")
-    header = dict(
-        line.split() for line in slope.read_text().splitlines()[:6]
-    )
+    header = dict(line.split() for line in slope.read_text().splitlines()[:6])
     assert int(header["ncols"]) == 5
     assert int(header["nrows"]) == 5
     assert float(header["xllcorner"]) == pytest.approx(1000.0)
@@ -141,7 +137,7 @@ def test_dem_without_crs_is_rejected(tmp_path):
 @pytest.mark.parametrize(
     ("gradient", "expected"),
     [
-        ("east", 90.0),   # ground falls towards +x
+        ("east", 90.0),  # ground falls towards +x
         ("south", 180.0),
         ("west", 270.0),
         ("north", 0.0),

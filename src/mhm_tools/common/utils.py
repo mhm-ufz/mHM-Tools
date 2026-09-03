@@ -670,13 +670,16 @@ def align_bounds_to_l2(ds, resolutions, min_row, max_row, min_col, max_col):
 # FUNCTIONS
 
 
-def get_upscaling_factor(resolutions, max_resolution=False, l1=False, l2=True):
+def get_upscaling_factor(
+    resolutions, max_resolution=False, input_res=None, l1=False, l2=True
+):
     """Compute integer upscaling factor from a Resolution-like object."""
-    input_res = resolutions.l0
     if input_res is None:
-        msg = "L0 resolution is required to compute upscaling factor."
-        with ErrorLogger(logger):
-            raise ValueError(msg)
+        input_res = resolutions.l0
+        if input_res is None:
+            msg = "L0 resolution is required to compute upscaling factor."
+            with ErrorLogger(logger):
+                raise ValueError(msg)
     if l1:
         upscale_res = resolutions.l1
     elif l2:

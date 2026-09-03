@@ -18,6 +18,7 @@ from mhm_tools.post.gridded_data_evaluation import (
     get_stats_one_pass,
     infer_time_resolution_hours_from_files,
     regridd_to_higher_spatial_resolution,
+    resample_to_target_freq,
 )
 
 

@@ -76,9 +76,7 @@ def _read_lc_manifest(input_file: PathLike):
     )
     periods = []
     for row_number, row in enumerate(table.itertuples(index=False), start=2):
-        start = _required_integer(
-            row.StartYear, "StartYear", row_number, "Manifest"
-        )
+        start = _required_integer(row.StartYear, "StartYear", row_number, "Manifest")
         end = _required_integer(row.EndYear, "EndYear", row_number, "Manifest")
         if start > end:
             msg = (
@@ -260,12 +258,12 @@ def _write_aligned_lc_period(
                 if fill_nodata:
                     valid = _reference_valid(reference)
                     if not np.any(valid):
-                        msg = "The DEM has no valid cell to define the land-cover domain."
+                        msg = (
+                            "The DEM has no valid cell to define the land-cover domain."
+                        )
                         raise ValueError(msg)
                     values = warped.read(1, out_dtype="int32")
-                    missing = int(
-                        np.count_nonzero((values == int(NO_DATA)) & valid)
-                    )
+                    missing = int(np.count_nonzero((values == int(NO_DATA)) & valid))
                     x, y = _grid_coordinates(reference)
                     filled = fill_grid_nodata(
                         values,

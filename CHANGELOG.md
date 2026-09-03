@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- Add `ds` and `raise_exception` arguments to `get_file_res`.
 - `read_dataset`, `get_dataset_from_path` and `get_xarray_ds_from_file` gained variable selection: naming a variable now restricts what is read instead of only sizing the chunks, applied to each file before they are combined. An mHM fluxes-and-states file holds 28 variables of which a snow or flux evaluation needs one, so reading a multi-year record meant moving roughly 25 times more data than the tool used. A name that is not in the file leaves the dataset untouched. `gridded-data-evaluation` now names its variable at its read sites, including the per-file loop of `get_stats_one_pass_subset`.
 - Add `legacy-tools snow-evaluation`, comparing a simulated snow field against a gridded snow reference. It brings both onto the coarser grid and the coarser calendar (never finer than 8 day composites), reduces them to a binary snow-presence flag, and writes per snow year and per cell the date of the first and last snow-covered day, the snow season span and the number of snow-covered days. It also maps the snow presence classification accuracy (the share of compared time steps in which both flags agree, alongside the `n` per cell), plots the snow covered share of the cells over the full period (one panel per hemisphere when the domain reaches over the equator, a single panel otherwise), and renders an animated three-panel comparison marking the cells where only one of the two datasets has snow. Every plot and gif is repeated per `WMO_REGION_BOUNDS` region that holds data.
 - `resample_to_target_freq` gains the optional `resample_origin`, `time_anchor` and `drop_partial_edges` arguments, all defaulting to the previous behavior. A step of several days is binned from an origin instead of from the calendar, so without a shared origin two records whose data start on different days produce no common bins at all; `time_anchor="period_start"` makes a resampled label describe the steps it was aggregated from instead of the right edge of its period, which otherwise offsets a weekly label by a full week against the days it averages; and `drop_partial_edges` drops a first or last step that only one of the two datasets covers completely, which would otherwise compare a full period against a shorter one.
@@ -29,7 +30,8 @@
 - Add `mhm_tools.common.lookup_handler` for reading lookup tables and CSV manifests. A lookup table is read as CSV/TXT, column names are matched case-, punctuation- and unit-suffix-insensitively (`Bulk Density Unit`, `bulk_density_unit` and `Karstic [flag]` all resolve), and every value is validated with the row number reported, so a malformed table names the offending row instead of failing later inside a raster operation.
 
 ### Changed
-
+- Derive the coordinate resolution from the average step with a median step fallback for irregular grids.
+- Use `calculate_coordinate_resolution` wherever coordinate spacing was derived inline including `get_file_res`.
 - `snow-evaluation` streams its input instead of holding it: the record is opened lazily one chunk per file, the binary flag is an `int8` with `-1` for missing rather than a `float64` carrying NaN, and the raw fields are released once the flags exist. The flags themselves stay computed, because every consumer reads them again per year window, per region and per gif frame. Measured on a two year global 0.1 degree comparison, the run went from needing more than 40 GB to a peak of 20.8 GiB.
 - Move `timedelta_to_alias`, `normalize_time_axis` and `resample_to_target_freq` from `mhm_tools.common.xarray_utils` into `mhm_tools.common.time_utils`, which now holds every time and resampling helper while `xarray_utils` keeps the generic xarray ones and imports `timedelta_to_alias` for `get_overlapping_time_slice`. The dependency between the two modules is one-way again; importing from each other was a circular import that left both unimportable. Behavior is unchanged, only the import paths move.
 - Move the WMO region tables out of `post/discharge_evaluation.py` into `common/constants.py` as `WMO_REGION_BOUNDS`, `WMO_INDEX_TO_REGION` and `WMO_REGION_TO_INDEX`, shared by `discharge-evaluation`, `discharge-eval-comparison` and `snow-evaluation` (`region_bounds`, `index_to_region` and `region_to_index` are gone from `discharge_evaluation`).
@@ -43,7 +45,9 @@
 - Add catchment candidate-selection and CLI coverage for meter limits, radial filtering, optional area delimiting, coordinate-aware distances, and distance argument validation.
 
 ### Fixed
-
+- Fix `--no-fill-nodata`, `--coords-are-not-latlon` and `--no-area-delimiter` being stuck on their off value under Click 8.3, so the flags take effect and their defaults apply again.
+- Fix resolution mismatches caused by the rounding of float32 coordinates.
+- Fix mask upscaling for domains narrower than a single target cell.
 - `get_ds_extend` no longer raises `KeyError` when a coordinate names a bounds variable that is not present, which happens as soon as a single variable is selected out of a dataset that had bounds. It trusted the coordinate's `bounds` attribute without checking that the variable came along.
 - `resample_to_target_freq` keeps a multi-day step anchored to its origin under pandas 3, which stopped counting `Day` as Tick-like and therefore ignored `origin` for `8D` with only a warning, leaving two records that start on different days without a single common bin and failing `snow-evaluation` with "No common time steps remain". The resample call now uses the equivalent hour alias (`8D` as `192h`), still a Tick on pandas 2 and 3, while the day alias stays in use for the labels and the partial edge trimming.
 
