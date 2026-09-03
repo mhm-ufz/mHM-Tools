@@ -62,9 +62,7 @@ def create_dem_derivatives(
     output_path = Path(output_path)
     if extension == "nc":
         return (_write_netcdf(derivatives, grid, resolved_crs, output_path),)
-    return _write_per_layer(
-        derivatives, grid, resolved_crs, output_path, extension
-    )
+    return _write_per_layer(derivatives, grid, resolved_crs, output_path, extension)
 
 
 def compute_dem_derivatives(dem, crs):
@@ -79,7 +77,7 @@ def compute_dem_derivatives(dem, crs):
     elevation = np.where(invalid, NO_DATA, elevation)
 
     transform = dem.rio.transform()
-    transform_array = np.asarray(tuple(transform), dtype=np.float64) # affine v3 fix
+    transform_array = np.asarray(tuple(transform), dtype=np.float64)  # affine v3 fix
     latlon = bool(crs.is_geographic)
     filled, _ = pyflwdir.dem.fill_depressions(elevation, nodata=NO_DATA)
     flw = pyflwdir.from_dem(

@@ -201,12 +201,16 @@ def fill_grid_nodata(
         values,
         dims=("y", "x"),
         coords={
-            "y": np.arange(rows, dtype=np.float64)
-            if y is None
-            else np.asarray(y, dtype=np.float64),
-            "x": np.arange(columns, dtype=np.float64)
-            if x is None
-            else np.asarray(x, dtype=np.float64),
+            "y": (
+                np.arange(rows, dtype=np.float64)
+                if y is None
+                else np.asarray(y, dtype=np.float64)
+            ),
+            "x": (
+                np.arange(columns, dtype=np.float64)
+                if x is None
+                else np.asarray(x, dtype=np.float64)
+            ),
         },
         name=name,
     )

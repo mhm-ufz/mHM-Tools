@@ -11,10 +11,9 @@ This module provides helpers for common command-line tasks such as:
 import argparse
 import logging
 
-import numpy as np
-
 from mhm_tools.common.file_handler import get_xarray_ds_from_file
 from mhm_tools.common.logger import ErrorLogger
+from mhm_tools.common.resolution_handler import calculate_coordinate_resolution
 from mhm_tools.common.xarray_utils import get_coord_key, get_ds_extend
 
 logger = logging.getLogger(__name__)
@@ -107,11 +106,18 @@ def get_coords_from_mask(mask, mask_key=None, resolutions=None):
             lat_max_target_grid,
         ) = get_ds_extend(mask_ds, mask_key, resolutions=resolutions)
 
-        resolution = np.median(np.diff(mask_ds[get_coord_key(mask_ds, lon=True)]))
-
-        logger.debug(
-            f"Read coord from mask file: lat ({lat_min_target_grid} to {lat_max_target_grid}) {(lon_max_target_grid-lat_min_target_grid)/resolution} cells and lon ({lon_min_target_grid} to {lon_max_target_grid}) {(lon_max_target_grid-lat_min_target_grid)/resolution} cells"
-        )
+        # the resolution is only needed to report cell counts, so derive it lazily
+        if logger.isEnabledFor(logging.DEBUG):
+            lon_coord = mask_ds[get_coord_key(mask_ds, lon=True)]
+            # a single-cell mask has no spacing to derive it from
+            resolution = (
+                calculate_coordinate_resolution(lon_coord)
+                if lon_coord.size > 1
+                else mask_ds.attrs.get("spatial_resolution", float("nan"))
+            )
+            logger.debug(
+                f"Read coord from mask file: lat ({lat_min_target_grid} to {lat_max_target_grid}) {(lon_max_target_grid-lat_min_target_grid)/resolution} cells and lon ({lon_min_target_grid} to {lon_max_target_grid}) {(lon_max_target_grid-lat_min_target_grid)/resolution} cells"
+            )
 
         if lat_min_target_grid > lat_max_target_grid:
             lat_min_target_grid, lat_max_target_grid = (

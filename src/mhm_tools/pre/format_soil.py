@@ -345,9 +345,7 @@ def _read_soil_manifest(input_file: PathLike):
             row["Lower Depth"], "Lower Depth", row_number, "Manifest"
         )
         if upper < 0 or lower <= upper:
-            msg = (
-                f"Manifest row {row_number} requires 0 <= Upper Depth < Lower Depth."
-            )
+            msg = f"Manifest row {row_number} requires 0 <= Upper Depth < Lower Depth."
             raise ValueError(msg)
         horizons.append(
             {
@@ -1113,8 +1111,7 @@ def format_soil_horizons(
     protected = {manifest.resolve(), dem_file.resolve()}
     for horizon in horizons:
         protected.update(
-            horizon[name].resolve()
-            for name in ("clay", "sand", "silt", "bulk_density")
+            horizon[name].resolve() for name in ("clay", "sand", "silt", "bulk_density")
         )
     expected = (
         (output_path / "soil_class.asc", output_path / "soil_classdefinition.txt")

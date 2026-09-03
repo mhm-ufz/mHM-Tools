@@ -30,7 +30,10 @@ from mhm_tools.common.file_handler import (
 from mhm_tools.common.logger import ErrorLogger, log_arguments
 from mhm_tools.common.netcdf import add_variable_hard_link, generate_bounds
 from mhm_tools.common.provenance import apply_output_provenance
-from mhm_tools.common.resolution_handler import Resolution
+from mhm_tools.common.resolution_handler import (
+    Resolution,
+    calculate_coordinate_resolution,
+)
 from mhm_tools.common.utils import (
     coord_to_index,
     cut_to_filled_area,
@@ -39,7 +42,9 @@ from mhm_tools.common.utils import (
     get_candidate_search_window,
     get_upscaling_factor,
 )
-from mhm_tools.common.xarray_utils import get_dtype
+from mhm_tools.common.xarray_utils import (
+    get_dtype,
+)
 from mhm_tools.pre.create_id_gauges import write_gauge_id
 
 logger = logging.getLogger(__name__)
@@ -778,7 +783,7 @@ class Catchment:
         self.resolutions = resolutions if resolutions is not None else Resolution()
         if self.resolutions.l0 is None:
             self.resolutions.l0 = round(
-                abs(ds.lon.data[1] - ds.lon.data[0]), l0_precision
+                calculate_coordinate_resolution(ds.lon), l0_precision
             )
         self.upscaled_resolution = self.resolutions.l0
         self.do_upscale = upscale
@@ -2310,14 +2315,37 @@ class Catchment:
         """
         if factor is None:
             factor, upscaled_resolution = get_upscaling_factor(
-                self.resolutions, l2=True
+                self.resolutions, input_res=self.upscaled_resolution, l2=True
             )
+        else:
+            # the mask arrives at the current working resolution, so coarsening
+            # it by the factor is what gives the target cell width
+            upscaled_resolution = self.upscaled_resolution * factor
         if factor < 1:
             msg = "factor must be >= 1"
             with ErrorLogger(logger):
                 raise ValueError(msg)
+        if factor == 1:
+            # nothing to coarsen, and the edge arithmetic below needs a
+            # neighbour to derive a cell width from, which a one cell wide
+            # domain does not have
+            return da
 
         logger.info(f"Upscaling mask with factor {factor} to {upscaled_resolution}.")
+
+        # coarsening trims a partial block away, so an axis shorter than the
+        # factor would leave nothing behind
+        for name in (lat_name, lon_name):
+            if name in da.dims and da.sizes[name] < factor:
+                msg = (
+                    f"Cannot upscale to {upscaled_resolution} from "
+                    f"{self.upscaled_resolution}: the domain spans "
+                    f"{da.sizes[name]} cell(s) along {name!r} but a factor of "
+                    f"{factor} needs at least {factor}. The catchment is "
+                    "narrower than a single target cell."
+                )
+                with ErrorLogger(logger):
+                    raise ValueError(msg)
 
         # 1) coarsen over lon/lat windows
         kx = ky = int(factor)
@@ -2438,13 +2466,15 @@ class Catchment:
                 f"Created mask dataarray with shape {mask_da.shape} and stats min {mask_da.min().item()}, max {mask_da.max().item()}"
             )
             mask_ds = xr.Dataset({"mask": mask_da})
-            mask_upscaled = None
-            if self.do_upscale:
-                mask_upscaled = mask_da
-            elif self.resolutions.l2 is not None:
-                mask_upscaled = self.upscale_mask_with_correct_coords(mask_da)
 
-            if mask_upscaled is not None:
+            if self.resolutions.l2 is not None:
+                l2_factor, _ = get_upscaling_factor(
+                    self.resolutions, input_res=self.upscaled_resolution, l2=True
+                )
+                mask_upscaled = self.upscale_mask_with_correct_coords(
+                    mask_da, factor=l2_factor
+                )
+
                 mask_upscaled = mask_upscaled.rename({"lat": "lat_l2", "lon": "lon_l2"})
                 mask_upscaled.attrs.update(
                     {
@@ -2460,10 +2490,14 @@ class Catchment:
             dim_coords = all_coords & dims  # intersection
             for var in dim_coords:
                 bounds_name = f"{var}_bnds"
+                if var.endswith("_l2"):
+                    res = self.resolutions.l2
+                else:
+                    res = self.upscaled_resolution
                 try:
-                    mask_ds.coords[bounds_name] = generate_bounds(mask_ds[var])
+                    mask_ds.coords[bounds_name] = generate_bounds(mask_ds[var], res=res)
                     mask_ds[var].attrs["bounds"] = bounds_name
-                except IndexError:
+                except (IndexError, ValueError):
                     logger.info(f"Could not generate bounds for coord {var}")
             encoding = {
                 v: {"zlib": True, "complevel": 4, "shuffle": True, **NC_ENCODE_MASK}

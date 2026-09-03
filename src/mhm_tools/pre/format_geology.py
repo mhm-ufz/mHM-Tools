@@ -61,11 +61,7 @@ def _optional_field(field_lookup: dict, *field_names: str):
 def _visible_table(table):
     """Drop lookup columns explicitly marked as ignored with ``*``."""
     return table[
-        [
-            column
-            for column in table.columns
-            if not str(column).strip().startswith("*")
-        ]
+        [column for column in table.columns if not str(column).strip().startswith("*")]
     ]
 
 
@@ -92,9 +88,7 @@ def _required_bool_int(value: object, row_number: int, field: object) -> int:
 # Class definition output
 
 
-_CLASSDEFINITION_HEADER = (
-    "GeoParam(i)   ClassUnit     Karstic      Description\n"
-)
+_CLASSDEFINITION_HEADER = "GeoParam(i)   ClassUnit     Karstic      Description\n"
 _CLASSDEFINITION_FOOTER = (
     "!<-END\n"
     "\n"

@@ -2223,16 +2223,6 @@ def regridd_to_higher_spatial_resolution(ds1, ds2):
     xarray.Dataset
         The finer dataset (unchanged).
     """
-
-    def _coord_spacing(coord):
-        if coord is None or coord.size < 2:
-            return None
-        diffs = np.diff(np.asarray(coord))
-        diffs = np.abs(diffs[~np.isnan(diffs)])
-        if diffs.size == 0:
-            return None
-        return float(np.nanmedian(diffs))
-
     # lat_res_1 = abs(ds1["lat"][1] - ds1["lat"][0]).item()
     # lon_res_1 = abs(ds1["lon"][1] - ds1["lon"][0]).item()
     # lat_res_2 = abs(ds2["lat"][1] - ds2["lat"][0]).item()
@@ -2251,10 +2241,9 @@ def regridd_to_higher_spatial_resolution(ds1, ds2):
         coarse_ds, fine_ds = ds1, ds2
     else:
         coarse_ds, fine_ds = ds2, ds1
-    coarse_res = _coord_spacing(coarse_ds.get("lat")) or _coord_spacing(
-        coarse_ds.get("lon")
-    )
-    if coarse_res is None:
+    coarse_res = get_file_res(ds=coarse_ds, raise_exception=False)
+    # a NaN tolerance would let every nearest match fail and blank the whole grid
+    if np.isnan(coarse_res):
         regridded_ds = coarse_ds.reindex(
             lat=fine_ds["lat"], lon=fine_ds["lon"], method="nearest"
         )

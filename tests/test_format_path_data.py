@@ -61,9 +61,7 @@ def test_format_lc_periods_maps_before_majority_and_writes_both_formats(tmp_path
     )
     manifest = input_path / "historical-land-cover.csv"
     manifest.write_text(
-        "StartYear,EndYear,FilePath\n"
-        "2000,2004,first.tif\n"
-        "2005,2009,second.tif\n",
+        "StartYear,EndYear,FilePath\n" "2000,2004,first.tif\n" "2005,2009,second.tif\n",
         encoding="utf-8",
     )
 
@@ -136,9 +134,9 @@ def test_format_lc_periods_reprojects_to_dem_crs(tmp_path, output_type):
         crs="EPSG:3857",
         transform=dem_transform,
     )
-    gpd.GeoDataFrame(
-        {"source": [10, 20, 30, 40], "class": [1, 2, 3, 4]}
-    ).to_file(lookup, driver="GPKG")
+    gpd.GeoDataFrame({"source": [10, 20, 30, 40], "class": [1, 2, 3, 4]}).to_file(
+        lookup, driver="GPKG"
+    )
     manifest = input_path / "periods.csv"
     manifest.write_text(
         "StartYear,EndYear,FilePath\n2000,2000,period.tif\n",
@@ -164,9 +162,7 @@ def test_format_lc_periods_reprojects_to_dem_crs(tmp_path, output_type):
             np.testing.assert_array_equal(dataset.read(1), [[1, 2], [3, 4]])
     else:
         with xr.open_dataset(output, decode_cf=False) as dataset:
-            output_crs = rasterio.crs.CRS.from_wkt(
-                dataset["crs"].attrs["spatial_ref"]
-            )
+            output_crs = rasterio.crs.CRS.from_wkt(dataset["crs"].attrs["spatial_ref"])
             assert output_crs.to_epsg() == 3857
             np.testing.assert_array_equal(
                 dataset["land_cover"].values, [[[1, 2], [3, 4]]]
@@ -181,9 +177,7 @@ def test_format_lc_periods_rejects_gaps(tmp_path):
     _write_raster(input_path / "second.tif", np.ones((1, 1), dtype=np.int16))
     manifest = input_path / "format-data.csv"
     manifest.write_text(
-        "StartYear,EndYear,FilePath\n"
-        "2000,2004,first.tif\n"
-        "2006,2009,second.tif\n",
+        "StartYear,EndYear,FilePath\n" "2000,2004,first.tif\n" "2006,2009,second.tif\n",
         encoding="utf-8",
     )
 
@@ -264,9 +258,7 @@ def test_format_soil_horizons_writes_v6_horizon_classes_and_mode1_lut(tmp_path):
     dem = tmp_path / "dem.tif"
     _write_raster(dem, np.ones((2, 2), dtype=np.float32))
 
-    raster, definition = format_soil_horizons(
-        manifest, dem, tmp_path / "v6", "nc"
-    )
+    raster, definition = format_soil_horizons(manifest, dem, tmp_path / "v6", "nc")
 
     assert raster.name == "soil_horizon_class.nc"
     assert definition.name == "soil_classdefinition_iFlag_soilDB_1.txt"

@@ -484,12 +484,23 @@ def _action_to_click_option(action: argparse.Action, option_group: str = "option
 
     if isinstance(action, argparse._CountAction):
         kwargs["count"] = True
-    elif isinstance(action, argparse._StoreTrueAction):
+    elif isinstance(action, (argparse._StoreTrueAction, argparse._StoreFalseAction)):
+        # Click derives a bool flag's value from its own default, so declaring
+        # both a default and a flag_value turns the flag into a constant. Take
+        # the flag as presence only and map it back to the parser's semantics.
+        stored_value = isinstance(action, argparse._StoreTrueAction)
+        parser_default = kwargs.get("default", _normalize_default(action))
         kwargs["is_flag"] = True
-        kwargs["flag_value"] = True
-    elif isinstance(action, argparse._StoreFalseAction):
-        kwargs["is_flag"] = True
-        kwargs["flag_value"] = False
+        kwargs["default"] = False
+        kwargs["show_default"] = str(parser_default)
+
+        def flag_callback(
+            _ctx, _param, given, stored=stored_value, default=parser_default
+        ):
+            """Return the stored value if the flag was given, else the default."""
+            return stored if given else default
+
+        kwargs["callback"] = flag_callback
     else:
         if action.nargs in ("+", "*"):
             kwargs["multiple"] = True

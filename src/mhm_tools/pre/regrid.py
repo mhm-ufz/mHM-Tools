@@ -38,15 +38,10 @@ import xarray as xr
 from mhm_tools.common.constants import NC_ENCODE_DEFAULTS
 from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_to_file
 from mhm_tools.common.logger import ErrorLogger
+from mhm_tools.common.resolution_handler import calculate_coordinate_resolution
 from mhm_tools.common.xarray_utils import get_coord_key
 
 logger = logging.getLogger(__name__)
-
-
-def _delta_from_coords(vals: np.ndarray) -> float:
-    # robust median step (handles ascending or descending)
-    diffs = np.diff(vals)
-    return float(np.median(np.abs(diffs)))
 
 
 def _parse_res(s: str):
@@ -126,8 +121,8 @@ def regrid_file(input, mask, output, l2, method="nearest", var=None):
             msg = "This script assumes 1D lon/lat coordinates."
             with ErrorLogger(logger):
                 raise ValueError(msg)
-        l0_dx = _delta_from_coords(lon0)
-        l0_dy = _delta_from_coords(lat0)
+        l0_dx = calculate_coordinate_resolution(lon0)
+        l0_dy = calculate_coordinate_resolution(lat0)
 
         # l2_dx, l2_dy = _parse_res(l2)
 
