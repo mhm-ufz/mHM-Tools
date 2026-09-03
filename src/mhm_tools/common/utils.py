@@ -642,9 +642,12 @@ def align_bounds_to_l2(ds, resolutions, min_row, max_row, min_col, max_col):
     l2_lon_min, l2_lon_max = _bound_to_grid(l2_lon, cur_lon_min, cur_lon_max)
     l2_lat_min, l2_lat_max = _bound_to_grid(l2_lat, cur_lat_min, cur_lat_max)
 
-    def _idx_for(coordinate_values, target_values, name):
-        asc_factor = 1 if coordinate_values[1] > coordinate_values[0] else -1
-        target = target_values + resolutions.l0 / 2 * asc_factor
+    def _idx_for(coordinate_values, target_value, name, is_lower_bound):
+        """Return the index of the L0 cell just inside the given L2 edge."""
+        # step half an L0 cell into the domain: the lower bound maps to the
+        # first cell inside it, the upper bound to the last one, so the shift
+        # follows the bound and not the storage order of the coordinate
+        target = target_value + resolutions.l0 / 2 * (1 if is_lower_bound else -1)
         idx = int(np.argmin(np.abs(coordinate_values - target)))
         logger.debug(
             f"_idx_for: {name} target: {target}, L0 coord: {coordinate_values[idx]}, idx: {idx}"
@@ -655,10 +658,10 @@ def align_bounds_to_l2(ds, resolutions, min_row, max_row, min_col, max_col):
             )
         return idx
 
-    lon_min_idx = _idx_for(lon, l2_lon_min, "lon-min")
-    lon_max_idx = _idx_for(lon, l2_lon_max, "lon-max")
-    lat_min_idx = _idx_for(lat, l2_lat_min, "lat-min")
-    lat_max_idx = _idx_for(lat, l2_lat_max, "lat-max")
+    lon_min_idx = _idx_for(lon, l2_lon_min, "lon-min", is_lower_bound=True)
+    lon_max_idx = _idx_for(lon, l2_lon_max, "lon-max", is_lower_bound=False)
+    lat_min_idx = _idx_for(lat, l2_lat_min, "lat-min", is_lower_bound=True)
+    lat_max_idx = _idx_for(lat, l2_lat_max, "lat-max", is_lower_bound=False)
 
     min_col = min(lon_min_idx, lon_max_idx)
     max_col = max(lon_min_idx, lon_max_idx)

@@ -45,6 +45,7 @@
 - Add catchment candidate-selection and CLI coverage for meter limits, radial filtering, optional area delimiting, coordinate-aware distances, and distance argument validation.
 
 ### Fixed
+- Fix `align_bounds_to_l2` overshooting the upper bound by one L0 cell, which left the domain indivisible by the upscaling factor and fell back to a crop that ignores the meteo grid, offsetting `mask_l2` against the forcing.
 - Fix `--no-fill-nodata`, `--coords-are-not-latlon` and `--no-area-delimiter` being stuck on their off value under Click 8.3, so the flags take effect and their defaults apply again.
 - Fix resolution mismatches caused by the rounding of float32 coordinates.
 - Fix mask upscaling for domains narrower than a single target cell.

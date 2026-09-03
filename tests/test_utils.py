@@ -1,12 +1,14 @@
 """Tests for mhm_tools.common.utils.cut_to_filled_area."""
 
+import tempfile
 import unittest
+from pathlib import Path
 
 import numpy as np
 import xarray as xr
 
 from mhm_tools.common.resolution_handler import Resolution
-from mhm_tools.common.utils import cut_to_filled_area
+from mhm_tools.common.utils import align_bounds_to_l2, cut_to_filled_area
 
 
 def _make_ds(n_rows, n_cols):
@@ -106,3 +108,96 @@ class TestCutToFilledArea(unittest.TestCase):
             cut_to_filled_area(
                 ds=ds, resolutions=Resolution(l0=1.0), catchment_mask=mask
             )
+
+
+L0_RES = 1 / 600
+L2_RES = 0.1
+FACTOR = 60
+# the fdir window is cut to the shapefile bounds, so its corner sits off the
+# 0.1 degree meteo grid; every index below is counted from these edges
+L0_LAT_TOP_EDGE = 47.575
+L0_LON_LEFT_EDGE = 9.595
+
+
+def _make_l0_ds(n_rows, n_cols):
+    """Build an L0 dataset whose grid corner is off the L2 grid."""
+    lat = L0_LAT_TOP_EDGE - (np.arange(n_rows) + 0.5) * L0_RES
+    lon = L0_LON_LEFT_EDGE + (np.arange(n_cols) + 0.5) * L0_RES
+    return xr.Dataset(coords={"lat": lat, "lon": lon})
+
+
+def _write_l2_file(path):
+    """Write a meteo file on the standard 0.1 degree grid."""
+    lat = np.arange(47.55, 47.14, -L2_RES)
+    lon = np.arange(9.65, 10.06, L2_RES)
+    ds = xr.Dataset(
+        data_vars={"pre": (("lat", "lon"), np.ones((lat.size, lon.size)))},
+        coords={"lat": lat, "lon": lon},
+    )
+    ds.to_netcdf(path)
+    return path
+
+
+class TestAlignBoundsToL2(unittest.TestCase):
+    """Bounds derived from an L0 grid that is offset from the meteo grid."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp_dir = tempfile.TemporaryDirectory()
+        cls.l2_file = _write_l2_file(Path(cls._tmp_dir.name) / "pre.nc")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmp_dir.cleanup()
+
+    def _resolutions(self):
+        return Resolution(
+            l0=L0_RES, l1=L2_RES, l11=L2_RES, l2=L2_RES, l2_file=self.l2_file
+        )
+
+    def _catchment_mask(self, n_rows, n_cols):
+        # a catchment spanning lat 47.35..47.45 and lon 9.65..9.85, so the
+        # aligned domain has to be lat 47.3..47.5 and lon 9.6..9.9
+        mask = np.zeros((n_rows, n_cols), dtype=bool)
+        mask[75:135, 33:153] = True
+        return mask
+
+    def test_aligned_window_is_divisible_by_the_upscaling_factor(self):
+        """The aligned L0 window must hold whole L2 cells."""
+        ds = _make_l0_ds(240, 240)
+
+        min_row, max_row, min_col, max_col = align_bounds_to_l2(
+            ds, self._resolutions(), 75, 134, 33, 152
+        )
+
+        self.assertEqual((max_row + 1 - min_row) % FACTOR, 0)
+        self.assertEqual((max_col + 1 - min_col) % FACTOR, 0)
+
+    def test_cropped_window_edges_land_on_the_l2_grid(self):
+        """The cropped domain must start and end on 0.1 degree lines."""
+        n_rows, n_cols = 240, 240
+        ds = _make_l0_ds(n_rows, n_cols)
+        mask = self._catchment_mask(n_rows, n_cols)
+
+        lat_slice, lon_slice = cut_to_filled_area(
+            ds=ds, resolutions=self._resolutions(), catchment_mask=mask
+        )
+
+        lat_top = L0_LAT_TOP_EDGE - lat_slice.start * L0_RES
+        lat_bottom = L0_LAT_TOP_EDGE - lat_slice.stop * L0_RES
+        lon_left = L0_LON_LEFT_EDGE + lon_slice.start * L0_RES
+        lon_right = L0_LON_LEFT_EDGE + lon_slice.stop * L0_RES
+
+        for name, edge in [
+            ("lat_top", lat_top),
+            ("lat_bottom", lat_bottom),
+            ("lon_left", lon_left),
+            ("lon_right", lon_right),
+        ]:
+            with self.subTest(edge=name):
+                self.assertAlmostEqual(
+                    edge / L2_RES,
+                    round(edge / L2_RES),
+                    places=6,
+                    msg=f"{name}={edge} is not on the {L2_RES} grid",
+                )
