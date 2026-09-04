@@ -6,6 +6,11 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+from mhm_tools.common.constants import (
+    EARTH_RADIUS_M,
+    METERS_PER_DEGREE,
+    MIN_COS_LATITUDE,
+)
 from mhm_tools.common.file_handler import get_coord_values, get_xarray_ds_from_file
 from mhm_tools.common.logger import ErrorLogger
 from mhm_tools.common.netcdf import generate_bounds
@@ -164,6 +169,31 @@ def coord_to_index(ds, lat, lon):
     return i, j
 
 
+def convert_meters_to_degrees(distance_m, lat_deg=None):
+    """Convert a distance in meters to degrees on the same sphere as the distances.
+
+    A degree of longitude shrinks with the cosine of the latitude, so passing a
+    latitude returns the larger of the two degree spans covering the distance,
+    which is the one that has to fit in longitude. Without a latitude only the
+    meridional span is returned, which is too short in longitude everywhere
+    outside the equator.
+
+    Args:
+        distance_m (float): Distance in meters.
+        lat_deg (float): Latitude at which the distance is converted. Defaults
+            to None for the meridional span.
+
+    Returns
+    -------
+        The distance in degrees.
+    """
+    degrees = distance_m / METERS_PER_DEGREE
+    if lat_deg is None:
+        return degrees
+    cos_latitude = max(float(np.cos(np.deg2rad(lat_deg))), MIN_COS_LATITUDE)
+    return degrees / cos_latitude
+
+
 def distance_100m_units(di, dj, l0_resolution, lat_deg=None, latlon=False):
     """Convert index deltas to 100 m units using coordinate-aware distances."""
     resolution = float(abs(l0_resolution))
@@ -233,7 +263,6 @@ def calculate_coordinate_distances_m(
     if not latlon:
         return np.hypot(delta_y, delta_x)
 
-    earth_radius_m = 6_371_008.8
     latitude_radians = np.deg2rad(candidate_latitudes)
     longitude_radians = np.deg2rad(candidate_longitudes)
     if not paired:
@@ -249,7 +278,7 @@ def calculate_coordinate_distances_m(
         * np.cos(latitude_radians)
         * np.sin(delta_longitude / 2) ** 2
     )
-    return 2 * earth_radius_m * np.arcsin(np.sqrt(haversine_value))
+    return 2 * EARTH_RADIUS_M * np.arcsin(np.sqrt(haversine_value))
 
 
 def get_candidate_search_window(
@@ -370,7 +399,7 @@ def find_best_gauge_location_by_area(  # noqa: PLR0915
     max_distance_cells=None,
     max_distance_m=None,
     max_error=0.25,
-    use_area_delimiter=True,
+    use_max_error=True,
     recursion=False,
     method="basinex",
     raise_on_fallback=True,
@@ -392,7 +421,7 @@ def find_best_gauge_location_by_area(  # noqa: PLR0915
     )
     logger.info(
         f"Selecting outlet candidates within {distance_description}; "
-        f"area delimiter enabled: {use_area_delimiter}."
+        f"max error as a hard limit: {use_max_error}."
     )
 
     # We will search for candidate outlet cells within a bbox around the gauge
@@ -436,9 +465,7 @@ def find_best_gauge_location_by_area(  # noqa: PLR0915
 
         sub_error = np.abs(sub - size) / size
         finite_mask = np.isfinite(sub_error)
-        within_tol = finite_mask & (
-            (sub_error <= max_error) if use_area_delimiter else True
-        )
+        within_tol = finite_mask & ((sub_error <= max_error) if use_max_error else True)
         if np.any(within_tol):
             min_error = float(np.min(sub_error[within_tol]))
             candidates = np.where(within_tol & np.isclose(sub_error, min_error))
@@ -498,7 +525,7 @@ def find_best_gauge_location_by_area(  # noqa: PLR0915
         candidates_error = 1 - ratio
         candidates_indices = np.where(
             np.isfinite(candidates_error)
-            & ((candidates_error <= max_error) if use_area_delimiter else True)
+            & ((candidates_error <= max_error) if use_max_error else True)
         )
         if len(candidates_indices[0]) > 0:
             cand_i = candidates_indices[0] + i_min
@@ -543,7 +570,7 @@ def find_best_gauge_location_by_area(  # noqa: PLR0915
             max_distance_cells=max_distance_cells * 2,
             max_distance_m=None,
             max_error=max_error,
-            use_area_delimiter=use_area_delimiter,
+            use_max_error=use_max_error,
             recursion=True,
             method=method,
             raise_on_fallback=raise_on_fallback,
@@ -551,7 +578,7 @@ def find_best_gauge_location_by_area(  # noqa: PLR0915
         )
     if raise_on_fallback:
         area_error_description = (
-            f" and {max_error*100:.2f}% area error" if use_area_delimiter else ""
+            f" and {max_error*100:.2f}% area error" if use_max_error else ""
         )
         msg = (
             "No suitable outlet candidate found within the configured distance "

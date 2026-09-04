@@ -21,7 +21,7 @@ import xarray as xr
 from joblib import Parallel, delayed
 from scipy.ndimage import binary_dilation
 
-from mhm_tools.common.constants import NC_ENCODE_MASK
+from mhm_tools.common.constants import EARTH_RADIUS_KM, NC_ENCODE_MASK
 from mhm_tools.common.file_handler import (
     get_coord_values,
     get_xarray_ds_from_file,
@@ -35,6 +35,7 @@ from mhm_tools.common.resolution_handler import (
     calculate_coordinate_resolution,
 )
 from mhm_tools.common.utils import (
+    convert_meters_to_degrees,
     coord_to_index,
     cut_to_filled_area,
     distance_100m_units,
@@ -73,6 +74,40 @@ GAUGE_INFO_COLUMNS = (
 # use d8 for basinex, ldd for mRM version in Ulysses
 OUTPUT_FTYPE = "ldd"
 CUTOFF_THRESHOLD = 175
+# an outlet candidate has to drain a plausible fraction/multiple of the
+# reference catchment area, which keeps hillslope and main-stem cells out
+CANDIDATE_AREA_AGREEMENT_FACTOR = 0.1
+# a reference shape can disagree with the flow direction data, so the crop for
+# the delineation keeps room for a catchment reaching beyond the shape bounds
+SHAPE_BUFFER_EXTENT_FACTOR = 1.5
+
+
+# every numeric gauge info column reports an unknown value as nan
+GAUGE_INFO_NUMERIC_COLUMNS = (
+    "lon",
+    "lat",
+    "lon_old",
+    "lat_old",
+    "distance",
+    "area",
+    "old_area",
+    "area_error",
+    "score",
+    "shape_error",
+)
+
+
+def _fill_missing_numbers(row):
+    """Replace missing numeric gauge info values with nan, in place."""
+    for column in GAUGE_INFO_NUMERIC_COLUMNS:
+        if row.get(column) is None:
+            row[column] = np.nan
+    return row
+
+
+def _format_area(area):
+    """Return an area in km2 for a log message, "unknown" if there is none."""
+    return "unknown" if area is None else f"{area:.0f} km2"
 
 
 def _shape_crs(is_latlon):
@@ -345,18 +380,65 @@ def _combine_shape_bounds(bounds_list):
     return min_x, min_y, max_x, max_y
 
 
-def _buffer_bounds(bounds, latlon):
-    """Apply a buffer to bounds (degrees if latlon, otherwise meters)."""
+def _buffer_bounds(bounds, min_buffer=0.0, extent_factor=SHAPE_BUFFER_EXTENT_FACTOR):
+    """Enlarge bounds to leave room for a catchment reaching beyond the shape.
+
+    The buffer scales with the bounds themselves, because a shape that
+    disagrees with the flow direction data is off by a fraction of the
+    catchment it describes rather than by a fixed distance. It is derived from
+    the half extent of the bounds, so it compares to a search radius.
+
+    Args:
+        bounds: Bounding box as (min_x, min_y, max_x, max_y) or None.
+        min_buffer (float): Lower limit for the length that is scaled, in the
+            unit of the bounds, so the buffer never falls below
+            min_buffer * extent_factor.
+        extent_factor (float): Multiple of that length added on every side.
+
+    Returns
+    -------
+        The buffered bounds as tuple, or None if no bounds were given.
+    """
     if bounds is None:
         return None
-    buffer_value = 1.0 if latlon else 100_000.0
     min_x, min_y, max_x, max_y = bounds
-    return (
-        min_x - buffer_value,
-        min_y - buffer_value,
-        max_x + buffer_value,
-        max_y + buffer_value,
+    buffer = max(max(max_x - min_x, max_y - min_y) / 2, min_buffer) * extent_factor
+    logger.debug(
+        f"Buffering shape bounds by {buffer} "
+        f"(extent factor {extent_factor}, minimum scaled length {min_buffer})."
     )
+    return (
+        min_x - buffer,
+        min_y - buffer,
+        max_x + buffer,
+        max_y + buffer,
+    )
+
+
+def _outlet_search_buffer(max_distance_m, max_distance_cells, l0_resolution, latlon):
+    """Split the outlet search distance into a grid-unit and a metric buffer.
+
+    The selected outlet may sit that far from the given gauge coordinates, so
+    the crop has to reach at least as far to keep every candidate available. A
+    distance in cells is already in the unit of the grid, while a distance in
+    meters only becomes degrees once the latitude is known.
+
+    Args:
+        max_distance_m (float): Maximum radial outlet distance in meters.
+        max_distance_cells (int): Maximum outlet distance in grid cells.
+        l0_resolution (float): L0 grid resolution.
+        latlon (bool): Whether the grid is geographic.
+
+    Returns
+    -------
+        Tuple of the buffer in the unit of the grid and the buffer in meters,
+        both 0 if no distance limit is known.
+    """
+    if max_distance_m is not None:
+        return (0.0, max_distance_m) if latlon else (max_distance_m, 0.0)
+    if max_distance_cells is not None and l0_resolution is not None:
+        return max_distance_cells * l0_resolution, 0.0
+    return 0.0, 0.0
 
 
 def _slices_from_bounds(bounds, lat_values):
@@ -372,8 +454,23 @@ def _slices_from_bounds(bounds, lat_values):
     return {"lat": lat_slice, "lon": lon_slice}
 
 
-def _shape_bounds_from_folder(shape_folder, gauge_ids, latlon):
-    """Compute a buffered bounding box from available gauge shapefiles."""
+def _shape_bounds_from_folder(
+    shape_folder, gauge_ids, min_buffer=0.0, min_buffer_m=0.0
+):
+    """Compute the buffered bounding box of the available gauge shapefiles.
+
+    Args:
+        shape_folder: Folder holding the gauge shapefiles.
+        gauge_ids: Gauge id or list of gauge ids to look for.
+        min_buffer (float): Lower limit for the buffer added around the
+            combined bounds, in the unit of the shapefile coordinates.
+        min_buffer_m (float): Same lower limit given in meters, converted with
+            the latitude of the shape, so it also holds along longitude.
+
+    Returns
+    -------
+        The bounds as (min_x, min_y, max_x, max_y), or None if none were found.
+    """
     if not shape_folder or gauge_ids is None:
         logger.warning(
             f"No shape_folder or gauge_ids provided; cannot compute shape bounds. {shape_folder}, {gauge_ids}"
@@ -407,8 +504,15 @@ def _shape_bounds_from_folder(shape_folder, gauge_ids, latlon):
     combined_bounds = _combine_shape_bounds(bounds_list)
     if combined_bounds is None:
         return None
-    buffered_bounds = _buffer_bounds(combined_bounds, latlon)
-    logger.info(f"Using shapefile bounds with buffer for slicing: {buffered_bounds}")
+    if min_buffer_m:
+        # the shape sits at the latitude where the metric distance has to fit,
+        # and its edge further from the equator needs the largest degree span
+        shape_latitude = max(abs(combined_bounds[1]), abs(combined_bounds[3]))
+        min_buffer = max(
+            min_buffer, convert_meters_to_degrees(min_buffer_m, shape_latitude)
+        )
+    buffered_bounds = _buffer_bounds(combined_bounds, min_buffer)
+    logger.info(f"Using buffered shapefile bounds for slicing: {buffered_bounds}")
     return buffered_bounds
 
 
@@ -418,7 +522,7 @@ def create_cell_area(ds, lat_name="lat", lon_name="lon"):
     lat = ds[lat_name].data
     lon = ds[lon_name].data
     # calculate cellsize in kilometers
-    R = 6371  # radius of the earth in kilometers
+    R = EARTH_RADIUS_KM
     lat_rad = np.deg2rad(lat)
     lon_rad = np.deg2rad(lon)
     dlat = np.abs(np.gradient(lat_rad))
@@ -526,6 +630,16 @@ def write_gauges_to_csv(gauges, output_target, filename="gauges_info.csv"):
         Either a target file path or a target directory.
     filename : str
         Filename used when output_target is a directory.
+
+    Notes
+    -----
+    `distance` is the shift of the outlet in km, `area` the upstream area at
+    the delineated outlet and `old_area` the reference area in km2, and
+    `area_error` their relative difference. `score` is the value the method in
+    `method` ranked its candidates by and compared against `max_error`: the
+    `shape_error` (`1 - IoU`, therefore identical to it) for `shape_iou`, the
+    area error for `area_basinex`, and the area error weighed against the
+    outlet distance for `area_burek`. Unknown values are written as `nan`.
     """
     if not gauges:
         logger.warning("No gauges to write to CSV.")
@@ -553,9 +667,9 @@ def write_gauges_to_csv(gauges, output_target, filename="gauges_info.csv"):
                 "distance": gauge.get("distance", gauge.get("distance_error", np.nan)),
                 "area": gauge.get("area"),
                 "old_area": gauge.get("old_area", gauge.get("area_old")),
-                "area_error": gauge.get("area_error", gauge.get("error")),
-                "score": gauge.get("score"),
-                "shape_error": gauge.get("shape_error"),
+                "area_error": gauge.get("area_error", gauge.get("error", np.nan)),
+                "score": gauge.get("score", np.nan),
+                "shape_error": gauge.get("shape_error", np.nan),
                 "method": gauge.get("method", gauge.get("used_method")),
             }
         else:
@@ -573,7 +687,7 @@ def write_gauges_to_csv(gauges, output_target, filename="gauges_info.csv"):
                 "shape_error": gauge.shape_error,
                 "method": gauge.method,
             }
-        rows.append(row)
+        rows.append(_fill_missing_numbers(row))
 
     with output_path.open("w", newline="", encoding="utf-8") as fp:
         writer = csv.DictWriter(fp, fieldnames=GAUGE_INFO_COLUMNS)
@@ -612,18 +726,22 @@ def write_gauges_to_nc(gauges, output_target, filename="gauges_info.nc"):
     lons = []
     lats = []
     areas = []
+    methods = []
     for gauge in gauges:
         if isinstance(gauge, dict):
             station_id = gauge.get("gauge_id", gauge.get("id"))
             lon = gauge.get("lon")
             lat = gauge.get("lat")
             area = gauge.get("area")
+            method = gauge.get("method", gauge.get("used_method"))
         else:
             station_id = gauge.gauge_id
             lon = gauge.lon
             lat = gauge.lat
             area = gauge.area
+            method = gauge.method
 
+        methods.append(method)
         station_ids_raw.append(station_id)
         lons.append(np.nan if lon is None else float(lon))
         lats.append(np.nan if lat is None else float(lat))
@@ -670,13 +788,20 @@ def write_gauges_to_nc(gauges, output_target, filename="gauges_info.nc"):
             "units": "degrees_north",
         }
     )
+    used_methods = sorted({method for method in methods if method})
     ds["area"].attrs.update(
         {
             "standard_name": "catchment_area",
-            "long_name": (
-                "catchment area based on correction to Merit Hydro by Peter Burek et al. (2023)"
-            ),
+            "long_name": "upstream area at the delineated outlet cell",
             "units": "km2",
+            "delineation": (
+                "outlet matched by "
+                + (", ".join(used_methods) if used_methods else "unknown method")
+                + "; shape_iou maximizes the overlap with a reference catchment "
+                "shape, area_basinex minimizes the upstream area error, "
+                "area_burek weighs the area error against the outlet distance "
+                "(Burek et al. 2023)"
+            ),
         }
     )
 
@@ -711,10 +836,10 @@ class Gauge:
         self.area_old = None
         self.lat_old = None
         self.lon_old = None
-        self.distance_error = None
-        self.area_error = None
-        self.score = None
-        self.shape_error = None
+        self.distance_error = np.nan
+        self.area_error = np.nan
+        self.score = np.nan
+        self.shape_error = np.nan
         self.method = None
 
     def update(
@@ -940,7 +1065,7 @@ class Catchment:
         logger.info("Create cell area data array.")
         lon, lat = self.get_current_coordinates()
         # calculate cellsize in kilometers
-        R = 6371  # radius of the earth in kilometers
+        R = EARTH_RADIUS_KM
         lat_rad = np.deg2rad(lat)
         lon_rad = np.deg2rad(lon)
         dlat = np.abs(np.gradient(lat_rad))
@@ -1087,7 +1212,7 @@ class Catchment:
         max_distance_cells=None,
         max_distance_m=None,
         max_error=0.5,
-        use_area_delimiter=True,
+        use_max_error=True,
         ref_catchment_area=None,
         reference_upstream_area=None,
     ):
@@ -1124,7 +1249,7 @@ class Catchment:
             max_distance_cells=max_distance_cells,
             max_distance_m=max_distance_m,
             max_error=max_error,
-            use_area_delimiter=use_area_delimiter,
+            use_max_error=use_max_error,
             reference_shape_gdf=l0_shape_gdf,
             lat_values=lat_coords,
             lon_values=lon_coords,
@@ -1263,7 +1388,7 @@ class Catchment:
         reference_shape_gdf=None,
         lat_values=None,
         lon_values=None,
-        use_area_delimiter=True,
+        use_max_error=True,
         started_from_shape=False,
     ):
         """Find best gauge location using shape similarity."""
@@ -1290,7 +1415,6 @@ class Catchment:
             lat_values = self.ds.lat.data
             lon_values = self.ds.lon.data
 
-        has_reference_area = ref_catchment_area is not None
         if ref_catchment_area is None:
             ref_catchment_area = self.calculate_shape_area_on_current_grid(
                 reference_shape,
@@ -1350,19 +1474,39 @@ class Catchment:
 
         # Limit candidate search to a local neighborhood around the gauge
         sub = upstream_area[row_min : row_max + 1, col_min : col_max + 1]
-        if ref_catchment_area is not None and use_area_delimiter:
-            candidate_indices = np.where(
-                distance_mask
+        candidate_mask = distance_mask & np.isfinite(sub)
+        if ref_catchment_area is not None and not use_max_error:
+            # Limit candidates to those with upstream area within a factor of the reference area
+            # reduce runtime
+            area_min = ref_catchment_area * CANDIDATE_AREA_AGREEMENT_FACTOR
+            area_max = ref_catchment_area / CANDIDATE_AREA_AGREEMENT_FACTOR
+            plausible_mask = candidate_mask & (sub > area_min) & (sub < area_max)
+            if np.any(plausible_mask):
+                candidate_mask = plausible_mask
+                logger.debug(
+                    f"Restricted candidates to an upstream area between "
+                    f"{area_min:.2f} and {area_max:.2f} km2 (reference "
+                    f"{ref_catchment_area:.2f} km2)."
+                )
+            else:
+                logger.warning(
+                    f"No candidate drains between {area_min:.2f} and "
+                    f"{area_max:.2f} km2; keeping every candidate within the "
+                    "search distance."
+                )
+        if ref_catchment_area is not None and use_max_error:
+            delimited_mask = (
+                candidate_mask
                 & (sub >= ref_catchment_area * (1 - max_error))
                 & (sub <= ref_catchment_area * (1 + max_error))
             )
-            if candidate_indices[0].size == 0:
+            if np.any(delimited_mask):
+                candidate_mask = delimited_mask
+            else:
                 logger.warning(
                     "No candidates within area error bounds; expanding search to all finite upstream area values."
                 )
-                candidate_indices = np.where(distance_mask & np.isfinite(sub))
-        else:
-            candidate_indices = np.where(distance_mask & np.isfinite(sub))
+        candidate_indices = np.where(candidate_mask)
 
         logger.debug(
             f"Shape-based candidate count: {len(candidate_indices[0])}",
@@ -1404,20 +1548,10 @@ class Catchment:
                     lat_deg=lat_deg,
                 )
             )
-            if ref_catchment_area:
-                upstream_area_ratio = (
-                    min(upstream_value, ref_catchment_area)
-                    / max(upstream_value, ref_catchment_area)
-                    if upstream_value and ref_catchment_area
-                    else 0.0
-                )
-                score = np.hypot(
-                    1 - upstream_area_ratio, 1 - shape_overlap_ratio
-                ) / np.sqrt(
-                    2
-                )  # sqrt(x1**2 + x2**2)
-            else:
-                score = 1 - shape_overlap_ratio
+            # the IoU already carries the area discrepancy, as it can never
+            # exceed the ratio of the smaller to the larger of the two areas,
+            # so the area only scores candidates where no shape is available
+            score = 1 - shape_overlap_ratio
             if (
                 best_candidate_index is None
                 or score < best_candidate_score
@@ -1467,27 +1601,34 @@ class Catchment:
                 reference_shape_gdf=reference_shape,
                 lat_values=lat_values,
                 lon_values=lon_values,
-                use_area_delimiter=use_area_delimiter,
+                use_max_error=use_max_error,
                 started_from_shape=True,
             )
+        # the delimiter decides whether a poor overlap disqualifies a candidate
+        # or only ranks it, the same role the area error plays in the area based
+        # search, and the score is 1 - IoU so the cutoff is a minimum IoU
+        min_shape_iou = 1 - max_error
         if best_candidate_index is None or (
-            use_area_delimiter and best_candidate_score > max_error
+            use_max_error and best_candidate_shape_iou < min_shape_iou
         ):
             logger.warning("No suitable candidate found for shape-based correction.")
             logger.warning(
-                f"Score {best_candidate_score:.3f} > {max_error} from IoU {best_candidate_shape_iou:.3f};  and area {best_candidate_upstream_area:.0f}km^2 / {ref_catchment_area:.0f}km^2."
+                f"Best IoU {best_candidate_shape_iou:.3f} stays below the required "
+                f"{min_shape_iou:.3f} with an upstream area of "
+                f"{_format_area(best_candidate_upstream_area)} against a reference "
+                f"of {_format_area(ref_catchment_area)}."
             )
             return None
 
         area_error = (
             abs(1 - best_candidate_upstream_area / ref_catchment_area)
             if ref_catchment_area and best_candidate_upstream_area
-            else -9999
+            else np.nan
         )
         logger.info(
             f"Shape-based gauge correction used {shape_label} with IoU {best_candidate_shape_iou:.3f}; area error {area_error:.3f} and distance {best_candidate_distance_100m/10:.2f}km.",
         )
-        used_method = "shape-area" if has_reference_area else "shape"
+        used_method = "shape_iou"
         return (
             best_candidate_index,
             area_error,
@@ -1505,7 +1646,7 @@ class Catchment:
         max_distance_cells=None,
         max_distance_m=None,
         max_error=0.25,
-        use_area_delimiter=True,
+        use_max_error=True,
         method="basinex",
         shape_folder=None,
         gauge_id=None,
@@ -1529,7 +1670,7 @@ class Catchment:
                     max_distance_cells=max_distance_cells,
                     max_distance_m=max_distance_m,
                     max_error=max_error,
-                    use_area_delimiter=use_area_delimiter,
+                    use_max_error=use_max_error,
                 )
             except Exception as exc:
                 logger.warning(
@@ -1571,12 +1712,12 @@ class Catchment:
                     max_distance_cells=max_distance_cells,
                     max_distance_m=max_distance_m,
                     max_error=max_error,
-                    use_area_delimiter=use_area_delimiter,
+                    use_max_error=use_max_error,
                     method=method,
                     raise_on_fallback=raise_on_fallback,
                     latlon=self.latlon,
                 )
-                used_method = f"area-{method}"
+                used_method = f"area_{method}"
                 score = error * 100 + 2 * distance_error if method == "burek" else error
             else:
                 outlet_idx_bx, error_bx, distance_error_bx = (
@@ -1589,7 +1730,7 @@ class Catchment:
                         max_distance_cells=max_distance_cells,
                         max_distance_m=max_distance_m,
                         max_error=max_error,
-                        use_area_delimiter=use_area_delimiter,
+                        use_max_error=use_max_error,
                         method="basinex",
                         raise_on_fallback=True,
                         latlon=self.latlon,
@@ -1605,7 +1746,7 @@ class Catchment:
                         max_distance_cells=max_distance_cells,
                         max_distance_m=max_distance_m,
                         max_error=max_error,
-                        use_area_delimiter=use_area_delimiter,
+                        use_max_error=use_max_error,
                         method="burek",
                         raise_on_fallback=True,
                         latlon=self.latlon,
@@ -1638,14 +1779,14 @@ class Catchment:
                     error = error_bx
                     distance_error = distance_error_bx
                     score = score_bx
-                    used_method = "area-basinex"
+                    used_method = "area_basinex"
                 else:
                     logger.info("Using Burek location")
                     outlet_idx = outlet_idx_bu
                     error = error_bu
                     distance_error = distance_error_bu
                     score = score_bu
-                    used_method = "area-burek"
+                    used_method = "area_burek"
             new_lat = float(self.ds.lat.data[outlet_idx[0]])
             new_lon = float(self.ds.lon.data[outlet_idx[1]])
             gauge_lat = new_lat
@@ -1668,7 +1809,7 @@ class Catchment:
             outlet_idx = coord_to_index(self.ds, gauge_coords[0], gauge_coords[1])
             gauge_lat = float(gauge_coords[0])
             gauge_lon = float(gauge_coords[1])
-            error = None
+            error = np.nan
             distance_error = 0.0
         return (
             outlet_idx,
@@ -1690,7 +1831,7 @@ class Catchment:
         max_error,
         raise_on_sanity_check,
         gauge_id,
-        use_area_delimiter=True,
+        use_max_error=True,
     ):
         """Perform sanity checks on the delineated basin."""
         try:
@@ -1731,7 +1872,7 @@ class Catchment:
                     f"{delineated_area:.2f} km2; reference area = "
                     f"{ref_catchment_area:.2f} km2; error = {area_error * 100.0:.2f}%"
                 )
-                if use_area_delimiter and abs(area_error) > max_error * 2:
+                if use_max_error and abs(area_error) > max_error * 2:
                     with ErrorLogger(logger):
                         msg = f"Delineated basin area ({delineated_area:2f} km2) differs from reference area ({ref_catchment_area:2f} km2) by more than twice the max error {max_error*100:.2f}%. Adjust max_error or the maximum distance."
                         if raise_on_sanity_check:
@@ -1766,7 +1907,7 @@ class Catchment:
         max_distance_cells=None,
         max_distance_m=None,
         max_error=0.25,
-        use_area_delimiter=True,
+        use_max_error=True,
         raise_on_sanity_check=True,
         upstream_area=None,
         mask_catchment: Optional[bool] = True,
@@ -1817,7 +1958,7 @@ class Catchment:
             max_distance_cells=max_distance_cells,
             max_distance_m=max_distance_m,
             max_error=max_error,
-            use_area_delimiter=use_area_delimiter,
+            use_max_error=use_max_error,
             method=gauge_opti_method,
             shape_folder=shape_folder,
             gauge_id=gauge_id,
@@ -1855,7 +1996,7 @@ class Catchment:
             max_error,
             raise_on_sanity_check,
             gauge_id,
-            use_area_delimiter=use_area_delimiter,
+            use_max_error=use_max_error,
         )
 
         if np.all(catchment_mask):
@@ -2621,7 +2762,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
     max_distance_cells=None,
     max_distance_m=None,
     max_error=0.1,
-    use_area_delimiter=True,
+    use_max_error=True,
     gauge_ids=None,
     ncpus=1,
     output_vars=None,
@@ -2689,8 +2830,16 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
         if coordinate_slices is None:
             coordinate_slices = {"lat": slice(None, None), "lon": slice(None, None)}
             coord_slices_default = True
+        search_buffer, search_buffer_m = _outlet_search_buffer(
+            max_distance_m, max_distance_cells, resolutions.l0, latlon
+        )
         if coord_slices_default and shape_folder:
-            bounds = _shape_bounds_from_folder(shape_folder, gauge_ids, latlon=latlon)
+            bounds = _shape_bounds_from_folder(
+                shape_folder,
+                gauge_ids,
+                min_buffer=search_buffer,
+                min_buffer_m=search_buffer_m,
+            )
             if bounds is not None:
                 slices = _slices_from_bounds(bounds, input_ds.lat.data)
                 if slices is not None:
@@ -2702,7 +2851,10 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
         if coordinate_slices is None:
             if shape_folder:
                 bounds = _shape_bounds_from_folder(
-                    shape_folder, gauge_ids, latlon=latlon
+                    shape_folder,
+                    gauge_ids,
+                    min_buffer=search_buffer,
+                    min_buffer_m=search_buffer_m,
                 )
                 logger.debug(f"Extracted bounds from shape_folder: {bounds}")
                 if bounds is not None:
@@ -2887,7 +3039,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                 max_distance_cells=max_distance_cells,
                 max_distance_m=max_distance_m,
                 max_error=max_error,
-                use_area_delimiter=use_area_delimiter,
+                use_max_error=use_max_error,
                 gauge_opti_method=gauge_opti_method,
                 shape_folder=shape_folder,
                 raise_on_fallback=raise_on_fallback,
@@ -2922,7 +3074,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                     max_distance_cells=max_distance_cells,
                     max_distance_m=max_distance_m,
                     max_error=max_error,
-                    use_area_delimiter=use_area_delimiter,
+                    use_max_error=use_max_error,
                     ref_catchment_area=ref_catchment_area,
                 )
                 if new_coords is not None:
@@ -3011,7 +3163,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                     max_distance_cells=max_distance_cells,
                     max_distance_m=max_distance_m,
                     max_error=max_error,
-                    use_area_delimiter=use_area_delimiter,
+                    use_max_error=use_max_error,
                     method=gauge_opti_method,
                     shape_folder=shape_folder,
                     gauge_id=gauge_ids[i],
@@ -3098,7 +3250,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                         max_error,
                         False,
                         gi["gauge_id"],
-                        use_area_delimiter=use_area_delimiter,
+                        use_max_error=use_max_error,
                     )
                     if failed:
                         continue
@@ -3170,7 +3322,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                     max_distance_cells=max_distance_cells,
                     max_distance_m=max_distance_m,
                     max_error=max_error,
-                    use_area_delimiter=use_area_delimiter,
+                    use_max_error=use_max_error,
                     ref_catchment_area=gi.get("ref_area"),
                 )
                 if new_coords is not None:

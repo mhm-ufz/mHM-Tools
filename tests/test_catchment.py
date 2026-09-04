@@ -476,7 +476,7 @@ class TestCatchment(unittest.TestCase):
             resolutions=c.resolutions,
             max_distance_m=1.5,
             max_error=0.1,
-            use_area_delimiter=False,
+            use_max_error=False,
             raise_on_fallback=True,
         )
 
@@ -497,7 +497,7 @@ class TestCatchment(unittest.TestCase):
             ref_catchment_area=100.0,
             resolutions=c.resolutions,
             max_distance_m=1.1,
-            use_area_delimiter=False,
+            use_max_error=False,
             raise_on_fallback=True,
         )
 
@@ -1192,7 +1192,7 @@ class TestCatchment(unittest.TestCase):
             self.assertTrue(np.isfinite(shape_error))
             self.assertGreaterEqual(shape_error, 0.0)
             self.assertLessEqual(shape_error, 1.0)
-            self.assertEqual(method, "shape-area")
+            self.assertEqual(method, "shape_iou")
             linear = np.ravel_multi_index(candidate_idx, c._fdir.shape)
             basin = c._fdir.basins(idxs=np.array([linear], dtype=np.int64))
             candidate_mask = basin > 0

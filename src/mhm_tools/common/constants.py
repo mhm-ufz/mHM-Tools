@@ -6,6 +6,8 @@ Constants
 .. autosummary::
     NO_DATA
     NC_ENCODE_DEFAULTS
+    EARTH_RADIUS_M
+    METERS_PER_DEGREE
     ESRI_TYPES
     ESRI_REQ
     GREENLAND_COORDS
@@ -15,6 +17,10 @@ Constants
 .. autodata:: NO_DATA
 
 .. autodata:: NC_ENCODE_DEFAULTS
+
+.. autodata:: EARTH_RADIUS_M
+
+.. autodata:: METERS_PER_DEGREE
 
 .. autodata:: ESRI_TYPES
 
@@ -33,6 +39,15 @@ NO_DATA = -9999.0
 NC_ENCODE_DEFAULTS = {"_FillValue": NO_DATA, "missing_value": NO_DATA}
 NC_ENCODE_MASK = {"_FillValue": 0, "missing_value": 0}
 """Default netcdf encoding settings."""
+
+EARTH_RADIUS_M = 6_371_008.8
+"""Mean earth radius in meters (IUGG), the sphere every distance here assumes."""
+EARTH_RADIUS_KM = EARTH_RADIUS_M / 1000
+"""Mean earth radius in kilometers."""
+METERS_PER_DEGREE = EARTH_RADIUS_M * np.pi / 180
+"""Length of one degree along a meridian in meters."""
+MIN_COS_LATITUDE = 0.01
+"""Lower limit for cos(latitude), so a conversion near the poles stays finite."""
 
 ESRI_TYPES = {
     "ncols": int,

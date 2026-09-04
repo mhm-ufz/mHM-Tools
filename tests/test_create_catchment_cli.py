@@ -24,7 +24,7 @@ def test_distance_defaults_preserve_cell_based_behavior():
 
     assert arguments.max_distance_cells is None
     assert arguments.max_distance_m is None
-    assert arguments.use_area_delimiter
+    assert arguments.use_max_error
 
 
 def test_meter_distance_and_no_area_delimiter_are_parsed():
@@ -43,7 +43,7 @@ def test_meter_distance_and_no_area_delimiter_are_parsed():
 
     assert arguments.max_distance_m == 1500
     assert arguments.max_distance_cells is None
-    assert not arguments.use_area_delimiter
+    assert not arguments.use_max_error
 
 
 def test_distance_cli_arguments_are_mutually_exclusive():
