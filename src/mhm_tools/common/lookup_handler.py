@@ -1,4 +1,10 @@
-"""Lookup-table and CSV-manifest reading and value mapping."""
+"""
+Lookup-table and CSV-manifest reading and value mapping.
+
+Authors
+-------
+- Sanjeev Bashyal
+"""
 
 import logging
 from pathlib import Path

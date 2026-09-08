@@ -4,6 +4,10 @@ The derivatives come from :mod:`pyflwdir`, except aspect, which pyflwdir does
 not provide and which is computed with the Horn gradient. Grid coordinates and
 the CRS variable come from :mod:`mhm_tools.pre.latlon`, so the output carries
 the same lat/lon convention as the rest of an mHM setup.
+
+Authors
+-------
+- Sanjeev Bashyal
 """
 
 from pathlib import Path

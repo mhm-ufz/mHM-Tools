@@ -1,4 +1,12 @@
-"""Shared categorical raster formatting for mHM."""
+"""
+Shared categorical raster formatting for mHM.
+
+Authors
+-------
+- Sanjeev Bashyal
+"""
+
+
 
 from __future__ import annotations
 

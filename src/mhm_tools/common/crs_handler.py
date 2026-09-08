@@ -1,4 +1,10 @@
-"""Coordinate reference system helpers for raster data."""
+"""
+Coordinate reference system helpers for raster data.
+
+Authors
+-------
+- Sanjeev Bashyal
+"""
 
 import contextlib
 

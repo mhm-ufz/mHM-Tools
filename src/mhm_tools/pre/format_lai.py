@@ -10,6 +10,10 @@ The sections below follow the gridded data flow: aggregate in time, find the
 source variable, build the target grid, refuse a request that cannot fit on
 disk, sample the source onto row blocks, and write. The two gridded pipelines,
 the categorical class definitions, and the public entry points follow.
+
+Authors
+-------
+- Sanjeev Bashyal
 """
 
 from __future__ import annotations
