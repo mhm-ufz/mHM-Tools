@@ -21,10 +21,22 @@ from scipy.stats import variation, zscore
 
 
 def filter_nan(s, o):
-    """Remove paired NaN values before calculating SPAEF."""
-    data = np.transpose(np.array([s.flatten(), o.flatten()]))
-    data = data[~np.isnan(data).any(1)]
-    return data[:, 0], data[:, 1]
+    """Remove paired NaN values before calculating a metric.
+
+    Args:
+        s, o: Arrays of the same shape.
+
+    Returns
+    -------
+        Both arrays flattened and reduced to their pairwise non-NaN values.
+    """
+    # reshape gives a view for the contiguous arrays used here, and one bool
+    # buffer replaces the stacked copy the pairs used to be selected through
+    s = np.asarray(s).reshape(-1)
+    o = np.asarray(o).reshape(-1)
+    valid = ~np.isnan(s)
+    valid &= ~np.isnan(o)
+    return s[valid], o[valid]
 
 
 def SPAEF(s, o):

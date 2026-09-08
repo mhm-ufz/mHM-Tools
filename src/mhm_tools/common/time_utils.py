@@ -9,10 +9,20 @@ import pandas as pd
 import xarray as xr
 
 from mhm_tools.common.logger import ErrorLogger
+from mhm_tools.common.netcdf import generate_bounds
 
 logger = logging.getLogger(__name__)
 
 FIXED_DAY_ALIAS = re.compile(r"(\d*)D")
+
+# A step this much larger than the median one is a gap rather than a rhythm,
+# and the windows around it cannot be derived from the stamps.
+IRREGULAR_SPACING_TOLERANCE = 1.5
+
+# A CF bounds variable spans a second dimension, which a DataArray of one
+# variable cannot carry, so the two edges travel as a pair of 1-D coordinates.
+TIME_BOUNDS_START_COORD = "time_bounds_start"
+TIME_BOUNDS_END_COORD = "time_bounds_end"
 
 
 def get_step_days(target_freq):
@@ -518,7 +528,7 @@ def normalize_time_axis(
     return ds_out
 
 
-def _origin_anchored_freq(target_freq):
+def get_origin_anchored_freq(target_freq):
     """Translate a day multiple into the hour alias that ``origin`` still anchors.
 
     ``origin`` only takes effect for a Tick-like frequency, and pandas 3.0
@@ -537,6 +547,206 @@ def _origin_anchored_freq(target_freq):
     """
     step_days = get_step_days(target_freq)
     return target_freq if step_days is None else f"{step_days * 24}h"
+
+
+def get_time_bounds(obj):
+    """Return the CF time bounds of a record as a (n, 2) array of timestamps.
+
+    A time stamp only labels a period, and the bounds are the period itself.
+    They are the only place a record states the window each of its values was
+    observed or averaged over. A CF bounds variable spans a second dimension,
+    which a DataArray of one variable cannot carry, so the two edges are also
+    accepted as the pair of 1-D coordinates that `set_time_bounds` attaches.
+
+    Args:
+        obj: Dataset or DataArray with a ``time`` coordinate.
+
+    Returns
+    -------
+        The (start, end) of every step, or None when the record has no bounds.
+    """
+    if "time" not in getattr(obj, "coords", {}):
+        return None
+    coords = obj.coords
+    if TIME_BOUNDS_START_COORD in coords and TIME_BOUNDS_END_COORD in coords:
+        return np.stack(
+            [
+                np.asarray(coords[TIME_BOUNDS_START_COORD].values),
+                np.asarray(coords[TIME_BOUNDS_END_COORD].values),
+            ],
+            axis=1,
+        )
+    time_coord = obj["time"]
+    bounds_name = time_coord.attrs.get("bounds") or time_coord.encoding.get("bounds")
+    if not bounds_name:
+        return None
+    holder = obj if bounds_name in getattr(obj, "coords", {}) else None
+    if holder is None and bounds_name in getattr(obj, "variables", {}):
+        holder = obj
+    if holder is None:
+        logger.warning(
+            f"The time coordinate names the bounds '{bounds_name}', but the "
+            f"record does not carry that variable."
+        )
+        return None
+    bounds = np.asarray(holder[bounds_name].values)
+    if bounds.ndim != 2 or bounds.shape[0] != time_coord.size or bounds.shape[1] != 2:
+        logger.warning(
+            f"The time bounds '{bounds_name}' have shape {bounds.shape}, which "
+            f"does not describe two edges per time step."
+        )
+        return None
+    return bounds
+
+
+def set_time_bounds(da, bounds):
+    """Attach time bounds to a DataArray as a pair of 1-D coordinates.
+
+    Selecting one variable out of a dataset drops its CF bounds variable,
+    because that variable spans a second dimension the DataArray does not have.
+    Two 1-D coordinates carry the same two edges along the time axis.
+
+    Args:
+        da: DataArray with a ``time`` dimension.
+        bounds: (n, 2) array of the start and end of every step, or None.
+
+    Returns
+    -------
+        The DataArray with the bounds attached, unchanged when none were given.
+    """
+    if bounds is None:
+        return da
+    return da.assign_coords(
+        {
+            TIME_BOUNDS_START_COORD: ("time", np.asarray(bounds)[:, 0]),
+            TIME_BOUNDS_END_COORD: ("time", np.asarray(bounds)[:, 1]),
+        }
+    )
+
+
+def infer_time_bounds(obj, tolerance=IRREGULAR_SPACING_TOLERANCE, label="reference"):
+    """Infer the window of every step from evenly spaced stamps.
+
+    The edges sit halfway between two stamps, which takes a stamp as the centre
+    of its window. A gap would stretch the windows around it over instants the
+    record never observed, so an unevenly spaced record has to state its own
+    bounds instead of having them guessed.
+
+    Args:
+        obj: Dataset or DataArray with a ``time`` coordinate.
+        tolerance: How much the largest step may exceed the median one.
+        label: Name used in the error message.
+
+    Returns
+    -------
+        The (start, end) of every step as a (n, 2) array.
+    """
+    time_index = pd.DatetimeIndex(obj["time"].values)
+    if time_index.size < 2:
+        msg = (
+            f"The {label} record holds a single time step, so the window it "
+            f"covers cannot be derived from the spacing of its stamps. Give its "
+            f"time coordinate a CF 'bounds' attribute naming a (time, 2) "
+            f"variable with the first and last instant of the step."
+        )
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    spacing = np.diff(time_index.values) / np.timedelta64(1, "D")
+    median_spacing = float(np.median(spacing))
+    largest_spacing = float(spacing.max())
+    if largest_spacing > tolerance * median_spacing:
+        gap_at = time_index[int(np.argmax(spacing))]
+        msg = (
+            f"The {label} record steps {median_spacing:.0f} days at a time but "
+            f"jumps {largest_spacing:.0f} days after {gap_at.date()}, so its "
+            f"steps do not state what they cover. Deriving the windows from the "
+            f"stamps would stretch the ones around that jump over instants the "
+            f"record never observed. Give its time coordinate a CF 'bounds' "
+            f"attribute naming a (time, 2) variable with the first and last "
+            f"instant of every step."
+        )
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    logger.info(
+        f"Deriving the {label} windows from its {median_spacing:.0f} day spacing."
+    )
+    # the lower edges plus the last upper one are contiguous by construction,
+    # while the upper column of generate_bounds is not for uneven spacing
+    coord = xr.DataArray(
+        time_index.values, dims=("time",), coords={"time": time_index.values}
+    )
+    raw_bounds = generate_bounds(coord).values
+    edges = np.append(raw_bounds[:, 0], raw_bounds[-1, 1])
+    return np.stack([edges[:-1], edges[1:]], axis=1)
+
+
+def resample_to_reference_windows(input_ds, ref_ds, label="input"):
+    """Average an input over each time window of a reference record.
+
+    The reference keeps every one of its steps and its own time axis, and the
+    input is averaged over exactly the window each reference value was observed
+    over. A window the input does not cover completely is dropped from both,
+    because a full period must not be compared against a shorter one.
+
+    A reference that states its bounds is taken at its word. One that does not
+    has its windows derived from its stamps, which only works while they are
+    evenly spaced.
+
+    Args:
+        input_ds: Dataset or DataArray to average, with a ``time`` dimension.
+        ref_ds: Reference whose time windows define the shared calendar.
+        label: Name used in the log and error messages.
+
+    Returns
+    -------
+        Tuple of the averaged input and the reference on the shared windows.
+    """
+    bounds = get_time_bounds(ref_ds)
+    if bounds is None:
+        bounds = infer_time_bounds(ref_ds)
+    window_days = float(
+        np.median((bounds[:, 1] - bounds[:, 0]) / np.timedelta64(1, "D"))
+    )
+    input_step_days, _ = timedelta_to_alias(input_ds)
+    input_step_days = input_step_days / 24
+    if input_step_days > window_days * IRREGULAR_SPACING_TOLERANCE:
+        msg = (
+            f"The {label} steps {input_step_days:.0f} days at a time, which is "
+            f"coarser than the {window_days:.0f} day windows of the reference. "
+            f"Averaging it over them would repeat one value across several "
+            f"windows instead of comparing what each window covers."
+        )
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    input_start, input_end = get_data_coverage(input_ds)
+    kept_steps, averages = [], []
+    for step, (window_start, window_end) in enumerate(bounds):
+        if pd.Timestamp(window_start) < input_start or (
+            pd.Timestamp(window_end) > input_end
+        ):
+            continue
+        window = input_ds.sel(time=slice(window_start, window_end))
+        if window.sizes.get("time", 0) == 0:
+            continue
+        averages.append(window.mean("time", keep_attrs=True))
+        kept_steps.append(step)
+    if not kept_steps:
+        msg = (
+            f"No reference window is covered completely by the {label} record, "
+            f"which spans {input_start.date()} to {input_end.date()}."
+        )
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    dropped = ref_ds.sizes["time"] - len(kept_steps)
+    if dropped:
+        logger.info(
+            f"Dropping {dropped} reference window(s) the {label} record does not "
+            f"cover completely."
+        )
+    ref_out = ref_ds.isel(time=kept_steps)
+    input_out = xr.concat(averages, dim=ref_out["time"])
+    logger.info(f"Averaged the {label} over {len(kept_steps)} reference windows.")
+    return input_out, ref_out
 
 
 def resample_to_target_freq(
@@ -586,9 +796,11 @@ def resample_to_target_freq(
         )
     resample_kwargs = {} if resample_origin is None else {"origin": resample_origin}
     force_resample = resample_origin is not None
-    # an origin only anchors a Tick-like frequency, see _origin_anchored_freq
+    # an origin only anchors a Tick-like frequency, see get_origin_anchored_freq
     resample_freq = (
-        target_freq if resample_origin is None else _origin_anchored_freq(target_freq)
+        target_freq
+        if resample_origin is None
+        else get_origin_anchored_freq(target_freq)
     )
 
     if force_resample or target_freq != alias_ref:

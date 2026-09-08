@@ -176,13 +176,13 @@ def run(args):
     from mhm_tools.post.metric_plots import write_metric_plots
 
     input_paths = normalize_cli_sequence(args.input_paths)
-    input_names = normalize_cli_sequence(args.input_names)
+    input_names = normalize_cli_sequence(args.input_names, split_whitespace=False)
     variables = normalize_cli_sequence(args.variables)
     plot_types = _validate_metric_plot_types(normalize_cli_sequence(args.plot_types))
     shape_paths = normalize_cli_sequence(args.shape_paths)
     mask_paths = normalize_cli_sequence(args.mask_paths)
-    name_fields = normalize_cli_sequence(args.name_fields)
-    group_by = normalize_cli_sequence(args.group_by)
+    name_fields = normalize_cli_sequence(args.name_fields, split_whitespace=False)
+    group_by = normalize_cli_sequence(args.group_by, split_whitespace=False)
     write_metric_plots(
         input_paths=input_paths,
         input_names=input_names,

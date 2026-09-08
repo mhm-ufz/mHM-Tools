@@ -3,13 +3,14 @@ General CLI utility functions.
 
 This module provides helpers for common command-line tasks such as:
 - Parsing 'lat,lon' strings into float tuples
-- Converting memory size strings (e.g., "10MB", "2GB") into bytes
+- Converting memory size strings (e.g., "10MB", "2GB") into a budget in GiB
 - Determining coordinate extents from NetCDF mask datasets
 - Consolidating coordinate inputs from strings, mask files, or explicit values
 """
 
 import argparse
 import logging
+import re
 
 from mhm_tools.common.file_handler import get_xarray_ds_from_file
 from mhm_tools.common.logger import ErrorLogger
@@ -19,13 +20,20 @@ from mhm_tools.common.xarray_utils import get_coord_key, get_ds_extend
 logger = logging.getLogger(__name__)
 
 
-def normalize_cli_sequence(values):
-    """Normalize repeated and comma-separated CLI values.
+def normalize_cli_sequence(values, split_whitespace=True):
+    """Normalize repeated, comma-separated and space-separated CLI values.
+
+    A repeatable option takes one value per occurrence, so `--x "a b"` arrives
+    as one string. Splitting it keeps that form working instead of turning it
+    into a single value that no file matches.
 
     Parameters
     ----------
     values : str or Sequence[str] or None
         CLI value or values to normalize.
+    split_whitespace : bool, optional
+        Also split on whitespace, by default True. Pass False for a value that
+        may legitimately contain a space, such as a plot label.
 
     Returns
     -------
@@ -36,9 +44,10 @@ def normalize_cli_sequence(values):
         return None
     if isinstance(values, str):
         values = [values]
+    separators = r"[,\s]+" if split_whitespace else ","
     normalized_values = []
     for value in values:
-        for part in str(value).split(","):
+        for part in re.split(separators, str(value)):
             striped_part = part.strip()
             if striped_part:
                 normalized_values.append(striped_part)
@@ -59,22 +68,34 @@ def parse_coords(coords_str):
 
 
 def get_available_mem_in_unit(available_mem):
-    """Convert a memory string with units into an integer number of bytes.
+    """Convert a memory string into a budget in GiB.
 
-    Accepts strings like '10MB', '2GB', or raw numbers (interpreted as bytes).
-    Returns None if input is None.
+    Args:
+        available_mem: Memory as a string carrying a `kb`, `mb` or `gb`
+            suffix, or a plain number that is already read as GiB. None
+            passes through.
+
+    Returns
+    -------
+        The budget in GiB as a float, or None when nothing was given.
     """
     if available_mem is None:
         return None
-    mem_str = available_mem.lower().strip()
+    mem_str = str(available_mem).lower().strip()
     logger.info(f"mem_string {mem_str}")
-    if mem_str.endswith("kb"):
-        return int(mem_str[:-2]) // 1000_000
-    if mem_str.endswith("mb"):
-        return int(mem_str[:-2]) // 1000
-    if mem_str.endswith("gb"):
-        return int(mem_str[:-2])
-    return int(mem_str) * 1_000_000_000
+    # every caller consumes this as `available_mem_gib`, so the value stays a
+    # float: flooring it turned any budget below one GiB into zero
+    for suffix, per_gib in (("kb", 1024**2), ("mb", 1024), ("gb", 1)):
+        if mem_str.endswith(suffix):
+            value = float(mem_str[: -len(suffix)]) / per_gib
+            break
+    else:
+        value = float(mem_str)
+    if value <= 0:
+        msg = f"available memory must be greater than zero, got {available_mem!r}"
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    return value
 
 
 def get_coords_from_mask(mask, mask_key=None, resolutions=None):

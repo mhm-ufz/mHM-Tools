@@ -90,6 +90,114 @@ class TestNormalizeLatLon(XarrayUtilsBase):
         np.testing.assert_array_equal(out["lon"].values, target_lon)
 
 
+class TestNormalizeLatLonCoordinateLayouts(XarrayUtilsBase):
+    """Cover the coordinate layouts that leave a dimension without an index."""
+
+    LAT = np.array([40.0, 30.0, 20.0, 10.0])
+    LON = np.array([1.0, 2.0, 3.0])
+
+    def make_aliased_coords_ds(self):
+        """Dims lat/lon, but the coordinates are named latitude/longitude."""
+        return xr.Dataset(
+            {"tws": (("lat", "lon"), np.zeros((4, 3)))},
+            coords={"latitude": ("lat", self.LAT), "longitude": ("lon", self.LON)},
+        )
+
+    def make_coord_data_vars_ds(self):
+        """The coordinates are stored as data variables, only the dims point to them."""
+        return xr.Dataset(
+            {
+                "tws": (("lat", "lon"), np.zeros((4, 3))),
+                "latitude": ("lat", self.LAT),
+                "longitude": ("lon", self.LON),
+            }
+        )
+
+    def test_aliased_coordinate_becomes_an_indexed_dimension_coordinate(self):
+        out = normalize_lat_lon(self.make_aliased_coords_ds())
+        self.assertIn("lat", out.coords)
+        self.assertNotIn("latitude", out.coords)
+        # without an index every label based selection turns positional
+        self.assertIn("lat", out.indexes)
+        self.assertIn("lon", out.indexes)
+        np.testing.assert_array_equal(out["lat"].values, self.LAT)
+
+    def test_coordinate_data_variables_are_promoted_and_indexed(self):
+        out = normalize_lat_lon(self.make_coord_data_vars_ds())
+        self.assertEqual(tuple(out.data_vars), ("tws",))
+        self.assertIn("lat", out.indexes)
+        self.assertIn("lon", out.indexes)
+        np.testing.assert_array_equal(out["lat"].values, self.LAT)
+
+    def test_label_selection_works_after_normalization(self):
+        for ds in (self.make_aliased_coords_ds(), self.make_coord_data_vars_ds()):
+            out = normalize_lat_lon(ds)
+            # a missing index made this silently positional and raise on a float
+            cropped = crop_ds(out["tws"], 1.0, 3.0, 20.0, 40.0)
+            self.assertEqual(cropped.sizes["lat"], 3)
+
+    def test_descending_latitude_is_detected_after_normalization(self):
+        for ds in (self.make_aliased_coords_ds(), self.make_coord_data_vars_ds()):
+            out = normalize_lat_lon(ds)
+            # positional indices would compare as ascending and never flip
+            self.assertGreater(float(out["lat"][0]), float(out["lat"][-1]))
+
+    def test_already_normalized_dataset_is_untouched(self):
+        ds = xr.Dataset(
+            {"tws": (("lat", "lon"), np.zeros((4, 3)))},
+            coords={"lat": self.LAT, "lon": self.LON},
+        )
+        out = normalize_lat_lon(ds)
+        self.assertEqual(tuple(out.coords), tuple(ds.coords))
+        self.assertIn("lat", out.indexes)
+
+    def test_existing_lat_coordinate_is_not_clobbered_by_an_alias(self):
+        ds = xr.Dataset(
+            {"tws": (("lat", "lon"), np.zeros((4, 3)))},
+            coords={
+                "lat": self.LAT,
+                "lon": self.LON,
+                "latitude": ("lat", self.LAT + 100),
+            },
+        )
+        out = normalize_lat_lon(ds)
+        np.testing.assert_array_equal(out["lat"].values, self.LAT)
+        self.assertIn("latitude", out.coords)
+
+    def test_unrelated_lat_dimension_blocks_the_rename(self):
+        ds = xr.Dataset(
+            {
+                "tws": (("latitude", "lon"), np.zeros((4, 3))),
+                "other": (("lat",), np.zeros(2)),
+            },
+            coords={"latitude": self.LAT, "lon": self.LON, "lat": np.array([0.0, 1.0])},
+        )
+        out = normalize_lat_lon(ds)
+        # renaming latitude onto the unrelated lat dimension would collide
+        self.assertIn("latitude", out.coords)
+        np.testing.assert_array_equal(out["lat"].values, np.array([0.0, 1.0]))
+
+    def test_two_dimensional_coordinates_are_left_without_an_index(self):
+        ds = xr.Dataset(
+            {"tws": (("y", "x"), np.zeros((4, 3)))},
+            coords={
+                "latitude": (("y", "x"), np.zeros((4, 3))),
+                "longitude": (("y", "x"), np.zeros((4, 3))),
+            },
+        )
+        out = normalize_lat_lon(ds)
+        self.assertNotIn("lat", out.indexes)
+
+    def test_dataset_without_lat_lon_is_returned_unchanged(self):
+        ds = xr.Dataset({"tws": (("a", "b"), np.zeros((4, 3)))})
+        out = normalize_lat_lon(ds)
+        self.assertEqual(tuple(out.sizes), tuple(ds.sizes))
+
+    def test_data_array_input_is_also_normalized(self):
+        out = normalize_lat_lon(self.make_aliased_coords_ds()["tws"])
+        self.assertIn("lat", out.indexes)
+
+
 class TestRegridMask(XarrayUtilsBase):
     def test_regrid_mask_snaps_same_resolution_shifted_coordinates(self):
         target_lon = np.array([0.0, 1.0, 2.0])

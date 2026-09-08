@@ -22,6 +22,7 @@ from matplotlib import gridspec
 
 from mhm_tools.common.file_handler import get_xarray_ds_from_file
 from mhm_tools.common.logger import ErrorLogger, log_arguments
+from mhm_tools.common.metrics.kge import calculate_kling_gupta_efficiency
 from mhm_tools.common.metrics.metrics_handler import create_csv_from_dict
 from mhm_tools.common.utils import dict_to_multiline_string
 
@@ -282,12 +283,8 @@ class Hydrograph:
         -------
             None
         """
-        alpha = np.nanstd(simulated) / np.nanstd(observed)
-        beta = np.nanmean(simulated) / np.nanmean(observed)
-        gamma = np.corrcoef(observed, simulated)[1, 0]
-        self.objectives.kge = 1 - np.sqrt(
-            (gamma - 1) ** 2 + (alpha - 1) ** 2 + (beta - 1) ** 2
-        )
+        kge, alpha, beta, gamma = calculate_kling_gupta_efficiency(simulated, observed)
+        self.objectives.kge = kge
         self.objectives.alpha = alpha
         self.objectives.beta = beta
         self.objectives.gamma = gamma

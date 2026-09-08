@@ -251,6 +251,24 @@ def add_args(parser):
         required=False,
         help=("Only compare bias and temporal standard deviation (no Spearman)."),
     )
+    flags.add_argument(
+        "--stream-metrics",
+        action="store_true",
+        required=False,
+        help=(
+            """calculate the result metrics from monthly means accumulated while
+            streaming the files, so neither record is ever held in memory"""
+        ),
+    )
+    flags.add_argument(
+        "--compare-on-coarser-grid",
+        action="store_true",
+        required=False,
+        help=(
+            """compare on the coarser of the two grids instead of the finer one
+            lowers peak memory a lot but changes the grid every metric is calculated on"""
+        ),
+    )
 
     optional.add_argument(
         "--resample-time-to",
@@ -355,11 +373,15 @@ def run(args):
         direct_comp=(
             args.n_bootstrap_selections is None and args.n_boostrap_years is None
         )
-        and not (args.global_climate or args.no_direct_comparison),
+        and not (
+            args.global_climate or args.no_direct_comparison or args.stream_metrics
+        ),
         year_slice=year_slice,
         avaiable_mem=available_mem,
         bias_only=args.bias_only,
         global_climate=args.global_climate,
+        compare_on_coarser_grid=args.compare_on_coarser_grid,
+        stream_metrics=args.stream_metrics,
         target_time_freq=target_freq,
         mask_var=args.mask_var,
         result_metric=args.metric,

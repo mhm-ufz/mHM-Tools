@@ -28,16 +28,10 @@ def _parse_fill_nearest_files(value):
 
 
 def _split_values(value):
-    """Flatten repeated and quoted whitespace-separated CLI values."""
-    if value is None:
-        return []
-    values = value if isinstance(value, (list, tuple)) else [value]
-    parsed = []
-    for item in values:
-        if item is None:
-            continue
-        parsed.extend(str(item).split())
-    return parsed
+    """Flatten repeated, quoted and comma-separated CLI values into a list."""
+    from mhm_tools.common.cli_utils import normalize_cli_sequence
+
+    return normalize_cli_sequence(value) or []
 
 
 def add_args(parser):
@@ -106,8 +100,10 @@ def add_args(parser):
         ),
     )
     optional.add_argument(
+        "--ncpus",
         "--n-cpus",
         "--n_cpus",
+        dest="n_cpus",
         required=False,
         default=1,
         type=int,

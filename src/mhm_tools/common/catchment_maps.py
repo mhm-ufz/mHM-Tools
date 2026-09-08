@@ -10,6 +10,7 @@ import xarray as xr
 from matplotlib import colors as mcolors
 from matplotlib import pyplot as plt
 
+from mhm_tools.common.constants import KGE_CONSTANT_MEAN_BOUND
 from mhm_tools.common.resolution_handler import calculate_coordinate_resolution
 from mhm_tools.common.xarray_utils import get_coord_key, get_single_data_var
 
@@ -655,7 +656,7 @@ def _get_metric_color_limits(variable, values):
         msg = f"No finite values available for {variable}."
         raise ValueError(msg)
     if variable == "kge":
-        vmin, vmax = -0.5, 1.0
+        vmin, vmax = KGE_CONSTANT_MEAN_BOUND, 1.0
     elif variable == "nse":
         vmin, vmax = -0.1, 1.0
     else:

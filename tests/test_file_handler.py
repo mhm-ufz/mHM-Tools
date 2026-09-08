@@ -519,6 +519,98 @@ class TestGetXarrayDsFromFile(unittest.TestCase, BaseDatasetMixin):
             self.assertNotIn("lon_bnds", out.coords)
 
 
+class TestReadCoordinateLayouts(unittest.TestCase):
+    """Read files whose coordinates are not plain dimension coordinates."""
+
+    LAT = np.array([40.0, 30.0, 20.0, 10.0])
+    LON = np.array([1.0, 2.0, 3.0])
+
+    def write_layout(self, directory, layout):
+        """Write a NetCDF file storing its coordinates in the given layout."""
+        payload = np.zeros((self.LAT.size, self.LON.size), dtype=np.float32)
+        if layout == "dimension_coords":
+            ds = xr.Dataset(
+                {"tws": (("lat", "lon"), payload)},
+                coords={"lat": self.LAT, "lon": self.LON},
+            )
+        elif layout == "aliased_coords":
+            ds = xr.Dataset(
+                {"tws": (("lat", "lon"), payload)},
+                coords={"latitude": ("lat", self.LAT), "longitude": ("lon", self.LON)},
+            )
+        else:
+            ds = xr.Dataset(
+                {
+                    "tws": (("lat", "lon"), payload),
+                    "latitude": ("lat", self.LAT),
+                    "longitude": ("lon", self.LON),
+                }
+            )
+        file_path = Path(directory) / f"{layout}.nc"
+        ds.to_netcdf(file_path)
+        return file_path
+
+    def test_every_layout_yields_indexed_lat_lon(self):
+        for layout in ("dimension_coords", "aliased_coords", "coord_data_vars"):
+            with tempfile.TemporaryDirectory() as td:
+                out = fh.get_dataset_from_path(
+                    self.write_layout(td, layout),
+                    var_name="tws",
+                    normalize_latlon_coords=True,
+                )
+                self.assertIn("lat", out.indexes, layout)
+                self.assertIn("lon", out.indexes, layout)
+                np.testing.assert_array_equal(out["lat"].values, self.LAT)
+
+    def test_naming_a_variable_keeps_the_coordinate_variables(self):
+        # selecting a variable must not drop coordinates stored as data variables
+        with tempfile.TemporaryDirectory() as td:
+            out = fh.get_dataset_from_path(
+                self.write_layout(td, "coord_data_vars"),
+                var_name="tws",
+                normalize_latlon_coords=True,
+            )
+            self.assertEqual(tuple(out.data_vars), ("tws",))
+            self.assertIn("lat", out.coords)
+
+    def test_force_ascending_y_flips_every_layout(self):
+        for layout in ("dimension_coords", "aliased_coords", "coord_data_vars"):
+            with tempfile.TemporaryDirectory() as td:
+                out = fh.get_dataset_from_path(
+                    self.write_layout(td, layout),
+                    var_name="tws",
+                    normalize_latlon_coords=True,
+                    force_ascending_y=True,
+                )
+                # a coordinate without an index compares positionally and would
+                # always look ascending, leaving the grid flipped
+                np.testing.assert_array_equal(out["lat"].values, self.LAT[::-1])
+
+    def test_force_descending_y_keeps_every_layout_descending(self):
+        for layout in ("dimension_coords", "aliased_coords", "coord_data_vars"):
+            with tempfile.TemporaryDirectory() as td:
+                out = fh.get_dataset_from_path(
+                    self.write_layout(td, layout),
+                    var_name="tws",
+                    normalize_latlon_coords=True,
+                    force_decending_y=True,
+                )
+                np.testing.assert_array_equal(out["lat"].values, self.LAT)
+
+    def test_chunking_uses_the_dimension_of_an_aliased_coordinate(self):
+        for layout in ("aliased_coords", "coord_data_vars"):
+            with tempfile.TemporaryDirectory() as td:
+                out = fh.get_dataset_from_path(
+                    self.write_layout(td, layout),
+                    var_name="tws",
+                    normalize_latlon_coords=True,
+                    chunking=True,
+                    available_mem_gib=8.0,
+                    chunk_type=fh.ChunkType.TIME,
+                )
+                self.assertIsNotNone(out["tws"].chunks, layout)
+
+
 class TestGetDatasetFromPath(unittest.TestCase, BaseDatasetMixin):
     def test_get_dataset_from_path_file(self):
         ds = self.make_simple_ds()

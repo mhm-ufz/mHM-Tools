@@ -10,6 +10,7 @@ from mhm_tools.common.constants import (
     EARTH_RADIUS_M,
     METERS_PER_DEGREE,
     MIN_COS_LATITUDE,
+    WMO_REGION_BOUNDS,
 )
 from mhm_tools.common.file_handler import get_coord_values, get_xarray_ds_from_file
 from mhm_tools.common.logger import ErrorLogger
@@ -17,6 +18,85 @@ from mhm_tools.common.netcdf import generate_bounds
 from mhm_tools.common.resolution_handler import Resolution
 
 logger = logging.getLogger(__name__)
+
+
+def split_file_list(file_list, n_processes):
+    """Split a list into sublists, one per process.
+
+    Args:
+        file_list: Items to spread over the processes.
+        n_processes: Number of sublists to create.
+
+    Returns
+    -------
+        List of sublists, or the flat list for a single process.
+    """
+    file_list = list(file_list)
+    if n_processes > 1:
+        return [
+            subset
+            for subset in (file_list[i::n_processes] for i in range(n_processes))
+            if subset
+        ]
+    return file_list
+
+
+def normalize_unit_string(units):
+    """Normalize common unit-string variants to canonical forms.
+
+    Args:
+        units: Unit string of a variable.
+
+    Returns
+    -------
+        The lower case unit without "**" and with collapsed whitespace.
+    """
+    normalized = str(units).strip().lower().replace("**", "")
+    return " ".join(normalized.split())
+
+
+def select_regions(requested_regions):
+    """Resolve the requested region names against the known regions.
+
+    Args:
+        requested_regions: "all", "none" or a comma separated list of names.
+
+    Returns
+    -------
+        List of region names, empty when no regional output is wanted.
+    """
+    requested = str(requested_regions).strip()
+    if requested.lower() in {"none", ""}:
+        return []
+    if requested.lower() == "all":
+        return list(WMO_REGION_BOUNDS)
+    selected = []
+    lookup = {name.lower(): name for name in WMO_REGION_BOUNDS}
+    for entry in requested.split(","):
+        key = entry.strip().lower()
+        if key in lookup:
+            selected.append(lookup[key])
+        elif key:
+            msg = (
+                f"Unknown region {entry.strip()!r}. "
+                f"Available regions: {', '.join(WMO_REGION_BOUNDS)}."
+            )
+            with ErrorLogger(logger):
+                raise ValueError(msg)
+    return selected
+
+
+def format_region_title(region_name):
+    """Format a region name as a title suffix.
+
+    Args:
+        region_name: Region name or None for the whole domain.
+
+    Returns
+    -------
+        The suffix string, empty when no region is given.
+    """
+    return f" - {region_name}" if region_name else ""
 
 
 def sanitize_name(value):

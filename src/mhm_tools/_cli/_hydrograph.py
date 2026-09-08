@@ -103,15 +103,18 @@ def run(args):
     args : argparse.Namespace
         parsed command line arguments
     """
+    from mhm_tools.common.cli_utils import normalize_cli_sequence
+
     from ..post.hydrograph import get_hydrograph_from_path
 
     get_hydrograph_from_path(
-        input_path=args.in_dir,
+        input_path=normalize_cli_sequence(args.in_dir),
         output_file=args.out_file,
         show=args.show,
         save=True,
         title=args.title,
         plot_code=args.plots_to_be_created,
         prec_path=args.prec,
-        sim_names=args.sim_names,
+        # a plot label may hold a space, so it is only split on commas
+        sim_names=normalize_cli_sequence(args.sim_names, split_whitespace=False),
     )

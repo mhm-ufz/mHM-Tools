@@ -17,6 +17,7 @@ Files
    ~mhm_tools.post.relative_difference
    ~mhm_tools.post.snow_evaluation
    ~mhm_tools.post.taylor_diagram
+   ~mhm_tools.post.twsa_evaluation
 
 Notes
 -----
@@ -35,6 +36,7 @@ _ATTR_EXPORTS = {
     "gridded_data_evaluation": ("gridded_data_evaluation", "gridded_data_evaluation"),
     "Hydrograph": ("hydrograph", "Hydrograph"),
     "snow_evaluation": ("snow_evaluation", "snow_evaluation"),
+    "twsa_evaluation": ("twsa_evaluation", "twsa_evaluation"),
 }
 
 __all__ = [
@@ -44,6 +46,7 @@ __all__ = [
     "evaludate_grdc_data",
     "gridded_data_evaluation",
     "snow_evaluation",
+    "twsa_evaluation",
 ]
 
 

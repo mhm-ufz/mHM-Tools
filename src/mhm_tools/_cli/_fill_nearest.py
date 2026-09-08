@@ -57,7 +57,9 @@ def add_args(parser):
         help="Fill value written to cells masked by --mask-file/--mask-var.",
     )
     optional.add_argument(
+        "--ncpus",
         "--n-cpus",
+        dest="n_cpus",
         default=1,
         type=int,
         help="Number of cpus for parallel processing of multiple files.",

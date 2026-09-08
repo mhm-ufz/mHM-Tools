@@ -22,6 +22,7 @@ import xarray as xr
 from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_to_file
 from mhm_tools.common.logger import ErrorLogger, log_arguments
 from mhm_tools.common.time_utils import resample_to_daily_or_hourly_adaptive
+from mhm_tools.common.utils import normalize_unit_string
 from mhm_tools.common.xarray_utils import crop_ds, get_single_data_var
 
 logger = logging.getLogger(__name__)
@@ -44,12 +45,6 @@ PRECIPITATION_UNITS = ["m", "kg m-2", "mm"]
 PRECIPITATION_RATE_UNITS = ["kg m-2 s-1", "mm s-1", "mm d-1"]
 
 
-def _normalize_unit_string(units: str) -> str:
-    """Normalize common unit-string variants to canonical forms."""
-    normalized = units.strip().lower().replace("**", "")
-    return " ".join(normalized.split())
-
-
 def convert_units(ds: Union[xr.Dataset, xr.DataArray], var: str) -> xr.DataArray:
     """Convert variable to standard units.
 
@@ -70,10 +65,10 @@ def convert_units(ds: Union[xr.Dataset, xr.DataArray], var: str) -> xr.DataArray
         msg = f"Variable '{var}' missing 'units' attribute."
         raise ValueError(msg)
     original_attrs = dict(da.attrs)
-    normalized_units = _normalize_unit_string(units)
+    normalized_units = normalize_unit_string(units)
     logger.info(f"units are: {units} (normalized: {normalized_units})")
     # Temperature
-    if normalized_units in [_normalize_unit_string(u) for u in TEMPERATURE_UNITS]:
+    if normalized_units in [normalize_unit_string(u) for u in TEMPERATURE_UNITS]:
         if normalized_units in ["k", "kelvin"]:
             da = da - 273.15
         elif normalized_units in ["f", "°f", "degf", "fahrenheit"]:
@@ -81,7 +76,7 @@ def convert_units(ds: Union[xr.Dataset, xr.DataArray], var: str) -> xr.DataArray
         da.attrs = original_attrs
         da.attrs["units"] = "degC"
     # Total precipitation
-    elif normalized_units in [_normalize_unit_string(u) for u in PRECIPITATION_UNITS]:
+    elif normalized_units in [normalize_unit_string(u) for u in PRECIPITATION_UNITS]:
         if normalized_units in ["m", "kg m-2"]:
             da = da * 1000
         da.attrs = original_attrs
@@ -89,7 +84,7 @@ def convert_units(ds: Union[xr.Dataset, xr.DataArray], var: str) -> xr.DataArray
 
     # Precipitation rate
     elif normalized_units in [
-        _normalize_unit_string(u) for u in PRECIPITATION_RATE_UNITS
+        normalize_unit_string(u) for u in PRECIPITATION_RATE_UNITS
     ]:
         freq = pd.infer_freq(da.indexes["time"])
         if not freq or not freq.startswith(("h", "D")):
