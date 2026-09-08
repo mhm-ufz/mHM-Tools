@@ -3,9 +3,11 @@
 import numpy as np
 import pandas as pd
 import pytest
+import xarray as xr
 
 from mhm_tools.common.metrics import metrics_handler, tsm
 from mhm_tools.common.metrics.mspaef import MSPAEF
+from mhm_tools.common.metrics.rmse import calculate_root_mean_square_error_per_cell
 from mhm_tools.common.metrics.waspaef import WASPAEF
 
 
@@ -38,7 +40,7 @@ def test_norm_deviation_shape_and_values():
     out = tsm.norm_deviation(data)
     assert out.shape == data.shape
     mean_t0 = np.nanmean(data[0])
-    expected_t0 = data[0] - mean_t0 / mean_t0
+    expected_t0 = (data[0] - mean_t0) / mean_t0
     assert np.allclose(out[0], expected_t0)
 
 
@@ -224,3 +226,97 @@ def test_create_results_csv_rejects_unknown_metric(tmp_path):
             tmp_path / "results.csv",
             metric="unknown",
         )
+
+
+def _storage_record(values):
+    """Wrap a (time, lat, lon) array in a daily DataArray on a 2x2 grid."""
+    values = np.asarray(values, dtype=float)
+    times = pd.date_range("2004-01-01", periods=values.shape[0], freq="D")
+    return xr.DataArray(
+        values,
+        dims=("time", "lat", "lon"),
+        coords={"time": times, "lat": [10.0, 11.0], "lon": [20.0, 21.0]},
+    )
+
+
+def test_rmse_per_cell_matches_the_hand_computed_error():
+    """Every cell holds the root of its own mean squared difference."""
+    differences = np.array(
+        [
+            [[1.0, -1.0], [2.0, 0.0]],
+            [[1.0, 1.0], [2.0, 0.0]],
+            [[1.0, -3.0], [2.0, 4.0]],
+            [[1.0, 3.0], [2.0, 0.0]],
+        ]
+    )
+    observed = _storage_record(np.zeros((4, 2, 2)))
+    simulated = _storage_record(differences)
+
+    rmse = calculate_root_mean_square_error_per_cell(simulated, observed)
+
+    assert rmse.dims == ("lat", "lon")
+    np.testing.assert_allclose(rmse.values, np.sqrt((differences**2).mean(axis=0)))
+
+
+def test_two_identical_records_score_zero():
+    """A perfect match is an error of zero rather than an empty cell."""
+    record = _storage_record(np.random.default_rng(0).normal(size=(5, 2, 2)))
+
+    rmse = calculate_root_mean_square_error_per_cell(record, record)
+
+    np.testing.assert_allclose(rmse.values, 0.0, atol=1e-12)
+
+
+def test_a_step_missing_in_either_record_is_left_out():
+    """A step only one record holds is dropped instead of scored as an error."""
+    simulated_values = np.zeros((4, 2, 2))
+    simulated_values[:, 0, 0] = [1.0, 1.0, 1.0, 9.0]
+    simulated_values[:, 0, 1] = 2.0
+    observed = _storage_record(np.zeros((4, 2, 2)))
+    simulated = _storage_record(simulated_values)
+    # the observation is missing where the simulation is far off
+    observed[3, 0, 0] = np.nan
+
+    rmse = calculate_root_mean_square_error_per_cell(simulated, observed)
+
+    assert np.isclose(rmse.sel(lat=10.0, lon=20.0), 1.0)
+    assert np.isclose(rmse.sel(lat=10.0, lon=21.0), 2.0)
+
+
+def test_a_cell_with_too_few_pairs_stays_empty():
+    """A cell holding fewer pairs than required is NaN, its neighbours are not."""
+    observed = _storage_record(np.zeros((4, 2, 2)))
+    simulated = _storage_record(np.ones((4, 2, 2)))
+    observed[2:, 0, 0] = np.nan
+
+    rmse = calculate_root_mean_square_error_per_cell(
+        simulated, observed, min_valid_pairs=3
+    )
+
+    assert np.isnan(rmse.sel(lat=10.0, lon=20.0))
+    assert np.isclose(rmse.sel(lat=10.0, lon=21.0), 1.0)
+
+
+def test_min_valid_pairs_below_one_is_lifted_to_one():
+    """A cell without a single pair stays empty instead of scoring zero."""
+    observed = _storage_record(np.zeros((3, 2, 2)))
+    simulated = _storage_record(np.ones((3, 2, 2)))
+    observed[:, 0, 0] = np.nan
+
+    default = calculate_root_mean_square_error_per_cell(simulated, observed)
+    lifted = calculate_root_mean_square_error_per_cell(
+        simulated, observed, min_valid_pairs=0
+    )
+
+    np.testing.assert_array_equal(np.isnan(default.values), np.isnan(lifted.values))
+    assert np.isnan(lifted.sel(lat=10.0, lon=20.0))
+    assert np.isclose(lifted.sel(lat=10.0, lon=21.0), 1.0)
+
+
+def test_a_chunked_record_is_scored_lazily():
+    """A dask backed record is scored without being computed."""
+    record = _storage_record(np.arange(24).reshape(6, 2, 2)).chunk({"time": 2})
+
+    rmse = calculate_root_mean_square_error_per_cell(record, record * 2)
+
+    assert rmse.chunks is not None

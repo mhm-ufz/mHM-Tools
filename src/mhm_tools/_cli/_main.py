@@ -106,6 +106,7 @@ _COMMAND_GROUPS: List[Tuple[str, str, List[Tuple[str, object]]]] = [
             ("discharge-evaluation", "mhm_tools._cli._discharge_evaluation"),
             ("hydrograph", "mhm_tools._cli._hydrograph"),
             ("gridded-data-evaluation", "mhm_tools._cli._gridded_data_evaluation"),
+            ("twsa-evaluation", "mhm_tools._cli._twsa_evaluation"),
             ("run-overview", "mhm_tools._cli._mhm_run_overview"),
         ],
     ),
@@ -504,13 +505,13 @@ def _action_to_click_option(action: argparse.Action, option_group: str = "option
     else:
         if action.nargs in ("+", "*"):
             kwargs["multiple"] = True
-            if kwargs.get("default") is None and not action.required:
+            # a repeatable option needs a sequence default, and click raises for
+            # a bare one, so a single value is wrapped instead of passed through
+            default = kwargs.get("default")
+            if default is None and not action.required:
                 kwargs["default"] = ()
-            elif isinstance(kwargs.get("default"), str):
-                # argparse takes a bare string default for nargs="+", but Click
-                # rejects one for a multiple option and would fail at import,
-                # taking the whole CLI with it. Read it as a single value.
-                kwargs["default"] = (kwargs["default"],)
+            elif default is not None and not isinstance(default, (list, tuple)):
+                kwargs["default"] = (default,)
         elif isinstance(action.nargs, int) and action.nargs > 1:
             kwargs["nargs"] = action.nargs
         if action.type in (int, float, str, bool):

@@ -102,6 +102,30 @@ def _fallback_open(
         raise exc
 
 
+def normalize_variable_selection(var_name):
+    """Turn a variable selection into a list of names for `read_dataset`.
+
+    Accepts a single name or a sequence of names, so a caller that needs
+    several variables of one file does not have to read all of them.
+
+    Parameters
+    ----------
+    var_name : str or Sequence[str] or None
+        One variable name, several names, or None for no selection.
+
+    Returns
+    -------
+    list or None
+        The names as a list, or None when nothing was requested.
+    """
+    if var_name is None:
+        return None
+    if isinstance(var_name, str):
+        return [var_name] if var_name else None
+    names = [name for name in var_name if name]
+    return names or None
+
+
 def select_dataset_variables(ds, variables):
     """Keep only the requested data variables, plus any coordinate bounds.
 
@@ -126,8 +150,16 @@ def select_dataset_variables(ds, variables):
     keep = [name for name in variables if name in ds.data_vars]
     if not keep:
         return ds
-    # bounds are tiny and describe the coordinates, so they are worth keeping
-    keep += [name for name in ds.data_vars if name.endswith(("_bnds", "_bounds"))]
+    # A file can store its coordinates as data variables instead of coordinates.
+    # They and the bounds are tiny and describe the grid, so dropping them would
+    # leave the dimensions without an index.
+    coord_names = LAT_KEYS + LON_KEYS + TIME_KEYS
+    keep += [
+        name
+        for name in ds.data_vars
+        if name.endswith(("_bnds", "_bounds"))
+        or (name in coord_names and ds[name].ndim == 1)
+    ]
     return ds[list(dict.fromkeys(keep))]
 
 

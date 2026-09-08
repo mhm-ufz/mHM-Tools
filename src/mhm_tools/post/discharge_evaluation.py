@@ -25,7 +25,7 @@ from matplotlib import colors as mcolors
 from scipy.spatial import cKDTree
 
 from mhm_tools.common.catchment_maps import write_catchment_median_maps
-from mhm_tools.common.constants import WMO_INDEX_TO_REGION
+from mhm_tools.common.constants import KGE_CONSTANT_MEAN_BOUND, WMO_INDEX_TO_REGION
 from mhm_tools.common.file_handler import (
     get_dataset_from_path,
     write_xarray_to_file,
@@ -2011,8 +2011,10 @@ def plot_map(  # noqa: PLR0915
         # Determine value range and colorbar extension
         extend = "neither"
         if var == "kge":
-            logger.info("Setting kge colorbar limits to -0.5 and 1.0")
-            vmin, vmax = -0.5, 1.0
+            logger.info(
+                f"Setting kge colorbar limits to {KGE_CONSTANT_MEAN_BOUND} and 1.0"
+            )
+            vmin, vmax = KGE_CONSTANT_MEAN_BOUND, 1.0
             if np.nanmin(vals) < vmin:
                 extend = "min"
         elif var == "nse":
@@ -2094,7 +2096,9 @@ def get_discharge_cdf_x_limits(variable, values):
     tuple[float, float]
         Lower and upper x-axis limits.
     """
-    if variable in ["kge", "nse"]:
+    if variable == "kge":
+        return KGE_CONSTANT_MEAN_BOUND, 1.0
+    if variable == "nse":
         return -0.5, 1.0
     values = np.asarray(values, dtype=float)
     xmin = values.min() if values.min() > -2 else np.quantile(values, 0.05)

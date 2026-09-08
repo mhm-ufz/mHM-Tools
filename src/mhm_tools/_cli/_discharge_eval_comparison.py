@@ -157,7 +157,7 @@ def run(args):
     )
 
     input_paths = normalize_cli_sequence(args.input_paths)
-    input_names = normalize_cli_sequence(args.input_names)
+    input_names = normalize_cli_sequence(args.input_names, split_whitespace=False)
     variables = normalize_cli_sequence(args.variables)
     plot_types = _validate_discharge_comparison_plot_types(
         normalize_cli_sequence(args.plot_types)

@@ -15,8 +15,13 @@ Normalization rules
   instead. Multi day steps are binned from the 1970 epoch, so both datasets
   land on the same bin grid regardless of where their records start.
 - Grid: the finer dataset is aggregated onto the coarser grid by spatial mean.
-- Snow flag: values above the snow threshold become 1 (snow), all other valid
-  values become 0 (no snow), missing values stay missing.
+- Snow flag: every step is compared against the snow threshold on its own, and
+  a time step of the comparison counts as snow-covered when at least one of the
+  steps it was aggregated from exceeded it. A step where nothing valid was
+  observed stays missing. Thresholding each step rather than the mean of a
+  composite makes the flag independent of how the record is split into files,
+  and at a threshold of 0 the two give the same answer, because the mean of
+  non-negative values only exceeds 0 when one of them does.
 - Year window: a snow year from September to August, labelled by its start
   year, so a northern winter stays inside one window. ``calendar_year``
   switches to 1 January until 31 December.
@@ -50,38 +55,59 @@ Authors
 import logging
 from pathlib import Path
 
+import dask.array as darr
 import matplotlib as mpl
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import xarray as xr
+from joblib import Parallel, delayed
 from matplotlib.animation import FuncAnimation, PillowWriter
 from matplotlib.colors import BoundaryNorm, ListedColormap
 from matplotlib.patches import Patch
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-from mhm_tools.common.constants import WMO_REGION_BOUNDS
 from mhm_tools.common.file_handler import (
     ChunkType,
     get_dataset_from_path,
     write_xarray_to_file,
 )
 from mhm_tools.common.logger import ErrorLogger
+from mhm_tools.common.parallel import resolve_ncpus
+from mhm_tools.common.plotter import (
+    AXIS_COLOR,
+    CAPTION_COLOR,
+    INPUT_COLOR,
+    REF_COLOR,
+    style_axes,
+)
 from mhm_tools.common.time_utils import (
+    get_data_coverage,
+    get_origin_anchored_freq,
     get_period_freq,
     get_step_days,
+    normalize_time_axis,
     resample_to_target_freq,
     timedelta_to_alias,
 )
-from mhm_tools.common.utils import sanitize_name
+from mhm_tools.common.utils import (
+    format_region_title,
+    sanitize_name,
+    select_regions,
+    split_file_list,
+)
 from mhm_tools.common.xarray_utils import (
-    crop_ds,
+    aggregate_to_target_grid,
+    align_to_target_grid,
+    calculate_coordinate_resolution,
+    crop_to_region,
     get_coord_key,
     get_ds_extend,
-    get_overlapping_time_slice,
     get_single_data_var,
     normalize_lat_lon,
+    normalize_time,
+    regrid_to_coarser_grid,
 )
 from mhm_tools.post.gridded_data_evaluation import (
     crop_datasets_to_spatial_overlap,
@@ -100,6 +126,9 @@ SNOW_VALUE = 1
 # eight times smaller than a float64 and keeps whole records in reach.
 MISSING_VALUE = -1
 SNOW_FLAG_DTYPE = "int8"
+# a file is opened in blocks of a sixteenth of the budget, so several blocks
+# may be computed at once without the sum of them leaving it
+FILE_BLOCKS_IN_BUDGET = 16
 NANOSECONDS_PER_DAY = 86_400_000_000_000
 
 # Neutral state ramp for the binary panels. The light end is dark enough to
@@ -107,39 +136,15 @@ NANOSECONDS_PER_DAY = 86_400_000_000_000
 NO_SNOW_COLOR = "#9fb0b8"
 SNOW_COLOR = "#37474f"
 NO_DATA_COLOR = "#ffffff"
-# Dataset identity, one hue each, kept the same in every figure. Validated as a
-# categorical pair: protan dE 22.9, normal dE 31.9, both above the surface floor.
-INPUT_COLOR = "#1f6feb"
-REF_COLOR = "#d1495b"
 AGREEMENT_COLOR = NO_SNOW_COLOR
 # single hue light to dark, so a high accuracy reads as a strong colour
 ACCURACY_COLORMAP = "Blues"
 ACCURACY_UNDER_COLOR = "#f7f4d8"
-# recessive ink for axes, labels and captions
-AXIS_COLOR = "#9aa5ab"
-CAPTION_COLOR = "#5b6770"
-GRID_COLOR = "#e4e8ea"
 
 
 # ---------------------------------------------------------------------------
 # reading and writing
 # ---------------------------------------------------------------------------
-def normalize_time(obj, new_time_key="time"):
-    """Rename the time dimension and coordinate to ``time``.
-
-    Args:
-        obj: Dataset or DataArray to rename.
-        new_time_key: Target time name.
-
-    Returns
-    -------
-        The renamed object.
-    """
-    time_key = get_coord_key(obj, time=True)
-    if time_key == new_time_key:
-        return obj
-    logger.info(f"Normalizing time coordinate name: {time_key} -> {new_time_key}")
-    return obj.rename({time_key: new_time_key})
 
 
 def read_snow_data_array(data_path, file_name, var_name, label, max_memory_gib=8.0):
@@ -194,7 +199,16 @@ def read_snow_data_array(data_path, file_name, var_name, label, max_memory_gib=8
         with ErrorLogger(logger):
             raise ValueError(msg)
 
-    da = normalize_time(normalize_lat_lon(ds[var_name])).squeeze(drop=True)
+    da = normalize_time(normalize_lat_lon(ds[var_name]))
+    # a file holding a single time step must keep its time dimension, so only
+    # the dimensions that are not part of the grid are squeezed away
+    squeezable = [
+        name
+        for name in da.dims
+        if name not in ("time", "lat", "lon") and da.sizes[name] == 1
+    ]
+    if squeezable:
+        da = da.squeeze(squeezable, drop=True)
     missing_dims = {"time", "lat", "lon"} - set(da.dims)
     if missing_dims:
         msg = (
@@ -286,169 +300,6 @@ def resample_snow_to_target_frequency(input_da, ref_da, target_freq):
 # -------------------------------------------------------------------------
 
 
-def calculate_coordinate_resolution(coord):
-    """Return the median absolute spacing of a 1-D coordinate.
-
-    Args:
-        coord: Coordinate DataArray or array with at least two values.
-
-    Returns
-    -------
-        The spacing as float.
-    """
-    values = np.asarray(coord)
-    if values.ndim != 1 or values.size < 2:
-        msg = (
-            f"Cannot determine the resolution of a coordinate with shape "
-            f"{values.shape}. Two-dimensional or single-cell grids are not supported."
-        )
-        with ErrorLogger(logger):
-            raise ValueError(msg)
-    return float(np.nanmedian(np.abs(np.diff(values))))
-
-
-def create_cell_edges(centers):
-    """Create cell edges from monotonic cell centers.
-
-    Args:
-        centers: 1-D array of cell centers.
-
-    Returns
-    -------
-        Array of ``len(centers) + 1`` cell edges in the order of the centers.
-    """
-    centers = np.asarray(centers, dtype=float)
-    if centers.size < 2:
-        msg = "Cannot create cell edges from less than two cell centers."
-        with ErrorLogger(logger):
-            raise ValueError(msg)
-    inner_edges = 0.5 * (centers[:-1] + centers[1:])
-    first_edge = centers[0] - (inner_edges[0] - centers[0])
-    last_edge = centers[-1] + (centers[-1] - inner_edges[-1])
-    return np.concatenate([[first_edge], inner_edges, [last_edge]])
-
-
-def align_to_target_grid(da, target_lat, target_lon):
-    """Snap a DataArray onto target coordinates of the same resolution.
-
-    Args:
-        da: DataArray with ``lat`` and ``lon``.
-        target_lat: Target latitude values.
-        target_lon: Target longitude values.
-
-    Returns
-    -------
-        The DataArray reindexed to the target coordinates.
-    """
-    tolerance = (
-        max(
-            calculate_coordinate_resolution(target_lat),
-            calculate_coordinate_resolution(target_lon),
-        )
-        / 2
-    )
-    return da.reindex(
-        lat=np.asarray(target_lat),
-        lon=np.asarray(target_lon),
-        method="nearest",
-        tolerance=tolerance,
-    )
-
-
-def aggregate_to_target_grid(da, target_lat, target_lon):
-    """Aggregate a fine DataArray onto a coarser target grid by spatial mean.
-
-    Uses ``coarsen`` when the target grid is an aligned integer multiple of the
-    source grid and falls back to binning the source cells into the target
-    cells otherwise.
-
-    Args:
-        da: Fine DataArray with ``lat`` and ``lon``.
-        target_lat: Coarse latitude values.
-        target_lon: Coarse longitude values.
-
-    Returns
-    -------
-        The aggregated DataArray on the target grid.
-    """
-    lat_factor = round(
-        calculate_coordinate_resolution(target_lat)
-        / calculate_coordinate_resolution(da["lat"])
-    )
-    lon_factor = round(
-        calculate_coordinate_resolution(target_lon)
-        / calculate_coordinate_resolution(da["lon"])
-    )
-    if (
-        lat_factor > 1
-        and lon_factor > 1
-        and da.sizes["lat"] % lat_factor == 0
-        and da.sizes["lon"] % lon_factor == 0
-    ):
-        coarsened = da.coarsen(lat=lat_factor, lon=lon_factor, boundary="trim").mean()
-        if coarsened.sizes["lat"] == len(target_lat) and coarsened.sizes["lon"] == len(
-            target_lon
-        ):
-            logger.info(
-                f"Aggregating with coarsen by factors lat={lat_factor}, lon={lon_factor}."
-            )
-            return coarsened.assign_coords(
-                lat=np.asarray(target_lat), lon=np.asarray(target_lon)
-            )
-        logger.debug(
-            f"Coarsen produced {coarsened.sizes['lat']}x{coarsened.sizes['lon']} cells "
-            f"instead of {len(target_lat)}x{len(target_lon)}; binning instead."
-        )
-
-    logger.info("Aggregating fine cells into the coarse target cells by mean.")
-    lat_edges = create_cell_edges(target_lat)
-    lon_edges = create_cell_edges(target_lon)
-    # groupby_bins needs ascending edges, so reverse the labels for descending grids
-    lat_labels = target_lat if lat_edges[0] < lat_edges[-1] else target_lat[::-1]
-    lon_labels = target_lon if lon_edges[0] < lon_edges[-1] else target_lon[::-1]
-    binned = (
-        da.groupby_bins("lat", np.sort(lat_edges), labels=np.asarray(lat_labels))
-        .mean("lat")
-        .groupby_bins("lon", np.sort(lon_edges), labels=np.asarray(lon_labels))
-        .mean("lon")
-        .rename({"lat_bins": "lat", "lon_bins": "lon"})
-    )
-    return binned.reindex(lat=np.asarray(target_lat), lon=np.asarray(target_lon))
-
-
-def regrid_to_coarser_grid(input_da, ref_da):
-    """Bring two DataArrays onto the coarser of their two grids.
-
-    Args:
-        input_da: Input DataArray with ``lat`` and ``lon``.
-        ref_da: Reference DataArray with ``lat`` and ``lon``.
-
-    Returns
-    -------
-        Tuple of the two DataArrays on the common coarse grid.
-    """
-    input_cell_area = calculate_coordinate_resolution(
-        input_da["lat"]
-    ) * calculate_coordinate_resolution(input_da["lon"])
-    ref_cell_area = calculate_coordinate_resolution(
-        ref_da["lat"]
-    ) * calculate_coordinate_resolution(ref_da["lon"])
-
-    if np.isclose(input_cell_area, ref_cell_area, rtol=1e-3):
-        logger.info("Input and reference share the same grid resolution.")
-        return align_to_target_grid(input_da, ref_da["lat"], ref_da["lon"]), ref_da
-    if input_cell_area > ref_cell_area:
-        logger.info("Reference grid is finer; aggregating it onto the input grid.")
-        return input_da, aggregate_to_target_grid(
-            ref_da, input_da["lat"].values, input_da["lon"].values
-        )
-    logger.info("Input grid is finer; aggregating it onto the reference grid.")
-    return (
-        aggregate_to_target_grid(input_da, ref_da["lat"].values, ref_da["lon"].values),
-        ref_da,
-    )
-
-
 def get_snow_alias(obj):
     """Detect the calendar of a snow field, naming an 8 day step ``8D``.
 
@@ -531,34 +382,344 @@ def create_snow_cover_flag(da, snow_threshold):
     return flag
 
 
-def materialize_snow_flag(snow_flag, max_memory_gib, label):
-    """Compute a snow cover flag once, if it fits the memory budget.
-
-    Every consumer reads the flag again - once per year window, per region and
-    per gif frame - so leaving it lazy makes dask rebuild the whole read,
-    regrid and resample graph each time. Computing it once trades that for one
-    array, and as a signed byte it is an eighth of the float it replaces. A
-    record too large for the budget stays lazy and correct, only slower.
+def get_snow_record_files(data_path, file_name):
+    """List the files one snow record is read from, in time order of their names.
 
     Args:
-        snow_flag: Snow cover flag DataArray.
-        max_memory_gib: Memory budget in GiB.
-        label: Name used in log messages.
+        data_path: Path to a NetCDF file or a directory searched recursively.
+        file_name: Glob pattern used for the recursive directory search.
 
     Returns
     -------
-        The computed or the unchanged DataArray.
+        Sorted list of file paths.
     """
-    estimated_gib = snow_flag.size * snow_flag.dtype.itemsize / 1024**3
-    if estimated_gib <= max_memory_gib:
-        logger.info(f"Computing {label} once ({estimated_gib:.2f} GiB).")
-        return snow_flag.load()
-    logger.warning(
-        f"Keeping {label} lazy because {estimated_gib:.2f} GiB exceeds the budget "
-        f"of {max_memory_gib} GiB. It is recomputed per year, region and frame, "
-        "so this is markedly slower; raise --max-memory-gib if the memory is there."
+    data_path = Path(data_path)
+    files = sorted(data_path.rglob(file_name)) if data_path.is_dir() else [data_path]
+    if not files:
+        msg = f"No file matches {file_name!r} below {data_path}."
+        with ErrorLogger(logger):
+            raise FileNotFoundError(msg)
+    return files
+
+
+def get_file_time_block(da, max_memory_gib):
+    """Return how many time steps of one file to reduce at a time.
+
+    A record kept in a single file would otherwise be reduced in one go, which
+    is the whole record again. Because the flags are merged by a maximum, a
+    block may cover any steps in any order, so the block size only has to fit
+    the budget.
+
+    Args:
+        da: DataArray of one file, with ``lat`` and ``lon``.
+        max_memory_gib: Memory budget of the run.
+
+    Returns
+    -------
+        The number of time steps per block, at least one.
+    """
+    step_bytes = da.sizes["lat"] * da.sizes["lon"] * max(da.dtype.itemsize, 1)
+    block_bytes = max(max_memory_gib, 0.1) * 1024**3 / FILE_BLOCKS_IN_BUDGET
+    return max(1, min(da.sizes["time"], int(block_bytes // max(step_bytes, 1))))
+
+
+def read_snow_file_times(file_path):
+    """Read the time axis of one file without touching its values.
+
+    Opening a dataset does not read a data variable, so only the coordinate is
+    fetched here. This is what keeps a probe of thousands of files cheap.
+
+    Args:
+        file_path: Path to a NetCDF file.
+
+    Returns
+    -------
+        The time stamps of that file as an array.
+    """
+    with xr.open_dataset(file_path) as ds:
+        return np.asarray(ds[get_coord_key(ds, time=True)].values)
+
+
+def probe_snow_record(
+    data_path, file_name, var_name, label, ncpus=1, max_memory_gib=8.0
+):
+    """Describe a record by its grid and calendar without reading its values.
+
+    The shared grid, period and calendar are all that is needed before the
+    files can be binned, and none of it needs the data. Opening the whole
+    record instead would hold every file at once, which on a record of
+    thousands of files costs more than the binning it prepares.
+
+    Args:
+        data_path: Path to a NetCDF file or a directory searched recursively.
+        file_name: Glob pattern used for the recursive directory search.
+        var_name: Variable to read, or None to detect the single one.
+        label: Name used in the log and error messages.
+        ncpus: Cores used to read the time axes in parallel.
+        max_memory_gib: Memory budget the single probed file is sized against.
+
+    Returns
+    -------
+        An empty DataArray carrying the real grid and time axis of the record.
+    """
+    files = get_snow_record_files(data_path, file_name)
+    # one file settles the grid, the variable and its type
+    first = read_snow_data_array(
+        files[0], "*.nc", var_name, f"{label} grid", max_memory_gib
     )
-    return snow_flag
+    latitudes = first["lat"].values
+    longitudes = first["lon"].values
+    if len(files) == 1:
+        times = pd.DatetimeIndex(first["time"].values)
+    else:
+        cores = min(resolve_ncpus(ncpus), len(files))
+        logger.info(
+            f"Probing the time axis of {len(files)} {label} file(s) on "
+            f"{cores} core(s)."
+        )
+        if cores > 1:
+            per_file = Parallel(n_jobs=cores, backend="loky")(
+                delayed(read_snow_file_times)(file_path) for file_path in files
+            )
+        else:
+            per_file = [read_snow_file_times(file_path) for file_path in files]
+        times = pd.DatetimeIndex(np.concatenate(per_file)).sort_values()
+    logger.info(
+        f"The {label} record holds {len(times)} steps from "
+        f"{times[0].date()} to {times[-1].date()} on a "
+        f"{len(latitudes)}x{len(longitudes)} grid."
+    )
+    # the values stay empty and lazy; only the coordinates carry information
+    skeleton = darr.zeros(
+        (len(times), len(latitudes), len(longitudes)),
+        dtype=first.dtype,
+        chunks=(1, len(latitudes), len(longitudes)),
+    )
+    return xr.DataArray(
+        skeleton,
+        dims=("time", "lat", "lon"),
+        coords={"time": times, "lat": latitudes, "lon": longitudes},
+        name=first.name,
+    )
+
+
+def create_target_bins(time_slice, target_freq):
+    """Create the shared time bins every file's values are aggregated into.
+
+    A fixed day multiple is binned from the 1970 epoch, so a file only covering
+    part of the record still lands on the same bins as every other file.
+
+    Args:
+        time_slice: ``slice`` of the compared period.
+        target_freq: Pandas frequency alias of one bin.
+
+    Returns
+    -------
+        DatetimeIndex of the first instant of every bin.
+    """
+    start, end = pd.Timestamp(time_slice.start), pd.Timestamp(time_slice.stop)
+    step_days = get_step_days(target_freq)
+    if step_days is not None:
+        epoch = pd.Timestamp("1970-01-01")
+        first = epoch + pd.Timedelta(
+            days=((start - epoch).days // step_days) * step_days
+        )
+        labels = pd.date_range(first, end, freq=f"{step_days}D")
+        bin_ends = labels + pd.Timedelta(days=step_days)
+    else:
+        period_freq = get_period_freq(target_freq) or "D"
+        periods = pd.period_range(start, end, freq=period_freq)
+        labels = pd.DatetimeIndex(periods.start_time)
+        bin_ends = pd.DatetimeIndex(periods.end_time)
+    # a bin reaching outside the compared period is aggregated from fewer steps
+    # than a full one, which would compare a full period against a shorter one
+    fully_covered = (labels >= start) & (bin_ends <= end)
+    dropped = len(labels) - int(fully_covered.sum())
+    if dropped:
+        logger.info(
+            f"Dropping {dropped} bin(s) the compared period only covers partly."
+        )
+    return labels[fully_covered]
+
+
+def regrid_da_to_target_grid(da, target_lat, target_lon):
+    """Bring one field onto the shared target grid.
+
+    Args:
+        da: DataArray with ``lat`` and ``lon``.
+        target_lat: Target latitude values.
+        target_lon: Target longitude values.
+
+    Returns
+    -------
+        The DataArray on the target grid.
+    """
+    source_cell = calculate_coordinate_resolution(
+        da["lat"]
+    ) * calculate_coordinate_resolution(da["lon"])
+    target_cell = calculate_coordinate_resolution(
+        target_lat
+    ) * calculate_coordinate_resolution(target_lon)
+    if np.isclose(source_cell, target_cell, rtol=1e-3):
+        return align_to_target_grid(da, target_lat, target_lon)
+    return aggregate_to_target_grid(da, target_lat, target_lon)
+
+
+def accumulate_snow_flag_subset(
+    files,
+    var_name,
+    label,
+    target_grid,
+    target_freq,
+    time_slice,
+    snow_threshold,
+    max_memory_gib=8.0,
+):
+    """Reduce a subset of files to the binary flag of the bins it fills.
+
+    One file is read, regridded and binned at a time, and only the totals of
+    the shared bins are kept, so the raw record never has to fit in memory.
+
+    Args:
+        files: File paths of this subset.
+        var_name: Variable to read, or None to detect the single one.
+        label: Name used in the log and error messages.
+        target_grid: Tuple of (bin labels, target latitudes, target longitudes).
+        target_freq: Pandas frequency alias of one bin.
+        time_slice: ``slice`` of the compared period.
+        snow_threshold: Values strictly above this count as snow-covered.
+        max_memory_gib: Memory budget one chunk of a file is sized against.
+
+    Returns
+    -------
+        The binary snow cover flag of the bins this subset filled.
+    """
+    bin_labels, target_lat, target_lon = target_grid
+    # Every step is thresholded on its own and the bin keeps the largest flag it
+    # saw, so -1 stays only where nothing valid fell, 0 where snow never did and
+    # 1 as soon as one step exceeded the threshold. That merge is a maximum, so
+    # it does not care in which order the files arrive and needs no sums.
+    flag = np.full(
+        (len(bin_labels), len(target_lat), len(target_lon)),
+        MISSING_VALUE,
+        dtype=SNOW_FLAG_DTYPE,
+    )
+    bin_position = {label_value: index for index, label_value in enumerate(bin_labels)}
+    step_days = get_step_days(target_freq)
+    resample_origin = "epoch" if step_days is not None and step_days > 1 else None
+    resample_kwargs = {} if resample_origin is None else {"origin": resample_origin}
+    resample_freq = (
+        target_freq
+        if resample_origin is None
+        else get_origin_anchored_freq(target_freq)
+    )
+
+    for number, file_path in enumerate(files, start=1):
+        da = read_snow_data_array(
+            file_path,
+            "*.nc",
+            var_name,
+            f"{label} file {number}",
+            max_memory_gib / FILE_BLOCKS_IN_BUDGET,
+        )
+        da = da.sel(time=time_slice)
+        if da.sizes["time"] == 0:
+            continue
+        da = regrid_da_to_target_grid(da, target_lat, target_lon)
+        # a block at a time, so a record kept in one file is streamed as well
+        block = get_file_time_block(da, max_memory_gib)
+        for first_step in range(0, da.sizes["time"], block):
+            part = da.isel(time=slice(first_step, first_step + block))
+            step_flag = create_snow_cover_flag(part, snow_threshold)
+            binned = step_flag.resample(time=resample_freq, **resample_kwargs).max()
+            binned = normalize_time_axis(binned, target_freq, anchor="period_start")
+            binned_values = binned.compute().values
+            for step, bin_start in enumerate(pd.DatetimeIndex(binned["time"].values)):
+                position = bin_position.get(bin_start)
+                if position is None:
+                    continue
+                np.maximum(flag[position], binned_values[step], out=flag[position])
+        logger.info(f"Binned {label} file {number} of {len(files)}: {file_path.name}")
+    return flag
+
+
+def create_snow_flag_one_pass(
+    data_path,
+    file_name,
+    var_name,
+    label,
+    target_grid,
+    target_freq,
+    time_slice,
+    snow_threshold,
+    ncpus=1,
+    max_memory_gib=8.0,
+):
+    """Read a record one file at a time and reduce it to a binary snow flag.
+
+    Only the totals of the shared bins and the flag itself are held, so the
+    memory a run needs follows the compared grid rather than the size of the
+    record. The files are independent, so subsets of them are binned in
+    parallel and their totals summed.
+
+    Args:
+        data_path: Path to a NetCDF file or a directory searched recursively.
+        file_name: Glob pattern used for the recursive directory search.
+        var_name: Variable to read, or None to detect the single one.
+        label: Name used in the log and error messages.
+        target_grid: Tuple of (bin labels, target latitudes, target longitudes).
+        target_freq: Pandas frequency alias of one bin.
+        time_slice: ``slice`` of the compared period.
+        snow_threshold: Values strictly above this count as snow-covered.
+        ncpus: Cores used to bin the files in parallel.
+        max_memory_gib: Memory budget one chunk of a file is sized against.
+
+    Returns
+    -------
+        The binary snow cover flag on the target grid and bins.
+    """
+    files = get_snow_record_files(data_path, file_name)
+    cores = min(resolve_ncpus(ncpus), len(files))
+    # merging two subsets is a maximum, so the files may be split any way
+    subsets = split_file_list(files, cores) if cores > 1 else [files]
+    logger.info(f"Binning {len(files)} {label} file(s) on {cores} core(s).")
+    arguments = (
+        var_name,
+        label,
+        target_grid,
+        target_freq,
+        time_slice,
+        snow_threshold,
+        max_memory_gib,
+    )
+    if cores > 1:
+        results = Parallel(n_jobs=cores, backend="loky")(
+            delayed(accumulate_snow_flag_subset)(subset, *arguments)
+            for subset in subsets
+        )
+    else:
+        results = [accumulate_snow_flag_subset(subsets[0], *arguments)]
+
+    bin_labels, target_lat, target_lon = target_grid
+    flag = results[0]
+    for subset_flag in results[1:]:
+        np.maximum(flag, subset_flag, out=flag)
+    flag_da = xr.DataArray(
+        flag,
+        dims=("time", "lat", "lon"),
+        coords={"time": bin_labels, "lat": target_lat, "lon": target_lon},
+        name="snow_cover",
+    )
+    flag_da.attrs = {
+        "long_name": "binary snow cover flag",
+        "units": "1",
+        "flag_values": f"{NO_SNOW_VALUE}, {SNOW_VALUE}",
+        "flag_meanings": "no_snow snow",
+        "snow_threshold": snow_threshold,
+    }
+    held_gib = flag_da.size * flag_da.dtype.itemsize / 1024**3
+    logger.info(f"Holding the {label} snow cover flag ({held_gib:.2f} GiB).")
+    return flag_da
 
 
 def get_valid_snow_mask(snow_flag):
@@ -572,6 +733,37 @@ def get_valid_snow_mask(snow_flag):
         Boolean DataArray, True where the cell was observed.
     """
     return snow_flag >= 0
+
+
+def drop_uncovered_bins(input_flag, ref_flag, target_freq):
+    """Drop the bins that only one of the two records has data in.
+
+    A bin at the edge of one record is aggregated from fewer steps than the
+    same bin of the other, which would compare a full period against a shorter
+    one.
+
+    Args:
+        input_flag: Input snow cover flag on the shared bins.
+        ref_flag: Reference snow cover flag on the shared bins.
+        target_freq: Pandas frequency alias of one bin.
+
+    Returns
+    -------
+        Tuple of the two flags reduced to the bins both records cover.
+    """
+    covered = (get_valid_snow_mask(input_flag).any(("lat", "lon"))) & (
+        get_valid_snow_mask(ref_flag).any(("lat", "lon"))
+    )
+    kept = int(covered.sum())
+    if kept == 0:
+        msg = f"No common time steps remain after resampling to {target_freq}."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    dropped = input_flag.sizes["time"] - kept
+    if dropped:
+        logger.info(f"Dropping {dropped} bin(s) only one of the records covers.")
+    logger.info(f"Both datasets share {kept} {target_freq} time steps.")
+    return input_flag.isel(time=covered.values), ref_flag.isel(time=covered.values)
 
 
 def create_year_windows(time_index, year_mode, snow_year_start_month, step_days):
@@ -893,38 +1085,6 @@ def calculate_classification_accuracy(input_flag, ref_flag):
     return accuracy_ds
 
 
-def format_region_title(region_name):
-    """Format a region name as a title suffix.
-
-    Args:
-        region_name: Region name or None for the whole domain.
-
-    Returns
-    -------
-        The suffix string, empty when no region is given.
-    """
-    return f" - {region_name}" if region_name else ""
-
-
-def crop_to_region(snow_flag, region_name):
-    """Crop a snow cover field to the bounds of an evaluation region.
-
-    Args:
-        snow_flag: DataArray with ``lat`` and ``lon`` coordinates.
-        region_name: Key of ``WMO_REGION_BOUNDS``.
-
-    Returns
-    -------
-        The DataArray reduced to the region's bounds.
-    """
-    bounds = WMO_REGION_BOUNDS[region_name]
-    lon_slice = bounds["lon_slice"]
-    lat_slice = bounds["lat_slice"]
-    return crop_ds(
-        snow_flag, lon_slice.start, lon_slice.stop, lat_slice.start, lat_slice.stop
-    )
-
-
 def select_hemisphere(snow_flag, northern=True):
     """Select the cells of one hemisphere from a snow cover field.
 
@@ -999,29 +1159,6 @@ def calculate_map_figure_size(
     # keep a very thin domain from collapsing into a line
     panel_width = max(panel_height * aspect, 2.0)
     return (panel_count * panel_width + extra_width, panel_height + extra_height)
-
-
-def style_axes(ax, show_grid=False):
-    """Apply the recessive axis styling shared by every figure.
-
-    Args:
-        ax: Matplotlib axes to style.
-        show_grid: Draw a light horizontal grid behind the data.
-
-    Returns
-    -------
-        The styled axes.
-    """
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-    for spine in ("left", "bottom"):
-        ax.spines[spine].set_color(AXIS_COLOR)
-        ax.spines[spine].set_linewidth(0.8)
-    ax.tick_params(colors=CAPTION_COLOR, labelcolor=CAPTION_COLOR, length=3, width=0.8)
-    if show_grid:
-        ax.grid(axis="y", color=GRID_COLOR, linewidth=0.8)
-        ax.set_axisbelow(True)
-    return ax
 
 
 def get_map_extent_and_origin(da):
@@ -1472,37 +1609,6 @@ def create_snow_cover_gif(
 # -------------------------------------------------------------------------
 
 
-def select_regions(requested_regions):
-    """Resolve the requested region names against the known regions.
-
-    Args:
-        requested_regions: "all", "none" or a comma separated list of names.
-
-    Returns
-    -------
-        List of region names, empty when no regional output is wanted.
-    """
-    requested = str(requested_regions).strip()
-    if requested.lower() in {"none", ""}:
-        return []
-    if requested.lower() == "all":
-        return list(WMO_REGION_BOUNDS)
-    selected = []
-    lookup = {name.lower(): name for name in WMO_REGION_BOUNDS}
-    for entry in requested.split(","):
-        key = entry.strip().lower()
-        if key in lookup:
-            selected.append(lookup[key])
-        elif key:
-            msg = (
-                f"Unknown region {entry.strip()!r}. "
-                f"Available regions: {', '.join(WMO_REGION_BOUNDS)}."
-            )
-            with ErrorLogger(logger):
-                raise ValueError(msg)
-    return selected
-
-
 def create_region_outputs(
     input_flag,
     ref_flag,
@@ -1617,6 +1723,7 @@ def snow_evaluation(  # noqa: PLR0913
     gif_fps=4,
     max_gif_frames=0,
     max_memory_gib=8.0,
+    ncpus=1,
 ):
     """Evaluate the snow cover of an input dataset against a reference dataset.
 
@@ -1655,31 +1762,69 @@ def snow_evaluation(  # noqa: PLR0913
     output_dir = Path(output_dir)
     # resolve the regions first, so a typo fails before the data is read
     region_names = select_regions(regions)
-    input_da = read_snow_data_array(
-        input_path, input_file_name, input_var, "input", max_memory_gib
+    input_da = probe_snow_record(
+        input_path, input_file_name, input_var, "input", ncpus, max_memory_gib
     )
-    ref_da = read_snow_data_array(
-        ref_path, ref_file_name, ref_var, "reference", max_memory_gib
+    ref_da = probe_snow_record(
+        ref_path, ref_file_name, ref_var, "reference", ncpus, max_memory_gib
     )
 
     input_da, ref_da = crop_datasets_to_spatial_overlap(input_da, ref_da)
     input_da, ref_da = regrid_to_coarser_grid(input_da, ref_da)
     input_da, ref_da = crop_datasets_to_spatial_overlap(input_da, ref_da)
 
-    time_slice = get_overlapping_time_slice(input_da, ref_da)
+    # the overlap comes from the time coordinates alone; scanning the values for
+    # empty steps would read both records in full, and the one-pass counts drop
+    # a bin nothing fell into anyway
+    input_coverage = get_data_coverage(input_da)
+    ref_coverage = get_data_coverage(ref_da)
+    time_slice = slice(
+        max(input_coverage[0], ref_coverage[0]),
+        min(input_coverage[1], ref_coverage[1]),
+    )
+    if time_slice.start >= time_slice.stop:
+        msg = (
+            f"The two records do not overlap in time: the input covers "
+            f"{input_coverage[0].date()} to {input_coverage[1].date()} and the "
+            f"reference {ref_coverage[0].date()} to {ref_coverage[1].date()}."
+        )
+        with ErrorLogger(logger):
+            raise ValueError(msg)
     input_da = input_da.sel(time=time_slice)
     ref_da = ref_da.sel(time=time_slice)
     if target_freq is None:
         target_freq = get_target_frequency(input_da, ref_da)
-    input_da, ref_da = resample_snow_to_target_frequency(input_da, ref_da, target_freq)
-
-    input_flag = create_snow_cover_flag(input_da, input_snow_threshold)
-    ref_flag = create_snow_cover_flag(ref_da, ref_snow_threshold)
-    input_flag = materialize_snow_flag(input_flag, max_memory_gib, "input snow cover")
-    ref_flag = materialize_snow_flag(ref_flag, max_memory_gib, "reference snow cover")
-    # the raw fields are the largest arrays in play and are done with once the
-    # flags are computed, so let them go before the metrics start
+    # only the shared grid and calendar come from the lazy records; the values
+    # are read again one file at a time so the raw fields never have to fit
+    bin_labels = create_target_bins(time_slice, target_freq)
+    target_grid = (bin_labels, input_da["lat"].values, input_da["lon"].values)
     del input_da, ref_da
+
+    input_flag = create_snow_flag_one_pass(
+        input_path,
+        input_file_name,
+        input_var,
+        "input",
+        target_grid,
+        target_freq,
+        time_slice,
+        input_snow_threshold,
+        ncpus=ncpus,
+        max_memory_gib=max_memory_gib,
+    )
+    ref_flag = create_snow_flag_one_pass(
+        ref_path,
+        ref_file_name,
+        ref_var,
+        "reference",
+        target_grid,
+        target_freq,
+        time_slice,
+        ref_snow_threshold,
+        ncpus=ncpus,
+        max_memory_gib=max_memory_gib,
+    )
+    input_flag, ref_flag = drop_uncovered_bins(input_flag, ref_flag, target_freq)
 
     step_days = float(
         np.median(np.diff(input_flag.time.values)) / np.timedelta64(1, "D")

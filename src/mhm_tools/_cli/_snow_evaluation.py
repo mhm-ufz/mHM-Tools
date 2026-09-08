@@ -185,6 +185,15 @@ def add_args(parser):
         help="Maximum number of gif frames, 0 for all time steps.",
     )
     optional.add_argument(
+        "--ncpus",
+        type=int,
+        default=1,
+        help=(
+            "Cores the input files are binned on. "
+            "0 uses every core the machine reports."
+        ),
+    )
+    optional.add_argument(
         "--max-memory-gib",
         type=float,
         default=8.0,
@@ -236,6 +245,7 @@ def run(args):
         gif_fps=args.gif_fps,
         max_gif_frames=args.max_gif_frames,
         max_memory_gib=args.max_memory_gib,
+        ncpus=args.ncpus,
     )
     for label, file_path in written_files.items():
         logger.info(f"{label}: {file_path}")

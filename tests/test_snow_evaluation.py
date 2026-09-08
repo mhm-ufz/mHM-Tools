@@ -10,11 +10,14 @@ from mhm_tools.common.time_utils import (
     normalize_time_axis,
     resample_to_target_freq,
 )
+from mhm_tools.common.xarray_utils import (
+    aggregate_to_target_grid,
+    regrid_to_coarser_grid,
+)
 from mhm_tools.post.snow_evaluation import (
     MISSING_VALUE,
     NO_SNOW_VALUE,
     SNOW_VALUE,
-    aggregate_to_target_grid,
     calculate_classification_accuracy,
     calculate_snow_covered_cell_percentage,
     calculate_snow_season_metrics,
@@ -25,7 +28,6 @@ from mhm_tools.post.snow_evaluation import (
     crop_to_region,
     get_snow_alias,
     get_target_frequency,
-    regrid_to_coarser_grid,
     resample_snow_to_target_frequency,
     select_hemisphere,
     select_regions,

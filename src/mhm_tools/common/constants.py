@@ -120,3 +120,32 @@ WMO_INDEX_TO_REGION = {
     6: "Europe",
 }
 WMO_REGION_TO_INDEX = {v: k for k, v in WMO_INDEX_TO_REGION.items()}
+MHM_TWS_STORAGE_VARS = (
+    "interception",
+    "swe",
+    "sealedSTW",
+    "unsatSTW",
+    "satSTW",
+)
+"""mHM storage variables that sum up to total water storage, without the soil layers."""
+MHM_SOIL_MOISTURE_PREFIX = "SWC_L"
+"""Prefix of the per-layer mHM soil water content variables (SWC_L01, SWC_L02, ...)."""
+WATER_STORAGE_UNIT_FACTORS_MM = {
+    "mm": 1.0,
+    "mm of water": 1.0,
+    "mm water equivalent": 1.0,
+    "mm h2o": 1.0,
+    "kg m-2": 1.0,
+    "kg/m2": 1.0,
+    "kg m^-2": 1.0,
+    "cm": 10.0,
+    "cm of water": 10.0,
+    "cm water equivalent": 10.0,
+    "cm h2o": 10.0,
+    "m": 1000.0,
+    "meter": 1000.0,
+    "metre": 1000.0,
+}
+"""Millimetres of water per unit, for the CF `units` attribute of a storage field."""
+KGE_CONSTANT_MEAN_BOUND = -0.41
+"""Lower end of every KGE scale, the score of a constant mean value predictor."""

@@ -9,7 +9,6 @@ Authors
 - Simon Lüdke
 """
 
-import array
 import logging
 import random
 import re
@@ -18,6 +17,7 @@ from typing import Iterable, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import xarray as xr
 from joblib import Parallel, delayed
 from matplotlib.colors import BoundaryNorm
@@ -38,8 +38,10 @@ from mhm_tools.common.time_utils import (
     resample_to_target_freq,
     timedelta_to_alias,
 )
-from mhm_tools.common.utils import cut_to_filled_area
+from mhm_tools.common.utils import cut_to_filled_area, split_file_list
 from mhm_tools.common.xarray_utils import (
+    SPEARMAN_BYTES_PER_ELEMENT,
+    calculate_spearman_over_time,
     crop_ds,
     get_clim_from_ds,
     get_coord_key,
@@ -47,10 +49,13 @@ from mhm_tools.common.xarray_utils import (
     get_overlapping_time_slice,
     normalize_lat_lon,
     regrid_mask,
-    spearman_correlation,
+    regrid_to_coarser_grid,
 )
 
 logger = logging.getLogger(__name__)
+# Working set of one spearman block. Small on purpose: the runtime is flat
+# down to a few MiB, so a bigger block would only raise the peak.
+SPEARMAN_BLOCK_BUDGET_MIB = 32
 
 
 class EvalDataset:
@@ -70,81 +75,53 @@ class EvalDataset:
         self.file_name = file_name
 
 
-def spearman_spatial(data1, data2):
-    """Calculate pixel-wise Spearman correlation maps for two DataArrays.
+def calculate_spearman_map(input_data, ref_data) -> Tuple[np.ndarray, np.ndarray]:
+    """Correlate two stacks cell by cell over their leading axis.
 
-    Both inputs must have shape (12, Y, X): one climatology value per month.
-    """
-    if len(np.shape(data1)) != len(np.shape(data2)) or len(np.shape(data1)) != 3:
-        with ErrorLogger(logger):
-            msg = "Wrong shape for spatial spearman correlation!"
-            raise ValueError(msg)
-    res = np.full(np.shape(data1[0]), np.nan)
-    pval = np.full(np.shape(data1[0]), np.nan)
-    for i, row in enumerate(data1[0]):
-        for j, _col in enumerate(row):
-            sp_corr, sp_pval = spearman_correlation(data1[:, i, j], data2[:, i, j])
-            res[i, j] = sp_corr
-            pval[i, j] = sp_pval
-    return res, pval
-
-
-def spearman_spatial_joblib(
-    data1: np.ndarray, data2: np.ndarray, spearman_correlation, n_jobs: int = -1
-) -> Tuple[np.ndarray, np.ndarray]:
-    """Parallel pixel-wise Spearman correlation over two arrays of shape (T, Y, X).
+    Vectorizing the correlation costs several float64 copies of whatever is
+    handed to the kernel, so the stack is fed to it in latitude blocks. The
+    block size is deliberately small: measured over a 200x280 grid the runtime
+    is flat from a 1 GiB block down to a 4 MiB one, so a larger block would
+    only raise the peak.
 
     Parameters
     ----------
-    data1, data2 : ndarray, shape (T, Y, X)
-        The two time-series stacks to correlate.
-    spearman_correlation : Callable
-        A function f(a: 1D, b: 1D) -> (rho, pval).
-    n_jobs : int
-        Number of parallel workers (-1 = all CPUs).
+    input_data, ref_data : numpy.ndarray
+        Stacks of the same shape, with time or month as the leading dimension.
 
     Returns
     -------
-    res : ndarray, shape (Y, X)
-        Spearman rho for each pixel.
-    pval : ndarray, shape (Y, X)
-        Two-tailed p-value for each pixel.
+    tuple of numpy.ndarray
+        Spearman rho and two-sided p-value, both of shape (lat, lon).
     """
-    # materialize once to avoid expensive lazy per-pixel loads
-    data1 = np.asarray(data1)
-    data2 = np.asarray(data2)
-
-    # get spatial shape
-    _, ny, nx = data1.shape
-
-    # pre-allocate outputs
-    res = np.full((ny, nx), np.nan, dtype=np.float32)
-    pval = np.full((ny, nx), np.nan, dtype=np.float32)
-
-    # list of all pixel indices
-    indices = [(i, j) for i in range(ny) for j in range(nx)]
-
-    # worker for a single pixel
-    def _worker(i, j):
-        rho, p = spearman_correlation(data1[:, i, j], data2[:, i, j])
-        return i, j, rho, p
-
-    if n_jobs == 1:
-        for i, j in indices:
-            rho, p = spearman_correlation(data1[:, i, j], data2[:, i, j])
-            res[i, j] = rho
-            pval[i, j] = p
-        return res, pval
-
-    # dispatch in parallel
-    results = Parallel(n_jobs=n_jobs)(delayed(_worker)(i, j) for i, j in indices)
-
-    # scatter results back
-    for i, j, rho, p in results:
-        res[i, j] = rho
-        pval[i, j] = p
-
-    return res, pval
+    if np.shape(input_data) != np.shape(ref_data) or len(np.shape(input_data)) != 3:
+        with ErrorLogger(logger):
+            msg = "Wrong shape for spatial spearman correlation!"
+            raise ValueError(msg)
+    # the kernel reduces the trailing axis, so the leading one is moved back
+    input_np = np.moveaxis(np.asarray(input_data), 0, -1)
+    ref_np = np.moveaxis(np.asarray(ref_data), 0, -1)
+    n_lat, n_lon, n_steps = input_np.shape
+    block_rows = max(
+        1,
+        int(
+            SPEARMAN_BLOCK_BUDGET_MIB
+            * 1024**2
+            // (n_lon * n_steps * SPEARMAN_BYTES_PER_ELEMENT)
+        ),
+    )
+    logger.info(
+        f"Correlating {n_lat}x{n_lon} cells over {n_steps} steps "
+        f"in blocks of {min(block_rows, n_lat)} rows."
+    )
+    rho = np.empty((n_lat, n_lon), dtype=np.float32)
+    pval = np.empty((n_lat, n_lon), dtype=np.float32)
+    for start in range(0, n_lat, block_rows):
+        stop = min(start + block_rows, n_lat)
+        rho[start:stop], pval[start:stop] = calculate_spearman_over_time(
+            input_np[start:stop], ref_np[start:stop]
+        )
+    return rho, pval
 
 
 def crop_datasets_to_spatial_overlap(input_ds, ref_ds):
@@ -229,22 +206,12 @@ def get_std_from_ds(ds, input_var=None, clim=None, factor=1):
     data = ds * factor if input_var is None else ds[input_var] * factor
 
     # Subtract climatology for each month
-    if clim is None:
+    if clim is not None:
         data_reduced = data.groupby("time.month") - clim
         std = data_reduced.std(dim="time", skipna=True)
     else:
         std = data.std(dim="time", skipna=True)
 
-    # Return as DataArray with appropriate coordinates
-    if type(std) is array and len(std.shape) == 2:
-        return xr.DataArray(
-            std,
-            coords={
-                "lat": get_coord_values(ds, lat=True),
-                "lon": get_coord_values(ds, lon=True),
-            },
-            dims=["lat", "lon"],
-        )
     return std
 
 
@@ -582,28 +549,80 @@ def get_files(path, n_bootstrap_years=None, available_years=None, file_name="*.*
 
 
 def combine_results(results):
-    """Combine the statistics calculated for subsets into one."""
-    total_count = sum(count for _, _, count, _, _ in results)
+    """Combine the statistics calculated for subsets into one.
+
+    Args:
+        results: One tuple per subset, as returned by
+            `get_stats_one_pass_subset`. Consumed in place, so the caller must
+            not read it again.
+
+    Returns
+    -------
+        Tuple of combined mean, M2, count, monthly sums and counts, and the
+        merged period sums and counts.
+    """
+    total_count = sum(count for _, _, count, _, _, _, _ in results)
     if total_count == 0:
         msg = "Total count of number of results is 0"
         with ErrorLogger(logger):
             raise ValueError(msg)
-    total_mean = sum(mean * count for mean, _, count, _, _ in results) / total_count
-    total_M2 = sum(M2 for _, M2, _, _, _ in results)
-    total_M2 += sum(
-        count * (mean - total_mean) ** 2 for mean, _, count, _, _ in results
+    total_mean = (
+        sum(mean * count for mean, _, count, _, _, _, _ in results) / total_count
     )
-    monthly_sums = sum(ms for _, _, _, ms, _ in results)
-    monthly_counts = sum(mc for _, _, _, _, mc in results)
-    return total_mean, total_M2, total_count, monthly_sums, monthly_counts
+    total_M2 = sum(M2 for _, M2, _, _, _, _, _ in results)
+    total_M2 += sum(
+        count * (mean - total_mean) ** 2 for mean, _, count, _, _, _, _ in results
+    )
+    monthly_sums = sum(ms for _, _, _, ms, _, _, _ in results)
+    monthly_counts = sum(mc for _, _, _, _, mc, _, _ in results)
+    # each subset streams its own files, so a calendar month can be split
+    # across subsets and its sums have to be added up per key. Both the subset
+    # and its buckets are popped as they are merged, so a subset's copy of the
+    # record is released here instead of outliving the merge.
+    period_sums, period_counts = {}, {}
+    while results:
+        _, _, _, _, _, subset_sums, subset_counts = results.pop(0)
+        for key in list(subset_sums):
+            values, counts = subset_sums.pop(key), subset_counts.pop(key)
+            if key in period_sums:
+                period_sums[key] += values
+                period_counts[key] += counts
+            else:
+                period_sums[key] = values
+                period_counts[key] = counts
+    return (
+        total_mean,
+        total_M2,
+        total_count,
+        monthly_sums,
+        monthly_counts,
+        period_sums,
+        period_counts,
+    )
 
 
-def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None):
+def get_stats_one_pass_subset(
+    files, input_var, factor=1, coordinate_slice=None, with_period_series=False
+):
     """Compute running statistics from a list of monthly files.
 
     Iterates through NetCDF files (each containing one month's data for
     `input_var`), optionally applies a spatial slice, multiplies by `factor`,
     and updates running aggregates.
+
+    Parameters
+    ----------
+    files : list
+        NetCDF files to stream through.
+    input_var : str
+        Variable to read.
+    factor : float
+        Unit conversion factor applied to every time step.
+    coordinate_slice : dict, optional
+        Lat/lon slices to crop each time step to.
+    with_period_series : bool
+        Also accumulate one field per calendar year and month, which gives the
+        monthly means the spatial metrics need without ever holding the record.
 
     Returns
     -------
@@ -617,6 +636,10 @@ def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None)
         Sum per calendar month, shape (12, ...).
     monthly_counts : ndarray
         Valid-count per calendar month, shape (12, ...).
+    period_sums : dict
+        Sum per (year, month) key, empty unless `with_period_series`.
+    period_counts : dict
+        Valid-count per (year, month) key, empty unless `with_period_series`.
     """
     da = None
     if not isinstance(files, Iterable):
@@ -644,7 +667,9 @@ def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None)
     mean = np.zeros(da.shape[1:])
     sum_square_diff = np.zeros(da.shape[1:])
     monthly_sums = np.zeros((12, *da.shape[1:]))
-    monthly_counts = np.zeros((12, *da.shape[1:]))
+    monthly_counts = np.zeros((12, *da.shape[1:]), dtype=np.uint32)
+    period_sums = {}
+    period_counts = {}
     for f, file in enumerate(files):
         with get_xarray_ds_from_file(
             file, var_name=input_var, engine="netcdf4", force_decending_y=True
@@ -670,8 +695,26 @@ def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None)
                     sum_square_diff += delta * delta2
                     # climatology
                     month = int(data_slice.time.dt.month.item()) - 1
-                    monthly_sums[month] += data_slice.fillna(0).values * factor
-                    monthly_counts[month] += ~np.isnan(data_slice.values)
+                    filled = data_slice.fillna(0).values * factor
+                    is_valid = ~np.isnan(data_slice.values)
+                    monthly_sums[month] += filled
+                    monthly_counts[month] += is_valid
+                    if with_period_series:
+                        # one bucket per calendar month of the record, so the
+                        # monthly means fall out of this same pass
+                        key = (int(data_slice.time.dt.year.item()), month + 1)
+                        if key not in period_sums:
+                            # a bucket only ever holds one month, so float32
+                            # sums and uint16 counts carry the record at a
+                            # quarter of the float64 footprint
+                            period_sums[key] = np.zeros(
+                                data_values.shape, dtype=np.float32
+                            )
+                            period_counts[key] = np.zeros(
+                                data_values.shape, dtype=np.uint16
+                            )
+                        period_sums[key] += filled
+                        period_counts[key] += is_valid
                 except Exception as e:
                     logger.error(data_slice)
                     with ErrorLogger(logger):
@@ -679,19 +722,55 @@ def get_stats_one_pass_subset(files, input_var, factor=1, coordinate_slice=None)
     logger.debug(
         f"{np.nanmean(mean)}, {np.nanmean(sum_square_diff)}, {count}, {np.nanmean(monthly_sums)}, {np.nanmean(monthly_counts)}"
     )
-    return mean, sum_square_diff, count, monthly_sums, monthly_counts
+    return (
+        mean,
+        sum_square_diff,
+        count,
+        monthly_sums,
+        monthly_counts,
+        period_sums,
+        period_counts,
+    )
 
 
-def split_file_list(file_list, n_processes):
-    """Split a list into sublists."""
-    file_list = list(file_list)
-    if n_processes > 1:
-        return [
-            subset
-            for subset in (file_list[i::n_processes] for i in range(n_processes))
-            if subset
-        ]
-    return file_list
+def create_period_mean_series(period_sums, period_counts, lat, lon, var, units=None):
+    """Create a monthly mean time series from streamed per-month buckets.
+
+    Parameters
+    ----------
+    period_sums, period_counts : dict
+        Sum and valid-count fields keyed by ``(year, month)``. Emptied in
+        place, so the caller must not read them again.
+    lat, lon : array-like
+        Coordinate values of the streamed grid.
+    var : str
+        Source variable name, used for the long name.
+    units : str, optional
+        Units copied onto the series.
+
+    Returns
+    -------
+    xarray.Dataset
+        Dataset with a single ``time_series`` variable on a monthly time axis.
+    """
+    keys = sorted(period_sums)
+    # filled bucket by bucket, popping each one once it has been divided, so
+    # the record is never stacked into a second full copy
+    means = np.full((len(keys), *period_sums[keys[0]].shape), np.nan, dtype=np.float32)
+    for index, key in enumerate(keys):
+        sums, counts = period_sums.pop(key), period_counts.pop(key)
+        np.divide(sums, counts, out=means[index], where=counts > 0)
+    times = pd.to_datetime([f"{year:04d}-{month:02d}-01" for year, month in keys])
+    series = xr.DataArray(
+        means,
+        coords={"time": times, "lat": lat, "lon": lon},
+        dims=["time", "lat", "lon"],
+        name="time_series",
+    )
+    series.attrs = {"long_name": f"Monthly mean of {var}"}
+    if units is not None:
+        series.attrs["units"] = units
+    return series.to_dataset()
 
 
 def get_stats_one_pass(
@@ -705,6 +784,7 @@ def get_stats_one_pass(
     output_path=None,
     available_years=None,
     file_name="*.*",
+    with_period_series=False,
 ):
     """Compute streaming statistics from monthly/yearly files.
 
@@ -712,6 +792,10 @@ def get_stats_one_pass(
     standard deviation, and monthly climatology. Optionally slices coordinates,
     applies a multiplicative factor, supports bootstrapping over years, and can
     write the result to disk.
+
+    With `with_period_series` the same pass also returns a monthly
+    `time_series`, so the spatial metrics can be calculated without the record
+    ever being held in memory.
     """
     files = []
     if path.is_dir():
@@ -734,13 +818,21 @@ def get_stats_one_pass(
     file_subsets = split_file_list(files, ncpus) if ncpus > 1 else [files]
     logger.info("creating statistics one pass...")
     subset_results = Parallel(n_jobs=ncpus, backend="loky")(
-        delayed(get_stats_one_pass_subset)(file_subset, var, factor, coordinate_slice)
+        delayed(get_stats_one_pass_subset)(
+            file_subset, var, factor, coordinate_slice, with_period_series
+        )
         for file_subset in file_subsets
     )
     logger.info("combining results...")
-    mean, sum_square_diff, count, monthly_sums, monthly_counts = combine_results(
-        subset_results
-    )
+    (
+        mean,
+        sum_square_diff,
+        count,
+        monthly_sums,
+        monthly_counts,
+        period_sums,
+        period_counts,
+    ) = combine_results(subset_results)
     logger.debug(
         f"{mean.mean()}, {sum_square_diff.mean()}, {count}, {monthly_sums.mean()}, {monthly_counts.mean()}"
     )
@@ -796,6 +888,15 @@ def get_stats_one_pass(
         coords={"month": np.arange(1, 13, 1), "lat": lat, "lon": lon},
     )
     output = generate_bounds_for_all_coords(output, res=spatial_resolution)
+    if period_sums:
+        output = xr.merge(
+            [
+                output,
+                create_period_mean_series(
+                    period_sums, period_counts, lat, lon, var, source_units
+                ),
+            ]
+        )
     # Trigger computation if needed
     if output_path is not None:
         output_file = (
@@ -1131,6 +1232,7 @@ def plot_map(
     plt.tight_layout()
     file_name = f"et_map_{input_name}_{ref_name}.png".replace(" ", "_")
     plt.savefig(output_path / file_name, dpi=800)
+    plt.close(fig)
     logger.info(f"created et_map {output_path / file_name}")
 
 
@@ -1283,6 +1385,7 @@ def plot_map_bias_only(
 
     file_name = f"et_map_bias_only_{input_name}_{ref_name}.png".replace(" ", "_")
     plt.savefig(output_path / file_name, dpi=800)
+    plt.close(fig)
     logger.info(f"created et_map {output_path / file_name}")
 
 
@@ -1343,6 +1446,7 @@ def plot_map_global_climate(
     plt.tight_layout()
     file_name = f"et_map_global_climate_{input_name}_{ref_name}.png".replace(" ", "_")
     plt.savefig(output_path / file_name, dpi=800)
+    plt.close(fig)
     logger.info(f"created et_map {output_path / file_name}")
 
 
@@ -1432,6 +1536,7 @@ def plot_map_global_climate2(
 
     file_name = f"et_map_global_climate2_{input_name}_{ref_name}.png".replace(" ", "_")
     plt.savefig(output_path / file_name, dpi=800)
+    plt.close(fig)
     logger.info(f"created et_map {output_path / file_name}")
 
 
@@ -1550,6 +1655,7 @@ def plot_map_local_climate(
         cbar.ax.tick_params(labelsize=8)
         fig.subplots_adjust(left=0.03, right=0.94, bottom=0.04, top=0.89)
         plt.savefig(output_path / output_file_name, dpi=400)
+        plt.close(fig)
         logger.info(f"created et_map {output_path / output_file_name}")
 
     rel_file_name = f"et_map_local_climate_rel_{input_name}_{ref_name}.png".replace(
@@ -1660,6 +1766,7 @@ def get_stats(
     mask_da=None,
     mask_var=None,
     file_name="*.*",
+    stream_metrics=False,
 ):
     """Get statistics dataset from a path to a file or directory with files."""
     logger.info(f"Get stats for {path}")
@@ -1675,6 +1782,7 @@ def get_stats(
                 output_path=output_file,
                 available_years=available_years,
                 file_name=file_name,
+                with_period_series=stream_metrics,
             )
         elif path.is_dir() or path.is_file():
             if path.is_file() and path.suffix == ".nc":
@@ -1775,6 +1883,8 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
     plot=True,
     bias_only=False,
     global_climate=False,
+    compare_on_coarser_grid=False,
+    stream_metrics=False,
     mask_da=None,
     mask_var=None,
     input_file_name=None,
@@ -1805,6 +1915,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
         mask_da=mask_da,
         mask_var=mask_var,
         file_name=input_file_name,
+        stream_metrics=stream_metrics,
     )
     logger.debug(f"input ds: {input}")
 
@@ -1823,6 +1934,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
         mask_da=mask_da,
         mask_var=mask_var,
         file_name=ref_file_name,
+        stream_metrics=stream_metrics,
     )
     logger.debug(f"ref ds: {ref}")
     logger.debug(
@@ -1840,7 +1952,12 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
         logger.error("Ref dataset has empty coordinate.")
 
     input, ref = crop_datasets_to_spatial_overlap(input, ref)
-    input, ref = regridd_to_higher_spatial_resolution(input, ref)
+    if compare_on_coarser_grid:
+        input, ref = regrid_datasets_to_coarser_grid(input, ref)
+        # the aggregation can shift the outer edges, so the overlap is taken again
+        input, ref = crop_datasets_to_spatial_overlap(input, ref)
+    else:
+        input, ref = regridd_to_higher_spatial_resolution(input, ref)
     logger.debug(
         f"After spatial overlap/regrid input/ref are all nan: "
         f"input_mean={bool(input['mean'].isnull().all().compute().item())}, "
@@ -1853,7 +1970,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
     full_metrics = not bias_only and not global_climate
     with_std = not bias_only
 
-    if direct_comp:
+    if direct_comp or stream_metrics:
         input_ts, ref_ts = input["time_series"], ref["time_series"]
 
         # If we already know the target frequency, resample to that; otherwise pick the coarser one.
@@ -1868,30 +1985,49 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
             msg = f"Input and ref time_series shapes differ after resampling/cropping: {input_ts.shape} vs {ref_ts.shape}"
             with ErrorLogger(logger):
                 raise ValueError(msg)
-        pairwise_valid = np.isfinite(input_ts.values) & np.isfinite(ref_ts.values)
-        input_ts = input_ts.where(pairwise_valid)
-        ref_ts = ref_ts.where(pairwise_valid)
         logger.info(
-            f"Creating data from timeseries with shape {input_ts.shape} and {ref_ts.shape}"
+            f"Creating data from timeseries with shape {input_ts.shape} "
+            f"and {ref_ts.shape} as {input_ts.dtype}"
         )
         if input_ts.sizes.get("time", 0) == 0 or ref_ts.sizes.get("time", 0) == 0:
             msg = "No overlapping time steps after alignment; cannot compare input and reference."
             logger.error(msg)
             raise ValueError(msg)
-        if not np.any(pairwise_valid):
-            msg = (
-                "Input and reference data have no paired finite values after "
-                "time alignment, spatial overlap, regridding, and masking."
-            )
-            with ErrorLogger(logger):
-                raise ValueError(msg)
-        try:
-            if full_metrics:
-                input_ts_np = np.asarray(input_ts.values)
-                ref_ts_np = np.asarray(ref_ts.values)
-                spearman, spearman_pval = spearman_spatial_joblib(
-                    input_ts_np, ref_ts_np, spearman_correlation, ncpus
-                )
+        no_pair_msg = (
+            "Input and reference data have no paired finite values after "
+            "time alignment, spatial overlap, regridding, and masking."
+        )
+        if not full_metrics:
+            # nothing below reads the stacks, so this stays a reduction that
+            # runs chunk by chunk instead of materializing both of them
+            if not bool((np.isfinite(input_ts) & np.isfinite(ref_ts)).any()):
+                with ErrorLogger(logger):
+                    raise ValueError(no_pair_msg)
+        else:
+            # astype always copies, so the metrics below own their arrays. Each
+            # record is released right after its copy exists, because a float64
+            # record and its float32 copy would otherwise both be held.
+            input_time, ref_time = input_ts.time, ref_ts.time
+            input_ts_np = input_ts.astype(np.float32).values
+            del input_ts
+            input = input.drop_vars("time_series")
+            ref_ts_np = ref_ts.astype(np.float32).values
+            del ref_ts
+            ref = ref.drop_vars("time_series")
+            # One buffer does both jobs: it holds the paired steps first and is
+            # then inverted into the mask that gives both stacks the same
+            # missing pattern, as the metrics below expect.
+            paired_valid = np.isfinite(input_ts_np)
+            paired_valid &= np.isfinite(ref_ts_np)
+            if not paired_valid.any():
+                with ErrorLogger(logger):
+                    raise ValueError(no_pair_msg)
+            np.logical_not(paired_valid, out=paired_valid)
+            input_ts_np[paired_valid] = np.nan
+            ref_ts_np[paired_valid] = np.nan
+            del paired_valid
+            try:
+                spearman, spearman_pval = calculate_spearman_map(input_ts_np, ref_ts_np)
                 create_results_csv(
                     map1=input_ts_np,
                     map2=ref_ts_np,
@@ -1901,11 +2037,12 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
                     out_name=output_name,
                     metric=result_metric,
                 )
-        except ValueError as ve:
-            logger.error("Input and ref do not have the same temporal extent.")
-            logger.info(input_ts.time)
-            logger.info(ref_ts.time)
-            raise ve
+            except ValueError as ve:
+                logger.error("Input and ref do not have the same temporal extent.")
+                logger.info(input_time)
+                logger.info(ref_time)
+                raise ve
+            del input_ts_np, ref_ts_np
     elif full_metrics:
         logger.info("Calculating spearman correlation from seasonalities.")
         input_clim_np = np.asarray(input["clim"].values)
@@ -1917,9 +2054,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
             )
             with ErrorLogger(logger):
                 raise ValueError(msg)
-        spearman, spearman_pval = spearman_spatial_joblib(
-            input_clim_np, ref_clim_np, spearman_correlation, ncpus
-        )
+        spearman, spearman_pval = calculate_spearman_map(input_clim_np, ref_clim_np)
         create_results_csv(
             map1=input_clim_np,
             map2=ref_clim_np,
@@ -2284,6 +2419,39 @@ def regridd_to_higher_spatial_resolution(ds1, ds2):
     return aligned_fine, aligned_coarse
 
 
+def regrid_datasets_to_coarser_grid(ds1, ds2):
+    """Bring two statistics datasets onto the coarser of their two grids.
+
+    The coordinate bounds are dropped before aggregating and regenerated after,
+    because averaging bounds values would not describe the new cells.
+
+    Parameters
+    ----------
+    ds1, ds2 : xarray.Dataset
+        Statistics datasets with 'lat' and 'lon' coordinates.
+
+    Returns
+    -------
+    xarray.Dataset
+        The first dataset on the common coarse grid.
+    xarray.Dataset
+        The second dataset on the common coarse grid.
+    """
+    bounds_vars = [
+        name
+        for name in set(ds1.variables) | set(ds2.variables)
+        if str(name).endswith("_bnds")
+    ]
+    coarse_ds1, coarse_ds2 = regrid_to_coarser_grid(
+        ds1.drop_vars(bounds_vars, errors="ignore"),
+        ds2.drop_vars(bounds_vars, errors="ignore"),
+    )
+    return (
+        generate_bounds_for_all_coords(coarse_ds1),
+        generate_bounds_for_all_coords(coarse_ds2),
+    )
+
+
 def get_years_from_path(path, raise_exception=True, file_name="*.*"):
     """Get available years from a dataset folder structure or file."""
     if path.is_dir():
@@ -2434,6 +2602,8 @@ def gridded_data_evaluation(  # noqa: PLR0913
     target_time_freq=None,
     bias_only=False,
     global_climate=False,
+    compare_on_coarser_grid=False,
+    stream_metrics=False,
     only_plot=False,
     result_metric="all",
     avaiable_mem=None,
@@ -2524,7 +2694,7 @@ def gridded_data_evaluation(  # noqa: PLR0913
                     input.var,
                     input.factor,
                     coordinate_slice,
-                    output=output_path / output_name,
+                    output_path=output_path / output_name,
                     avaiable_years=available_years,  # keep parameter name as used elsewhere
                 )
 
@@ -2598,6 +2768,8 @@ def gridded_data_evaluation(  # noqa: PLR0913
                     target_freq=target_time_freq,
                     bias_only=bias_only,
                     global_climate=global_climate,
+                    compare_on_coarser_grid=compare_on_coarser_grid,
+                    stream_metrics=stream_metrics,
                     mask_da=mask_da,
                     mask_var=mask_var,
                     result_metric=result_metric,
@@ -2681,6 +2853,8 @@ def gridded_data_evaluation(  # noqa: PLR0913
             target_freq=target_time_freq,
             bias_only=bias_only,
             global_climate=global_climate,
+            compare_on_coarser_grid=compare_on_coarser_grid,
+            stream_metrics=stream_metrics,
             mask_da=mask_da,
             mask_var=mask_var,
             result_metric=result_metric,

@@ -10,12 +10,8 @@ import numpy as np
 import pandas as pd
 from scipy.stats import spearmanr
 
-
-def filter_nan(s, o):
-    """Remove rows containing NaNs from paired arrays."""
-    data = np.transpose(np.array([s.flatten(), o.flatten()]))
-    data = data[~np.isnan(data).any(1)]
-    return data[:, 0], data[:, 1]
+# shared with the other spatial metrics; also keeps tsm.filter_nan importable
+from mhm_tools.common.metrics.spaef import filter_nan
 
 
 def objective_functions(s, o, metrics=None, param=""):
@@ -40,7 +36,7 @@ def objective_functions(s, o, metrics=None, param=""):
 
 def norm_deviation(data):
     """Calculate normalized deviation from spatial mean at that point in time."""
-    return data - np.nanmean(data, axis=(1, 2), keepdims=True) / np.nanmean(
+    return (data - np.nanmean(data, axis=(1, 2), keepdims=True)) / np.nanmean(
         data, axis=(1, 2), keepdims=True
     )
 

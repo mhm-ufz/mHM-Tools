@@ -25,6 +25,15 @@ from matplotlib.colors import BoundaryNorm, ListedColormap
 
 logger = logging.getLogger(__name__)
 
+# Dataset identity, one hue each, kept the same in every figure. Validated as a
+# categorical pair: protan dE 22.9, normal dE 31.9, both above the surface floor.
+INPUT_COLOR = "#1f6feb"
+REF_COLOR = "#d1495b"
+# recessive ink for axes, labels and captions
+AXIS_COLOR = "#9aa5ab"
+CAPTION_COLOR = "#5b6770"
+GRID_COLOR = "#e4e8ea"
+
 ONE_CENTERED_METRICS = {
     "alpha",
     "beta",
@@ -76,6 +85,29 @@ def _require_cartopy() -> None:
             "Install with `pip install cartopy` to enable plotting functions."
         )
         raise ImportError(msg)
+
+
+def style_axes(ax, show_grid=False):
+    """Apply the recessive axis styling shared by every figure.
+
+    Args:
+        ax: Matplotlib axes to style.
+        show_grid: Draw a light horizontal grid behind the data.
+
+    Returns
+    -------
+        The styled axes.
+    """
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    for spine in ("left", "bottom"):
+        ax.spines[spine].set_color(AXIS_COLOR)
+        ax.spines[spine].set_linewidth(0.8)
+    ax.tick_params(colors=CAPTION_COLOR, labelcolor=CAPTION_COLOR, length=3, width=0.8)
+    if show_grid:
+        ax.grid(axis="y", color=GRID_COLOR, linewidth=0.8)
+        ax.set_axisbelow(True)
+    return ax
 
 
 def calculate_cdf_values(values: Sequence[float]):
@@ -970,10 +1002,12 @@ def plot_discrete_data_map(
     x_max=None,
     y_min=None,
     y_max=None,
+    under_color=None,
 ):
     """Plot a map with discrete bins using a colorbar.
 
     Uses Cartopy for geographic projection and Matplotlib for color mapping.
+    `under_color` paints every value below vmin in one colour of its own.
     """
     _require_cartopy()
 
@@ -995,6 +1029,8 @@ def plot_discrete_data_map(
 
     base_cmap = plt.get_cmap(cmap, n_bins + extra)
     cmap = ListedColormap(base_cmap(np.arange(n_bins + extra)))
+    if under_color is not None:
+        cmap.set_under(under_color)
     norm = BoundaryNorm(levels, ncolors=n_bins + extra, extend=extend)
 
     # Set up the plot using Cartopy's PlateCarree projection
@@ -1054,6 +1090,7 @@ def plot_map(
     y_max: Optional[float] = None,
     vmin: Optional[float] = None,
     vmax: Optional[float] = None,
+    under_color: Optional[str] = None,
 ) -> None:
     """
     Plot and save a 2D DataArray over longitude and latitude using Cartopy.
@@ -1077,6 +1114,8 @@ def plot_map(
         Manual spatial limits for zooming.
     vmin, vmax : float, optional
         Color scale limits. If not provided, data min/max are used.
+    under_color : str, optional
+        Colour of every value below vmin, so it stays distinct from the scale.
     """
     _require_cartopy()
 
@@ -1121,6 +1160,7 @@ def plot_map(
             x_max=x_max,
             y_min=y_min,
             y_max=y_max,
+            under_color=under_color,
         )
 
 

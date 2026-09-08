@@ -38,6 +38,7 @@ from mhm_tools.common.netcdf import (
     generate_bounds,
     generate_bounds_for_all_coords,
     get_netcdf_metadata_data_vars,
+    normalize_variable_selection,
     prepare_dataset_for_netcdf_write,
     prepare_time_bounds_encoding,
     read_dataset,
@@ -469,7 +470,7 @@ def chunk_dataset_space_only(
 ) -> Dict[str, int]:
     """Chunk only in space (lat/lon), leaving time whole, sized to available memory.
 
-    - Uses 80% of available_mem_gib for a single chunk.
+    - Uses 10% of available_mem_gib for a single chunk.
     - Computes how many total cells (t * y * x) fit, then allocates all t,
       and splits y/x so that t·y·x·bytes_per_cell ≤ work_bytes.
     - If no time dimension, behaves similarly with t=1.
@@ -494,7 +495,7 @@ def chunk_dataset_space_only(
     nx = ds.sizes[lon_key]
     nt = ds.sizes.get(time_key, 1)
 
-    # --- memory budget in bytes (80%) ---
+    # --- memory budget in bytes (10%) ---
     work_bytes = max(int(0.1 * available_mem_gib * 1024**3), 4 * 1024**2)
     # how many total cells fit
     max_cells = work_bytes // dtype_sz
@@ -751,8 +752,9 @@ def get_xarray_ds_from_file(  # noqa: PLR0912
             file_path=file_path,
             use_mfdataset=use_mfdataset,
             engine=engine,
+            # "all" also decodes the grid mapping variable holding the CRS
             decode_coords="all" if load_crs else "coordinates",
-            variables=[var_name] if var_name else None,
+            variables=normalize_variable_selection(var_name),
         )
     elif suffix in {".tif", ".tiff"}:
         import rioxarray as rxr
@@ -784,6 +786,16 @@ def get_xarray_ds_from_file(  # noqa: PLR0912
             raise NotImplementedError(msg)
     lat_key = get_coord_key(ds_out, lat=True, raise_exception=False)
     lon_key = get_coord_key(ds_out, lon=True, raise_exception=False)
+    # normalize before the axis order is read, because a coordinate that is not
+    # an index yet makes the comparison below positional and therefore always
+    # ascending, which would silently keep a flipped grid
+    if normalize_latlon_coords:
+        # re-name input coords to lat and lon
+        ds_out = normalize_lat_lon(
+            ds_out, lat_key=lat_key, lon_key=lon_key, raise_exceptions=False
+        )
+        lat_key = get_coord_key(ds_out, lat=True, raise_exception=False)
+        lon_key = get_coord_key(ds_out, lon=True, raise_exception=False)
     # force correct order of y coordinate
     if lat_key is not None and (
         (force_decending_y and ds_out[lat_key].data[0] < ds_out[lat_key].data[-1])
@@ -793,11 +805,6 @@ def get_xarray_ds_from_file(  # noqa: PLR0912
     logger.debug(ds_out)
     logger.debug(lat_key)
     logger.debug(lon_key)
-    if normalize_latlon_coords:
-        # re-name input coords to lat and lon
-        ds_out = normalize_lat_lon(
-            ds_out, lat_key=lat_key, lon_key=lon_key, raise_exceptions=False
-        )
     if create_bounds:
         ds_out = generate_bounds_for_all_coords(ds_out)
     if lon_key is None and lat_key is None:
@@ -806,7 +813,12 @@ def get_xarray_ds_from_file(  # noqa: PLR0912
         logger.error("Dataset has only one of lon at lat keys.")
 
     if chunking and available_mem_gib is not None:
-        ds_out = chunk_dataset(ds_out, chunk_type, available_mem_gib, var_name)
+        # several variables share one dtype and shape, so sizing the chunks on
+        # the first of them sizes them for each
+        selected = normalize_variable_selection(var_name)
+        ds_out = chunk_dataset(
+            ds_out, chunk_type, available_mem_gib, selected[0] if selected else None
+        )
     else:
         # if no chunking remove chunking encoding because this might cause errors while writing
         for name in list(ds_out.variables):
@@ -1211,6 +1223,16 @@ def get_dataset_from_path(
     def _postprocess(ds_out):
         lat_key = get_coord_key(ds_out, lat=True, raise_exception=False)
         lon_key = get_coord_key(ds_out, lon=True, raise_exception=False)
+        # normalize before the axis order is read, because a coordinate that is
+        # not an index yet makes the comparison below positional and therefore
+        # always ascending, which would silently keep a flipped grid
+        if normalize_latlon_coords:
+            ds_out = normalize_lat_lon(
+                ds_out, lat_key=lat_key, lon_key=lon_key, raise_exceptions=False
+            )
+            lat_key = get_coord_key(ds_out, lat=True, raise_exception=False)
+            lon_key = get_coord_key(ds_out, lon=True, raise_exception=False)
+
         if lat_key is not None and (
             (force_decending_y and ds_out[lat_key].data[0] < ds_out[lat_key].data[-1])
             or (
@@ -1225,18 +1247,17 @@ def get_dataset_from_path(
         logger.debug(lat_key)
         logger.debug(lon_key)
 
-        if normalize_latlon_coords:
-            ds_out = normalize_lat_lon(
-                ds_out, lat_key=lat_key, lon_key=lon_key, raise_exceptions=False
-            )
-
         if lon_key is None and lat_key is None:
             logger.warning("Dataset does not have lon and lat key.")
         elif lon_key is None or lat_key is None:
             logger.error("Dataset has only one of lon at lat keys.")
 
         if chunking and available_mem_gib is not None:
-            ds_out = chunk_dataset(ds_out, chunk_type, available_mem_gib, var_name)
+            # several variables share one dtype and shape, so sizing the chunks
+            # on the first of them sizes them for each
+            selected = normalize_variable_selection(var_name)
+            chunk_var = selected[0] if selected else None
+            ds_out = chunk_dataset(ds_out, chunk_type, available_mem_gib, chunk_var)
         else:
             for name in list(ds_out.variables):
                 enc = ds_out.variables[name].encoding
@@ -1295,7 +1316,7 @@ def get_dataset_from_path(
             file_list,
             use_mfdataset=use_mfdataset,
             engine=engine,
-            variables=[var_name] if var_name else None,
+            variables=normalize_variable_selection(var_name),
         )
         return _postprocess(ds_out)
 
@@ -1325,7 +1346,7 @@ def get_dataset_from_path(
             path_str,
             use_mfdataset=use_mfdataset,
             engine=engine,
-            variables=[var_name] if var_name else None,
+            variables=normalize_variable_selection(var_name),
         )
         return _postprocess(ds_out)
 
