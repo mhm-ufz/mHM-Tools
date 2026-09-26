@@ -18,11 +18,11 @@ EPILOG = """Manifest input (-i pointing at a .csv or .txt file) formats several 
 -t lc -- historical land-cover periods (needs -l, -m and -c):
 
 \b
-  StartYear,EndYear,FilePath
-  2000,2004,landcover_2000.tif
-  2005,2009,landcover_2005.tif
+  StartDateTime,EndDateTime,FilePath
+  2000-01-01T00:00:00,2005-07-01T12:00:00,landcover_2000.tif
+  2005-07-01T12:00:00,2010-01-01T00:00:00,landcover_2005.tif
 
-Periods must not overlap and must leave no gap: each StartYear is the previous EndYear plus one. -e asc writes one lc_<start>_<end>.asc per period; -e nc writes a single lc_periods.nc.
+Periods use inclusive start and exclusive end boundaries. They must be ordered without gaps or overlaps: each StartDateTime equals the previous EndDateTime. Year-only values are accepted. Legacy StartYear/EndYear manifests remain supported with inclusive end years. -e asc writes one file per period; -e nc writes a single lc_periods.nc.
 
 -t soil -- physical horizon layers (no lookup table; -l, -m and -c are ignored):
 

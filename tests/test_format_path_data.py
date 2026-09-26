@@ -41,7 +41,7 @@ def _write_raster(
 
 
 def test_format_lc_periods_maps_before_majority_and_writes_both_formats(tmp_path):
-    """Historical classes are mapped before mode resampling and retain bounds."""
+    """Historical classes are mapped first and retain full datetime bounds."""
     input_path = tmp_path / "land-cover"
     input_path.mkdir()
     first = input_path / "first.tif"
@@ -61,7 +61,9 @@ def test_format_lc_periods_maps_before_majority_and_writes_both_formats(tmp_path
     )
     manifest = input_path / "historical-land-cover.csv"
     manifest.write_text(
-        "StartYear,EndYear,FilePath\n" "2000,2004,first.tif\n" "2005,2009,second.tif\n",
+        "StartDateTime,EndDateTime,FilePath\n"
+        "2000-01-01T00:00:00,2005-07-01T12:00:00,first.tif\n"
+        "2005-07-01T12:00:00,2010-01-01T00:00:00,second.tif\n",
         encoding="utf-8",
     )
 
@@ -75,8 +77,8 @@ def test_format_lc_periods_maps_before_majority_and_writes_both_formats(tmp_path
         "asc",
     )
     assert [path.name for path in ascii_outputs] == [
-        "lc_2000_2004.asc",
-        "lc_2005_2009.asc",
+        "lc_20000101T000000_20050701T120000.asc",
+        "lc_20050701T120000_20100101T000000.asc",
     ]
     with rasterio.open(ascii_outputs[0]) as dataset:
         np.testing.assert_array_equal(dataset.read(1), [[1]])
@@ -99,14 +101,17 @@ def test_format_lc_periods_maps_before_majority_and_writes_both_formats(tmp_path
         np.testing.assert_array_equal(dataset["land_cover"].values[:, 0, 0], [1, 2])
         np.testing.assert_array_equal(
             dataset["time"].values,
-            np.array(["2000-01-01", "2005-01-01"], dtype="datetime64[ns]"),
+            np.array(
+                ["2000-01-01T00:00:00", "2005-07-01T12:00:00"],
+                dtype="datetime64[ns]",
+            ),
         )
         np.testing.assert_array_equal(
             dataset["time_bnds"].values,
             np.array(
                 [
-                    ["2000-01-01", "2005-01-01"],
-                    ["2005-01-01", "2010-01-01"],
+                    ["2000-01-01T00:00:00", "2005-07-01T12:00:00"],
+                    ["2005-07-01T12:00:00", "2010-01-01T00:00:00"],
                 ],
                 dtype="datetime64[ns]",
             ),
@@ -170,18 +175,20 @@ def test_format_lc_periods_reprojects_to_dem_crs(tmp_path, output_type):
 
 
 def test_format_lc_periods_rejects_gaps(tmp_path):
-    """Inclusive historical periods must form one gap-free time axis."""
+    """Datetime periods must form one ordered, continuous time axis."""
     input_path = tmp_path / "land-cover"
     input_path.mkdir()
     _write_raster(input_path / "first.tif", np.ones((1, 1), dtype=np.int16))
     _write_raster(input_path / "second.tif", np.ones((1, 1), dtype=np.int16))
     manifest = input_path / "format-data.csv"
     manifest.write_text(
-        "StartYear,EndYear,FilePath\n" "2000,2004,first.tif\n" "2006,2009,second.tif\n",
+        "start_date_time,end-date-time,file path\n"
+        "2000-01-01,2005-01-01,first.tif\n"
+        "2006-01-01,2010-01-01,second.tif\n",
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="gap between 2004 and 2006"):
+    with pytest.raises(ValueError, match="ordered, continuous and non-overlapping"):
         format_lc_periods(
             manifest,
             tmp_path / "missing-dem.tif",

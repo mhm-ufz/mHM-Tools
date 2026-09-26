@@ -171,7 +171,7 @@ def read_format_manifest(input_file: PathLike, required_columns):
             )
             raise ValueError(msg)
         rename[column] = required
-    return manifest, table.rename(columns=rename)[list(required_columns)].copy()
+    return manifest, table.rename(columns=rename).copy()
 
 
 def _lookup_mapping(table, mapping_field: str, class_field: str) -> dict:

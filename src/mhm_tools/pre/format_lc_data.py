@@ -18,8 +18,8 @@ Authors
 
 from __future__ import annotations
 
-import logging
 import datetime as dt
+import logging
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Union
@@ -41,6 +41,7 @@ from mhm_tools.common.format_data import (
 )
 from mhm_tools.common.lookup_handler import (
     _lookup_mapping,
+    _normalise_field_name,
     read_format_manifest,
     read_lookup_table,
 )
@@ -76,34 +77,48 @@ def _period_datetime(value, label: str) -> dt.datetime:
     try:
         result = dt.datetime.fromisoformat(text)
     except ValueError as error:
-        raise ValueError(f"{label} must be a year or ISO datetime: {value!r}") from error
+        msg = f"{label} must be a year or ISO datetime: {value!r}"
+        raise ValueError(msg) from error
     if result.tzinfo is not None:
-        raise ValueError(f"{label} must use a timezone-free UTC datetime.")
+        msg = f"{label} must use a timezone-free UTC datetime."
+        raise ValueError(msg)
     return result
 
 
 def _read_lc_manifest(input_file: PathLike):
     """Read continuous [start, end) dates, retaining inclusive legacy year CSVs."""
     manifest, table = read_format_manifest(input_file, ("FilePath",))
-    legacy = {"StartYear", "EndYear"}.issubset(table.columns)
-    columns = ("StartYear", "EndYear") if legacy else ("StartDateTime", "EndDateTime")
-    if not set(columns).issubset(table.columns):
-        raise ValueError("Manifest requires StartDateTime/EndDateTime or StartYear/EndYear.")
+    normalized_columns = {
+        _normalise_field_name(column): column for column in table.columns
+    }
+    legacy = {"startyear", "endyear"}.issubset(normalized_columns)
+    labels = ("StartYear", "EndYear") if legacy else ("StartDateTime", "EndDateTime")
+    columns = tuple(
+        normalized_columns.get(_normalise_field_name(label)) for label in labels
+    )
+    if any(column is None for column in columns):
+        msg = "Manifest requires StartDateTime/EndDateTime or StartYear/EndYear."
+        raise ValueError(msg)
     periods = []
     for row_number, row in enumerate(table.to_dict("records"), start=2):
-        start = _period_datetime(row[columns[0]], columns[0])
-        end = _period_datetime(row[columns[1]], columns[1])
+        start = _period_datetime(row[columns[0]], labels[0])
+        end = _period_datetime(row[columns[1]], labels[1])
         if legacy:
             end = dt.datetime(end.year + 1, 1, 1)
         if start >= end:
-            raise ValueError(f"Manifest row {row_number} must end after it starts.")
-        periods.append({
-            "start": start, "end": end,
-            "path": _manifest_raster_path(manifest, row["FilePath"], row_number),
-        })
+            msg = f"Manifest row {row_number} must end after it starts."
+            raise ValueError(msg)
+        periods.append(
+            {
+                "start": start,
+                "end": end,
+                "path": _manifest_raster_path(manifest, row["FilePath"], row_number),
+            }
+        )
     for previous, current in zip(periods, periods[1:]):
         if current["start"] != previous["end"]:
-            raise ValueError("Land-cover periods must be ordered, continuous and non-overlapping.")
+            msg = "Land-cover periods must be ordered, continuous and non-overlapping."
+            raise ValueError(msg)
     return manifest, periods
 
 
@@ -340,8 +355,6 @@ def _create_lc_netcdf(path, reference, reference_crs, periods):
     Returns the open dataset and its ``land_cover`` variable; the caller fills
     one period at a time and is responsible for closing the dataset.
     """
-    import datetime as dt
-
     import netCDF4
 
     transform = reference.transform

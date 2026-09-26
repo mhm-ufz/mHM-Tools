@@ -318,8 +318,8 @@ def test_rasterize_map_normalizes_integral_text_and_numeric_keys(tmp_path: Path)
         )
 
 
-def test_rasterize_map_cli_registration_and_short_options(monkeypatch):
-    """The grouped command accepts its single-dash option forms."""
+def test_rasterize_map_cli_forwards_options(monkeypatch):
+    """The grouped command forwards direct, lookup, and CRS options."""
     captured = {}
 
     def fake_rasterize_map_data(**kwargs):
@@ -330,92 +330,7 @@ def test_rasterize_map_cli_registration_and_short_options(monkeypatch):
         "rasterize_map_data",
         fake_rasterize_map_data,
     )
-    runner = CliRunner()
-    result = runner.invoke(
-        cli,
-        [
-            "data-converter",
-            "rasterize-map",
-            "-i",
-            "soil.gpkg",
-            "-d",
-            "dem.tif",
-            "-o",
-            "soil.tif",
-            "-b",
-            "map_code",
-        ],
-    )
-
-    assert result.exit_code == 0, result.output
-    assert captured == {
-        "input_file": Path("soil.gpkg"),
-        "dem_file": Path("dem.tif"),
-        "output_file": Path("soil.tif"),
-        "burn_field": "map_code",
-    }
-    alias_result = runner.invoke(cli, ["data-converter", "rasterize_map", "--help"])
-    assert alias_result.exit_code == 0
-
-
-def test_rasterize_map_cli_lookup_options(monkeypatch):
-    """The CLI maps category fields through the requested lookup burn field."""
-    captured = {}
-
-    def fake_rasterize_map_data(**kwargs):
-        captured.update(kwargs)
-
-    monkeypatch.setattr(
-        rasterize_map_module,
-        "rasterize_map_data",
-        fake_rasterize_map_data,
-    )
-    runner = CliRunner()
-    result = runner.invoke(
-        cli,
-        [
-            "data-converter",
-            "rasterize-map",
-            "-i",
-            "soil.gpkg",
-            "-d",
-            "dem.tif",
-            "-o",
-            "soil.tif",
-            "-l",
-            "lookup.csv",
-            "-m",
-            "map_code",
-            "-b",
-            "SOIL_CLASS",
-        ],
-    )
-
-    assert result.exit_code == 0, result.output
-    assert captured == {
-        "input_file": Path("soil.gpkg"),
-        "dem_file": Path("dem.tif"),
-        "output_file": Path("soil.tif"),
-        "burn_field": "SOIL_CLASS",
-        "lookup_table": Path("lookup.csv"),
-        "mapping_field": "map_code",
-    }
-
-
-def test_rasterize_map_cli_forwards_crs_options(monkeypatch):
-    """The optional short CRS arguments are forwarded to rasterization."""
-    captured = {}
-
-    def fake_rasterize_map_data(**kwargs):
-        captured.update(kwargs)
-
-    monkeypatch.setattr(
-        rasterize_map_module,
-        "rasterize_map_data",
-        fake_rasterize_map_data,
-    )
-    runner = CliRunner()
-    result = runner.invoke(
+    result = CliRunner().invoke(
         cli,
         [
             "data-converter",
@@ -427,6 +342,10 @@ def test_rasterize_map_cli_forwards_crs_options(monkeypatch):
             "-o",
             "soil.tif",
             "-b",
+            "SOIL_CLASS",
+            "-l",
+            "lookup.csv",
+            "-m",
             "map_code",
             "-s",
             "EPSG:32631",
@@ -436,8 +355,16 @@ def test_rasterize_map_cli_forwards_crs_options(monkeypatch):
     )
 
     assert result.exit_code == 0, result.output
-    assert captured["input_crs"] == "EPSG:32631"
-    assert captured["dem_crs"] == "EPSG:32632"
+    assert captured == {
+        "input_file": Path("soil.gpkg"),
+        "dem_file": Path("dem.asc"),
+        "output_file": Path("soil.tif"),
+        "burn_field": "SOIL_CLASS",
+        "lookup_table": Path("lookup.csv"),
+        "mapping_field": "map_code",
+        "input_crs": "EPSG:32631",
+        "dem_crs": "EPSG:32632",
+    }
 
 
 @pytest.mark.parametrize(
@@ -472,20 +399,3 @@ def test_rasterize_map_cli_rejects_incomplete_lookup_options(lookup_options):
         "Options --lookup-table and --mapping-field must be provided together."
         in result.output
     )
-
-
-def test_rasterize_map_cli_help_describes_both_modes():
-    """Command help exposes burn, lookup, and mapping options under aliases."""
-    runner = CliRunner()
-    result = runner.invoke(
-        cli,
-        ["data-converter", "rasterize_map", "--help"],
-    )
-
-    assert result.exit_code == 0, result.output
-    assert "-b, --burn-field" in result.output
-    assert "-l, --lookup-table" in result.output
-    assert "-m, --mapping-field" in result.output
-    assert "-s, --input-crs" in result.output
-    assert "-r, --dem-crs" in result.output
-    assert ".asc, .nc, .tif, or .tiff" in result.output

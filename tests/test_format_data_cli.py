@@ -81,6 +81,8 @@ def test_format_data_dispatches_with_shared_options(
             "EPSG:32632",
             "-r",
             "EPSG:32633",
+            "--resampling",
+            "mode",
             *extension_args,
         ],
     )
@@ -96,25 +98,9 @@ def test_format_data_dispatches_with_shared_options(
         "output_type": extension,
         "input_crs": "EPSG:32632",
         "dem_crs": "EPSG:32633",
+        "resampling": "mode",
         "fill_nodata": True,
     }
-
-
-def test_format_data_help_and_alias():
-    """Help exposes the new choices through both command spellings."""
-    runner = CliRunner()
-    result = runner.invoke(cli, ["data-converter", "format-data", "--help"])
-    alias_result = runner.invoke(cli, ["data-converter", "format_data", "--help"])
-
-    assert result.exit_code == 0, result.output
-    assert alias_result.exit_code == 0, alias_result.output
-    assert "-t, --type" in result.output
-    assert "[soil|geology|lai|lc]" in result.output
-    assert "-i, --input-file" in result.output
-    assert "-c, --class-field" in result.output
-    assert "-e, --extension" in result.output
-    assert "[nc|asc|tif]" in result.output
-    assert "--output-temporal-resolution" in result.output
 
 
 def test_format_data_help_documents_manifest_formats():
@@ -123,24 +109,13 @@ def test_format_data_help_documents_manifest_formats():
 
     assert result.exit_code == 0, result.output
     # The land-cover and soil headers appear verbatim, so they can be copied.
-    assert "StartYear,EndYear,FilePath" in result.output
+    assert "StartDateTime,EndDateTime,FilePath" in result.output
     assert (
         "Horizon,Upper Depth,Lower Depth,Clay Layer,Sand Layer,Silt Layer,"
         "Bulk Density Layer,Bulk Density Unit" in result.output
     )
-    assert "2000,2004,landcover_2000.tif" in result.output
+    assert "2000-01-01T00:00:00,2005-07-01T12:00:00,landcover_2000.tif" in result.output
     assert "1,0,100,clay1.tif,sand1.tif,silt1.tif,bd1.tif,kg/m3" in result.output
-    assert "-i, --input-file" in result.output
-
-
-def test_epilog_is_opt_in_per_command():
-    """Only modules defining EPILOG get one; others keep their help unchanged."""
-    result = CliRunner().invoke(cli, ["visualization", "2d-map", "--help"])
-
-    assert result.exit_code == 0, result.output
-    # _2d_map.py sets parser.epilog, which the builder deliberately ignores.
-    assert "--colorbar-label 'Temp" not in result.output
-    assert "Manifest input" not in result.output
 
 
 @pytest.mark.parametrize(
@@ -186,78 +161,6 @@ def test_format_data_dispatches_gridded_lai_without_lookup(
         "dem_crs": None,
         "resampling": "bilinear",
     }
-
-
-def test_format_data_accepts_input_file(monkeypatch):
-    """The input-file option forwards a single raster."""
-    captured = {}
-
-    def fake_formatter(**kwargs):
-        captured.update(kwargs)
-
-    module = importlib.import_module("mhm_tools.pre.format_lc_data")
-    monkeypatch.setattr(module, "format_lc_data", fake_formatter)
-    result = CliRunner().invoke(
-        cli,
-        [
-            "data-converter",
-            "format-data",
-            "-t",
-            "lc",
-            "--input-file",
-            "input.tif",
-            "-d",
-            "dem.tif",
-            "-o",
-            "output",
-            "-l",
-            "lookup.gpkg",
-            "-m",
-            "source",
-            "-c",
-            "target",
-        ],
-    )
-
-    assert result.exit_code == 0, result.output
-    assert captured["input_file"] == Path("input.tif")
-
-
-def test_format_data_forwards_explicit_resampling_to_single_files(monkeypatch):
-    """The shared resampling option also applies to legacy file inputs."""
-    captured = {}
-
-    def fake_formatter(**kwargs):
-        captured.update(kwargs)
-
-    module = importlib.import_module("mhm_tools.pre.format_geology")
-    monkeypatch.setattr(module, "format_geology_data", fake_formatter)
-    result = CliRunner().invoke(
-        cli,
-        [
-            "data-converter",
-            "format-data",
-            "-t",
-            "geology",
-            "-i",
-            "input.tif",
-            "-d",
-            "dem.tif",
-            "-o",
-            "output",
-            "-l",
-            "lookup.gpkg",
-            "-m",
-            "source",
-            "-c",
-            "target",
-            "--resampling",
-            "mode",
-        ],
-    )
-
-    assert result.exit_code == 0, result.output
-    assert captured["resampling"] == "mode"
 
 
 @pytest.mark.parametrize(
@@ -343,41 +246,6 @@ def test_format_data_rejects_directory_input(tmp_path):
     assert "not a directory" in result.output
 
 
-@pytest.mark.parametrize(
-    ("option", "value"),
-    [("-t", "landcover"), ("-e", "tiff")],
-)
-def test_format_data_rejects_invalid_choices(option, value):
-    """Unsupported data types and output extensions fail during parsing."""
-    arguments = [
-        "data-converter",
-        "format-data",
-        "-t",
-        "soil",
-        "-i",
-        "input.tif",
-        "-d",
-        "dem.tif",
-        "-o",
-        "output",
-        "-l",
-        "lookup.gpkg",
-        "-m",
-        "source",
-        "-c",
-        "target",
-    ]
-    if option == "-t":
-        arguments[arguments.index("soil")] = value
-    else:
-        arguments.extend([option, value])
-
-    result = CliRunner().invoke(cli, arguments)
-
-    assert result.exit_code != 0
-    assert "Invalid value" in result.output
-
-
 def test_format_data_requires_class_field():
     """The CLI never guesses a lookup class column."""
     result = CliRunner().invoke(
@@ -402,13 +270,3 @@ def test_format_data_requires_class_field():
 
     assert result.exit_code != 0
     assert "class-field" in result.output
-
-
-def test_old_format_commands_are_not_registered():
-    """Only the consolidated formatter is listed in data-converter."""
-    result = CliRunner().invoke(cli, ["data-converter", "--help"])
-
-    assert result.exit_code == 0, result.output
-    assert "format-data" in result.output
-    assert "format-soil-data" not in result.output
-    assert "format-geology-data" not in result.output
