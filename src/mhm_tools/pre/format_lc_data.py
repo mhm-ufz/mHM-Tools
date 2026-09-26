@@ -19,6 +19,7 @@ Authors
 from __future__ import annotations
 
 import logging
+import datetime as dt
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Union
@@ -40,7 +41,6 @@ from mhm_tools.common.format_data import (
 )
 from mhm_tools.common.lookup_handler import (
     _lookup_mapping,
-    _required_integer,
     read_format_manifest,
     read_lookup_table,
 )
@@ -68,43 +68,42 @@ def _manifest_raster_path(manifest: Path, value, row_number: int) -> Path:
     return path
 
 
+def _period_datetime(value, label: str) -> dt.datetime:
+    """Parse a year or ISO datetime value into a naive period boundary."""
+    text = str(value).strip()
+    if len(text) == 4 and text.isdigit():
+        text += "-01-01"
+    try:
+        result = dt.datetime.fromisoformat(text)
+    except ValueError as error:
+        raise ValueError(f"{label} must be a year or ISO datetime: {value!r}") from error
+    if result.tzinfo is not None:
+        raise ValueError(f"{label} must use a timezone-free UTC datetime.")
+    return result
+
+
 def _read_lc_manifest(input_file: PathLike):
-    """Read validated, chronological land-cover period records."""
-    manifest, table = read_format_manifest(
-        input_file,
-        ("StartYear", "EndYear", "FilePath"),
-    )
+    """Read continuous [start, end) dates, retaining inclusive legacy year CSVs."""
+    manifest, table = read_format_manifest(input_file, ("FilePath",))
+    legacy = {"StartYear", "EndYear"}.issubset(table.columns)
+    columns = ("StartYear", "EndYear") if legacy else ("StartDateTime", "EndDateTime")
+    if not set(columns).issubset(table.columns):
+        raise ValueError("Manifest requires StartDateTime/EndDateTime or StartYear/EndYear.")
     periods = []
-    for row_number, row in enumerate(table.itertuples(index=False), start=2):
-        start = _required_integer(row.StartYear, "StartYear", row_number, "Manifest")
-        end = _required_integer(row.EndYear, "EndYear", row_number, "Manifest")
-        if start > end:
-            msg = (
-                f"Manifest row {row_number} has StartYear {start} after EndYear {end}."
-            )
-            raise ValueError(msg)
-        periods.append(
-            {
-                "start": start,
-                "end": end,
-                "path": _manifest_raster_path(manifest, row.FilePath, row_number),
-            }
-        )
-    periods.sort(key=lambda period: (period["start"], period["end"]))
+    for row_number, row in enumerate(table.to_dict("records"), start=2):
+        start = _period_datetime(row[columns[0]], columns[0])
+        end = _period_datetime(row[columns[1]], columns[1])
+        if legacy:
+            end = dt.datetime(end.year + 1, 1, 1)
+        if start >= end:
+            raise ValueError(f"Manifest row {row_number} must end after it starts.")
+        periods.append({
+            "start": start, "end": end,
+            "path": _manifest_raster_path(manifest, row["FilePath"], row_number),
+        })
     for previous, current in zip(periods, periods[1:]):
-        if current["start"] <= previous["end"]:
-            msg = (
-                "Land-cover periods overlap: "
-                f"{previous['start']}-{previous['end']} and "
-                f"{current['start']}-{current['end']}."
-            )
-            raise ValueError(msg)
-        if current["start"] != previous["end"] + 1:
-            msg = (
-                "Land-cover periods have a gap between "
-                f"{previous['end']} and {current['start']}."
-            )
-            raise ValueError(msg)
+        if current["start"] != previous["end"]:
+            raise ValueError("Land-cover periods must be ordered, continuous and non-overlapping.")
     return manifest, periods
 
 
@@ -374,12 +373,11 @@ def _create_lc_netcdf(path, reference, reference_crs, periods):
         chunksizes=(1, min(256, rows), min(256, cols)),
     )
 
-    # Each period spans whole years, so its bounds run from the first instant
-    # of StartYear to the first instant of the year after EndYear.
+    # Continuous boundaries are preserved verbatim, including sub-year changes.
     units = "days since 1970-01-01 00:00:00"
     calendar = "proleptic_gregorian"
-    starts = [dt.datetime(period["start"], 1, 1) for period in periods]
-    ends = [dt.datetime(period["end"] + 1, 1, 1) for period in periods]
+    starts = [period["start"] for period in periods]
+    ends = [period["end"] for period in periods]
     time[:] = netCDF4.date2num(starts, units, calendar=calendar)
     time_bounds[:, 0] = netCDF4.date2num(starts, units, calendar=calendar)
     time_bounds[:, 1] = netCDF4.date2num(ends, units, calendar=calendar)
@@ -541,6 +539,9 @@ def format_lc_periods(
 ) -> tuple[Path, ...]:
     """Format historical land-cover rasters listed by a manifest.
 
+    StartDateTime/EndDateTime accept ISO datetimes or years with matching
+    adjacent boundaries. Legacy StartYear/EndYear remain inclusive whole years.
+
     Parameters
     ----------
     fill_nodata : bool, default True
@@ -572,7 +573,12 @@ def format_lc_periods(
 
     if output_type == "asc":
         outputs = tuple(
-            output_path / f"lc_{period['start']}_{period['end']}.asc"
+            output_path / (
+                f"lc_{period['start'].year}_{period['end'].year - 1}.asc"
+                if period["start"] == dt.datetime(period["start"].year, 1, 1)
+                and period["end"] == dt.datetime(period["end"].year, 1, 1)
+                else f"lc_{period['start']:%Y%m%dT%H%M%S}_{period['end']:%Y%m%dT%H%M%S}.asc"
+            )
             for period in periods
         )
         collisions = [output for output in outputs if output.resolve() in protected]
