@@ -109,7 +109,6 @@ class TestCutToFilledArea(unittest.TestCase):
                 ds=ds, resolutions=Resolution(l0=1.0), catchment_mask=mask
             )
 
-
 L0_RES = 1 / 600
 L2_RES = 0.1
 FACTOR = 60

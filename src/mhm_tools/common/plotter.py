@@ -325,6 +325,24 @@ def plot_metric_cdf_comparison(
             ax.axvline(
                 median_value,
                 color=color,
+                linestyle="dotted",
+                linewidth=1,
+            )
+
+    # Draw every line after every point so no series' line is obscured by
+    # another series' points when many CDFs overlap (e.g. per-continent plots).
+    for sorted_values, cdf_values, color, linestyle, median_value in series_to_draw:
+        ax.plot(
+            sorted_values,
+            cdf_values,
+            color=color,
+            linestyle=linestyle,
+            linewidth=1.0,
+        )
+        if show_median_line:
+            ax.axvline(
+                median_value,
+                color=color,
                 linestyle="dashed",
                 linewidth=1,
             )

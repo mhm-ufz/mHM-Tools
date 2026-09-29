@@ -2609,13 +2609,9 @@ class Catchment:
             mask_ds = xr.Dataset({"mask": mask_da})
 
             if self.resolutions.l2 is not None:
-                l2_factor, _ = get_upscaling_factor(
-                    self.resolutions, input_res=self.upscaled_resolution, l2=True
-                )
                 mask_upscaled = self.upscale_mask_with_correct_coords(
-                    mask_da, factor=l2_factor
+                    mask_da
                 )
-
                 mask_upscaled = mask_upscaled.rename({"lat": "lat_l2", "lon": "lon_l2"})
                 mask_upscaled.attrs.update(
                     {
