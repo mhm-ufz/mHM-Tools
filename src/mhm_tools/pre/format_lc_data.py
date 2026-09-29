@@ -586,7 +586,8 @@ def format_lc_periods(
 
     if output_type == "asc":
         outputs = tuple(
-            output_path / (
+            output_path
+            / (
                 f"lc_{period['start'].year}_{period['end'].year - 1}.asc"
                 if period["start"] == dt.datetime(period["start"].year, 1, 1)
                 and period["end"] == dt.datetime(period["end"].year, 1, 1)

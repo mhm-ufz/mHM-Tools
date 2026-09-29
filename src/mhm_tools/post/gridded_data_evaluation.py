@@ -1074,6 +1074,7 @@ def resample_to_coarser_calendar(
         logger.info(f"Both are already {target_alias}")
     return resample_to_target_freq(ds_input, ds_ref, target_alias)
 
+
 def crop_data_to_overlapping_time(input_ds, ref_ds):
     """Crop data to overlapping time."""
     time_slice = get_overlapping_time_slice(input_ds, ref_ds)
