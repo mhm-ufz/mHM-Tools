@@ -152,7 +152,7 @@ def add_args(parser):
         "--regions",
         default="all",
         help=(
-            "Regions to plot per cell: 'all', 'none' or a comma separated list "
+            "Regions mapped separately: 'all', 'none' or a comma separated list "
             f"of {', '.join(WMO_REGION_BOUNDS)}."
         ),
     )
@@ -160,7 +160,10 @@ def add_args(parser):
         "--max-region-cell-lines",
         type=int,
         default=DEFAULT_MAX_REGION_CELL_LINES,
-        help="Most cell lines drawn per dataset in a region plot, 0 for all cells.",
+        help=(
+            "Most cell lines drawn per dataset in a region cell plot "
+            "(--plot-region-cells), 0 for all cells."
+        ),
     )
     optional.add_argument(
         "--kge-vmin",
@@ -188,6 +191,16 @@ def add_args(parser):
         "--no-write-twsa",
         action="store_true",
         help="Skip writing the normalized monthly anomaly fields.",
+    )
+    flags.add_argument(
+        "--plot-kge-components",
+        action="store_true",
+        help="Also map the KGE components alpha, beta and gamma.",
+    )
+    flags.add_argument(
+        "--plot-region-cells",
+        action="store_true",
+        help="Also plot every grid cell over time per region.",
     )
 
 
@@ -263,6 +276,8 @@ def run(args):
             metrics=selected_metrics,
             write_twsa=not args.no_write_twsa,
             max_memory_gib=args.max_memory_gib,
+            plot_kge_components=args.plot_kge_components,
+            plot_region_cells=args.plot_region_cells,
         )
     for label, file_path in written_files.items():
         logger.info(f"{label}: {file_path}")

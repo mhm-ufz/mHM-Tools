@@ -7,10 +7,19 @@ from typing import Mapping, Optional
 import numpy as np
 import pandas as pd
 import xarray as xr
-from matplotlib import colors as mcolors
 from matplotlib import pyplot as plt
 
-from mhm_tools.common.constants import KGE_CONSTANT_MEAN_BOUND
+from mhm_tools.common.logger import log_errors
+from mhm_tools.common.plotter import (
+    PLOT_DPI,
+    add_map_colorbar,
+    calculate_map_figure_size,
+    create_axis_label,
+    create_discrete_colour_norm,
+    create_summary_text,
+    get_metric_plot_style,
+    style_map_axes,
+)
 from mhm_tools.common.resolution_handler import calculate_coordinate_resolution
 from mhm_tools.common.xarray_utils import get_coord_key, get_single_data_var
 
@@ -380,7 +389,7 @@ def write_catchment_median_maps(
     mask_files_by_id: Optional[Mapping[object, Path]] = None,
     id_col="id",
     output_prefix="catchment_map",
-    dpi=200,
+    dpi=PLOT_DPI,
     title_context=None,
     extent=None,
 ):
@@ -455,13 +464,14 @@ def write_catchment_median_maps(
     )
 
 
+@log_errors(raise_exceptions=True)
 def plot_catchment_metric_maps(
     metric_gdf,
     variables,
     output_dir,
     output_prefix="catchment_map",
-    cmap="viridis",
-    dpi=200,
+    cmap=None,
+    dpi=PLOT_DPI,
     title_context=None,
     extent=None,
 ):
@@ -478,7 +488,7 @@ def plot_catchment_metric_maps(
     output_prefix : str, optional
         Output filename prefix.
     cmap : str, optional
-        Matplotlib colormap.
+        Matplotlib colormap, None for the metric's own (`get_metric_plot_style`).
     dpi : int, optional
         Output image resolution.
     title_context : str, optional
@@ -524,22 +534,23 @@ def plot_catchment_metric_maps(
                 f"Skipping catchment map for {variable}: all values are NaN."
             )
             continue
-        vmin, vmax, extend = _get_metric_color_limits(variable, values.to_numpy())
-        cmap_obj = plt.get_cmap(cmap).copy()
-        if extend in ["min", "both"]:
-            cmap_obj.set_under("black")
-        if extend in ["max", "both"]:
-            cmap_obj.set_over("darkred")
-        norm = mcolors.Normalize(vmin=vmin, vmax=vmax, clip=False)
+        values = values.replace([np.inf, -np.inf], np.nan)
+        style = get_metric_plot_style(variable)
+        if cmap is not None:
+            style["cmap"] = cmap
+        cmap_obj, norm, bounds, extend, ticks = create_discrete_colour_norm(
+            values.to_numpy(dtype=float), bounds_type="data", **style
+        )
 
-        fig = plt.figure(figsize=(7, 5))
-        ax = plt.axes(projection=ccrs.PlateCarree())
+        fig, ax = plt.subplots(
+            figsize=calculate_map_figure_size(extent),
+            subplot_kw={"projection": ccrs.PlateCarree()},
+        )
         ax.set_extent(extent, crs=ccrs.PlateCarree())
-        ax.add_feature(cfeature.BORDERS, linewidth=0.6)
+        ax.add_feature(cfeature.BORDERS, linewidth=0.3)
         ax.add_feature(cfeature.COASTLINE, linewidth=0.5)
         ax.add_feature(cfeature.LAND, facecolor="0.97")
         ax.add_feature(cfeature.OCEAN, facecolor="0.85")
-        ax.gridlines(draw_labels=True, linewidth=0.2, linestyle="--")
         plot_gdf.assign(**{variable: values}).plot(
             column=variable,
             ax=ax,
@@ -551,18 +562,21 @@ def plot_catchment_metric_maps(
         )
         scalar_mappable = plt.cm.ScalarMappable(cmap=cmap_obj, norm=norm)
         scalar_mappable.set_array([])
-        cb = plt.colorbar(
+        add_map_colorbar(
+            fig,
+            ax,
             scalar_mappable,
-            ax=ax,
-            orientation="vertical",
-            shrink=0.8,
-            extend=extend,
+            bounds,
+            extend,
+            ticks,
+            create_axis_label(variable),
         )
-        cb.set_label(variable)
-        title = f"{variable} by catchment"
+        style_map_axes(ax)
+        title = "Catchment medians"
         if title_context is not None:
             title = f"{title} ({title_context})"
-        ax.set_title(title)
+        fig.suptitle(title, fontweight="normal", fontsize="x-large")
+        ax.set_title(f"{variable} ({create_summary_text(values, bounds=bounds)})")
         output_file = output_dir / f"{output_prefix}_{variable}.png"
         fig.tight_layout()
         fig.savefig(output_file, dpi=dpi)
@@ -633,42 +647,3 @@ def _geometry_union(geometry):
     if hasattr(geometry, "union_all"):
         return geometry.union_all()
     return geometry.unary_union
-
-
-def _get_metric_color_limits(variable, values):
-    """Get color limits for a metric variable.
-
-    Parameters
-    ----------
-    variable : str
-        Metric variable name.
-    values : Sequence[float]
-        Numeric values.
-
-    Returns
-    -------
-    tuple[float, float, str]
-        Minimum, maximum, and colorbar extension.
-    """
-    finite_values = np.asarray(values, dtype=float)
-    finite_values = finite_values[np.isfinite(finite_values)]
-    if finite_values.size == 0:
-        msg = f"No finite values available for {variable}."
-        raise ValueError(msg)
-    if variable == "kge":
-        vmin, vmax = KGE_CONSTANT_MEAN_BOUND, 1.0
-    elif variable == "nse":
-        vmin, vmax = -0.1, 1.0
-    else:
-        vmin, vmax = float(np.nanmin(finite_values)), float(np.nanmax(finite_values))
-    if np.isfinite(vmin) and np.isfinite(vmax) and vmin == vmax:
-        vmin -= 1.0
-        vmax += 1.0
-    extend = "neither"
-    if np.nanmin(finite_values) < vmin and np.nanmax(finite_values) > vmax:
-        extend = "both"
-    elif np.nanmin(finite_values) < vmin:
-        extend = "min"
-    elif np.nanmax(finite_values) > vmax:
-        extend = "max"
-    return vmin, vmax, extend

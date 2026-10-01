@@ -53,13 +53,13 @@ Outputs
   with ``alpha``, ``beta``, ``gamma``, the compared month count, the reference
   mean and standard deviation and the baseline offset that make the bias term
   readable, and the root mean square error.
-- ``twsa_metric_<name>_<input>_vs_<ref>.png`` per selected metric and per KGE
-  component.
+- ``twsa_metric_<name>_<input>_vs_<ref>.png`` per selected metric, plus one
+  per KGE component when they are requested.
 - ``twsa_monthly_<name>.nc`` per dataset with the normalized anomaly on the
   shared calendar.
-- ``twsa_cells_<input>_vs_<ref>_region_<region>.png`` per evaluation region,
-  with every grid cell over time and the region mean of both datasets.
-- the KGE map again per evaluation region, where the KGE is selected.
+- the selected metric maps again per evaluation region.
+- on request ``twsa_cells_<input>_vs_<ref>_region_<region>.png`` per evaluation
+  region, with every grid cell over time and the region mean of both datasets.
 
 Authors
 -------
@@ -87,13 +87,18 @@ from mhm_tools.common.file_handler import (
     get_dataset_from_path,
     write_xarray_to_file,
 )
-from mhm_tools.common.logger import ErrorLogger
+from mhm_tools.common.logger import ErrorLogger, log_errors
 from mhm_tools.common.metrics.kge import calculate_kling_gupta_efficiency_per_cell
 from mhm_tools.common.metrics.rmse import calculate_root_mean_square_error_per_cell
 from mhm_tools.common.plotter import (
     CAPTION_COLOR,
+    FIGURE_WIDTH,
     INPUT_COLOR,
+    PLOT_DPI,
     REF_COLOR,
+    create_axis_label,
+    create_comparison_title,
+    get_metric_plot_style,
     plot_map,
     style_axes,
 )
@@ -132,9 +137,6 @@ STORAGE_NAME_MARKERS = ("tws", "storage", "lwe")
 
 # the discharge evaluation scales a KGE the same way
 KGE_VMIN = KGE_CONSTANT_MEAN_BOUND
-KGE_VMAX = 1.0
-# cells scoring below the constant mean value bound get their own colour
-KGE_UNDER_COLOR = "lightgray"
 # below this share of its own spread a bias denominator makes the ratio noise
 ZERO_MEAN_BETA_TOLERANCE = 0.01
 # storage level in mm added back to both anomalies before they are scored, used
@@ -711,29 +713,6 @@ def write_twsa_dataset(ds, file_path):
     return Path(file_path)
 
 
-def get_metric_plot_style(metric_name, kge_vmin=KGE_VMIN):
-    """Return the colormap and colour limits of one metric.
-
-    Args:
-        metric_name: One of "kge", "alpha", "beta", "gamma" or "rmse".
-        kge_vmin: Lower end of the KGE colour scale.
-
-    Returns
-    -------
-        Tuple of (colormap name, vmin, vmax), where an upper limit of None
-        leaves the scale to the data.
-    """
-    if metric_name == "kge":
-        return "viridis", kge_vmin, KGE_VMAX
-    if metric_name == "rmse":
-        # an error is best at zero and has no natural upper end
-        return "magma_r", 0.0, None
-    if metric_name == "gamma":
-        return "RdBu_r", -1.0, 1.0
-    # a ratio is good at one, so it is shown on a scale centred there
-    return "RdBu_r", 0.0, 2.0
-
-
 def create_metric_maps(
     metric_ds,
     output_dir,
@@ -742,6 +721,7 @@ def create_metric_maps(
     kge_vmin=KGE_VMIN,
     region_name=None,
     metrics=("kge", *KGE_COMPONENTS),
+    years=None,
 ):
     """Plot the selected metrics and the KGE components as maps.
 
@@ -753,6 +733,7 @@ def create_metric_maps(
         kge_vmin: Lower end of the KGE colour scale.
         region_name: Region the map is limited to, or None for the domain.
         metrics: Metric names to plot.
+        years: First and last year of the compared period, None to omit it.
 
     Returns
     -------
@@ -777,21 +758,19 @@ def create_metric_maps(
         if metric not in metric_ds or not bool(metric_ds[metric].notnull().any()):
             logger.info(f"Skipping the {metric} map, it holds no valid cell.")
             continue
-        cmap, vmin, vmax = get_metric_plot_style(metric, kge_vmin)
+        style = get_metric_plot_style(metric, kge_vmin)
         label = metric.upper() if metric in AVAILABLE_METRICS else metric
         output_file = output_dir / f"twsa_metric_{metric}_{suffix}.png"
         plot_map(
             metric_ds[metric],
-            cb_label=f"{label} [mm]" if metric == "rmse" else label,
+            cb_label=create_axis_label(label, metric_ds[metric].attrs.get("units")),
             title=(
-                f"TWSA {label}: "
-                f"{input_name} vs {ref_name}{format_region_title(region_name)}"
+                f"{create_comparison_title(input_name, ref_name, years)}"
+                f"{format_region_title(region_name)}"
             ),
             out_path=output_file,
-            cmap=cmap,
-            vmin=vmin,
-            vmax=vmax,
-            under_color=KGE_UNDER_COLOR if metric == "kge" else None,
+            panel_title=f"TWSA {label}",
+            **style,
             **limits,
         )
         key = f"{metric}_map"
@@ -844,6 +823,7 @@ def calculate_latitude_weighted_mean(da):
     return da.weighted(weights.fillna(0)).mean(("lat", "lon"))
 
 
+@log_errors(raise_exceptions=True)
 def create_region_cell_series_plot(
     input_twsa,
     ref_twsa,
@@ -870,7 +850,7 @@ def create_region_cell_series_plot(
     """
     output_file = Path(output_file)
     output_file.parent.mkdir(parents=True, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(11.0, 5.0))
+    fig, ax = plt.subplots(figsize=(FIGURE_WIDTH, 5.0))
 
     captions = []
     for da, color, name in (
@@ -897,31 +877,29 @@ def create_region_cell_series_plot(
             zorder=5,
         )
 
-    ax.axhline(0.0, color=CAPTION_COLOR, linewidth=0.8, zorder=1)
+    ax.axhline(0.0, color=CAPTION_COLOR, linewidth=0.5, zorder=1)
     style_axes(ax, show_grid=True)
-    ax.set_ylabel("TWS anomaly [mm]")
-    ax.set_title(
-        f"TWS anomaly per cell: {input_name} vs {ref_name}"
-        f"{format_region_title(region_name)}",
-        color=CAPTION_COLOR,
-    )
+    ax.set_ylabel(create_axis_label("TWS anomaly", input_twsa.attrs.get("units", "mm")))
     time_index = pd.DatetimeIndex(input_twsa["time"].values)
+    years = (time_index[0].year, time_index[-1].year)
+    fig.suptitle(
+        f"{create_comparison_title(input_name, ref_name, years)}"
+        f"{format_region_title(region_name)}",
+        fontweight="normal",
+        fontsize="x-large",
+    )
+    ax.set_title(f"TWS anomaly per cell ({'; '.join(captions)})")
     span_years = max(1, (time_index[-1] - time_index[0]).days // 365)
     ax.xaxis.set_major_locator(mdates.YearLocator(base=max(1, -(-span_years // 15))))
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
     ax.set_xlim(
         time_index[0] - pd.Timedelta(days=45), time_index[-1] + pd.Timedelta(days=45)
     )
-    ax.annotate(
-        "; ".join(captions),
-        xy=(0.0, -0.18),
-        xycoords="axes fraction",
-        color=CAPTION_COLOR,
-        fontsize=8,
-    )
-    fig.legend(loc="lower center", ncol=2, frameon=False, bbox_to_anchor=(0.5, -0.04))
-    fig.savefig(output_file, dpi=150, bbox_inches="tight")
+    ax.legend(loc="upper right")
+    fig.tight_layout()
+    fig.savefig(output_file, dpi=PLOT_DPI)
     plt.close(fig)
+    logger.info(f"Wrote cell series plot to {output_file}")
     return output_file
 
 
@@ -940,9 +918,10 @@ def create_region_outputs(
     ref_name,
     kge_vmin=KGE_VMIN,
     max_cell_lines=DEFAULT_MAX_REGION_CELL_LINES,
-    metrics=("kge",),
+    metrics=AVAILABLE_METRICS,
+    plot_cells=False,
 ):
-    """Write the cell series plot and the metric maps for every region with data.
+    """Write the metric maps and optionally the cell series plot per region.
 
     Args:
         input_twsa: Monthly input anomaly of the whole domain.
@@ -954,7 +933,8 @@ def create_region_outputs(
         ref_name: Reference dataset name.
         kge_vmin: Lower end of the KGE colour scale.
         max_cell_lines: Most cell lines drawn per dataset.
-        metrics: Metric names mapped per region, empty for the series plot only.
+        metrics: Metric names mapped per region, empty for none.
+        plot_cells: Also plot every grid cell over time per region.
 
     Returns
     -------
@@ -962,6 +942,10 @@ def create_region_outputs(
     """
     output_dir = Path(output_dir)
     written = {}
+    if not plot_cells and (metric_ds is None or not metrics):
+        return written
+    time_index = pd.DatetimeIndex(input_twsa["time"].values)
+    years = (time_index[0].year, time_index[-1].year)
     for region_name in region_names:
         region_input = crop_to_region(input_twsa, region_name)
         region_ref = crop_to_region(ref_twsa, region_name)
@@ -977,15 +961,16 @@ def create_region_outputs(
             f"{sanitize_name(input_name)}_vs_{sanitize_name(ref_name)}"
             f"_region_{sanitize_name(region_name)}"
         )
-        written[f"{region_name} cell_series_plot"] = create_region_cell_series_plot(
-            region_input,
-            region_ref,
-            output_dir / f"twsa_cells_{suffix}.png",
-            input_name,
-            ref_name,
-            region_name=region_name,
-            max_cell_lines=max_cell_lines,
-        )
+        if plot_cells:
+            written[f"{region_name} cell_series_plot"] = create_region_cell_series_plot(
+                region_input,
+                region_ref,
+                output_dir / f"twsa_cells_{suffix}.png",
+                input_name,
+                ref_name,
+                region_name=region_name,
+                max_cell_lines=max_cell_lines,
+            )
         if metric_ds is None or not metrics:
             continue
         region_maps = create_metric_maps(
@@ -996,6 +981,7 @@ def create_region_outputs(
             kge_vmin=kge_vmin,
             region_name=region_name,
             metrics=metrics,
+            years=years,
         )
         for key, path in region_maps.items():
             written[f"{region_name} {key}"] = path
@@ -1025,6 +1011,8 @@ def twsa_evaluation(  # noqa: PLR0913
     metrics=AVAILABLE_METRICS,
     write_twsa=True,
     max_memory_gib=8.0,
+    plot_kge_components=False,
+    plot_region_cells=False,
 ):
     """Evaluate a modelled total water storage anomaly against a reference.
 
@@ -1053,6 +1041,8 @@ def twsa_evaluation(  # noqa: PLR0913
             calculated, written nor plotted.
         write_twsa: Also write the normalized monthly anomaly fields.
         max_memory_gib: Memory budget the time chunks are sized against.
+        plot_kge_components: Also map alpha, beta and gamma for the whole domain.
+        plot_region_cells: Also plot every grid cell over time per region.
 
     Returns
     -------
@@ -1177,13 +1167,14 @@ def twsa_evaluation(  # noqa: PLR0913
         written_files["metrics"] = write_twsa_dataset(
             metric_ds, output_dir / f"twsa_metrics_{suffix}.nc"
         )
-        # a KGE is only readable next to its components, so they are mapped with it
+        # the components are always written, but only mapped on request
         map_metrics = []
         for metric in selected_metrics:
             map_metrics.append(metric)
-            if metric == "kge":
+            if metric == "kge" and plot_kge_components:
                 map_metrics.extend(KGE_COMPONENTS)
         logger.info(f"Plotting {', '.join(map_metrics)} as maps.")
+        time_index = pd.DatetimeIndex(input_twsa["time"].values)
         written_files.update(
             create_metric_maps(
                 metric_ds,
@@ -1192,6 +1183,7 @@ def twsa_evaluation(  # noqa: PLR0913
                 ref_name,
                 kge_vmin=kge_vmin,
                 metrics=map_metrics,
+                years=(time_index[0].year, time_index[-1].year),
             )
         )
     if write_twsa:
@@ -1221,7 +1213,8 @@ def twsa_evaluation(  # noqa: PLR0913
             ref_name,
             kge_vmin=kge_vmin,
             max_cell_lines=max_region_cell_lines,
-            metrics=("kge",) if "kge" in selected_metrics else (),
+            metrics=tuple(selected_metrics),
+            plot_cells=plot_region_cells,
         )
     )
     return written_files

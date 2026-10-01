@@ -72,13 +72,13 @@ def add_args(parser):
         default=None,
         help=(
             "Comparison plot types to create: cdf, violin, catchment-map, "
-            "map-diff. Defaults to cdf, violin, map-diff, plus catchment-map "
+            "map-diff. Defaults to cdf, map-diff, plus catchment-map "
             "whenever --shape-folder or --mask-folder is given."
         ),
     )
     optional.add_argument(
         "--dpi",
-        default=450,
+        default=400,
         type=int,
         help="Output image resolution for cdf/violin plots.",
     )
@@ -104,12 +104,12 @@ def add_args(parser):
     )
     optional.add_argument(
         "--map-diff-cmap",
-        default="RdBu_r",
+        default="coolwarm_r",
         help="Diverging colormap for map-diff, centered on zero.",
     )
     optional.add_argument(
         "--map-diff-dpi",
-        default=200,
+        default=400,
         type=int,
         help="Output image resolution for map-diff plots.",
     )

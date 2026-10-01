@@ -20,6 +20,7 @@ from mhm_tools.common.catchment_maps import (
     write_catchment_median_maps,
 )
 from mhm_tools.common.plotter import (
+    PLOT_DPI,
     create_metric_summary_rows,
     plot_metric_cdf_comparison,
     plot_metric_violin_comparison,
@@ -353,7 +354,7 @@ def _write_grouped_metric_plots(
     label_metadata,
     colors_by_label=None,
     linestyles_by_label=None,
-    dpi=450,
+    dpi=PLOT_DPI,
 ):
     """Write additional metric plots grouped by metadata fields.
 
@@ -646,7 +647,7 @@ def write_metric_plots(  # noqa: PLR0913
     file_names: str = "*.csv",
     output_prefix: str = "cdf",
     plot_types: Optional[Sequence[str]] = None,
-    dpi: int = 450,
+    dpi: int = PLOT_DPI,
     shape_paths: Optional[Sequence[str]] = None,
     shape_folder=None,
     mask_paths: Optional[Sequence[str]] = None,
@@ -713,7 +714,7 @@ def write_metric_plots(  # noqa: PLR0913
         anything to show), and ``metric_summary.csv``.
     """
     if plot_types is None:
-        plot_types = ["cdf", "violin"]
+        plot_types = ["cdf"]
     plot_types = list(plot_types)
 
     output_dir = Path(output_dir)

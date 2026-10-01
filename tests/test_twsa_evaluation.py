@@ -262,12 +262,12 @@ def test_selecting_only_the_error_writes_and_plots_only_the_error(tmp_path):
 
 
 def test_selecting_only_the_kge_leaves_the_error_out(tmp_path):
-    """The KGE is written and plotted with its components and without the error."""
+    """The KGE is written with its components, but only the KGE is plotted."""
     output_dir = _evaluate(tmp_path, ["kge"])
     written = _written_metrics(output_dir)
     assert {"kge", *KGE_COMPONENTS} <= written
     assert "rmse" not in written
-    assert _plotted_metrics(output_dir) == {"kge", *KGE_COMPONENTS}
+    assert _plotted_metrics(output_dir) == {"kge"}
 
 
 def test_selecting_both_metrics_writes_them_into_one_file(tmp_path):
@@ -275,7 +275,7 @@ def test_selecting_both_metrics_writes_them_into_one_file(tmp_path):
     output_dir = _evaluate(tmp_path, ["kge", "rmse"])
     written = _written_metrics(output_dir)
     assert {"kge", *KGE_COMPONENTS, "rmse", "compared_months"} <= written
-    assert _plotted_metrics(output_dir) == {"kge", *KGE_COMPONENTS, "rmse"}
+    assert _plotted_metrics(output_dir) == {"kge", "rmse"}
 
 
 if __name__ == "__main__":

@@ -321,10 +321,10 @@ def test_get_lower_axis_limit_pads_slightly_when_min_above_floor():
     assert -1.0 < limit < 0.2
 
 
-def test_plot_metric_violin_comparison_floors_y_axis_at_minus_one(
+def test_plot_metric_violin_comparison_floors_kge_y_axis_at_constant_mean_bound(
     tmp_path, monkeypatch
 ):
-    """Violin plots must cut the y-axis off at -1 for extreme low outliers."""
+    """Violin plots must cut the KGE y-axis off at -0.41 for extreme low outliers."""
     fig, ax = plotter.plt.subplots()
     monkeypatch.setattr(fig, "savefig", lambda output_file, **kwargs: None)
     monkeypatch.setattr(plotter.plt, "subplots", lambda **kwargs: (fig, ax))
@@ -335,11 +335,13 @@ def test_plot_metric_violin_comparison_floors_y_axis_at_minus_one(
         output_file=tmp_path / "violin_kge.png",
     )
 
-    assert ax.get_ylim()[0] == -1.0
+    assert ax.get_ylim()[0] == plotter.KGE_CONSTANT_MEAN_BOUND
 
 
-def test_plot_metric_cdf_comparison_floors_x_axis_at_minus_one(tmp_path, monkeypatch):
-    """CDF plots must cut the x-axis off at -1 for extreme low outliers."""
+def test_plot_metric_cdf_comparison_floors_kge_x_axis_at_constant_mean_bound(
+    tmp_path, monkeypatch
+):
+    """CDF plots must cut the KGE x-axis off at -0.41 for extreme low outliers."""
     fig, ax = plotter.plt.subplots()
     monkeypatch.setattr(fig, "savefig", lambda output_file, **kwargs: None)
     monkeypatch.setattr(plotter.plt, "subplots", lambda **kwargs: (fig, ax))
@@ -350,7 +352,7 @@ def test_plot_metric_cdf_comparison_floors_x_axis_at_minus_one(tmp_path, monkeyp
         output_file=tmp_path / "cdf_kge.png",
     )
 
-    assert ax.get_xlim()[0] == -1.0
+    assert ax.get_xlim()[0] == plotter.KGE_CONSTANT_MEAN_BOUND
 
 
 def test_plot_metric_cdf_comparison_respects_explicit_x_limits(tmp_path, monkeypatch):
@@ -487,23 +489,16 @@ def test_discharge_plot_cdf_delegates_to_shared_plotter(tmp_path, monkeypatch):
         )
     df = pd.DataFrame(rows)
     comparison_calls = []
-    cdf_value_calls = []
 
     def fake_plot_metric_cdf_comparison(**kwargs):
         """Capture CDF comparison plot arguments."""
         comparison_calls.append(kwargs)
-
-    def fake_plot_cdf_values(*args, **kwargs):
-        """Capture CDF value plot arguments."""
-        cdf_value_calls.append((args, kwargs))
-        return np.asarray(args[1]), np.linspace(0, 1, len(args[1]))
 
     monkeypatch.setattr(
         discharge_evaluation,
         "plot_metric_cdf_comparison",
         fake_plot_metric_cdf_comparison,
     )
-    monkeypatch.setattr(discharge_evaluation, "plot_cdf_values", fake_plot_cdf_values)
     monkeypatch.setattr(
         discharge_evaluation.plt, "savefig", lambda *args, **kwargs: None
     )
@@ -511,7 +506,6 @@ def test_discharge_plot_cdf_delegates_to_shared_plotter(tmp_path, monkeypatch):
     discharge_evaluation.plot_cdf(df, Path(tmp_path))
 
     assert comparison_calls
-    assert cdf_value_calls
     assert tmp_path / "cdf_alpha_global.png" in [
         call["output_file"] for call in comparison_calls
     ]

@@ -149,3 +149,5 @@ WATER_STORAGE_UNIT_FACTORS_MM = {
 """Millimetres of water per unit, for the CF `units` attribute of a storage field."""
 KGE_CONSTANT_MEAN_BOUND = -0.41
 """Lower end of every KGE scale, the score of a constant mean value predictor."""
+NSE_CONSTANT_MEAN_BOUND = 0.0
+"""Lower end of every NSE scale, the score of a constant mean value predictor."""

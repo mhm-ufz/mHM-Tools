@@ -56,7 +56,6 @@ import logging
 from pathlib import Path
 
 import dask.array as darr
-import matplotlib as mpl
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
@@ -66,21 +65,30 @@ from joblib import Parallel, delayed
 from matplotlib.animation import FuncAnimation, PillowWriter
 from matplotlib.colors import BoundaryNorm, ListedColormap
 from matplotlib.patches import Patch
-from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 from mhm_tools.common.file_handler import (
     ChunkType,
     get_dataset_from_path,
     write_xarray_to_file,
 )
-from mhm_tools.common.logger import ErrorLogger
+from mhm_tools.common.logger import ErrorLogger, log_errors
 from mhm_tools.common.parallel import resolve_ncpus
 from mhm_tools.common.plotter import (
     AXIS_COLOR,
-    CAPTION_COLOR,
+    FIGURE_WIDTH,
     INPUT_COLOR,
+    KGE_UNDER_COLOR,
+    PLOT_DPI,
     REF_COLOR,
+    add_map_colorbar,
+    calculate_map_figure_size,
+    create_axis_label,
+    create_comparison_title,
+    create_summary_text,
+    get_map_extent_and_origin,
+    plot_single_map,
     style_axes,
+    style_map_axes,
 )
 from mhm_tools.common.time_utils import (
     get_data_coverage,
@@ -103,7 +111,6 @@ from mhm_tools.common.xarray_utils import (
     calculate_coordinate_resolution,
     crop_to_region,
     get_coord_key,
-    get_ds_extend,
     get_single_data_var,
     normalize_lat_lon,
     normalize_time,
@@ -136,10 +143,11 @@ NANOSECONDS_PER_DAY = 86_400_000_000_000
 NO_SNOW_COLOR = "#9fb0b8"
 SNOW_COLOR = "#37474f"
 NO_DATA_COLOR = "#ffffff"
-AGREEMENT_COLOR = NO_SNOW_COLOR
-# single hue light to dark, so a high accuracy reads as a strong colour
-ACCURACY_COLORMAP = "Blues"
-ACCURACY_UNDER_COLOR = "#f7f4d8"
+# light neutral, so agreement stays apart from the light input colour
+AGREEMENT_COLOR = "#d9d9d9"
+# accuracy is a skill score and uses the sequential skill colormap
+ACCURACY_COLORMAP = "viridis_r"
+ACCURACY_UNDER_COLOR = KGE_UNDER_COLOR
 
 
 # ---------------------------------------------------------------------------
@@ -631,7 +639,13 @@ def accumulate_snow_flag_subset(
         for first_step in range(0, da.sizes["time"], block):
             part = da.isel(time=slice(first_step, first_step + block))
             step_flag = create_snow_cover_flag(part, snow_threshold)
-            binned = step_flag.resample(time=resample_freq, **resample_kwargs).max()
+            # a bin without any time step comes back as NaN, which is missing data
+            binned = (
+                step_flag.resample(time=resample_freq, **resample_kwargs)
+                .max()
+                .fillna(MISSING_VALUE)
+                .astype(SNOW_FLAG_DTYPE)
+            )
             binned = normalize_time_axis(binned, target_freq, anchor="period_start")
             binned_values = binned.compute().values
             for step, bin_start in enumerate(pd.DatetimeIndex(binned["time"].values)):
@@ -1126,57 +1140,6 @@ def calculate_snow_covered_cell_percentage(snow_flag):
 # -------------------------------------------------------------------------
 
 
-def calculate_map_figure_size(
-    da,
-    panel_count=1,
-    max_panel_width=4.6,
-    max_panel_height=6.5,
-    extra_width=0.0,
-    extra_height=1.2,
-):
-    """Size a map figure from the data aspect so the panels fill the canvas.
-
-    ``imshow`` keeps geographic cells square, so a figure that ignores the
-    lon/lat ratio leaves the map floating in white space. One panel is fitted
-    into the given box at the data aspect and the figure follows from that.
-
-    Args:
-        da: DataArray with ``lat`` and ``lon`` coordinates.
-        panel_count: Number of map panels side by side.
-        max_panel_width: Largest width of one panel in inches.
-        max_panel_height: Largest height of one panel in inches.
-        extra_width: Inches reserved for labels, colorbars and padding.
-        extra_height: Inches reserved for titles, captions and legends.
-
-    Returns
-    -------
-        The (width, height) figure size in inches.
-    """
-    lon_min, lon_max, lat_min, lat_max = get_ds_extend(da)
-    lat_span = lat_max - lat_min
-    aspect = (lon_max - lon_min) / lat_span if lat_span > 0 else 1.0
-    panel_height = min(max_panel_height, max_panel_width / aspect)
-    # keep a very thin domain from collapsing into a line
-    panel_width = max(panel_height * aspect, 2.0)
-    return (panel_count * panel_width + extra_width, panel_height + extra_height)
-
-
-def get_map_extent_and_origin(da):
-    """Return the imshow extent and origin for a lat/lon DataArray.
-
-    Args:
-        da: DataArray with ``lat`` and ``lon`` coordinates.
-
-    Returns
-    -------
-        Tuple of (extent tuple, origin string).
-    """
-    lon_min, lon_max, lat_min, lat_max = get_ds_extend(da)
-    lat_values = np.asarray(da["lat"].values)
-    origin = "lower" if lat_values[0] <= lat_values[-1] else "upper"
-    return (lon_min, lon_max, lat_min, lat_max), origin
-
-
 def create_plottable_frame(frame):
     """Turn one snow flag frame into floats, with NaN where data is missing.
 
@@ -1217,40 +1180,7 @@ def create_snow_cover_difference(input_frame, ref_frame):
     return difference
 
 
-def create_accuracy_levels(accuracy, accuracy_vmin=None):
-    """Create colour levels that resolve the spread of an accuracy field.
-
-    A fixed 0 to 1 ramp leaves most of its steps unused, because accuracies
-    usually sit in a narrow band near 1. The lower bound therefore follows the
-    data unless it is given, while the upper bound stays at the meaningful 1.
-
-    Args:
-        accuracy: Accuracy DataArray with values between 0 and 1.
-        accuracy_vmin: Lower bound to force, None to derive it from the data.
-
-    Returns
-    -------
-        Array of level edges from the lower bound up to 1.
-    """
-    if accuracy_vmin is None:
-        data_min = float(np.nanmin(accuracy))
-        if not np.isfinite(data_min):
-            data_min = 0.0
-        # round down to a 0.05 step so the tick labels stay readable
-        accuracy_vmin = np.floor(data_min * 20) / 20
-    accuracy_vmin = min(max(float(accuracy_vmin), 0.0), 0.95)
-    span = 1.0 - accuracy_vmin
-    step = next(
-        (
-            candidate
-            for candidate in (0.01, 0.02, 0.05, 0.1, 0.2)
-            if span / candidate <= 10
-        ),
-        0.2,
-    )
-    return np.round(np.arange(accuracy_vmin, 1.0 + step / 2, step), 4)
-
-
+@log_errors(raise_exceptions=True)
 def create_classification_accuracy_map(
     accuracy_ds,
     output_file,
@@ -1259,6 +1189,7 @@ def create_classification_accuracy_map(
     target_freq,
     accuracy_vmin=None,
     region_name=None,
+    years=None,
 ):
     """Plot the snow presence classification accuracy as a map.
 
@@ -1270,6 +1201,7 @@ def create_classification_accuracy_map(
         target_freq: Frequency alias the compared time steps refer to.
         accuracy_vmin: Lower end of the colour scale, None to derive it.
         region_name: Region shown in the title, None for the whole domain.
+        years: First and last year of the compared period, None to omit it.
 
     Returns
     -------
@@ -1278,69 +1210,64 @@ def create_classification_accuracy_map(
     output_file = Path(output_file)
     output_file.parent.mkdir(parents=True, exist_ok=True)
     accuracy = accuracy_ds["classification_accuracy"]
-    levels = create_accuracy_levels(accuracy, accuracy_vmin)
-    colormap = mpl.colormaps[ACCURACY_COLORMAP].resampled(len(levels) - 1)
-    colormap = colormap.with_extremes(bad="white", under=ACCURACY_UNDER_COLOR)
-    norm = BoundaryNorm(levels, colormap.N)
-    extent, origin = get_map_extent_and_origin(accuracy)
-    data_min = float(np.nanmin(accuracy))
-    data_max = float(np.nanmax(accuracy))
-
-    fig, ax = plt.subplots(
-        figsize=calculate_map_figure_size(
-            accuracy,
-            max_panel_width=8.0,
-            max_panel_height=6.4,
-            extra_width=2.6,
-            extra_height=1.3,
-        )
+    values = np.asarray(accuracy.values, dtype=float)
+    values = np.where(np.isinf(values), np.nan, values)
+    extent, origin = get_map_extent_and_origin(
+        accuracy["lon"].values, accuracy["lat"].values
     )
-    image = ax.imshow(
-        np.asarray(accuracy.values, dtype=float),
-        cmap=colormap,
-        norm=norm,
+
+    fig, ax = plt.subplots(figsize=calculate_map_figure_size(extent))
+    # the upper end stays at the meaningful 1, the lower end follows the data
+    image, bounds, extend, ticks = plot_single_map(
+        ax,
+        values,
+        center=None,
+        vmin=accuracy_vmin,
+        vmax=1.0,
+        cmap=ACCURACY_COLORMAP,
+        bounds_type="data",
+        under_color=ACCURACY_UNDER_COLOR,
         extent=extent,
         origin=origin,
         interpolation="nearest",
     )
-    # a divided axis keeps the colorbar exactly as tall as the map
-    colorbar_ax = make_axes_locatable(ax).append_axes("right", size="3.5%", pad=0.2)
-    colorbar = fig.colorbar(
+    add_map_colorbar(
+        fig,
+        ax,
         image,
-        cax=colorbar_ax,
-        ticks=levels,
-        extend="min" if data_min < levels[0] else "neither",
+        bounds,
+        extend,
+        ticks,
+        create_axis_label("Classification accuracy", accuracy.attrs.get("units")),
     )
-    colorbar.set_label("share of matching time steps", color=CAPTION_COLOR, labelpad=10)
-    colorbar.outline.set_visible(False)
-    colorbar.ax.tick_params(colors=CAPTION_COLOR, labelcolor=CAPTION_COLOR, length=3)
-    ax.set_xlabel("lon")
-    ax.set_ylabel("lat")
-    style_axes(ax)
-    compared_steps = accuracy_ds["compared_time_steps"]
+    style_map_axes(ax)
+    fig.suptitle(
+        f"{create_comparison_title(input_name, ref_name, years)}"
+        f"{format_region_title(region_name)}",
+        fontweight="normal",
+        fontsize="x-large",
+    )
     ax.set_title(
-        f"snow presence classification accuracy{format_region_title(region_name)}\n"
-        f"{input_name} vs {ref_name}",
-        fontsize="large",
-        pad=12,
+        "Snow presence classification accuracy "
+        f"({create_summary_text(values, bounds=bounds)})"
     )
-    # state the real range, so a clipped colour scale cannot mislead
+    compared_steps = accuracy_ds["compared_time_steps"]
     ax.annotate(
-        f"domain mean {float(accuracy.mean(skipna=True)):.2f}    "
-        f"range {data_min:.2f} to {data_max:.2f}    "
         f"n = {int(compared_steps.min()):d} to {int(compared_steps.max()):d} "
         f"{target_freq} steps per cell    white = no data",
-        xy=(0.0, -0.13),
+        xy=(0.0, -0.03),
         xycoords="axes fraction",
+        va="top",
         fontsize="small",
-        color=CAPTION_COLOR,
     )
-    logger.info(f"Writing {output_file}")
-    fig.savefig(output_file, dpi=150, bbox_inches="tight")
+    fig.tight_layout()
+    fig.savefig(output_file, dpi=PLOT_DPI)
     plt.close(fig)
+    logger.info(f"Wrote classification accuracy map to {output_file}")
     return output_file
 
 
+@log_errors(raise_exceptions=True)
 def create_snow_cover_percentage_plot(
     input_flag, ref_flag, output_file, input_name, ref_name, region_name=None
 ):
@@ -1370,31 +1297,31 @@ def create_snow_cover_percentage_plot(
         and select_hemisphere(input_flag, northern=False).sizes["lat"] > 0
     )
     panels = (
-        [("northern hemisphere", True), ("southern hemisphere", False)]
+        [("a) Northern hemisphere", True), ("b) Southern hemisphere", False)]
         if crosses_equator
-        else [(None, None)]
+        else [("Snow covered cells", None)]
     )
 
     fig, axes = plt.subplots(
         len(panels),
         1,
-        figsize=(12, 3.8 * len(panels)),
+        figsize=(FIGURE_WIDTH, 3.8 * len(panels) + 0.8),
         sharex=True,
         squeeze=False,
-        constrained_layout=True,
     )
     axes = axes[:, 0]
     for ax, (panel_title, northern) in zip(axes, panels):
-        if panel_title is not None:
-            ax.set_title(
-                panel_title, fontsize="medium", loc="left", color=CAPTION_COLOR, pad=6
-            )
-        ax.set_ylabel("snow covered cells [%]")
+        ax.set_ylabel(create_axis_label("Snow covered cells", "%"))
         style_axes(ax, show_grid=True)
         percentages = []
         for flag in (input_flag, ref_flag):
             cells = flag if northern is None else select_hemisphere(flag, northern)
             percentages.append(calculate_snow_covered_cell_percentage(cells).values)
+        summary = ", ".join(
+            f"mean {name}={np.nanmean(values):.1f}%"
+            for name, values in zip((input_name, ref_name), percentages)
+        )
+        ax.set_title(f"{panel_title} ({summary})", loc="left")
         for values, color, label in zip(
             percentages, (INPUT_COLOR, REF_COLOR), (input_name, ref_name)
         ):
@@ -1429,27 +1356,23 @@ def create_snow_cover_percentage_plot(
         axis_end = next_year_start
     axes[0].set_xlim(axis_start, axis_end)
     axes[-1].set_xlabel("year")
-    # one legend for both panels, below the axes so it never covers the lines
-    handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(
-        handles,
-        labels,
-        loc="outside lower center",
-        ncol=2,
-        frameon=False,
-        fontsize="medium",
-    )
+    # one legend for both panels
+    axes[0].legend(loc="upper right")
+    years = (time_values[0].year, time_values[-1].year)
     fig.suptitle(
-        f"snow covered share of the domain{format_region_title(region_name)}\n"
-        f"{input_name} vs {ref_name}",
-        fontsize="large",
+        f"{create_comparison_title(input_name, ref_name, years)}"
+        f"{format_region_title(region_name)}",
+        fontweight="normal",
+        fontsize="x-large",
     )
-    logger.info(f"Writing {output_file}")
-    fig.savefig(output_file, dpi=150, bbox_inches="tight")
+    fig.tight_layout()
+    fig.savefig(output_file, dpi=PLOT_DPI)
     plt.close(fig)
+    logger.info(f"Wrote snow cover percentage plot to {output_file}")
     return output_file
 
 
+@log_errors(raise_exceptions=True)
 def create_snow_cover_gif(
     input_flag,
     ref_flag,
@@ -1502,18 +1425,15 @@ def create_snow_cover_gif(
         bad=NO_DATA_COLOR
     )
     diff_norm = BoundaryNorm([-0.5, 0.5, 1.5, 2.5], diff_cmap.N)
-    extent, origin = get_map_extent_and_origin(input_flag)
+    extent, origin = get_map_extent_and_origin(
+        input_flag["lon"].values, input_flag["lat"].values
+    )
 
     fig, axes = plt.subplots(
         1,
         3,
         figsize=calculate_map_figure_size(
-            input_flag,
-            panel_count=3,
-            max_panel_width=4.6,
-            max_panel_height=6.2,
-            extra_width=1.4,
-            extra_height=1.45,
+            extent, panel_count=3, extra_width=0.6, extra_height=1.6
         ),
         sharex=True,
         sharey=True,
@@ -1548,15 +1468,13 @@ def create_snow_cover_gif(
     for ax, title in zip(
         axes,
         [
-            f"{input_name} snow cover",
-            f"{ref_name} snow cover",
-            "difference",
+            f"a) {input_name} snow cover",
+            f"b) {ref_name} snow cover",
+            "c) Difference",
         ],
     ):
-        ax.set_title(title, fontsize="medium", color=CAPTION_COLOR, pad=8)
-        ax.set_xlabel("lon")
-        style_axes(ax)
-    axes[0].set_ylabel("lat")
+        ax.set_title(title, fontsize="medium")
+        style_map_axes(ax)
     # one legend row per colour scheme, below its own panels
     legend_style = {
         "loc": "upper center",
@@ -1566,7 +1484,6 @@ def create_snow_cover_gif(
         "ncol": 3,
         "handlelength": 1.4,
         "columnspacing": 1.2,
-        "labelcolor": CAPTION_COLOR,
     }
     axes[1].legend(
         handles=[
@@ -1584,7 +1501,12 @@ def create_snow_cover_gif(
         ],
         **legend_style,
     )
-    suptitle = fig.suptitle(f"{time_values[0].date()}{region_title}", fontsize="large")
+    title = create_comparison_title(input_name, ref_name)
+    suptitle = fig.suptitle(
+        f"{title}, {time_values[0].date()}{region_title}",
+        fontweight="normal",
+        fontsize="x-large",
+    )
 
     def _update_frame(frame_index):
         input_values = np.asarray(input_flag.isel(time=frame_index).values)
@@ -1592,15 +1514,15 @@ def create_snow_cover_gif(
         images[0].set_data(create_plottable_frame(input_values))
         images[1].set_data(create_plottable_frame(ref_values))
         images[2].set_data(create_snow_cover_difference(input_values, ref_values))
-        suptitle.set_text(f"{time_values[frame_index].date()}{region_title}")
+        suptitle.set_text(f"{title}, {time_values[frame_index].date()}{region_title}")
         return [*images, suptitle]
 
-    logger.info(f"Writing {output_file} with {frame_count} frames.")
     animation = FuncAnimation(
         fig, _update_frame, frames=frame_count, blit=False, repeat=False
     )
     animation.save(output_file, writer=PillowWriter(fps=frames_per_second))
     plt.close(fig)
+    logger.info(f"Wrote snow cover gif with {frame_count} frames to {output_file}")
     return output_file
 
 
@@ -1624,8 +1546,8 @@ def create_region_outputs(
 ):
     """Write the coverage plot, accuracy map and gif for every region with data.
 
-    Regions whose bounds hold no cell or no valid time step of the normalized
-    domain are skipped with a log message.
+    Regions whose bounds hold no cell, or no time step where both datasets
+    hold valid data, are skipped with a log message.
 
     Args:
         input_flag: Binary snow cover DataArray of the input dataset.
@@ -1651,16 +1573,23 @@ def create_region_outputs(
         if region_input.sizes["lat"] == 0 or region_input.sizes["lon"] == 0:
             logger.info(f"Skipping region {region_name}: no cells inside its bounds.")
             continue
-        valid_cells = int(get_valid_snow_mask(region_input).any("time").sum())
+        # the accuracy map needs time steps where both datasets hold data
+        both_valid = get_valid_snow_mask(region_input) & get_valid_snow_mask(region_ref)
+        valid_cells = int(both_valid.any("time").sum())
         if valid_cells == 0:
-            logger.info(f"Skipping region {region_name}: no valid data inside it.")
+            logger.info(
+                f"Skipping region {region_name}: no time step with valid data in "
+                "both datasets inside it."
+            )
             continue
         logger.info(
             f"Region {region_name}: {region_input.sizes['lat']} x "
-            f"{region_input.sizes['lon']} cells, {valid_cells} of them with data."
+            f"{region_input.sizes['lon']} cells, {valid_cells} of them with data "
+            "in both datasets."
         )
         safe_name = sanitize_name(region_name)
         suffix = f"{input_name}_vs_{ref_name}_region_{safe_name}"
+        region_time = pd.DatetimeIndex(region_input.time.values)
         written_files[f"{region_name} cover_percentage_plot"] = (
             create_snow_cover_percentage_plot(
                 region_input,
@@ -1680,6 +1609,7 @@ def create_region_outputs(
                 target_freq=target_freq,
                 accuracy_vmin=accuracy_vmin,
                 region_name=region_name,
+                years=(region_time[0].year, region_time[-1].year),
             )
         )
         if write_gif:
@@ -1861,6 +1791,7 @@ def snow_evaluation(  # noqa: PLR0913
     )
     accuracy.attrs.update({**common_attrs, "dataset": f"{input_name} vs {ref_name}"})
 
+    input_time = pd.DatetimeIndex(input_flag.time.values)
     written_files = {
         "input_metrics": write_snow_dataset(
             input_metrics, output_dir / f"snow_season_metrics_{input_name}.nc"
@@ -1884,6 +1815,7 @@ def snow_evaluation(  # noqa: PLR0913
             ref_name=ref_name,
             target_freq=target_freq,
             accuracy_vmin=accuracy_vmin,
+            years=(input_time[0].year, input_time[-1].year),
         ),
         "cover_percentage_plot": create_snow_cover_percentage_plot(
             input_flag,
