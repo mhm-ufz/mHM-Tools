@@ -62,12 +62,14 @@ def add_args(parser):
         "--plot-types",
         dest="plot_types",
         nargs="+",
-        default=["cdf", "violin"],
-        help="Metric plot types to create: cdf, violin, catchment-map.",
+        default=["cdf"],
+        help=(
+            "Metric plot types to create: cdf, violin, catchment-map. Defaults to cdf."
+        ),
     )
     optional.add_argument(
         "--dpi",
-        default=450,
+        default=400,
         type=int,
         help="Output image resolution.",
     )
@@ -153,7 +155,7 @@ def _validate_metric_plot_types(plot_types):
         Validated plot type names.
     """
     if plot_types is None:
-        return ["cdf", "violin"]
+        return ["cdf"]
     invalid_plot_types = [
         plot_type for plot_type in plot_types if plot_type not in METRIC_PLOT_TYPES
     ]

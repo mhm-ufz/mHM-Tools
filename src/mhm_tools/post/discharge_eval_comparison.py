@@ -16,10 +16,20 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from matplotlib import colors as mcolors
 
 from mhm_tools.common.constants import WMO_REGION_BOUNDS
-from mhm_tools.common.logger import ErrorLogger
+from mhm_tools.common.logger import ErrorLogger, log_errors
+from mhm_tools.common.plotter import (
+    PLOT_DPI,
+    add_map_colorbar,
+    calculate_map_figure_size,
+    create_axis_label,
+    create_comparison_title,
+    create_discrete_colour_norm,
+    create_summary_text,
+    get_metric_plot_style,
+    style_map_axes,
+)
 from mhm_tools.common.utils import sanitize_name
 
 logger = logging.getLogger(__name__)
@@ -313,6 +323,7 @@ def _prepare_discharge_metric_diff_data(
     return lons[valid], lats[valid], diff[valid]
 
 
+@log_errors(raise_exceptions=True)
 def plot_discharge_metric_diff_map(
     reference_df,
     other_df,
@@ -322,9 +333,9 @@ def plot_discharge_metric_diff_map(
     output_dir,
     lon_col="x",
     lat_col="y",
-    cmap="RdBu_r",
+    cmap="coolwarm_r",
     point_size=6,
-    dpi=200,
+    dpi=PLOT_DPI,
     extent=None,
     region=None,
 ):
@@ -387,11 +398,11 @@ def plot_discharge_metric_diff_map(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    abs_limit = float(np.nanpercentile(np.abs(diff), 98)) if diff.size else 0.0
-    if not np.isfinite(abs_limit) or abs_limit == 0:
-        abs_limit = float(np.nanmax(np.abs(diff))) or 1.0
-    vmin, vmax = -abs_limit, abs_limit
-    extend = "both" if np.nanmax(np.abs(diff)) > abs_limit else "neither"
+    style = get_metric_plot_style("diff")
+    style["cmap"] = cmap
+    cmap_obj, norm, bounds, extend, ticks = create_discrete_colour_norm(
+        diff, bounds_type="data", **style
+    )
 
     size_scale = 1.0
     if len(diff) > 200:
@@ -410,21 +421,21 @@ def plot_discharge_metric_diff_map(
             max_lat + lat_pad,
         )
 
-    fig = plt.figure(figsize=(7, 5))
-    ax = plt.axes(projection=ccrs.PlateCarree())
+    fig, ax = plt.subplots(
+        figsize=calculate_map_figure_size(extent),
+        subplot_kw={"projection": ccrs.PlateCarree()},
+    )
     ax.set_extent(extent, crs=ccrs.PlateCarree())
-    ax.add_feature(cfeature.BORDERS, linewidth=0.6)
+    ax.add_feature(cfeature.BORDERS, linewidth=0.3)
     ax.add_feature(cfeature.COASTLINE, linewidth=0.5)
     ax.add_feature(cfeature.LAND, facecolor="0.97")
     ax.add_feature(cfeature.OCEAN, facecolor="0.85")
-    ax.gridlines(draw_labels=True, linewidth=0.2, linestyle="--")
 
-    norm = mcolors.Normalize(vmin=vmin, vmax=vmax, clip=False)
     sc = ax.scatter(
         lons,
         lats,
         c=diff,
-        cmap=plt.get_cmap(cmap),
+        cmap=cmap_obj,
         norm=norm,
         s=point_size,
         alpha=0.85,
@@ -432,11 +443,21 @@ def plot_discharge_metric_diff_map(
         linewidth=0.25,
         transform=ccrs.PlateCarree(),
     )
-    cb = plt.colorbar(sc, ax=ax, orientation="vertical", shrink=0.8, extend=extend)
-    cb.set_label(f"Δ{variable} ({other_name} - {reference_name})")
+    add_map_colorbar(
+        fig, ax, sc, bounds, extend, ticks, create_axis_label(f"Δ{variable}")
+    )
+    style_map_axes(ax)
     region_suffix = f"_region_{_sanitize_name(region)}" if region else ""
-    region_title = f" ({region})" if region else ""
-    ax.set_title(f"Δ{variable}: {other_name} vs {reference_name}{region_title}")
+    region_title = f" - {region}" if region else ""
+    fig.suptitle(
+        f"{create_comparison_title(other_name, reference_name)}{region_title}",
+        fontweight="normal",
+        fontsize="x-large",
+    )
+    ax.set_title(
+        f"Δ{variable} = {other_name} - {reference_name} "
+        f"({create_summary_text(diff, bounds=bounds)})"
+    )
     fig.tight_layout()
     output_file = (
         output_dir / f"map_diff_{variable}_{_sanitize_name(other_name)}_vs_"
@@ -444,6 +465,7 @@ def plot_discharge_metric_diff_map(
     )
     fig.savefig(output_file, dpi=dpi)
     plt.close(fig)
+    logger.info(f"Wrote difference map to {output_file}")
     return output_file
 
 
@@ -454,8 +476,8 @@ def write_discharge_metric_diff_maps(
     input_names=None,
     file_names="results.csv",
     reference_name=None,
-    cmap="RdBu_r",
-    dpi=200,
+    cmap="coolwarm_r",
+    dpi=PLOT_DPI,
 ):
     """Write per-gauge metric diff maps comparing runs against a baseline.
 
@@ -527,8 +549,8 @@ def write_discharge_metric_diff_region_maps(
     input_names=None,
     file_names="results.csv",
     reference_name=None,
-    cmap="RdBu_r",
-    dpi=200,
+    cmap="coolwarm_r",
+    dpi=PLOT_DPI,
 ):
     """Write one metric diff map per discharge-evaluation region with data.
 
@@ -614,8 +636,8 @@ def write_discharge_eval_comparison_region_plots(
     variables=None,
     input_names=None,
     file_names="results.csv",
-    plot_types=("cdf", "violin"),
-    dpi=450,
+    plot_types=("cdf",),
+    dpi=PLOT_DPI,
     axis_limits_by_variable=None,
 ):
     """Write one CDF/violin comparison plot per discharge-evaluation region.
@@ -738,7 +760,7 @@ def write_discharge_eval_comparison_region_catchment_maps(
     shape_folder=None,
     mask_folder=None,
     mask_var=None,
-    dpi=200,
+    dpi=PLOT_DPI,
 ):
     """Write one catchment-map set per discharge-evaluation region.
 
@@ -833,13 +855,13 @@ def write_discharge_eval_comparison_plots(
     input_names=None,
     file_names="results.csv",
     plot_types=None,
-    dpi=450,
+    dpi=PLOT_DPI,
     shape_folder=None,
     mask_folder=None,
     mask_var=None,
     reference_name=None,
-    map_diff_cmap="RdBu_r",
-    map_diff_dpi=200,
+    map_diff_cmap="coolwarm_r",
+    map_diff_dpi=PLOT_DPI,
 ):
     """Write discharge-evaluation comparison plots from `results.csv` files.
 
@@ -858,7 +880,7 @@ def write_discharge_eval_comparison_plots(
         Glob pattern used when an input path is a directory.
     plot_types : Sequence[str], optional
         Plot types to create; see `DISCHARGE_COMPARISON_PLOT_TYPES`. Defaults
-        to `cdf`, `violin`, `map-diff`, plus `catchment-map` whenever
+        to `cdf`, `map-diff`, plus `catchment-map` whenever
         `shape_folder` or `mask_folder` is given.
     dpi : int, optional
         Output image resolution for cdf/violin plots.
@@ -899,7 +921,7 @@ def write_discharge_eval_comparison_plots(
         list(variables) if variables else list(DEFAULT_DISCHARGE_COMPARISON_VARIABLES)
     )
     if plot_types is None:
-        plot_types = ["cdf", "violin", "map-diff"]
+        plot_types = ["cdf", "map-diff"]
         if shape_folder is not None or mask_folder is not None:
             plot_types.append("catchment-map")
     plot_types = list(plot_types)

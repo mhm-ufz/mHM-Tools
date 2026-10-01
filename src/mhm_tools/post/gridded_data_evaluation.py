@@ -20,7 +20,6 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from joblib import Parallel, delayed
-from matplotlib.colors import BoundaryNorm
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 from mhm_tools.common.file_handler import (
@@ -33,6 +32,7 @@ from mhm_tools.common.file_handler import (
 from mhm_tools.common.logger import ErrorLogger, log_arguments, log_errors
 from mhm_tools.common.metrics.metrics_handler import create_results_csv
 from mhm_tools.common.netcdf import generate_bounds_for_all_coords
+from mhm_tools.common.plotter import plot_single_map, round_sensibly
 from mhm_tools.common.resolution_handler import Resolution, get_file_res
 from mhm_tools.common.time_utils import (
     resample_to_target_freq,
@@ -909,148 +909,6 @@ def get_stats_one_pass(
     return output
 
 
-def plot_single_map(
-    ax,
-    values,
-    diff_to_mean=None,
-    center=1,
-    vmin=0,
-    vmax=1,
-    cmap=plt.cm.coolwarm_r,
-    # cmap = plt.cm.RdBu,
-    bounds_type="fixed",
-):
-    """Plot a single map on a Matplotlib Axes.
-
-    Handles bounds and colormap selection. Behavior by `bounds_type`:
-    - "max": set vmin=1 - diff_to_mean and vmax=1 + diff_to_mean
-    - "quantiles": set vmin/vmax to the 5th/95th percentiles of `values`
-    - "fixed": set vmin=0.5 and vmax=1.5
-
-    Returns
-    -------
-    im : AxesImage
-        The image artist.
-    bounds : ndarray
-        Bin edges used by BoundaryNorm.
-    extent : {"neither", "min", "max", "both"}
-        Whether data extend beyond bounds.
-    ticks : ndarray
-        Tick centers for colorbar labels (every second bin center).
-    """
-
-    def _step_decimals(step):
-        step_abs = abs(float(step))
-        if step_abs == 0:
-            return 0
-        decimals = int(max(0, -np.floor(np.log10(step_abs))))
-        if not np.isclose(step_abs * (10**decimals), round(step_abs * (10**decimals))):
-            decimals += 1
-        return min(decimals, 6)
-
-    if bounds_type == "max" and diff_to_mean is not None:
-        vmin = center - diff_to_mean
-        vmax = center + diff_to_mean
-    if bounds_type == "quantiles":
-        vmin, vmax = (
-            np.nanquantile(values, 0.05),
-            np.nanquantile(values, 0.95),
-        )
-        if abs(vmax - vmin) < abs(vmax / 3) or vmin == vmax:
-            vmin, vmax = (float(np.nanmin(values)), float(np.nanmax(values)))
-        if abs(vmax - vmin) < abs(vmax / 3) or vmin == vmax:
-            vmin, vmax = (
-                vmin - abs(vmin / 3),
-                vmax + abs(vmax / 3),
-            )
-    if bounds_type == "fixed":
-        # vmin, vmax = 0.5, 1.5
-        vmin, vmax = center - 0.5625, center + 0.5625
-
-    values_np = np.asarray(values)
-    if not np.isfinite(vmin) or not np.isfinite(vmax):
-        finite_values = values_np[np.isfinite(values_np)]
-        if finite_values.size == 0:
-            vmin, vmax = 0.0, 1.0
-        else:
-            vmin, vmax = float(np.nanmin(finite_values)), float(
-                np.nanmax(finite_values)
-            )
-    if np.isclose(vmax, vmin):
-        delta = max(abs(vmax), 1.0) * 0.5
-        vmin, vmax = vmin - delta, vmax + delta
-
-    target_bins = 9
-    step = (vmax - vmin) / max(target_bins, 1)
-    if not np.isfinite(step) or step <= 0:
-        step = 1.0
-    tick_anchor = center if bounds_type in {"fixed", "max"} else 0.0
-    if not (vmin <= tick_anchor <= vmax):
-        tick_anchor = 0.0 if (vmin < 0 < vmax) else vmin
-
-    centers = np.linspace(vmin + step / 2, vmax - step / 2, target_bins)
-    if vmin <= tick_anchor <= vmax and centers.size > 0:
-        anchor_idx = int(np.argmin(np.abs(centers - tick_anchor)))
-        centers = centers + (tick_anchor - centers[anchor_idx])
-
-    bounds = np.concatenate(
-        (
-            [centers[0] - step / 2],
-            0.5 * (centers[:-1] + centers[1:]),
-            [centers[-1] + step / 2],
-        )
-    )
-    if centers.size <= 2:
-        ticks = centers
-    else:
-        anchor_idx = np.where(np.isclose(centers, tick_anchor))[0]
-        start_idx = int(anchor_idx[0] % 2) if anchor_idx.size else 0
-        ticks = centers[start_idx::2]
-        if ticks.size == 0:
-            ticks = centers
-    decimals = _step_decimals(step)
-    ticks = np.round(ticks, decimals=decimals)
-    bounds = np.round(bounds, decimals=decimals + 1)
-
-    extent = "neither"
-    if np.nanquantile(values_np, 0.96) > bounds[-1]:
-        extent = "max"
-    if np.nanquantile(values_np, 0.049) < bounds[0]:
-        extent = "min" if extent == "neither" else "both"
-
-    norm = BoundaryNorm(bounds, cmap.N)
-    im = ax.imshow(values_np, cmap=cmap, norm=norm)
-    return im, bounds, extent, ticks
-
-
-def round_sensibly(value):
-    """Round map half-range to sensible steps and return decimals for labels.
-
-    Returns
-    -------
-    tuple[float, int]
-        (rounded_value, round_dec)
-    """
-    value = float(abs(value))
-    if not np.isfinite(value) or value == 0:
-        return 1e-6, 6
-
-    thresholds = [
-        (1.4, 2, 2),  # step 0.5
-        (0.15, 5, 2),  # step 0.2
-        (0.015, 50, 3),  # step 0.02
-        (0.0015, 500, 4),  # step 0.002
-        (0.00015, 5000, 5),  # step 0.0002
-        (0.0, 50000, 6),  # step 0.00002
-    ]
-    for threshold, scale, round_dec in thresholds:
-        if value > threshold:
-            rounded = round(value * scale) / scale
-            rounded = max(rounded, 1 / scale)
-            return rounded, round_dec
-    return value, 6
-
-
 def resample_to_coarser_calendar(
     ds_input: xr.Dataset, ds_ref: xr.Dataset
 ) -> Tuple[xr.Dataset, xr.Dataset]:
@@ -1478,8 +1336,7 @@ def plot_map_global_climate2(
     mean_diff_1 = max(abs(vmin), abs(vmax))
     mean_diff_1, round_dec = round_sensibly(mean_diff_1)
     logger.debug(
-        f"mean_diff_1={mean_diff_1}, vmin={vmin}, vmax={vmax}, "
-        f"round_dec={round_dec}"
+        f"mean_diff_1={mean_diff_1}, vmin={vmin}, vmax={vmax}, round_dec={round_dec}"
     )
     im0, bounds0, extend0, ticks0 = plot_single_map(
         ax_rel_mean, rel_mean, mean_diff_1, bounds_type="max", center=0
@@ -1497,8 +1354,7 @@ def plot_map_global_climate2(
     diff_diff_1 = max(abs(vmin), abs(vmax))
     diff_diff_1, round_dec = round_sensibly(diff_diff_1)
     logger.debug(
-        f"diff_diff_1={diff_diff_1}, vmin={vmin}, vmax={vmax}, "
-        f"round_dec={round_dec}"
+        f"diff_diff_1={diff_diff_1}, vmin={vmin}, vmax={vmax}, round_dec={round_dec}"
     )
     im1, bounds1, extend1, ticks1 = plot_single_map(
         ax_diff, diff_mean, diff_diff_1, center=0, bounds_type="max"

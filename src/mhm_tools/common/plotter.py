@@ -22,13 +22,21 @@ import numpy as np
 import xarray as xr
 from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.colors import BoundaryNorm, ListedColormap
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+
+from mhm_tools.common.constants import KGE_CONSTANT_MEAN_BOUND, NSE_CONSTANT_MEAN_BOUND
+from mhm_tools.common.logger import log_errors
 
 logger = logging.getLogger(__name__)
 
-# Dataset identity, one hue each, kept the same in every figure. Validated as a
-# categorical pair: protan dE 22.9, normal dE 31.9, both above the surface floor.
-INPUT_COLOR = "#1f6feb"
-REF_COLOR = "#d1495b"
+# Dataset roles, kept the same in every figure
+INPUT_COLOR = "#79A3E6"
+REF_COLOR = "#008176"
+RATIO_COLOR = "#0000A7"
+# colour of skill values below the lower colour limit, e.g. KGE < -0.41, NSE < 0
+KGE_UNDER_COLOR = "lightgray"
+FIGURE_WIDTH = 10.5
+PLOT_DPI = 400
 # recessive ink for axes, labels and captions
 AXIS_COLOR = "#9aa5ab"
 CAPTION_COLOR = "#5b6770"
@@ -53,6 +61,14 @@ ZERO_CENTERED_METRICS = {
     "sigma-error",
     "wd",
 }
+CORRELATION_METRICS = {
+    "gamma",
+    "pearson",
+    "r",
+    "rho",
+    "rs",
+    "spearman",
+}
 HIGHER_IS_BETTER_METRICS = {
     "comb",
     "esp",
@@ -69,12 +85,9 @@ METRIC_SUMMARY_VALUE_COLUMNS = {"value", "min", "max", "mean", "median"}
 try:  # cartopy is optional
     import cartopy.crs as ccrs
     import cartopy.feature as cfeature
-    from cartopy.mpl.ticker import LatitudeFormatter, LongitudeFormatter
 except ImportError:  # pragma: no cover - cartopy may be absent in some installs
     ccrs = None
     cfeature = None
-    LatitudeFormatter = None
-    LongitudeFormatter = None
 
 
 def _require_cartopy() -> None:
@@ -102,12 +115,472 @@ def style_axes(ax, show_grid=False):
     ax.spines["right"].set_visible(False)
     for spine in ("left", "bottom"):
         ax.spines[spine].set_color(AXIS_COLOR)
-        ax.spines[spine].set_linewidth(0.8)
-    ax.tick_params(colors=CAPTION_COLOR, labelcolor=CAPTION_COLOR, length=3, width=0.8)
+        ax.spines[spine].set_linewidth(0.5)
+    ax.tick_params(colors=CAPTION_COLOR, labelcolor=CAPTION_COLOR, length=3, width=0.5)
     if show_grid:
         ax.grid(axis="y", color=GRID_COLOR, linewidth=0.8)
         ax.set_axisbelow(True)
     return ax
+
+
+def style_map_axes(ax):
+    """Remove the ticks of a map axes and draw thin spines.
+
+    Args:
+        ax: Matplotlib or cartopy axes showing a map.
+
+    Returns
+    -------
+        The styled axes.
+    """
+    ax.set_xticks([])
+    ax.set_yticks([])
+    for spine in ax.spines.values():
+        spine.set_linewidth(0.25)
+    return ax
+
+
+def add_map_colorbar(fig, ax, mappable, bounds, extend, ticks, label):
+    """Attach a discrete colorbar to the right of a map axes.
+
+    Args:
+        fig: Figure holding the map.
+        ax: Map axes the colorbar is attached to.
+        mappable: Image or scatter returned by the plot call.
+        bounds: Bin edges of the colour norm.
+        extend: Colorbar extension, one of "neither", "min", "max" or "both".
+        ticks: Tick positions on the colorbar.
+        label: Colorbar label including units.
+
+    Returns
+    -------
+        The created colorbar.
+    """
+    # axes_class keeps the colorbar a plain axes next to cartopy GeoAxes
+    colorbar_ax = make_axes_locatable(ax).append_axes(
+        "right", size="5%", pad=0.1, axes_class=plt.Axes
+    )
+    colorbar = fig.colorbar(
+        mappable,
+        cax=colorbar_ax,
+        boundaries=bounds,
+        extend=extend,
+        ticks=ticks,
+        label=label,
+    )
+    # shortest form of every tick, so -0.41 and -0.2 instead of -0.41 and -0.20
+    colorbar.set_ticks(ticks, labels=[f"{tick + 0.0:g}" for tick in ticks])
+    return colorbar
+
+
+def create_comparison_title(input_name, ref_name, years=None):
+    """Create the figure title of an input/reference comparison.
+
+    Args:
+        input_name: Label of the input dataset.
+        ref_name: Label of the reference dataset.
+        years: Sequence of the covered years, None to leave the period out.
+
+    Returns
+    -------
+        Title string.
+    """
+    title = f"Comparison {input_name} with {ref_name}"
+    if years is not None and len(years) > 0:
+        first_year, last_year = years[0], years[-1]
+        if first_year == last_year:
+            title += f" for year {first_year}"
+        else:
+            title += f" for years {first_year}-{last_year}"
+    return title
+
+
+def create_axis_label(name, units=None):
+    """Create an axis or colorbar label with units in square brackets.
+
+    Args:
+        name: Quantity shown on the axis.
+        units: Units of the quantity, None or "1" for dimensionless values.
+
+    Returns
+    -------
+        Label of the form ``"name [units]"``.
+    """
+    if units in (None, "", "1", "-"):
+        units = "-"
+    return f"{name} [{units}]"
+
+
+def calculate_map_figure_size(
+    extent, panel_count=1, extra_width=1.0, extra_height=1.2, max_panel_height=7.0
+):
+    """Size a map figure of standard width from the aspect of the mapped domain.
+
+    Args:
+        extent: Map extent as (lon_min, lon_max, lat_min, lat_max).
+        panel_count: Number of map panels side by side.
+        extra_width: Inches reserved for colorbars and padding.
+        extra_height: Inches reserved for titles, captions and legends.
+        max_panel_height: Largest height of one panel in inches.
+
+    Returns
+    -------
+        The (width, height) figure size in inches.
+    """
+    lon_min, lon_max, lat_min, lat_max = extent
+    lat_span = lat_max - lat_min
+    aspect = (lon_max - lon_min) / lat_span if lat_span > 0 else 1.0
+    panel_width = (FIGURE_WIDTH - extra_width) / panel_count
+    # keep a very thin domain from collapsing into a line
+    panel_height = min(max_panel_height, max(panel_width / aspect, 1.5))
+    return FIGURE_WIDTH, panel_height + extra_height
+
+
+def get_metric_plot_style(metric_name, kge_vmin=KGE_CONSTANT_MEAN_BOUND):
+    """Get the colour settings of a metric map.
+
+    Skill and correlation metrics get a sequential map, ratios and differences
+    a diverging map centred on their no-difference value.
+
+    Args:
+        metric_name: Metric name, e.g. ``"kge"``, ``"alpha"`` or ``"diff"``.
+        kge_vmin: Lower colour limit of KGE maps.
+
+    Returns
+    -------
+        Dict with ``cmap``, ``center``, ``vmin``, ``vmax``, ``under_color`` and
+        ``max_extended_vmin`` for ``create_discrete_colour_norm`` with
+        ``bounds_type="data"``. None limits are derived from the data.
+    """
+    metric = metric_name.lower()
+    style = {
+        "cmap": "viridis_r",
+        "center": None,
+        "vmin": None,
+        "vmax": None,
+        "under_color": None,
+        "max_extended_vmin": None,
+    }
+    if metric == "kge":
+        style.update(vmin=kge_vmin, vmax=1.0, under_color=KGE_UNDER_COLOR)
+    elif metric == "nse":
+        style.update(
+            vmin=NSE_CONSTANT_MEAN_BOUND, vmax=1.0, under_color=KGE_UNDER_COLOR
+        )
+    elif metric in CORRELATION_METRICS:
+        # positive correlations stay on the scale, only negative ones extend
+        style.update(vmax=1.0, max_extended_vmin=0.0)
+    elif metric in ONE_CENTERED_METRICS:
+        style.update(cmap="coolwarm_r", center=1.0)
+    elif metric in ZERO_CENTERED_METRICS or metric.startswith("diff"):
+        style.update(cmap="coolwarm_r", center=0.0)
+    elif metric == "rmse":
+        style.update(cmap="magma_r", vmin=0.0)
+    return style
+
+
+def round_sensibly(value):
+    """Round map half-range to sensible steps and return decimals for labels.
+
+    Returns
+    -------
+    tuple[float, int]
+        (rounded_value, round_dec)
+    """
+    value = float(abs(value))
+    if not np.isfinite(value) or value == 0:
+        return 1e-6, 6
+
+    thresholds = [
+        (1.4, 2, 2),  # step 0.5
+        (0.15, 5, 2),  # step 0.2
+        (0.015, 50, 3),  # step 0.02
+        (0.0015, 500, 4),  # step 0.002
+        (0.00015, 5000, 5),  # step 0.0002
+        (0.0, 50000, 6),  # step 0.00002
+    ]
+    for threshold, scale, round_dec in thresholds:
+        if value > threshold:
+            rounded = round(value * scale) / scale
+            rounded = max(rounded, 1 / scale)
+            return rounded, round_dec
+    return value, 6
+
+
+def calculate_nice_step(raw_step, factors=(1.0, 2.0, 2.5, 5.0, 10.0)):
+    """Calculate the nice step closest to a raw colour bin width.
+
+    Args:
+        raw_step: Raw bin width, e.g. the colour range divided by 9.
+        factors: Allowed multiples of a power of ten, ascending up to 10.
+
+    Returns
+    -------
+        One of `factors` times a power of ten, 1.0 for an unusable width.
+    """
+    if not np.isfinite(raw_step) or raw_step <= 0:
+        return 1.0
+    magnitude = 10 ** np.floor(np.log10(raw_step))
+    candidates = magnitude * np.array(factors)
+    return float(candidates[np.argmin(np.abs(np.log(candidates / raw_step)))])
+
+
+def calculate_colour_limits(
+    values, center=None, vmin=None, vmax=None, max_extended_vmin=None
+):
+    """Calculate colour limits that are not stretched by outliers.
+
+    Each end uses the data min/max, or the 1st/99th percentile when the
+    outliers beyond it span more than the bulk of the data on that side. With
+    a center the limits are symmetric around it and left unrounded, since
+    ``create_discrete_colour_norm`` widens them to the edge of a bin centred on
+    the center. Sequential limits are rounded outwards to multiples of the bin
+    step, so rounding never pushes values off the scale.
+
+    Args:
+        values: Array of the plotted values.
+        center: No-difference value of a diverging map, None for sequential maps.
+        vmin: Lower limit to keep instead of deriving it.
+        vmax: Upper limit to keep instead of deriving it.
+        max_extended_vmin: Highest derived lower limit once values fall below
+            it, e.g. 0 for correlations; None for no such cap.
+
+    Returns
+    -------
+        Tuple of (vmin, vmax).
+    """
+    finite_values = np.asarray(values, dtype=float)
+    finite_values = finite_values[np.isfinite(finite_values)]
+    if finite_values.size == 0:
+        return (0.0 if vmin is None else vmin, 1.0 if vmax is None else vmax)
+    data_min, data_max = finite_values.min(), finite_values.max()
+    low, high = np.quantile(finite_values, [0.01, 0.99])
+    mean = finite_values.mean()
+    lower = low if abs(low - data_min) > abs(mean - low) else data_min
+    upper = high if abs(data_max - high) > abs(high - mean) else data_max
+    if center is not None:
+        half_range = max(abs(upper - center), abs(center - lower))
+        lower, upper = center - half_range, center + half_range
+    else:
+        # the step follows the final range, so a given limit counts as well
+        lower = lower if vmin is None else vmin
+        upper = upper if vmax is None else vmax
+        if upper > lower:
+            # the small shift keeps floating point noise from adding a step
+            step = calculate_nice_step((upper - lower) / 9)
+            if vmin is None:
+                lower = round(float(np.floor(lower / step + 1e-9) * step), 10)
+            if vmax is None:
+                upper = round(float(np.ceil(upper / step - 1e-9) * step), 10)
+    if vmin is None and max_extended_vmin is not None and data_min < lower:
+        lower = min(lower, max_extended_vmin)
+    lower = lower if vmin is None else vmin
+    upper = upper if vmax is None else vmax
+    return float(lower), float(upper)
+
+
+def create_discrete_colour_norm(
+    values,
+    diff_to_mean=None,
+    center=1,
+    vmin=0,
+    vmax=1,
+    cmap=plt.cm.coolwarm_r,
+    bounds_type="fixed",
+    under_color=None,
+    max_extended_vmin=None,
+):
+    """Create a discrete colour norm with about 9 bins for one map.
+
+    Sequential maps: the outer bin edges are the colour limits, the inner edges
+    sit on multiples of a nice step (1, 2, 2.5 or 5 times a power of ten), e.g.
+    -0.41, -0.2, 0, 0.2, ..., 1 for a KGE.
+    Diverging maps ("fixed", "max", or "data" with a center): an odd number of
+    bins with one centred on the center, edges at center +- 0.5, 1.5, ... steps
+    of 1, 2 or 5 times a power of ten, and the limits widened to the outer edges.
+
+    Behaviour by `bounds_type`:
+    - "max": set vmin=center - diff_to_mean and vmax=center + diff_to_mean
+    - "quantiles": set vmin/vmax to the 5th/95th percentiles of `values`
+    - "fixed": set vmin=center - 0.5 and vmax=center + 0.5
+    - "data": derive vmin/vmax with `calculate_colour_limits`; a vmin or vmax
+      that is not None is kept, a center that is not None makes them symmetric
+      and `max_extended_vmin` caps a lower limit that values fall below
+    - "given": use vmin/vmax as they are
+
+    Returns
+    -------
+    cmap : Colormap
+        One colour per bin. Values beyond a limit with a colorbar extension
+        get a colour of their own: `under_color` below the lowest bin if
+        given, otherwise the colormap colour past the last bin.
+    norm : BoundaryNorm
+        Norm mapping values to the bins.
+    bounds : ndarray
+        Bin edges used by BoundaryNorm.
+    extent : {"neither", "min", "max", "both"}
+        Whether data extend beyond bounds.
+    ticks : ndarray
+        Tick positions at the bin edges (every second edge when there are more
+        than 10 sequential or 11 diverging bins).
+    """
+
+    def _step_decimals(step):
+        step_abs = abs(float(step))
+        if step_abs == 0:
+            return 0
+        decimals = int(max(0, -np.floor(np.log10(step_abs))))
+        if not np.isclose(step_abs * (10**decimals), round(step_abs * (10**decimals))):
+            decimals += 1
+        return min(decimals, 6)
+
+    if bounds_type == "max" and diff_to_mean is not None:
+        vmin = center - diff_to_mean
+        vmax = center + diff_to_mean
+    if bounds_type == "quantiles":
+        vmin, vmax = (
+            np.nanquantile(values, 0.05),
+            np.nanquantile(values, 0.95),
+        )
+        if abs(vmax - vmin) < abs(vmax / 3) or vmin == vmax:
+            vmin, vmax = (float(np.nanmin(values)), float(np.nanmax(values)))
+        if abs(vmax - vmin) < abs(vmax / 3) or vmin == vmax:
+            vmin, vmax = (
+                vmin - abs(vmin / 3),
+                vmax + abs(vmax / 3),
+            )
+    if bounds_type == "fixed":
+        vmin, vmax = center - 0.5, center + 0.5
+    if bounds_type == "data":
+        vmin, vmax = calculate_colour_limits(
+            values, center, vmin, vmax, max_extended_vmin
+        )
+
+    values_np = np.asarray(values)
+    if vmin is None or vmax is None or not np.isfinite(vmin) or not np.isfinite(vmax):
+        finite_values = values_np[np.isfinite(values_np)]
+        if finite_values.size == 0:
+            vmin, vmax = 0.0, 1.0
+        else:
+            vmin, vmax = (
+                float(np.nanmin(finite_values)),
+                float(np.nanmax(finite_values)),
+            )
+    if np.isclose(vmax, vmin):
+        delta = max(abs(vmax), 1.0) * 0.5
+        vmin, vmax = vmin - delta, vmax + delta
+
+    diverging = bounds_type in {"fixed", "max"} or (
+        bounds_type == "data" and center is not None
+    )
+    if diverging:
+        # one bin is centred on the center value, so values close to it stand
+        # out; steps of 1, 2 or 5 keep the edges at center +- half a step readable
+        half_range = max(vmax - center, center - vmin)
+        step = calculate_nice_step(2 * half_range / 9, factors=(1.0, 2.0, 5.0, 10.0))
+        side_bins = max(1, int(np.ceil(half_range / step - 0.5 - 1e-9)))
+        edge_offsets = np.arange(-side_bins, side_bins + 2) - 0.5
+        bounds = np.round(center + step * edge_offsets, _step_decimals(step / 2))
+        ticks = bounds
+        if bounds.size > 12:
+            # every second edge outwards from the centre bin, plus both limits
+            keep_tick = np.round(np.abs(edge_offsets) - 0.5) % 2 == 0
+            keep_tick[[0, -1]] = True
+            ticks = bounds[keep_tick]
+    else:
+        step = calculate_nice_step((vmax - vmin) / 9)
+        inner_edges = step * np.arange(np.ceil(vmin / step), np.floor(vmax / step) + 1)
+        # an inner edge within half a step of a limit would leave a sliver bin
+        min_distance = step / 2 * (1 - 1e-9)
+        inner_edges = inner_edges[
+            (inner_edges - vmin >= min_distance) & (vmax - inner_edges >= min_distance)
+        ]
+        inner_edges = np.round(inner_edges, _step_decimals(step))
+        bounds = np.round(np.concatenate(([vmin], inner_edges, [vmax])), 6)
+        ticks = bounds
+        if bounds.size > 11:
+            # every second inner edge, plus both limits
+            even_edges = inner_edges[np.round(inner_edges / step) % 2 == 0]
+            ticks = np.round(np.concatenate(([vmin], even_edges, [vmax])), 6)
+
+    extent = "neither"
+    if bounds_type in {"data", "given"}:
+        # every value outside the bounds gets an arrow on the colorbar
+        finite_values = values_np[np.isfinite(values_np)]
+        below = finite_values.size > 0 and finite_values.min() < bounds[0]
+        above = finite_values.size > 0 and finite_values.max() > bounds[-1]
+        extent = {
+            (False, False): "neither",
+            (True, False): "min",
+            (False, True): "max",
+            (True, True): "both",
+        }[(bool(below), bool(above))]
+    else:
+        if np.nanquantile(values_np, 0.96) > bounds[-1]:
+            extent = "max"
+        if np.nanquantile(values_np, 0.049) < bounds[0]:
+            extent = "min" if extent == "neither" else "both"
+
+    # an extension gets the colormap colour past the last bin, so values beyond
+    # a limit never share the colour of the bin next to it
+    reserve_low = extent in {"min", "both"} and under_color is None
+    reserve_high = extent in {"max", "both"}
+    bin_count = bounds.size - 1
+    colours = plt.get_cmap(cmap)(
+        np.linspace(0, 1, bin_count + int(reserve_low) + int(reserve_high))
+    )
+    bin_colours = colours[int(reserve_low) : len(colours) - int(reserve_high)]
+    if under_color is None:
+        under_color = colours[0] if reserve_low else bin_colours[0]
+    cmap = ListedColormap(bin_colours).with_extremes(
+        under=under_color, over=colours[-1] if reserve_high else bin_colours[-1]
+    )
+    norm = BoundaryNorm(bounds, cmap.N)
+    return cmap, norm, bounds, extent, ticks
+
+
+def plot_single_map(
+    ax,
+    values,
+    diff_to_mean=None,
+    center=1,
+    vmin=0,
+    vmax=1,
+    cmap=plt.cm.coolwarm_r,
+    # cmap = plt.cm.RdBu,
+    bounds_type="fixed",
+    under_color=None,
+    **imshow_kwargs,
+):
+    """Plot a single map on a Matplotlib Axes.
+
+    Bounds and colormap come from `create_discrete_colour_norm`, see there for
+    the behaviour of `bounds_type`. `imshow_kwargs` (e.g. extent, origin,
+    transform) are passed on to `ax.imshow`.
+
+    Returns
+    -------
+    im : AxesImage
+        The image artist.
+    bounds : ndarray
+        Bin edges used by BoundaryNorm.
+    extent : {"neither", "min", "max", "both"}
+        Whether data extend beyond bounds.
+    ticks : ndarray
+        Tick centers for colorbar labels (every second bin center).
+    """
+    cmap, norm, bounds, extent, ticks = create_discrete_colour_norm(
+        values,
+        diff_to_mean=diff_to_mean,
+        center=center,
+        vmin=vmin,
+        vmax=vmax,
+        cmap=cmap,
+        bounds_type=bounds_type,
+        under_color=under_color,
+    )
+    im = ax.imshow(np.asarray(values), cmap=cmap, norm=norm, **imshow_kwargs)
+    return im, bounds, extent, ticks
 
 
 def calculate_cdf_values(values: Sequence[float]):
@@ -224,13 +697,32 @@ def _get_lower_axis_limit(values, floor=-1.0):
     return min_value - padding
 
 
+def _get_metric_floor(variable_name):
+    """Get the lowest axis limit drawn for a metric.
+
+    Args:
+        variable_name: Metric name.
+
+    Returns
+    -------
+        The constant-mean bound for KGE and NSE, otherwise -1.
+    """
+    metric = str(variable_name).lower()
+    if metric == "kge":
+        return KGE_CONSTANT_MEAN_BOUND
+    if metric == "nse":
+        return NSE_CONSTANT_MEAN_BOUND
+    return -1.0
+
+
+@log_errors(raise_exceptions=True)
 def plot_metric_cdf_comparison(
     values_by_label: Mapping[str, Sequence[float]],
     variable_name: str,
     output_file: Path,
     title: Optional[str] = None,
     x_limits: Optional[Sequence[float]] = None,
-    dpi: int = 450,
+    dpi: int = PLOT_DPI,
     colors: Optional[Mapping[str, str]] = None,
     linestyles: Optional[Mapping[str, object]] = None,
     show_median_line: bool = False,
@@ -246,9 +738,10 @@ def plot_metric_cdf_comparison(
     output_file : Path
         PNG file to write.
     title : str, optional
-        Plot title. Defaults to a CDF title for the variable.
+        Figure title. Defaults to a CDF title for the variable.
     x_limits : Sequence[float], optional
-        Lower and upper x-axis limits.
+        Lower and upper x-axis limits. Defaults to the data range, cut off at
+        -1 (at the constant-mean bound for KGE and NSE).
     dpi : int, optional
         Output image resolution.
     colors : Mapping[str, str], optional
@@ -262,12 +755,14 @@ def plot_metric_cdf_comparison(
     -------
     None
     """
-    fig, ax = plt.subplots(figsize=(6, 4))
+    # landscape aspect, so the plot fills a page of the overview PDF
+    fig, ax = plt.subplots(figsize=(FIGURE_WIDTH, 6.5))
     plotted_any = False
     series_count = len(values_by_label)
     tab20_colors = plt.get_cmap("tab20").colors
     continuous_cmap = plt.get_cmap("nipy_spectral")
     series_to_draw = []
+    plotted_labels = []
     for color_index, (label, values) in enumerate(values_by_label.items()):
         values_array = np.asarray(values, dtype=float)
         values_array = values_array[np.isfinite(values_array)]
@@ -282,6 +777,8 @@ def plot_metric_cdf_comparison(
             label_with_count = f"{label} (n={values_array.size})"
         if colors is not None and label in colors:
             color = colors[label]
+        elif series_count == 1:
+            color = INPUT_COLOR
         elif series_count <= len(tab20_colors):
             color = tab20_colors[color_index % len(tab20_colors)]
         else:
@@ -290,10 +787,11 @@ def plot_metric_cdf_comparison(
         linestyle = "-"
         if linestyles is not None and label in linestyles:
             linestyle = linestyles[label]
+        # the points stay out of the legend, the solid line represents the series
         sorted_values, cdf_values = plot_cdf_values(
             ax,
             values_array,
-            label=label_with_count,
+            label=None,
             color=color,
             linestyle=linestyle,
             draw_line=False,
@@ -303,8 +801,16 @@ def plot_metric_cdf_comparison(
             point_opacity=0.3,
         )
         series_to_draw.append(
-            (sorted_values, cdf_values, color, linestyle, median_value)
+            (
+                sorted_values,
+                cdf_values,
+                color,
+                linestyle,
+                median_value,
+                label_with_count,
+            )
         )
+        plotted_labels.append(label)
         plotted_any = True
     if not plotted_any:
         plt.close(fig)
@@ -313,31 +819,21 @@ def plot_metric_cdf_comparison(
 
     # Draw every line after every point so no series' line is obscured by
     # another series' points when many CDFs overlap (e.g. per-continent plots).
-    for sorted_values, cdf_values, color, linestyle, median_value in series_to_draw:
+    for (
+        sorted_values,
+        cdf_values,
+        color,
+        linestyle,
+        median_value,
+        label_with_count,
+    ) in series_to_draw:
         ax.plot(
             sorted_values,
             cdf_values,
             color=color,
             linestyle=linestyle,
             linewidth=1.0,
-        )
-        if show_median_line:
-            ax.axvline(
-                median_value,
-                color=color,
-                linestyle="dotted",
-                linewidth=1,
-            )
-
-    # Draw every line after every point so no series' line is obscured by
-    # another series' points when many CDFs overlap (e.g. per-continent plots).
-    for sorted_values, cdf_values, color, linestyle, median_value in series_to_draw:
-        ax.plot(
-            sorted_values,
-            cdf_values,
-            color=color,
-            linestyle=linestyle,
-            linewidth=1.0,
+            label=label_with_count,
         )
         if show_median_line:
             ax.axvline(
@@ -347,31 +843,46 @@ def plot_metric_cdf_comparison(
                 linewidth=1,
             )
 
-    ax.set_title(title or f"CDF of {variable_name}")
-    ax.set_xlabel(variable_name)
-    ax.set_ylabel("CDF")
+    all_values = np.concatenate([sorted_values for sorted_values, *_ in series_to_draw])
+    fig.suptitle(
+        title or f"CDF of {variable_name}", fontweight="normal", fontsize="x-large"
+    )
+    # one series gets its summary in the panel title, several keep it in the legend
+    if len(plotted_labels) == 1:
+        ax.set_title(f"{plotted_labels[0]} ({create_summary_text(all_values)})")
+    ax.set_xlabel(create_axis_label(variable_name))
+    ax.set_ylabel(create_axis_label("CDF"))
     ax.set_ylim(0.0, 1.01)
+    # every CDF crosses this line at its median
+    ax.axhline(0.5, color=CAPTION_COLOR, linestyle="--", linewidth=0.8, zorder=1)
     if x_limits is not None:
         ax.set_xlim(x_limits[0], x_limits[1])
     else:
-        all_values = np.concatenate(
-            [sorted_values for sorted_values, *_ in series_to_draw]
+        ax.set_xlim(
+            left=_get_lower_axis_limit(
+                all_values, floor=_get_metric_floor(variable_name)
+            )
         )
-        ax.set_xlim(left=_get_lower_axis_limit(all_values))
+    style_axes(ax)
     ax.grid(True, color="black", linestyle=":", linewidth=0.4, alpha=0.3)
-    ax.legend()
+    legend = ax.legend()
+    # thicker legend lines keep the series colours easy to tell apart
+    for handle in legend.legend_handles:
+        handle.set_linewidth(2.5)
     fig.tight_layout()
     fig.savefig(output_file, dpi=dpi)
     plt.close(fig)
+    logger.info(f"Wrote CDF plot to {output_file}")
 
 
+@log_errors(raise_exceptions=True)
 def plot_metric_violin_comparison(
     values_by_label: Mapping[str, Sequence[float]],
     variable_name: str,
     output_file: Path,
     title: Optional[str] = None,
     y_limits: Optional[Sequence[float]] = None,
-    dpi: int = 450,
+    dpi: int = PLOT_DPI,
     colors: Optional[Mapping[str, str]] = None,
 ) -> None:
     """Create a violin plot for one metric variable.
@@ -385,9 +896,10 @@ def plot_metric_violin_comparison(
     output_file : Path
         PNG file to write.
     title : str, optional
-        Plot title. Defaults to a violin title for the variable.
+        Figure title. Defaults to a violin title for the variable.
     y_limits : Sequence[float], optional
-        Lower and upper y-axis limits.
+        Lower and upper y-axis limits. Defaults to the data range, cut off at
+        -1 (at the constant-mean bound for KGE and NSE).
     dpi : int, optional
         Output image resolution.
     colors : Mapping[str, str], optional
@@ -425,8 +937,10 @@ def plot_metric_violin_comparison(
     if not finite_values:
         msg = f"No finite values available for {variable_name}."
         raise ValueError(msg)
+    if len(finite_values) == 1 and violin_colors[0] is None:
+        violin_colors[0] = INPUT_COLOR
 
-    fig, ax = plt.subplots(figsize=(max(6, len(labels) * 1.2), 4))
+    fig, ax = plt.subplots(figsize=(max(FIGURE_WIDTH, len(labels) * 1.2), 5))
     parts = ax.violinplot(
         finite_values,
         showmeans=False,
@@ -440,16 +954,26 @@ def plot_metric_violin_comparison(
             body.set_edgecolor(color)
     ax.set_xticks(np.arange(1, len(labels) + 1))
     ax.set_xticklabels(labels, rotation=30, ha="right")
-    ax.set_ylabel(variable_name)
-    ax.set_title(title or f"Distribution of {variable_name}")
+    ax.set_ylabel(create_axis_label(variable_name))
+    fig.suptitle(
+        title or f"Distribution of {variable_name}",
+        fontweight="normal",
+        fontsize="x-large",
+    )
     if y_limits is not None:
         ax.set_ylim(y_limits[0], y_limits[1])
     else:
-        ax.set_ylim(bottom=_get_lower_axis_limit(np.concatenate(finite_values)))
+        ax.set_ylim(
+            bottom=_get_lower_axis_limit(
+                np.concatenate(finite_values), floor=_get_metric_floor(variable_name)
+            )
+        )
+    style_axes(ax)
     ax.grid(axis="y", color="black", linestyle=":", linewidth=0.5, alpha=0.3)
     fig.tight_layout()
     fig.savefig(output_file, dpi=dpi)
     plt.close(fig)
+    logger.info(f"Wrote violin plot to {output_file}")
 
 
 def create_metric_summary_rows(
@@ -688,25 +1212,28 @@ def _log_metric_summary_table(summary_rows, columns):
     -------
     None
     """
-    table_text = _create_metric_summary_table_text(summary_rows, columns)
+    table_text = create_table_text(summary_rows, columns)
     if table_text:
         logger.info(f"Metric summary table:\n{table_text}")
 
 
-def _create_metric_summary_table_text(summary_rows, columns):
-    """Create a formatted text table for metric summaries.
+def create_table_text(summary_rows, columns):
+    """Create an aligned text table, e.g. for log output.
+
+    Floats are shown with 4 significant digits. A blank line separates rows
+    whose ``variable`` entry differs.
 
     Parameters
     ----------
     summary_rows : Sequence[Mapping[str, object]]
-        Metric summary rows.
+        Table rows as mappings from column name to value.
     columns : Sequence[str]
         Rendered table columns.
 
     Returns
     -------
     str
-        Formatted table text.
+        Formatted table text, empty when there are no rows.
     """
     table_rows = [
         [_format_metric_summary_value(row.get(column)) for column in columns]
@@ -954,59 +1481,155 @@ def _format_metric_summary_value(value):
     return str(value)
 
 
+def get_map_extent_and_origin(lon, lat):
+    """Return the imshow extent and origin for cell-centre lon/lat coordinates.
+
+    Args:
+        lon: 1D array of longitude cell centres.
+        lat: 1D array of latitude cell centres.
+
+    Returns
+    -------
+        Tuple of (extent tuple of the cell edges, origin string).
+    """
+    lon = np.asarray(lon, dtype=float)
+    lat = np.asarray(lat, dtype=float)
+    lon_half = abs(lon[-1] - lon[0]) / (lon.size - 1) / 2 if lon.size > 1 else 0.5
+    lat_half = abs(lat[-1] - lat[0]) / (lat.size - 1) / 2 if lat.size > 1 else 0.5
+    extent = (
+        float(lon.min() - lon_half),
+        float(lon.max() + lon_half),
+        float(lat.min() - lat_half),
+        float(lat.max() + lat_half),
+    )
+    origin = "lower" if lat[0] <= lat[-1] else "upper"
+    return extent, origin
+
+
+def create_summary_text(values, units=None, bounds=None):
+    """Create the median and mean summary shown in panel titles.
+
+    Args:
+        values: Array of the plotted values.
+        units: Units appended to both numbers, None for dimensionless values.
+        bounds: Colour bin edges; their range sets the number of decimals.
+
+    Returns
+    -------
+        Text like ``"median=0.12mm, mean=0.10mm"``.
+    """
+    finite_values = np.asarray(values, dtype=float)
+    finite_values = finite_values[np.isfinite(finite_values)]
+    if finite_values.size == 0:
+        return "no valid values"
+    round_dec = 2
+    if bounds is not None:
+        _, round_dec = round_sensibly((bounds[-1] - bounds[0]) / 2)
+    unit_text = "" if units in (None, "", "1", "-") else units
+    return (
+        f"median={np.median(finite_values):.{round_dec}f}{unit_text}, "
+        f"mean={np.mean(finite_values):.{round_dec}f}{unit_text}"
+    )
+
+
+def _create_geo_map_axes(extent):
+    """Create a standard width figure with one PlateCarree map axes.
+
+    Args:
+        extent: Map extent as (lon_min, lon_max, lat_min, lat_max).
+
+    Returns
+    -------
+        Tuple of (figure, axes).
+    """
+    fig, ax = plt.subplots(
+        figsize=calculate_map_figure_size(extent),
+        subplot_kw={"projection": ccrs.PlateCarree()},
+    )
+    ax.set_extent(extent, crs=ccrs.PlateCarree())
+    return fig, ax
+
+
+def _write_geo_map(fig, ax, title, panel_title, out_path, x_min, x_max, y_min, y_max):
+    """Add features, limits and titles to a map figure, then save and close it.
+
+    Args:
+        fig: Figure holding the map.
+        ax: Cartopy map axes.
+        title: Figure title.
+        panel_title: Panel title with the summary statistics.
+        out_path: Path the PNG is written to.
+        x_min, x_max, y_min, y_max: Optional spatial limits for zooming.
+    """
+    if x_min is not None or x_max is not None:
+        ax.set_xlim(left=x_min, right=x_max)
+    if y_min is not None or y_max is not None:
+        ax.set_ylim(bottom=y_min, top=y_max)
+    ax.coastlines(linewidth=0.5)
+    ax.add_feature(cfeature.BORDERS, linewidth=0.3)
+    style_map_axes(ax)
+    ax.set_title(panel_title)
+    fig.suptitle(title, fontweight="normal", fontsize="x-large")
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=PLOT_DPI)
+    plt.close(fig)
+    logger.info(f"Wrote map to {out_path}")
+
+
+@log_errors(raise_exceptions=True)
 def plot_constant_data_map(
     lon,
     lat,
     arr,
     vmin,
-    vmax,
+    vmax,  # noqa: ARG001 - kept so both map plotters share one signature
     cb_label,
     title,
     out_path,
     cmap="RdBu",
+    x_min=None,
+    x_max=None,
+    y_min=None,
+    y_max=None,
+    panel_title=None,
 ):
     """Plot a map for constant-valued data.
 
     Creates a uniform-colored map with a legend patch instead of a colorbar.
+    Cells without data stay unpainted.
     """
     _require_cartopy()
 
-    base_cmap = plt.get_cmap(cmap)
-    single_color = base_cmap(0.5)  # middle color
-
-    cmap = ListedColormap([single_color])
-    norm = BoundaryNorm([vmin - 1, vmax + 1], ncolors=1)
-
-    plt.figure(figsize=(12, 6))
-    ax = plt.axes(projection=ccrs.PlateCarree())
-    ax.set_extent([lon.min(), lon.max(), lat.min(), lat.max()], crs=ccrs.PlateCarree())
-
-    lon2d, lat2d = np.meshgrid(lon, lat)
-    ax.pcolormesh(
-        lon2d,
-        lat2d,
-        np.full_like(arr, fill_value=vmin),
-        cmap=cmap,
-        norm=norm,
+    single_color = plt.get_cmap(cmap)(0.5)  # middle color
+    extent, origin = get_map_extent_and_origin(lon, lat)
+    fig, ax = _create_geo_map_axes(extent)
+    ax.imshow(
+        np.where(np.isfinite(arr), vmin, np.nan),
+        cmap=ListedColormap([single_color]),
+        extent=extent,
+        origin=origin,
         transform=ccrs.PlateCarree(),
-        shading="auto",
+        interpolation="nearest",
     )
-
-    ax.coastlines()
-    ax.add_feature(cfeature.BORDERS, linewidth=0.5)
-    ax.gridlines(draw_labels=True, linewidth=0.2, linestyle="--")
-
     # Remove colorbar, add legend box with patch
     patch = mpatches.Patch(color=single_color, label=f"{vmin:.2f} {cb_label}")
-    ax.legend(handles=[patch], loc="lower right", framealpha=0.8, fontsize=12)
+    ax.legend(handles=[patch], loc="lower right", framealpha=0.8)
+    summary = create_summary_text(arr)
+    _write_geo_map(
+        fig,
+        ax,
+        title,
+        f"{panel_title} ({summary})" if panel_title else summary,
+        out_path,
+        x_min,
+        x_max,
+        y_min,
+        y_max,
+    )
 
-    plt.title(title)
-    plt.tight_layout()
-    plt.savefig(out_path, dpi=300)
-    plt.close()
 
-
-def plot_discrete_data_map(
+@log_errors(raise_exceptions=True)
+def plot_discrete_data_map(  # noqa: PLR0913
     lon,
     lat,
     arr,
@@ -1021,81 +1644,53 @@ def plot_discrete_data_map(
     y_min=None,
     y_max=None,
     under_color=None,
+    panel_title=None,
+    center=None,
 ):
-    """Plot a map with discrete bins using a colorbar.
+    """Plot a map with about 9 discrete colour bins and a colorbar.
 
     Uses Cartopy for geographic projection and Matplotlib for color mapping.
-    `under_color` paints every value below vmin in one colour of its own.
+    `under_color` paints every value below vmin in one colour of its own. A
+    `center` makes it a diverging map with one bin centred on that value.
     """
     _require_cartopy()
 
-    # Determine how the colorbar should handle data outside [vmin, vmax]
-    extend = "neither"
-    if np.nanmin(arr) < vmin and np.nanmax(arr) > vmax:
-        extend = "both"
-    elif np.nanmin(arr) < vmin:
-        extend = "min"
-    elif np.nanmax(arr) > vmax:
-        extend = "max"
-
-    # Create a discrete colormap with ~9 bins and possible extensions
-    levels = np.linspace(vmin, vmax, 10)
-    n_bins = len(levels) - 1
-
-    # Account for extra colors needed if data exceeds bounds
-    extra = {"neither": 0, "min": 1, "max": 1, "both": 2}[extend]
-
-    base_cmap = plt.get_cmap(cmap, n_bins + extra)
-    cmap = ListedColormap(base_cmap(np.arange(n_bins + extra)))
-    if under_color is not None:
-        cmap.set_under(under_color)
-    norm = BoundaryNorm(levels, ncolors=n_bins + extra, extend=extend)
-
-    # Set up the plot using Cartopy's PlateCarree projection
-    plt.figure(figsize=(12, 6))
-    ax = plt.axes(projection=ccrs.PlateCarree())
-
-    # Automatically set extent to data bounds unless overridden
-    ax.set_extent([lon.min(), lon.max(), lat.min(), lat.max()], crs=ccrs.PlateCarree())
-
-    # Create 2D grids of lon/lat for plotting
-    lon2d, lat2d = np.meshgrid(lon, lat)
-
-    # Plot the data field using pcolormesh with georeferenced lon/lat
-    mesh = ax.pcolormesh(
-        lon2d,
-        lat2d,
+    arr = np.where(np.isinf(arr), np.nan, arr)
+    extent, origin = get_map_extent_and_origin(lon, lat)
+    fig, ax = _create_geo_map_axes(extent)
+    image, bounds, extend, ticks = plot_single_map(
+        ax,
         arr,
+        diff_to_mean=None if center is None else max(vmax - center, center - vmin),
+        center=center,
+        vmin=vmin,
+        vmax=vmax,
         cmap=cmap,
-        norm=norm,
+        bounds_type="given" if center is None else "max",
+        under_color=under_color,
+        extent=extent,
+        origin=origin,
         transform=ccrs.PlateCarree(),
-        shading="auto",
+        interpolation="nearest",
+    )
+    add_map_colorbar(
+        fig, ax, image, bounds, extend, ticks, cb_label or create_axis_label("value")
+    )
+    summary = create_summary_text(arr, bounds=bounds)
+    _write_geo_map(
+        fig,
+        ax,
+        title,
+        f"{panel_title} ({summary})" if panel_title else summary,
+        out_path,
+        x_min,
+        x_max,
+        y_min,
+        y_max,
     )
 
-    # Optionally override axis limits
-    if x_min is not None or x_max is not None:
-        ax.set_xlim(left=x_min, right=x_max)
-    if y_min is not None or y_max is not None:
-        ax.set_ylim(bottom=y_min, top=y_max)
 
-    # Add cartographic features
-    ax.coastlines()
-    ax.add_feature(cfeature.BORDERS, linewidth=0.5)
-    ax.gridlines(draw_labels=True, linewidth=0.2, linestyle="--")
-
-    # Create colorbar with optional extensions to show clipping
-    cb = plt.colorbar(
-        mesh, ax=ax, orientation="vertical", shrink=0.8, pad=0.05, extend=extend
-    )
-    cb.set_label(cb_label)
-
-    # Final plot layout
-    plt.title(title)
-    plt.tight_layout()
-    plt.savefig(out_path, dpi=300)
-    plt.close()
-
-
+@log_errors(raise_exceptions=True)
 def plot_map(
     data: xr.DataArray,
     cb_label: str,
@@ -1109,6 +1704,9 @@ def plot_map(
     vmin: Optional[float] = None,
     vmax: Optional[float] = None,
     under_color: Optional[str] = None,
+    center: Optional[float] = None,
+    panel_title: Optional[str] = None,
+    max_extended_vmin: Optional[float] = None,
 ) -> None:
     """
     Plot and save a 2D DataArray over longitude and latitude using Cartopy.
@@ -1121,9 +1719,9 @@ def plot_map(
     data : xr.DataArray
         2D input data with 'lon' and 'lat' coordinates.
     cb_label : str
-        Label for the colorbar.
+        Label for the colorbar, with units in square brackets.
     title : str
-        Title of the plot.
+        Figure title.
     out_path : Path
         Path where the figure will be saved.
     cmap : str, optional
@@ -1131,9 +1729,15 @@ def plot_map(
     x_min, x_max, y_min, y_max : float, optional
         Manual spatial limits for zooming.
     vmin, vmax : float, optional
-        Color scale limits. If not provided, data min/max are used.
+        Color scale limits. If not provided, they follow `calculate_colour_limits`.
     under_color : str, optional
         Colour of every value below vmin, so it stays distinct from the scale.
+    center : float, optional
+        No-difference value of a diverging colormap, making the limits symmetric.
+    panel_title : str, optional
+        Name shown in front of the median and mean above the map.
+    max_extended_vmin : float, optional
+        Highest derived lower limit once values fall below it.
     """
     _require_cartopy()
 
@@ -1141,58 +1745,57 @@ def plot_map(
     lon = data["lon"].values
     lat = data["lat"].values
     arr = np.squeeze(data.values)  # remove singleton dimension (e.g., time)
+    arr = np.where(np.isinf(arr), np.nan, arr)
 
-    # Determine color limits if not provided
-    if vmin is None:
-        vmin = float(np.nanmin(arr))
-    if vmax is None:
-        vmax = float(np.nanmax(arr))
+    # Crop to the shown region so colour limits and extend follow its values
+    lon_mask = (lon >= (-np.inf if x_min is None else x_min)) & (
+        lon <= (np.inf if x_max is None else x_max)
+    )
+    lat_mask = (lat >= (-np.inf if y_min is None else y_min)) & (
+        lat <= (np.inf if y_max is None else y_max)
+    )
+    lon, lat = lon[lon_mask], lat[lat_mask]
+    arr = arr[np.ix_(lat_mask, lon_mask)]
 
-    # Fix for constant data (e.g., all zeros) so vmin != vmax
-    if vmin == vmax:
+    map_args = {
+        "lon": lon,
+        "lat": lat,
+        "arr": arr,
+        "cb_label": cb_label,
+        "title": title,
+        "out_path": out_path,
+        "cmap": cmap,
+        "x_min": x_min,
+        "x_max": x_max,
+        "y_min": y_min,
+        "y_max": y_max,
+        "panel_title": panel_title,
+    }
+    if np.nanmin(arr) == np.nanmax(arr):
         # Constant data plotting
-        plot_constant_data_map(
-            lon=lon,
-            lat=lat,
-            arr=arr,
-            vmin=vmin,
-            vmax=vmax,
-            cb_label=cb_label,
-            title=title,
-            out_path=out_path,
-            cmap=cmap,
-        )
+        constant_value = float(np.nanmin(arr))
+        plot_constant_data_map(vmin=constant_value, vmax=constant_value, **map_args)
     else:
         # plot regular discrete map
-        plot_discrete_data_map(
-            lon=lon,
-            lat=lat,
-            arr=arr,
+        vmin, vmax = calculate_colour_limits(
+            arr,
+            center=center,
             vmin=vmin,
             vmax=vmax,
-            cb_label=cb_label,
-            title=title,
-            out_path=out_path,
-            cmap=cmap,
-            x_min=x_min,
-            x_max=x_max,
-            y_min=y_min,
-            y_max=y_max,
-            under_color=under_color,
+            max_extended_vmin=max_extended_vmin,
+        )
+        plot_discrete_data_map(
+            vmin=vmin, vmax=vmax, under_color=under_color, center=center, **map_args
         )
 
 
 def _add_map_panel_features(ax, extent):
-    """Add coastlines, borders, ticks, and gridlines to one cartopy panel axis."""
+    """Add coastlines, borders and gridlines to one cartopy panel axis."""
     ax.add_feature(cfeature.COASTLINE.with_scale("110m"), linewidth=0.6, zorder=3)
     ax.add_feature(
         cfeature.BORDERS.with_scale("110m"), linewidth=0.4, alpha=0.7, zorder=3
     )
     ax.set_extent(extent, crs=ccrs.PlateCarree())
-    ax.set_xticks(np.arange(-180, 181, 60), crs=ccrs.PlateCarree())
-    ax.set_yticks(np.arange(-90, 91, 30), crs=ccrs.PlateCarree())
-    ax.xaxis.set_major_formatter(LongitudeFormatter())
-    ax.yaxis.set_major_formatter(LatitudeFormatter())
     ax.gridlines(
         crs=ccrs.PlateCarree(),
         draw_labels=False,
@@ -1201,8 +1804,10 @@ def _add_map_panel_features(ax, extent):
         alpha=0.5,
         linestyle="--",
     )
+    style_map_axes(ax)
 
 
+@log_errors(raise_exceptions=True)
 def plot_categorical_map_panels(
     grids: Sequence[Optional[xr.DataArray]],
     titles: Sequence[str],
@@ -1220,7 +1825,8 @@ def plot_categorical_map_panels(
         2D `(lat, lon)` categorical data arrays, one per panel. A `None` entry
         leaves its panel blank with a "not available" title instead of failing.
     titles : Sequence[str]
-        Panel titles, same length and order as `grids`.
+        Panel titles, same length and order as `grids`. They get an "a) ",
+        "b) ", ... prefix.
     category_colors : Mapping[int, str]
         Color per category id.
     category_names : Mapping[int, str]
@@ -1230,7 +1836,8 @@ def plot_categorical_map_panels(
     ncols : int, optional
         Number of columns in the panel grid, by default 2.
     panel_figsize : tuple[float, float], optional
-        Figure size per panel before scaling by the grid shape.
+        Width and height of one panel; only their ratio is used, since the
+        figure has the standard width.
 
     Returns
     -------
@@ -1247,27 +1854,27 @@ def plot_categorical_map_panels(
     if reference_grid is None:
         msg = "At least one grid is required to plot categorical map panels."
         raise ValueError(msg)
-    extent = [
-        float(reference_grid["lon"].min()),
-        float(reference_grid["lon"].max()),
-        float(reference_grid["lat"].min()),
-        float(reference_grid["lat"].max()),
-    ]
+    extent, origin = get_map_extent_and_origin(
+        reference_grid["lon"].values, reference_grid["lat"].values
+    )
 
     n_panels = len(grids)
     nrows = int(np.ceil(n_panels / ncols))
+    panel_width = FIGURE_WIDTH / ncols
+    panel_height = panel_width * panel_figsize[1] / panel_figsize[0]
     fig, axes = plt.subplots(
         nrows,
         ncols,
-        figsize=(panel_figsize[0] * ncols, panel_figsize[1] * nrows),
+        figsize=(FIGURE_WIDTH, panel_height * nrows + 1.0),
         subplot_kw={"projection": ccrs.PlateCarree()},
     )
     axes = np.atleast_1d(axes).ravel()
 
-    for ax, grid, title in zip(axes, grids, titles):
+    for panel_index, (ax, grid, title) in enumerate(zip(axes, grids, titles)):
+        panel_title = f"{chr(ord('a') + panel_index)}) {title}"
         if grid is None:
             logger.warning(f"Skipping panel {title!r}: no data available.")
-            ax.set_title(f"{title} (not available)")
+            ax.set_title(f"{panel_title} (not available)")
             ax.axis("off")
             continue
         values = np.ma.masked_where(
@@ -1277,13 +1884,13 @@ def plot_categorical_map_panels(
             values,
             cmap=cmap,
             norm=norm,
-            origin="upper",
+            origin=origin,
             extent=extent,
             transform=ccrs.PlateCarree(),
             interpolation="nearest",
         )
         _add_map_panel_features(ax, extent)
-        ax.set_title(title)
+        ax.set_title(panel_title)
 
     for ax in axes[n_panels:]:
         ax.axis("off")
@@ -1303,7 +1910,7 @@ def plot_categorical_map_panels(
         loc="lower center",
         bbox_to_anchor=(0.5, -0.02),
     )
-    plt.subplots_adjust(bottom=0.1)
-    fig.savefig(out_path, dpi=150, bbox_inches="tight", pad_inches=0.12)
+    fig.subplots_adjust(bottom=0.1)
+    fig.savefig(out_path, dpi=PLOT_DPI, bbox_inches="tight", pad_inches=0.12)
     plt.close(fig)
     logger.info(f"Wrote {out_path}")

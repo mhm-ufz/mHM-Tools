@@ -125,9 +125,9 @@ def add_args(parser):
         "--metric-plot-types",
         nargs="+",
         required=False,
-        default=["cdf", "violin", "map", "catchment-map"],
+        default=["cdf", "map", "catchment-map"],
         choices=["cdf", "violin", "map", "catchment-map"],
-        help="Metric plot types to create.",
+        help="Metric plot types to create. Violin plots are only made on request.",
     )
     optional.add_argument(
         "--n-boostrap-years",
