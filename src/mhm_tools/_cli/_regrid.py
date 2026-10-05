@@ -7,6 +7,11 @@ Authors
 
 from pathlib import Path
 
+from mhm_tools.common.cli_utils import (
+    add_netcdf_compression_args,
+    get_netcdf_compression,
+)
+
 
 def add_args(parser):
     """Add cli arguments.
@@ -42,6 +47,7 @@ def add_args(parser):
         choices=["nearest", "linear"],
         help="Regridding method",
     )
+    add_netcdf_compression_args(parser)
 
 
 def run(args):
@@ -62,4 +68,11 @@ def run(args):
         if not file.is_file():
             msg += f"{input!s} is not a file; "
     l2 = float(args.l2)
-    regrid(input=input, output=output, mask=mask, l2=l2, method=args.method)
+    regrid(
+        input=input,
+        output=output,
+        mask=mask,
+        l2=l2,
+        method=args.method,
+        compression=get_netcdf_compression(args),
+    )

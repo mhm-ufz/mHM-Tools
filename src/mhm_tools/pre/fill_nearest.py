@@ -386,26 +386,48 @@ def _prepare_coordinate(data_array):
     data_array.attrs.pop("missing_value", None)
 
 
-def _output_encoding(dataset):
-    """Build NetCDF encoding for coordinate variables in filled output.
+def _output_encoding(dataset, compression=None):
+    """Build NetCDF encoding for the filled output.
+
+    This writer calls ``to_netcdf`` directly, so the compression settings are
+    applied here rather than by `write_xarray_to_file`. The settings reach the
+    data variables only; `create_variable_encoding` already leaves integers and
+    anything holding coordinates out of the lossy part.
 
     Parameters
     ----------
     dataset : xarray.Dataset
-        Dataset whose coordinate encodings are generated.
+        Dataset whose encodings are generated.
+    compression : NetcdfCompression, optional
+        Lossless and lossy compression settings. None leaves the data variables
+        out of the mapping, so ``to_netcdf`` keeps the encoding they were read
+        with and the input file's compression carries over.
 
     Returns
     -------
     dict[str, dict]
         Encoding mapping passed to ``Dataset.to_netcdf``.
     """
-    return {
+    encoding = {
         name: dict(_FillValue=None, **({"dtype": "i4"} if name == "time" else {}))
         for name in dataset.coords
     }
+    if compression is not None:
+        encoding.update(
+            compression.create_variable_encoding(dataset, list(dataset.data_vars))
+        )
+    return encoding
 
 
-def fill_one_file(input_file, input_dir, fill_value, default_value, mask, output_dir):
+def fill_one_file(
+    input_file,
+    input_dir,
+    fill_value,
+    default_value,
+    mask,
+    output_dir,
+    compression=None,
+):
     """Fill all data variables in one NetCDF file and write the result.
 
     Parameters
@@ -481,7 +503,7 @@ def fill_one_file(input_file, input_dir, fill_value, default_value, mask, output
     output_file = output_dir / input_file.name
     with tempfile.TemporaryDirectory(dir=output_dir) as tmp_dir:
         tmp_file = Path(tmp_dir) / "tmp.nc"
-        dataset.to_netcdf(tmp_file, encoding=_output_encoding(dataset))
+        dataset.to_netcdf(tmp_file, encoding=_output_encoding(dataset, compression))
         shutil.move(tmp_file, output_file)
     logger.info(f"Wrote filled NetCDF file to {output_file}.")
     for var_name, (_, _, _, diagnostics) in variable_diagnostics.items():
@@ -505,6 +527,7 @@ def fill_nearest(
     fill_value=-9999.0,
     default_value=None,
     n_cpus=1,
+    compression=None,
 ):
     """Fill missing values in matching NetCDF files with nearest neighbours.
 
@@ -524,6 +547,8 @@ def fill_nearest(
         Fill value written to missing metadata and masked cells.
     n_cpus : int, default 1
         Number of worker processes used for file-level parallelism.
+    compression : NetcdfCompression, optional
+        Lossless and lossy compression settings. None uses the defaults.
 
     Returns
     -------
@@ -554,6 +579,7 @@ def fill_nearest(
                     default_value,
                     mask,
                     output_dir,
+                    compression,
                 )
             )
     else:
@@ -565,6 +591,7 @@ def fill_nearest(
                 default_value,
                 mask,
                 output_dir,
+                compression,
             )
             for input_file in input_files
         )

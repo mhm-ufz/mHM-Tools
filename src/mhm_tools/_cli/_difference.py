@@ -13,6 +13,11 @@ Authors
 
 import argparse
 
+from mhm_tools.common.cli_utils import (
+    add_netcdf_compression_args,
+    get_netcdf_compression,
+)
+
 
 def str2float(value):
     """Convert a string to float, but let None remain None."""
@@ -128,6 +133,7 @@ def add_args(parser):
         default=None,
         help="Maximum data value for colormap (optional)",
     )
+    add_netcdf_compression_args(parser)
 
 
 def run(args):
@@ -162,4 +168,5 @@ def run(args):
         mod_var=args.mod_var,
         plot=plot_opts,
         output=output_opts,
+        compression=get_netcdf_compression(args),
     )

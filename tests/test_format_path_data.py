@@ -3,12 +3,14 @@
 from pathlib import Path
 
 import geopandas as gpd
+import netCDF4
 import numpy as np
 import pytest
 import rasterio
 import xarray as xr
 
 from mhm_tools import pre
+from mhm_tools.common.netcdf import DEFAULT_COMPLEVEL, NetcdfCompression
 from mhm_tools.pre.format_lc_data import format_lc_periods
 from mhm_tools.pre.format_soil import _bulk_density_unit, format_soil_horizons
 
@@ -40,7 +42,10 @@ def _write_raster(
         dataset.write(values, 1)
 
 
-def test_format_lc_periods_maps_before_majority_and_writes_both_formats(tmp_path):
+@pytest.mark.parametrize("complevel", [None, 0, 7])
+def test_format_lc_periods_maps_before_majority_and_writes_both_formats(
+    tmp_path, complevel
+):
     """Historical classes are mapped first and retain full datetime bounds."""
     input_path = tmp_path / "land-cover"
     input_path.mkdir()
@@ -94,7 +99,14 @@ def test_format_lc_periods_maps_before_majority_and_writes_both_formats(tmp_path
         "source",
         "class",
         "nc",
+        compression=NetcdfCompression(complevel=complevel, significant_digits=3),
     )
+    with netCDF4.Dataset(netcdf_outputs[0]) as raw:
+        assert raw["land_cover"].filters()["complevel"] == (
+            DEFAULT_COMPLEVEL if complevel is None else complevel
+        )
+        assert raw["land_cover"].quantization() is None
+        assert all(raw[name].quantization() is None for name in raw.variables)
     assert [path.name for path in netcdf_outputs] == ["lc_periods.nc"]
     with xr.open_dataset(netcdf_outputs[0]) as dataset:
         assert dataset["land_cover"].dims == ("time", "y", "x")
@@ -132,7 +144,10 @@ def test_format_lc_periods_reprojects_to_dem_crs(tmp_path, output_type):
     lookup = tmp_path / "lookup.gpkg"
     _write_raster(source, [[10, 20], [30, 40]], crs="EPSG:4326")
     bounds = rasterio.warp.transform_bounds("EPSG:4326", "EPSG:3857", 0, 0, 2, 2)
-    dem_transform = rasterio.transform.from_bounds(*bounds, 2, 2)
+    cellsize = (bounds[2] - bounds[0]) / 2
+    dem_transform = rasterio.transform.from_origin(
+        bounds[0], bounds[3], cellsize, cellsize
+    )
     _write_raster(
         dem,
         np.ones((2, 2), dtype=np.float32),
@@ -256,7 +271,10 @@ def test_format_soil_horizons_writes_v5_profiles_and_normalizes_composition(
     ]
 
 
-def test_format_soil_horizons_writes_v6_horizon_classes_and_mode1_lut(tmp_path):
+@pytest.mark.parametrize("complevel", [None, 0, 7])
+def test_format_soil_horizons_writes_v6_horizon_classes_and_mode1_lut(
+    tmp_path, complevel
+):
     """v6 retains per-horizon validity, depth bounds, and a mode-1 LUT."""
     input_path = tmp_path / "soil"
     input_path.mkdir()
@@ -265,8 +283,20 @@ def test_format_soil_horizons_writes_v6_horizon_classes_and_mode1_lut(tmp_path):
     dem = tmp_path / "dem.tif"
     _write_raster(dem, np.ones((2, 2), dtype=np.float32))
 
-    raster, definition = format_soil_horizons(manifest, dem, tmp_path / "v6", "nc")
+    raster, definition = format_soil_horizons(
+        manifest,
+        dem,
+        tmp_path / "v6",
+        "nc",
+        compression=NetcdfCompression(complevel=complevel, significant_digits=3),
+    )
 
+    with netCDF4.Dataset(raster) as raw:
+        assert raw["soil_class"].filters()["complevel"] == (
+            DEFAULT_COMPLEVEL if complevel is None else complevel
+        )
+        assert raw["soil_class"].quantization() is None
+        assert all(raw[name].quantization() is None for name in raw.variables)
     assert raster.name == "soil_horizon_class.nc"
     assert definition.name == "soil_classdefinition_iFlag_soilDB_1.txt"
     with xr.open_dataset(raster, decode_cf=False) as dataset:

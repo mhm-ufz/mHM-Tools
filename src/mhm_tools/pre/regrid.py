@@ -97,7 +97,7 @@ def regrid_xarray(ds, lon_name, lat_name, lon_target, lat_target, method, var=No
     return out
 
 
-def regrid_file(input, mask, output, l2, method="nearest", var=None):
+def regrid_file(input, mask, output, l2, method="nearest", var=None, compression=None):
     """Regrid a single file to L2 grid using xarray."""
     # p.add_argument("--var", default=None, help="Single variable to regrid (default: all 2D/3D lon-lat vars)")
 
@@ -154,15 +154,13 @@ def regrid_file(input, mask, output, l2, method="nearest", var=None):
         in_lon, in_lat = lon_name, lat_name
     logger.info(f"regrid with xarray {method} interpolation")
     out = regrid_xarray(dsi, in_lon, in_lat, lonL2, latL2, method, var=var)
-    encoding = {
-        v: {"zlib": True, "complevel": 4, **NC_ENCODE_DEFAULTS} for v in out.data_vars
-    }
+    encoding = {v: dict(NC_ENCODE_DEFAULTS) for v in out.data_vars}
     logger.info(out)
-    write_xarray_to_file(out, output, encoding=encoding)
+    write_xarray_to_file(out, output, encoding=encoding, compression=compression)
     logger.info(f"Wrote {output}")
 
 
-def regrid(input, mask, output, l2=None, method="nearest", var=None):
+def regrid(input, mask, output, l2=None, method="nearest", var=None, compression=None):
     """Regrid file(s) to an L2 grid."""
     input = Path(input)
     if input.is_dir():
@@ -185,4 +183,6 @@ def regrid(input, mask, output, l2=None, method="nearest", var=None):
             output_path / file_input.parent.relative_to(input_dir) / output_name
         )
         logger.info(f"{file_input} -> {file_output}")
-        regrid_file(file_input, mask, file_output, l2, method, var)
+        regrid_file(
+            file_input, mask, file_output, l2, method, var, compression=compression
+        )

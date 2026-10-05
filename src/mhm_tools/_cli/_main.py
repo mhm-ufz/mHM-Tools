@@ -79,7 +79,7 @@ _COMMAND_GROUPS: List[Tuple[str, str, List[Tuple[str, object]]]] = [
         "data-processing",
         "Convert, regrid, merge, and derive gridded data products.",
         [
-            ("converter-nc-ascii", "mhm_tools._cli._file_converter"),
+            ("file-converter", "mhm_tools._cli._file_converter"),
             ("merge-files", "mhm_tools._cli._merge"),
             ("fill-nearest", "mhm_tools._cli._fill_nearest"),
             ("regrid-file", "mhm_tools._cli._regrid"),

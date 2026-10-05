@@ -30,9 +30,12 @@ from mhm_tools.common.crs_handler import (
     set_spatial_dims,
     write_object_crs,
 )
-from mhm_tools.common.esri_grid import standardize_header, write_grid, write_header
+from mhm_tools.common.esri_grid import standardize_header, write_header
 from mhm_tools.common.logger import ErrorLogger, log_arguments
 from mhm_tools.common.netcdf import (
+    QUANTIZATION_ATTRS,
+    QUANTIZATION_ENCODING_KEYS,
+    NetcdfCompression,
     add_variable_hard_link,
     apply_cf_baseline_metadata,
     generate_bounds,
@@ -605,6 +608,7 @@ def write_xarray_to_netcdf(
     var_name=None,
     encoding=None,
     engine="netcdf4",
+    compression=None,
 ):
     """Write an xarray Dataset or DataArray to a NetCDF file.
 
@@ -617,9 +621,14 @@ def write_xarray_to_netcdf(
     var_name : str, optional
         Data variable to write or DataArray name override.
     encoding : dict, optional
-        Per-variable NetCDF encoding.
+        Per-variable NetCDF encoding. Its compression keys are replaced by
+        `compression`, every other key it holds is kept.
     engine : str, default "netcdf4"
-        Xarray NetCDF backend engine.
+        Xarray NetCDF backend engine. Quantization needs "netcdf4".
+    compression : NetcdfCompression, optional
+        Lossless and lossy compression settings. None keeps the compression a
+        dataset read from a NetCDF file carries, falling back to the defaults
+        when it carries none.
 
     Returns
     -------
@@ -628,31 +637,83 @@ def write_xarray_to_netcdf(
     ds, data_vars = _get_netcdf_write_dataset_and_data_vars(ds, var_name)
     ds = apply_output_provenance(ds)
     apply_cf_baseline_metadata(ds, data_vars)
+    compression = (
+        NetcdfCompression(complevel=None, shuffle=None)
+        if compression is None
+        else compression
+    )
+    compression_encoding = compression.create_variable_encoding(ds, data_vars)
+    drop_quantization = engine != "netcdf4"
+    if drop_quantization and any(
+        "significant_digits" in settings for settings in compression_encoding.values()
+    ):
+        logger.warning(
+            f"Ignoring quantization for {file_path} because the {engine} engine "
+            "does not support it. Use engine='netcdf4' to quantize."
+        )
+    for name in set(data_vars) | set(ds.coords) | get_netcdf_metadata_data_vars(ds):
+        for attr in QUANTIZATION_ATTRS:
+            ds[name].attrs.pop(attr, None)
+        for key in QUANTIZATION_ENCODING_KEYS:
+            ds[name].encoding.pop(key, None)
+            ds[name].attrs.pop(key, None)
+    if drop_quantization:
+        for settings in compression_encoding.values():
+            for key in QUANTIZATION_ENCODING_KEYS:
+                settings.pop(key, None)
     if encoding is None:
         encoding = {
-            var: {
-                "zlib": True,
-                "complevel": 4,
-                "shuffle": True,
-                **NC_ENCODE_DEFAULTS,
-            }
+            var: {**NC_ENCODE_DEFAULTS, **compression_encoding[var]}
             for var in data_vars
         }
     else:
-        encoding = {key: value for key, value in encoding.items() if key in data_vars}
+        # the caller owns dtype and the fill values, the compression settings
+        # own the rest, so one option reaches every write that names variables
+        encoding = {
+            key: {**value, **compression_encoding.get(key, {})}
+            for key, value in encoding.items()
+            if key in data_vars
+        }
+        for var, settings in compression_encoding.items():
+            if var not in encoding:
+                encoding[var] = dict(settings)
 
+    numeric_coord_attrs = {
+        name: {
+            key: value
+            for key, value in {**ds[name].encoding, **ds[name].attrs}.items()
+            if key in {"units", "calendar"}
+        }
+        for name in set(ds.coords) | get_netcdf_metadata_data_vars(ds)
+        if np.issubdtype(ds[name].dtype, np.number)
+    }
     ds = prepare_time_bounds_encoding(ds)
     try:
         ds_clean, safe_encoding = prepare_dataset_for_netcdf_write(
-            ds, data_vars, encoding
+            ds, data_vars, encoding, compression
         )
+        # Restate resolved settings after inherited encoding has been merged.
+        for var, settings in compression_encoding.items():
+            if var in safe_encoding:
+                for key in QUANTIZATION_ENCODING_KEYS:
+                    safe_encoding[var].pop(key, None)
+                safe_encoding[var].update(settings)
+        # Numeric time axes (including LAI months) store units as attributes.
+        for name, attrs in numeric_coord_attrs.items():
+            if np.issubdtype(ds_clean[name].dtype, np.number):
+                ds_clean[name].attrs.update(attrs)
+                for key in ("units", "calendar"):
+                    ds_clean[name].encoding.pop(key, None)
         ds_clean.to_netcdf(
             file_path, engine=engine, format="NETCDF4", encoding=safe_encoding
         )
     except ValueError:
         logger.error(f"Error while writing to {file_path}")
         logger.error(ds)
-        logger.info(f"Trying to write without encoding {encoding}")
+        logger.info(
+            f"Trying to write without encoding {encoding}. This drops "
+            "compression, fill values and any quantization."
+        )
         ds = prepare_time_bounds_encoding(ds, strip_time_attrs=True)
         ds.to_netcdf(file_path, engine=engine, format="NETCDF4")
     except Exception as e:
@@ -844,8 +905,40 @@ def write_xarray_to_file(
     engine="netcdf4",
     resolution=None,
     crs=None,
+    compression=None,
+    geotiff_compression=None,
 ):
-    """Write xarray Datasets to file with file type depending on the file suffix."""
+    """Write xarray Datasets to file with file type depending on the file suffix.
+
+    Parameters
+    ----------
+    ds : xr.Dataset or xr.DataArray
+        Dataset or data array to write.
+    file_path : str or pathlib.Path
+        Target file path. The suffix selects ascii, NetCDF or GeoTIFF.
+    var_name : str, optional
+        Data variable to write or DataArray name override.
+    create_folder : bool, default True
+        Create the parent directory when it is missing.
+    encoding : dict, optional
+        Per-variable NetCDF encoding. Its compression keys are replaced by
+        `compression`, every other key it holds is kept.
+    engine : str, default "netcdf4"
+        Xarray NetCDF backend engine. Quantization needs "netcdf4".
+    resolution : float, optional
+        Cell size used by the ascii writer.
+    crs : Any, optional
+        Coordinate reference system written to the file.
+    compression : NetcdfCompression, optional
+        Lossless and lossy compression settings for a NetCDF file. None uses
+        inherited settings or defaults. Ignored by ASCII and GeoTIFF writers.
+    geotiff_compression : str, optional
+        GeoTIFF codec, such as "deflate". None keeps the raster writer default.
+
+    Returns
+    -------
+    None
+    """
     file_path = Path(file_path)
     suffix = file_path.suffix.lower()
     if suffix not in {".asc", ".nc", ".tif", ".tiff"}:
@@ -874,9 +967,17 @@ def write_xarray_to_file(
             resolved = resolve_crs(ds, crs)
             if resolved is not None:
                 ds = write_object_crs(ds, resolved)
-        write_xarray_to_netcdf(ds, file_path, var_name, encoding, engine)
+        write_xarray_to_netcdf(
+            ds, file_path, var_name, encoding, engine, compression=compression
+        )
     else:
-        write_xarray_to_geotiff(ds, file_path, var_name, crs=crs)
+        write_xarray_to_geotiff(
+            ds,
+            file_path,
+            var_name,
+            crs=crs,
+            geotiff_compression=geotiff_compression,
+        )
 
 
 def write_mask_to_file(
@@ -942,9 +1043,7 @@ def write_mask_to_file(
             mask_ds[coord].attrs["bounds"] = bounds_name
         except IndexError:
             logger.info(f"Could not generate bounds for coord {coord}")
-    encoding = {
-        var_name: {"zlib": True, "complevel": 4, "shuffle": True, **NC_ENCODE_MASK}
-    }
+    encoding = {var_name: dict(NC_ENCODE_MASK)}
     write_xarray_to_file(mask_ds, file_path, encoding=encoding)
     if var_name != "land_mask":
         add_variable_hard_link(file_path, existing_var=var_name, alias_var="land_mask")
@@ -993,16 +1092,16 @@ def write_xarray_to_ascii(
     if resolution is not None:
         header["cellsize"] = resolution
 
-    data_to_write = data
-    if isinstance(data_to_write, xr.DataArray):
-        data_to_write = data_to_write.data
-
-    if data_to_write.dtype.kind in ["i", "u", "f"]:  # i=int, u=unsigned, f=float
-        data_to_write = np.where(np.isnan(data_to_write), nodata_value, data_to_write)
-
-    out_header_str = write_grid(
-        file=filepath, header=header, dtype=dtype, data=data_to_write
+    out_header_str = write_header(filepath, header, dtype=dtype)
+    rows_per_block = max(
+        1, (8 * 1024**2) // (data.sizes[x_dim] * np.dtype(dtype).itemsize)
     )
+    is_int = np.issubdtype(np.dtype(dtype), np.integer)
+    with Path(filepath).open("a") as output:
+        for start in range(0, data.sizes[y_dim], rows_per_block):
+            values = data.isel({y_dim: slice(start, start + rows_per_block)}).values
+            values = np.where(np.isnan(values), nodata_value, values).astype(dtype)
+            np.savetxt(output, values, fmt="%i" if is_int else "%f")
     logger.info(f"Writting file to {filepath}")
     logger.debug(f"Header written:\n{out_header_str}")
     prj_path = Path(filepath).with_suffix(".prj")
@@ -1040,8 +1139,9 @@ def write_xarray_to_geotiff(
     data_var=None,
     nodata_value=None,
     crs=None,
+    geotiff_compression=None,
 ):
-    """Write one two-dimensional xarray payload to GeoTIFF."""
+    """Write a 2D payload to filepath, optionally using geotiff_compression."""
     if isinstance(dataset, xr.Dataset):
         data_var = data_var or get_single_data_var(dataset)
         if data_var is None or data_var not in dataset.data_vars:
@@ -1072,7 +1172,8 @@ def write_xarray_to_geotiff(
     if nodata_value is not None:
         data = data.rio.write_nodata(nodata_value, encoded=True, inplace=False)
     Path(filepath).parent.mkdir(parents=True, exist_ok=True)
-    data.rio.to_raster(filepath, dtype=output_dtype.name)
+    options = {} if geotiff_compression is None else {"compress": geotiff_compression}
+    data.rio.to_raster(filepath, dtype=output_dtype.name, **options)
 
 
 def _geotiff_dtype(data, nodata_value):

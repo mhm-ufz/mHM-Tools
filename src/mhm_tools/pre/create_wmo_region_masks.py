@@ -1562,14 +1562,7 @@ class CreateWmoRegionMasks:
         on_disk = region_grid.fillna(0).astype("uint8")
         on_disk.name = self.region_var
         on_disk.attrs["long_name"] = long_name
-        encoding = {
-            self.region_var: {
-                "dtype": "uint8",
-                "zlib": True,
-                "complevel": 4,
-                **NC_ENCODE_MASK,
-            }
-        }
+        encoding = {self.region_var: {"dtype": "uint8", **NC_ENCODE_MASK}}
         write_xarray_to_file(on_disk.to_dataset(), file_path, encoding=encoding)
         return file_path
 

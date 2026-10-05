@@ -47,6 +47,7 @@ def create_dem_derivatives(
     output_extension="nc",
     crs=None,
     var_name=None,
+    compression=None,
 ):
     """Write the DEM derivatives for ``input_file`` into ``output_path``.
 
@@ -65,7 +66,11 @@ def create_dem_derivatives(
 
     output_path = Path(output_path)
     if extension == "nc":
-        return (_write_netcdf(derivatives, grid, resolved_crs, output_path),)
+        return (
+            _write_netcdf(
+                derivatives, grid, resolved_crs, output_path, compression=compression
+            ),
+        )
     return _write_per_layer(derivatives, grid, resolved_crs, output_path, extension)
 
 
@@ -174,7 +179,7 @@ def _grid_coordinates(dem, crs):
     }
 
 
-def _write_netcdf(derivatives, grid, crs, output_path):
+def _write_netcdf(derivatives, grid, crs, output_path, compression=None):
     """Write every derivative plus grid and CRS into one NetCDF file."""
     output = _resolve_output(output_path, "dem_derivatives.nc")
     coords = {"y": grid["y"], "x": grid["x"]}
@@ -213,7 +218,7 @@ def _write_netcdf(derivatives, grid, crs, output_path):
         name: {"_FillValue": NO_DATA if dtype == "f8" else int(NO_DATA)}
         for name, (dtype, _attrs) in DERIVATIVE_ATTRS.items()
     }
-    write_xarray_to_netcdf(ds, output, encoding=encoding)
+    write_xarray_to_netcdf(ds, output, encoding=encoding, compression=compression)
     return output
 
 

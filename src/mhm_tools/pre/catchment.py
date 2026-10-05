@@ -2634,10 +2634,7 @@ class Catchment:
                     mask_ds[var].attrs["bounds"] = bounds_name
                 except (IndexError, ValueError):
                     logger.info(f"Could not generate bounds for coord {var}")
-            encoding = {
-                v: {"zlib": True, "complevel": 4, "shuffle": True, **NC_ENCODE_MASK}
-                for v in mask_ds.data_vars
-            }
+            encoding = {v: dict(NC_ENCODE_MASK) for v in mask_ds.data_vars}
             write_xarray_to_file(mask_ds, mask_file, encoding=encoding)
             add_variable_hard_link(
                 mask_file, existing_var="mask", alias_var="land_mask"

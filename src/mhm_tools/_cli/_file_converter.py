@@ -12,6 +12,11 @@ Authors
 
 from pathlib import Path
 
+from mhm_tools.common.cli_utils import (
+    add_netcdf_compression_args,
+    get_netcdf_compression,
+)
+
 
 def add_args(parser):
     """Add cli arguments for the file_converter subcommand.
@@ -78,6 +83,7 @@ def add_args(parser):
         required=False,
         help=("Only write header output."),
     )
+    add_netcdf_compression_args(parser)
 
 
 def run(args):
@@ -112,6 +118,12 @@ def run(args):
         if args.only_header:
             create_header(ds, output_path=output, no_data_value=None)
         else:
-            write_xarray_to_file(ds, output, var_name=var_name, crs=args.crs)
+            write_xarray_to_file(
+                ds,
+                output,
+                var_name=var_name,
+                crs=args.crs,
+                compression=get_netcdf_compression(args),
+            )
     finally:
         ds.close()

@@ -7,6 +7,11 @@ Authors
 - Simon Lüdke
 """
 
+from mhm_tools.common.cli_utils import (
+    add_netcdf_compression_args,
+    get_netcdf_compression,
+)
+
 
 def add_args(parser):
     """Add CLI arguments for prepare_mhm_forcings subcommand.
@@ -122,6 +127,7 @@ def add_args(parser):
         default=None,
         help="Resample the dataset to this target frequency (hourly, daily).",
     )
+    add_netcdf_compression_args(parser)
 
 
 def run(args):
@@ -148,4 +154,5 @@ def run(args):
         use_mfdataset=args.use_mfdataset,
         target_frequency=args.target_frequency,
         out_var=args.out_var,
+        compression=get_netcdf_compression(args),
     )

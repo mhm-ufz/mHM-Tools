@@ -20,6 +20,7 @@ import xarray as xr
 
 from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_to_file
 from mhm_tools.common.logger import ErrorLogger, log_arguments
+from mhm_tools.common.netcdf import NetcdfCompression
 from mhm_tools.common.time_utils import (
     calculate_median_time_step_seconds,
     resample_to_daily_or_hourly_adaptive,
@@ -126,6 +127,7 @@ def prepare_forcings(
     use_mfdataset: bool = False,
     target_frequency: Optional[str] = None,
     out_var: Optional[str] = None,
+    compression: Optional[NetcdfCompression] = None,
 ) -> None:
     """Loop through all files matching in_file in in_dir, convert units.
 
@@ -176,5 +178,5 @@ def prepare_forcings(
         # Write output
         logger.info(da)
         write_xarray_to_file(
-            ds=da, file_path=Path(out_dir) / name
+            ds=da, file_path=Path(out_dir) / name, compression=compression
         )  # , encoding=encoding)

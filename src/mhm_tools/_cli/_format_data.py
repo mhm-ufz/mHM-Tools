@@ -11,6 +11,11 @@ from pathlib import Path
 
 import click
 
+from mhm_tools.common.cli_utils import (
+    add_netcdf_compression_args,
+    get_netcdf_compression,
+)
+
 _MANIFEST_SUFFIXES = {".csv", ".txt"}
 
 EPILOG = """Manifest input (-i pointing at a .csv or .txt file) formats several rasters in one run. It is a plain comma-separated file with a header row; column names are matched case- and punctuation-insensitively. Relative paths resolve against the folder holding the manifest. Manifests are accepted only for -t lc and -t soil.
@@ -110,6 +115,16 @@ def add_args(parser: ArgumentParser) -> None:
         ),
     )
     optional.add_argument(
+        "--composition-step",
+        type=float,
+        help="Composition class interval for soil manifests. Default: 5.0.",
+    )
+    optional.add_argument(
+        "--bulkdensity-step",
+        type=float,
+        help="Bulk-density class interval for soil manifests. Default: 0.1.",
+    )
+    optional.add_argument(
         "--output-temporal-resolution",
         choices=("daily", "monthly", "annual", "long-term-mean-monthly"),
         help=(
@@ -128,6 +143,7 @@ def add_args(parser: ArgumentParser) -> None:
             "cell from every horizon."
         ),
     )
+    add_netcdf_compression_args(parser)
 
 
 def _require_lookup_options(args: Namespace) -> None:
@@ -154,6 +170,15 @@ def run(args: Namespace) -> None:
         msg = "--input-file must be a raster, CSV, or TXT file, not a directory."
         raise click.UsageError(msg)
     is_manifest_input = input_file.suffix.lower() in _MANIFEST_SUFFIXES
+    soil_step_values = {
+        "composition_step": args.composition_step,
+        "bulkdensity_step": args.bulkdensity_step,
+    }
+    if any(value is not None for value in soil_step_values.values()) and not (
+        is_manifest_input and args.data_type == "soil"
+    ):
+        msg = "Soil class intervals are only valid for soil manifest inputs."
+        raise click.UsageError(msg)
     lookup_values = (args.lookup_table, args.mapping_field, args.class_field)
     gridded_lai = (
         args.data_type == "lai"
@@ -174,6 +199,7 @@ def run(args: Namespace) -> None:
 
         kwargs = {
             "input_file": input_file,
+            "compression": get_netcdf_compression(args),
             "dem_file": Path(args.dem_file),
             "output_path": Path(args.output_path),
             "output_temporal_resolution": (
@@ -209,6 +235,7 @@ def run(args: Namespace) -> None:
 
     kwargs = {
         "input_file": input_file,
+        "compression": get_netcdf_compression(args),
         "dem_file": Path(args.dem_file),
         "output_path": Path(args.output_path),
         "output_type": args.extension,
@@ -220,6 +247,12 @@ def run(args: Namespace) -> None:
             lookup_table=Path(args.lookup_table),
             mapping_field=args.mapping_field,
             class_field=args.class_field,
+        )
+    else:
+        kwargs.update(
+            (name, value)
+            for name, value in soil_step_values.items()
+            if value is not None
         )
     if args.resampling is not None:
         kwargs["resampling"] = args.resampling

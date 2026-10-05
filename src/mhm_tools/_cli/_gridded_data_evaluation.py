@@ -12,6 +12,10 @@ Authors
 
 import logging
 
+from mhm_tools.common.cli_utils import (
+    add_netcdf_compression_args,
+    get_netcdf_compression,
+)
 from mhm_tools.common.logger import ErrorLogger
 
 logger = logging.getLogger(__name__)
@@ -300,6 +304,7 @@ def add_args(parser):
         required=False,
         help="Also write the statistics tables of the domain and the regions to CSV.",
     )
+    add_netcdf_compression_args(parser)
 
 
 def run(args):
@@ -400,6 +405,7 @@ def run(args):
         target_time_freq=target_freq,
         mask_var=args.mask_var,
         result_metric=args.metric,
+        compression=get_netcdf_compression(args),
         regions=args.regions,
         write_region_stats=args.write_region_stats,
     )

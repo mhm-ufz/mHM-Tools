@@ -232,6 +232,7 @@ def call_create_latlon(
     crs,
     chunking=True,
     lat_order="decreasing",
+    compression=None,
 ):
     """Create lat/lon headers for multiple resolutions and write the latlon file.
 
@@ -265,6 +266,7 @@ def call_create_latlon(
         level11=resolutions.l11,
         level2=resolutions.l2 if resolutions.l2 is not None else meteo_header_path,
         crs=crs,
+        compression=compression,
     )
     logger.info(f"Latlon file written to {latlon_output_file}")
 
@@ -286,6 +288,7 @@ def crop_file(  # noqa: PLR0912 PLR0915 PLR0913
     output_suffix=None,
     mask_all=False,
     resolutions=None,
+    compression=None,
 ):
     """Crops one file by lat and lon slice and may mask it with the mask dataarray."""
     if resolutions is None:
@@ -481,7 +484,9 @@ def crop_file(  # noqa: PLR0912 PLR0915 PLR0913
         )
     try:
         write_xarray_to_file(
-            ds_cropped, output_file  # , available_mem_gib=available_mem_gib
+            ds_cropped,
+            output_file,  # , available_mem_gib=available_mem_gib
+            compression=compression,
         )
     except Exception as e:
         logger.warning(f"First try writing the file failed: {e}")
@@ -489,7 +494,9 @@ def crop_file(  # noqa: PLR0912 PLR0915 PLR0913
         for var_name in ds_cropped.data_vars:
             ds_cropped[var_name] = ds_cropped[var_name].astype(float)
         write_xarray_to_file(
-            ds_cropped, output_file  # , available_mem_gib=available_mem_gib
+            ds_cropped,
+            output_file,  # , available_mem_gib=available_mem_gib
+            compression=compression,
         )
 
     logger.info(f"Written to {output_file}")
@@ -539,6 +546,7 @@ def crop_mhm_setup(  # noqa: PLR0913
     lat_order="decreasing",
     output_suffix=None,
     mask_all=False,
+    compression=None,
 ):
     """Cut out an existing mhm domain setup using a mask file."""
     # check if the input is correct
@@ -576,6 +584,7 @@ def crop_mhm_setup(  # noqa: PLR0913
             output_suffix=output_suffix,
             mask_all=mask_all,
             resolutions=resolutions,
+            compression=compression,
         )
         for f in files
     )
@@ -597,4 +606,5 @@ def crop_mhm_setup(  # noqa: PLR0913
             crs=crs,
             chunking=chunking,
             lat_order=lat_order,
+            compression=compression,
         )

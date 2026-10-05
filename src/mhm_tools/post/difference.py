@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Optional
 
 from mhm_tools.common.file_handler import write_xarray_to_file
-from mhm_tools.common.netcdf import read_dataset
+from mhm_tools.common.netcdf import NetcdfCompression, read_dataset
 from mhm_tools.common.plotter import plot_map
 from mhm_tools.common.xarray_utils import get_coord_key, normalize_lat_lon
 
@@ -57,6 +57,7 @@ def calc_diff(
     mod_var: str,
     plot: PlotOptions,
     output: OutputOptions,
+    compression: Optional[NetcdfCompression] = None,
 ) -> None:
     """Compute long-term mean difference between model and reference datasets and plot the result."""
     ds_ref = read_dataset(file_path=str(Path(ref_input_dir) / reference_pattern))
@@ -106,4 +107,8 @@ def calc_diff(
 
     # Optionally save NetCDF
     if output.save_ncfile:
-        write_xarray_to_file(ds=diff, file_path=out_path_dir / output.output_file_nc)
+        write_xarray_to_file(
+            ds=diff,
+            file_path=out_path_dir / output.output_file_nc,
+            compression=compression,
+        )

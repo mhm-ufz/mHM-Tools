@@ -11,6 +11,11 @@ from pathlib import Path
 
 import click
 
+from mhm_tools.common.cli_utils import (
+    add_netcdf_compression_args,
+    get_netcdf_compression,
+)
+
 
 def add_args(parser: ArgumentParser) -> None:
     """Add CLI arguments for the ``rasterize-map`` command."""
@@ -66,6 +71,7 @@ def add_args(parser: ArgumentParser) -> None:
         "--dem-crs",
         help="CRS to assign when the reference DEM has no CRS metadata.",
     )
+    add_netcdf_compression_args(parser)
 
 
 def run(args: Namespace) -> None:
@@ -78,6 +84,7 @@ def run(args: Namespace) -> None:
 
     kwargs = {
         "input_file": Path(args.input_file),
+        "compression": get_netcdf_compression(args),
         "dem_file": Path(args.dem_file),
         "output_file": Path(args.output_file),
         "burn_field": args.burn_field,

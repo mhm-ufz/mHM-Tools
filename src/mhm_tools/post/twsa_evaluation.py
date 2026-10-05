@@ -702,20 +702,20 @@ def set_metric_attributes(metric_ds, run_attributes):
 # ---------------------------------------------------------------------------
 
 
-def write_twsa_dataset(ds, file_path):
+def write_twsa_dataset(ds, file_path, compression=None):
     """Write a TWSA evaluation dataset to a compressed NetCDF file.
 
     Args:
         ds: Dataset to write.
         file_path: Target file path.
+        compression: NetCDF compression settings, or None.
 
     Returns
     -------
         The written file path.
     """
-    encoding = {name: {"zlib": True, "complevel": 4} for name in ds.data_vars}
     logger.info(f"Writing {file_path}")
-    write_xarray_to_file(ds, file_path, encoding=encoding)
+    write_xarray_to_file(ds, file_path, compression=compression)
     return Path(file_path)
 
 
@@ -1046,6 +1046,7 @@ def twsa_evaluation(  # noqa: PLR0913
     metrics=AVAILABLE_METRICS,
     write_twsa=True,
     max_memory_gib=8.0,
+    compression=None,
     plot_kge_components=False,
     plot_region_cells=False,
     write_region_stats=False,
@@ -1077,6 +1078,7 @@ def twsa_evaluation(  # noqa: PLR0913
             calculated, written nor plotted.
         write_twsa: Also write the normalized monthly anomaly fields.
         max_memory_gib: Memory budget the time chunks are sized against.
+        compression: NetCDF compression settings, or None.
         plot_kge_components: Also map alpha, beta and gamma for the whole domain.
         plot_region_cells: Also plot every grid cell over time per region.
         write_region_stats: Also write the metrics table of the domain and the
@@ -1203,7 +1205,9 @@ def twsa_evaluation(  # noqa: PLR0913
     if metric_ds is not None:
         metric_ds = set_metric_attributes(metric_ds, run_attributes)
         written_files["metrics"] = write_twsa_dataset(
-            metric_ds, output_dir / f"twsa_metrics_{suffix}.nc"
+            metric_ds,
+            output_dir / f"twsa_metrics_{suffix}.nc",
+            compression=compression,
         )
         # the components are always written, but only mapped on request
         region_stats_file = (
@@ -1251,7 +1255,9 @@ def twsa_evaluation(  # noqa: PLR0913
             }
             twsa_ds.attrs.update({**run_attributes, "dataset": name})
             written_files[key] = write_twsa_dataset(
-                twsa_ds, output_dir / f"twsa_monthly_{sanitize_name(name)}.nc"
+                twsa_ds,
+                output_dir / f"twsa_monthly_{sanitize_name(name)}.nc",
+                compression=compression,
             )
     if region_names:
         logger.info(f"Writing the outputs of {len(region_names)} region(s).")
