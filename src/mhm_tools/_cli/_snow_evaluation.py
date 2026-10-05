@@ -12,6 +12,10 @@ Authors
 
 import logging
 
+from mhm_tools.common.cli_utils import (
+    add_netcdf_compression_args,
+    get_netcdf_compression,
+)
 from mhm_tools.common.logger import ErrorLogger
 
 logger = logging.getLogger(__name__)
@@ -213,6 +217,7 @@ def add_args(parser):
         action="store_true",
         help="Also write the statistics table of the domain and the regions to CSV.",
     )
+    add_netcdf_compression_args(parser)
 
 
 def run(args):
@@ -251,6 +256,7 @@ def run(args):
         max_gif_frames=args.max_gif_frames,
         max_memory_gib=args.max_memory_gib,
         ncpus=args.ncpus,
+        compression=get_netcdf_compression(args),
         write_region_stats=args.write_region_stats,
     )
     for label, file_path in written_files.items():

@@ -21,8 +21,10 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import NamedTuple, Union
 
+from mhm_tools.common.file_handler import write_xarray_to_file
 from mhm_tools.common.format_data import (
     format_categorical_data,
     get_categorical_output_path,
@@ -33,6 +35,11 @@ from mhm_tools.common.lookup_handler import (
     _required_number,
     _resolve_field,
     read_lookup_table,
+)
+from mhm_tools.common.netcdf import (
+    COMPRESSION_ENCODING_KEYS,
+    QUANTIZATION_ENCODING_KEYS,
+    NetcdfCompression,
 )
 
 logger = logging.getLogger(__name__)
@@ -50,10 +57,6 @@ PAD_VALUE = 0.0
 DEFAULT_BLOCK_BYTES = 32 * 1024**2
 CHUNK_ROWS = 128
 CHUNK_COLS = 1024
-# Level 1 compresses an upsampled LAI grid about as well as level 4 (76:1 vs
-# 78:1 on a 100x upsample) in roughly half the time, and the time dominates.
-LAI_COMPRESS_LEVEL = 1
-COORD_COMPRESS_LEVEL = 4
 # Measured on a 100x upsample of real GIMMS LAI: bilinear output compresses only
 # 1.80:1 on the DEM grid and 1.85:1 on the L0 grid, because every cell differs.
 # Nearest-neighbour reached 70:1 on its long runs of repeated values, so do not
@@ -581,12 +584,13 @@ def lai_grid_byte_size(steps: int, nrows: int, ncols: int) -> int:
     return int(steps) * int(nrows) * int(ncols) * 8
 
 
-def assert_lai_output_fits(steps: int, nrows: int, ncols: int, folder) -> int:
-    """Reject an LAI request that cannot fit on disk, and return its size.
+def assert_lai_output_fits(
+    steps: int, nrows: int, ncols: int, folder, compression=None, source_encoding=None
+) -> int:
+    """Check folder space for staging and output; return payload bytes.
 
-    Memory is bounded by the streaming writer, so the remaining limit is the
-    output file. It is written compressed, but refuse outright when even a
-    generous compression estimate cannot fit in the free space.
+    compression and source_encoding determine whether final output is compressed.
+    The estimate includes uncompressed staging and both positional grids.
     """
     import shutil
 
@@ -595,11 +599,18 @@ def assert_lai_output_fits(steps: int, nrows: int, ncols: int, folder) -> int:
         free = shutil.disk_usage(str(folder)).free
     except OSError:
         return required
-    if required / LAI_ASSUMED_COMPRESSION > free:
+    staged_bytes = required + 2 * int(nrows) * int(ncols) * 8
+    settings = (
+        compression or NetcdfCompression(complevel=None, shuffle=None)
+    ).get_lossless_encoding(source_encoding)
+    ratio = LAI_ASSUMED_COMPRESSION if settings["zlib"] else 1.0
+    estimated_bytes = staged_bytes + staged_bytes / ratio
+    if estimated_bytes > free:
         msg = (
-            f"LAI needs about {required / 1024 ** 3:.1f} GiB uncompressed "
+            f"LAI needs about {required / 1024**3:.1f} GiB uncompressed "
             f"({int(steps)} time step(s) on a {int(ncols)} x {int(nrows)} "
-            f"grid) and only {free / 1024 ** 3:.1f} GiB is free on the output "
+            f"grid), about {estimated_bytes / 1024**3:.1f} GiB including staging, "
+            f"and only {free / 1024**3:.1f} GiB is free on the output "
             "volume. Choose 'long-term-mean-monthly' or use a smaller "
             "model extent."
         )
@@ -829,9 +840,22 @@ def coordinate_dataset(
     )
     dataset["time"].attrs.update(dict(time_attrs or {}))
     dataset["time"].attrs["bounds"] = "time_bnds"
-    units = "degrees" if is_geographic_crs_string(crs_string) else "m"
-    dataset["yc"].attrs.update({"axis": "Y", "units": units})
-    dataset["xc"].attrs.update({"axis": "X", "units": units})
+    geographic = is_geographic_crs_string(crs_string)
+    units = "degrees" if geographic else "m"
+    dataset["yc"].attrs.update(
+        {
+            "axis": "Y",
+            "units": units,
+            "standard_name": "latitude" if geographic else "projection_y_coordinate",
+        }
+    )
+    dataset["xc"].attrs.update(
+        {
+            "axis": "X",
+            "units": units,
+            "standard_name": "longitude" if geographic else "projection_x_coordinate",
+        }
+    )
     return dataset
 
 
@@ -849,100 +873,115 @@ def stream_lai_grid(
     is_cancelled=None,
     progress=None,
     log=None,
+    compression=None,
+    lai_encoding=None,
 ) -> str:
-    """Write a LAI NetCDF one block of target rows and one time step at a time.
+    """Stage sampled row blocks, then write a lazy LAI dataset to output_path.
 
-    ``coordinate_dataset`` is a small xarray dataset carrying time, time_bnds,
-    yc, xc and the global attributes; it is written first so xarray handles the
-    CF time encoding. ``row_lonlat(start, stop)`` returns the WGS84 longitude
-    and latitude meshes for target rows ``[start, stop)``.
+    coordinate_dataset supplies axes; row_lonlat supplies positional grids.
+    compression overrides lai_encoding. Return the completed output filename.
     """
+    import dask
+    import dask.array as da
+    import h5py
     import numpy as np
-    from netCDF4 import Dataset
+    from dask.callbacks import Callback
 
-    nrows = len(y_centers)
-    ncols = len(x_centers)
+    nrows, ncols = len(y_centers), len(x_centers)
     steps = int(sampler.steps)
     rows_per_block = block_row_count(ncols, block_bytes)
     if hasattr(sampler, "bind"):
         sampler.bind(ncols)
-
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
-    temporary = output.with_name(f".{output.name}.tmp")
-    temporary.unlink(missing_ok=True)
-    coordinate_dataset.to_netcdf(temporary)
-
+    assert_lai_output_fits(
+        steps, nrows, ncols, output.parent, compression, lai_encoding
+    )
     chunks = (1, min(nrows, CHUNK_ROWS), min(ncols, CHUNK_COLS))
-    try:
-        with Dataset(temporary, "a") as handle:
-            lai = handle.createVariable(
-                "lai",
-                "f8",
-                ("time", "yc", "xc"),
-                zlib=True,
-                complevel=LAI_COMPRESS_LEVEL,
-                chunksizes=chunks,
-                fill_value=NODATA,
-            )
-            lai.setncatts(dict(lai_attrs or {}))
-            latitude = handle.createVariable(
-                "lat",
-                "f8",
-                ("yc", "xc"),
-                zlib=True,
-                complevel=COORD_COMPRESS_LEVEL,
-                chunksizes=chunks[1:],
-            )
-            latitude.setncatts({"units": "degrees_north", "long_name": "latitude"})
-            longitude = handle.createVariable(
-                "lon",
-                "f8",
-                ("yc", "xc"),
-                zlib=True,
-                complevel=COORD_COMPRESS_LEVEL,
-                chunksizes=chunks[1:],
-            )
-            longitude.setncatts({"units": "degrees_east", "long_name": "longitude"})
 
+    def check_cancelled(*_args):
+        """Raise on cancellation; accept unused Dask callback arguments."""
+        if is_cancelled is not None and is_cancelled():
+            msg = "Task cancelled."
+            raise RuntimeError(msg)
+
+    with TemporaryDirectory(prefix=f".{output.stem}_", dir=output.parent) as temp_dir:
+        temporary_file = Path(temp_dir) / output.name
+        with h5py.File(Path(temp_dir) / "blocks.h5", "w") as staged:
+            lai = staged.create_dataset(
+                "lai",
+                (steps, nrows, ncols),
+                dtype="float64",
+                chunks=chunks,
+                fillvalue=NODATA,
+            )
+            latitude = staged.create_dataset(
+                "lat", (nrows, ncols), dtype="float64", chunks=chunks[1:]
+            )
+            longitude = staged.create_dataset(
+                "lon", (nrows, ncols), dtype="float64", chunks=chunks[1:]
+            )
             for start in range(0, nrows, rows_per_block):
-                if is_cancelled is not None and is_cancelled():
-                    msg = "Task cancelled."
-                    raise RuntimeError(msg)
+                check_cancelled()
                 stop = min(start + rows_per_block, nrows)
                 lon_block, lat_block = row_lonlat(start, stop)
                 lon_block = np.asarray(lon_block, dtype="float64")
                 lat_block = np.asarray(lat_block, dtype="float64")
                 longitude[start:stop, :] = lon_block
                 latitude[start:stop, :] = lat_block
-
                 sampler.prepare_block(start, stop, lon_block, lat_block)
                 block_mask = (
                     None
                     if mask is None
                     else np.asarray(mask[start:stop, :], dtype=bool)
                 )
-
                 for step in range(steps):
-                    if is_cancelled is not None and is_cancelled():
-                        msg = "Task cancelled."
-                        raise RuntimeError(msg)
+                    check_cancelled()
                     placed = sampler.sample(step)
                     if block_mask is not None:
                         placed = np.where(block_mask, placed, NODATA)
                     lai[step, start:stop, :] = placed
-
                 if progress is not None:
-                    progress(100.0 * stop / nrows)
+                    progress(50.0 * stop / nrows)
                 if log:
-                    log(f"LAI rows {stop}/{nrows} written ({steps} time step(s)).")
-    except BaseException:
-        temporary.unlink(missing_ok=True)
-        raise
+                    log(f"LAI rows {stop}/{nrows} staged ({steps} time step(s)).")
 
-    if output.exists():
-        output.unlink()
-    temporary.replace(output)
+            dataset = coordinate_dataset.copy(deep=False)
+            dataset["lai"] = (
+                ("time", "yc", "xc"),
+                da.from_array(lai, chunks=chunks, lock=True),
+                dict(lai_attrs or {}),
+            )
+            dataset["lai"].encoding.update(lai_encoding or {})
+            for name, values, units in (
+                ("lat", latitude, "degrees_north"),
+                ("lon", longitude, "degrees_east"),
+            ):
+                dataset.coords[name] = (
+                    ("yc", "xc"),
+                    da.from_array(values, chunks=chunks[1:], lock=True),
+                    {
+                        "units": units,
+                        "long_name": "latitude" if name == "lat" else "longitude",
+                        "standard_name": "latitude" if name == "lat" else "longitude",
+                    },
+                )
+            check_cancelled()
+            if log:
+                log("Writing staged LAI through the shared NetCDF writer.")
+            with dask.config.set(scheduler="synchronous"), Callback(
+                pretask=check_cancelled
+            ):
+                write_xarray_to_file(
+                    dataset,
+                    temporary_file,
+                    compression=compression,
+                    encoding={"lai": {"_FillValue": NODATA}},
+                )
+            check_cancelled()
+        temporary_file.replace(output)
+    if progress is not None:
+        progress(100.0)
     return str(output)
 
 
@@ -963,6 +1002,7 @@ def resample_lai_file_to_grid(
     is_cancelled=None,
     progress=None,
     log=None,
+    compression=None,
 ) -> str:
     """Aggregate LAI in time, then stream it onto ``target_grid``.
 
@@ -978,6 +1018,12 @@ def resample_lai_file_to_grid(
         source = locate_lai_cube(dataset, source_variable, log)
         dataset = source.dataset
         lat_coord, lon_coord = source.lat_coord, source.lon_coord
+        lai_encoding = {
+            key: value
+            for key, value in source.data.encoding.items()
+            if key in COMPRESSION_ENCODING_KEYS | QUANTIZATION_ENCODING_KEYS
+        }
+        source_attrs = dict(source.data.attrs)
 
         temporal = prepare_lai_temporal(
             source.data,
@@ -995,12 +1041,14 @@ def resample_lai_file_to_grid(
             len(y_centers),
             len(x_centers),
             Path(output_path).parent,
+            compression,
+            lai_encoding,
         )
         if log:
             log(
                 f"LAI: placing {steps} time step(s) on a "
                 f"{len(x_centers)} x {len(y_centers)} grid "
-                f"({required / 1024 ** 3:.1f} GiB uncompressed), streamed in "
+                f"({required / 1024**3:.1f} GiB uncompressed), streamed in "
                 f"row blocks using {method} interpolation."
             )
 
@@ -1031,7 +1079,9 @@ def resample_lai_file_to_grid(
             x_centers=x_centers,
             y_centers=y_centers,
             row_lonlat=target_grid.row_lonlat,
-            lai_attrs=lai_output_attrs(lai_data.attrs),
+            compression=compression,
+            lai_encoding=lai_encoding,
+            lai_attrs=lai_output_attrs(source_attrs),
             is_cancelled=is_cancelled,
             progress=progress,
             log=log,
@@ -1051,6 +1101,7 @@ def window_copy_lai_file(
     is_cancelled=None,
     progress=None,
     log=None,
+    compression=None,
 ) -> str:
     """Copy an aligned LAI file onto ``target_header`` without resampling.
 
@@ -1079,6 +1130,11 @@ def window_copy_lai_file(
         time_bounds = np.asarray(staged["time_bnds"].values)
         time_attrs = dict(staged["time"].attrs)
         lai_attrs = dict(staged["lai"].attrs)
+        lai_encoding = {
+            key: value
+            for key, value in staged["lai"].encoding.items()
+            if key in COMPRESSION_ENCODING_KEYS | QUANTIZATION_ENCODING_KEYS
+        }
     row_offset, column_offset = lai_window_offsets(source_x, source_y, target_header)
 
     handle = Dataset(str(source_path), "r")
@@ -1096,13 +1152,15 @@ def window_copy_lai_file(
             int(target_header["nrows"]),
             int(target_header["ncols"]),
             Path(output_path).parent,
+            compression,
+            lai_encoding,
         )
         if log:
             log(
                 f"LAI: copying {sampler.steps} time step(s) onto a "
                 f"{int(target_header['ncols'])} x {int(target_header['nrows'])} "
                 f"grid at row offset {row_offset}, column offset "
-                f"{column_offset} ({required / 1024 ** 3:.1f} GiB uncompressed)."
+                f"{column_offset} ({required / 1024**3:.1f} GiB uncompressed)."
             )
         return stream_lai_grid(
             output_path,
@@ -1119,6 +1177,8 @@ def window_copy_lai_file(
             x_centers=target_grid.x_centers,
             y_centers=target_grid.y_centers,
             row_lonlat=target_grid.row_lonlat,
+            compression=compression,
+            lai_encoding=lai_encoding,
             lai_attrs=lai_attrs,
             mask=mask,
             is_cancelled=is_cancelled,
@@ -1250,6 +1310,7 @@ def format_lai_data(
     dem_crs: str | None = None,
     resampling="nearest",
     fill_nodata: bool = True,
+    compression=None,
 ) -> Path:
     """Map a categorical raster and write its mHM LAI definition."""
     input_file = Path(input_file)
@@ -1283,6 +1344,7 @@ def format_lai_data(
         dem_crs=dem_crs,
         resampling=resampling,
         fill_nodata=fill_nodata,
+        compression=compression,
     )
     _write_classdefinition_text(definition_text, definition_output)
     return raster_output
@@ -1300,6 +1362,7 @@ def format_lai_netcdf_file(
     is_cancelled=None,
     progress=None,
     log=None,
+    compression=None,
 ) -> Path:
     """Temporally aggregate LAI and stream it onto the exact DEM grid."""
     input_file = Path(input_file)
@@ -1331,6 +1394,7 @@ def format_lai_netcdf_file(
         is_cancelled=is_cancelled,
         progress=progress,
         log=log,
+        compression=compression,
     )
     logger.info("Wrote formatted gridded LAI to %s", result)
     return Path(result)
@@ -1345,6 +1409,7 @@ def format_lai_netcdf_data(
     source_variable: str | None = None,
     dem_crs: str | None = None,
     resampling="bilinear",
+    compression=None,
 ) -> Path:
     """Write gridded LAI as ``lai.nc`` in an output directory."""
     return format_lai_netcdf_file(
@@ -1355,6 +1420,7 @@ def format_lai_netcdf_data(
         source_variable=source_variable,
         dem_crs=dem_crs,
         resampling=resampling,
+        compression=compression,
     )
 
 
@@ -1368,6 +1434,7 @@ def copy_lai_netcdf_to_grid(
     is_cancelled=None,
     progress=None,
     log=None,
+    compression=None,
 ) -> Path:
     """Window-copy aligned LAI onto another grid, padding with zero."""
     return Path(
@@ -1380,5 +1447,6 @@ def copy_lai_netcdf_to_grid(
             is_cancelled=is_cancelled,
             progress=progress,
             log=log,
+            compression=compression,
         )
     )

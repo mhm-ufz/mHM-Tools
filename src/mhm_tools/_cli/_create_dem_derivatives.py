@@ -8,6 +8,10 @@ Authors
 - Sanjeev Bashyal
 """
 
+from mhm_tools.common.cli_utils import (
+    add_netcdf_compression_args,
+    get_netcdf_compression,
+)
 from mhm_tools.pre.dem_derivatives import OUTPUT_EXTENSIONS
 
 
@@ -51,6 +55,7 @@ def add_args(parser):
         default=None,
         help="Elevation variable to read when the input holds several.",
     )
+    add_netcdf_compression_args(parser)
 
 
 def run(args):
@@ -66,6 +71,7 @@ def run(args):
         output_extension=args.output_extension,
         crs=args.crs,
         var_name=args.varname,
+        compression=get_netcdf_compression(args),
     )
     for path in written:
         logger.info(f"Wrote {path}")

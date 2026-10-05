@@ -23,6 +23,7 @@ from joblib import Parallel, delayed
 
 from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_to_file
 from mhm_tools.common.logger import ErrorLogger, log_arguments
+from mhm_tools.common.netcdf import NetcdfCompression
 from mhm_tools.common.resolution_handler import Resolution
 from mhm_tools.common.xarray_utils import (
     get_coord_key,
@@ -1830,6 +1831,7 @@ def create_mhm_restart_from_setup(  # noqa: PLR0913
     skip_mhm_run=False,
     recreate_restart=False,
     update_tile_masks=False,
+    compression=None,
 ):
     """Create restart files from a setup by tiling, running mHM, and merging output.
 
@@ -1978,6 +1980,7 @@ def create_mhm_restart_from_setup(  # noqa: PLR0913
             output_file=merged_restart_file,
             mask_ds=mask_ds,
             mask_var=mask_var,
+            compression=compression,
         )
         merged_restart_path = merged_restart_file
         merged_tile_mask_path = merged.attrs.get("merged_tile_mask_file")
@@ -2502,8 +2505,15 @@ def _mask_final_spatial_vars(ds, active_mask):
     return ds
 
 
-def _final_restart_encoding(ds):
-    """Build NetCDF encoding for final restart output variables."""
+def _final_restart_encoding(ds, compression=None):
+    """Build NetCDF encoding for final restart output variables.
+
+    This writer bypasses `write_xarray_to_file`, so the compression settings
+    are applied here instead of by the shared writer.
+    """
+    compression = NetcdfCompression() if compression is None else compression
+    lossless = compression.get_lossless_encoding()
+    quantization = compression.create_variable_encoding(ds, list(ds.variables))
     encoding = {}
     for name in ds.variables:
         if not np.issubdtype(ds[name].dtype, np.floating):
@@ -2511,9 +2521,8 @@ def _final_restart_encoding(ds):
         encoding[name] = {
             "dtype": "float64",
             "_FillValue": -9999.0,
-            "zlib": True,
-            "complevel": 4,
-            "shuffle": True,
+            **lossless,
+            **quantization.get(name, {}),
         }
     return encoding
 
@@ -2526,7 +2535,7 @@ def _drop_fill_value_attrs(ds):
     return ds
 
 
-def _write_final_restart(ds, output_file):
+def _write_final_restart(ds, output_file, compression=None):
     """Write the final restart dataset to NetCDF."""
     output_file = Path(output_file)
     output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -2535,7 +2544,7 @@ def _write_final_restart(ds, output_file):
     _drop_fill_value_attrs(ds).to_netcdf(
         output_file,
         engine="netcdf4",
-        encoding=_final_restart_encoding(ds),
+        encoding=_final_restart_encoding(ds, compression),
     )
 
 
@@ -2563,7 +2572,7 @@ def _write_merged_tile_mask(restart_file_paths, output_file, mask_var, lon, lat)
     write_xarray_to_file(
         mask_ds,
         mask_output,
-        encoding={var_name: {"_FillValue": np.nan, "zlib": True, "complevel": 4}},
+        encoding={var_name: {"_FillValue": np.nan}},
     )
     return mask_output
 
@@ -2622,6 +2631,7 @@ def merge_restart_files(
     output_file=None,
     mask_ds=None,
     mask_var="mask",
+    compression=None,
 ):
     """Merge mHM tile restart files into one final CF-style restart file."""
     logger.info("Merging restart files to final CF lat/lon restart")
@@ -2645,7 +2655,7 @@ def merge_restart_files(
     )
     if output_file is not None:
         output_file = Path(output_file)
-        _write_final_restart(final, output_file)
+        _write_final_restart(final, output_file, compression)
         tile_mask_file = _write_merged_tile_mask(
             restart_file_paths=restart_file_paths,
             output_file=output_file,

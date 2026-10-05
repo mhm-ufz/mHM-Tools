@@ -20,20 +20,26 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+from contextlib import ExitStack
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Union
 
+import dask
+import dask.array as da
 import numpy as np
 import pandas as pd
 import rasterio
+import rioxarray
+import xarray as xr
+from netCDF4 import date2num
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
-from rasterio.shutil import copy as copy_raster
 from rasterio.vrt import WarpedVRT
 from rasterio.windows import Window
 
 from mhm_tools.common.constants import NO_DATA
+from mhm_tools.common.file_handler import write_xarray_to_file
 from mhm_tools.common.format_data import (
     fill_grid_nodata,
     format_categorical_data,
@@ -340,97 +346,125 @@ def _format_lc_period_asc_streaming(
                 resampling=resampling,
                 fill_nodata=fill_nodata,
             )
-            copy_raster(
-                aligned_path,
-                output_path,
-                driver="AAIGrid",
-                DECIMAL_PRECISION=0,
-            )
+            with rioxarray.open_rasterio(
+                aligned_path, chunks={"band": 1, "y": 256, "x": 256}
+            ) as raster:
+                write_xarray_to_file(
+                    raster.squeeze("band", drop=True), output_path, crs=reference_crs
+                )
     return output_path
 
 
-def _create_lc_netcdf(path, reference, reference_crs, periods):
-    """Create the CF structure needed for period-by-period land-cover output.
-
-    Returns the open dataset and its ``land_cover`` variable; the caller fills
-    one period at a time and is responsible for closing the dataset.
-    """
-    import netCDF4
-
+def _create_lc_dataset(reference, reference_crs, periods, values):
+    """Return a CF Dataset from reference, reference_crs, periods and lazy values."""
     transform = reference.transform
-    rows, cols = reference.height, reference.width
-    projection = reference_crs.to_wkt()
-    geographic = reference_crs.is_geographic
     x_values, y_values = _grid_coordinates(reference)
-
-    dataset = netCDF4.Dataset(path, "w", format="NETCDF4")
-    dataset.createDimension("time", len(periods))
-    dataset.createDimension("y", rows)
-    dataset.createDimension("x", cols)
-    dataset.createDimension("bnds", 2)
-    time = dataset.createVariable("time", "f8", ("time",))
-    time_bounds = dataset.createVariable("time_bnds", "f8", ("time", "bnds"))
-    x = dataset.createVariable("x", "f8", ("x",))
-    y = dataset.createVariable("y", "f8", ("y",))
-    x_bounds = dataset.createVariable("x_bnds", "f8", ("x", "bnds"))
-    y_bounds = dataset.createVariable("y_bnds", "f8", ("y", "bnds"))
-    crs = dataset.createVariable("crs", "i4")
-    land_cover = dataset.createVariable(
-        "land_cover",
-        "i4",
-        ("time", "y", "x"),
-        fill_value=int(NO_DATA),
-        zlib=True,
-        complevel=4,
-        shuffle=True,
-        chunksizes=(1, min(256, rows), min(256, cols)),
-    )
-
-    # Continuous boundaries are preserved verbatim, including sub-year changes.
     units = "days since 1970-01-01 00:00:00"
     calendar = "proleptic_gregorian"
-    starts = [period["start"] for period in periods]
-    ends = [period["end"] for period in periods]
-    time[:] = netCDF4.date2num(starts, units, calendar=calendar)
-    time_bounds[:, 0] = netCDF4.date2num(starts, units, calendar=calendar)
-    time_bounds[:, 1] = netCDF4.date2num(ends, units, calendar=calendar)
-    time.units = units
-    time.calendar = calendar
-    time.standard_name = "time"
-    time.long_name = "land-cover period start"
-    time.axis = "T"
-    time.bounds = "time_bnds"
-    time_bounds.units = units
-    time_bounds.calendar = calendar
-    time_bounds.long_name = "land-cover period bounds"
-
-    x[:] = x_values
-    y[:] = y_values
-    x_bounds[:, 0] = x_values - abs(transform.a) / 2.0
-    x_bounds[:, 1] = x_values + abs(transform.a) / 2.0
-    y_bounds[:, 0] = y_values - abs(transform.e) / 2.0
-    y_bounds[:, 1] = y_values + abs(transform.e) / 2.0
-    x.standard_name = "longitude" if geographic else "projection_x_coordinate"
-    y.standard_name = "latitude" if geographic else "projection_y_coordinate"
-    x.units = "degrees_east" if geographic else "m"
-    y.units = "degrees_north" if geographic else "m"
-    x.axis = "X"
-    y.axis = "Y"
-    x.bounds = "x_bnds"
-    y.bounds = "y_bnds"
-
-    if projection:
-        crs.spatial_ref = projection
-        crs.crs_wkt = projection
-    crs.GeoTransform = " ".join(str(value) for value in transform.to_gdal())
-    land_cover.long_name = "mHM land cover"
-    land_cover.units = "1"
-    land_cover.nodata_value = int(NO_DATA)
-    land_cover.grid_mapping = "crs"
-    dataset.Conventions = "CF-1.8"
-    dataset.title = "Temporal land-cover classes for mHM"
-    dataset.source = "mhm-tools format-data land-cover manifest"
-    return dataset, land_cover
+    starts = np.asarray(
+        date2num([period["start"] for period in periods], units, calendar=calendar),
+        dtype="float64",
+    )
+    ends = np.asarray(
+        date2num([period["end"] for period in periods], units, calendar=calendar),
+        dtype="float64",
+    )
+    geographic = reference_crs.is_geographic
+    return xr.Dataset(
+        data_vars={
+            "land_cover": (
+                ("time", "y", "x"),
+                values,
+                {
+                    "long_name": "mHM land cover",
+                    "units": "1",
+                    "nodata_value": int(NO_DATA),
+                    "grid_mapping": "crs",
+                },
+            ),
+            "time_bnds": (
+                ("time", "bnds"),
+                np.column_stack((starts, ends)),
+                {
+                    "long_name": "land-cover period bounds",
+                    "units": units,
+                    "calendar": calendar,
+                },
+            ),
+            "x_bnds": (
+                ("x", "bnds"),
+                np.column_stack(
+                    (
+                        x_values - abs(transform.a) / 2,
+                        x_values + abs(transform.a) / 2,
+                    )
+                ),
+            ),
+            "y_bnds": (
+                ("y", "bnds"),
+                np.column_stack(
+                    (
+                        y_values - abs(transform.e) / 2,
+                        y_values + abs(transform.e) / 2,
+                    )
+                ),
+            ),
+            "crs": (
+                (),
+                np.int32(0),
+                {
+                    "spatial_ref": reference_crs.to_wkt(),
+                    "crs_wkt": reference_crs.to_wkt(),
+                    "GeoTransform": " ".join(
+                        str(value) for value in transform.to_gdal()
+                    ),
+                },
+            ),
+        },
+        coords={
+            "time": (
+                "time",
+                starts,
+                {
+                    "standard_name": "time",
+                    "long_name": "land-cover period start",
+                    "axis": "T",
+                    "bounds": "time_bnds",
+                    "units": units,
+                    "calendar": calendar,
+                },
+            ),
+            "x": (
+                "x",
+                x_values,
+                {
+                    "standard_name": (
+                        "longitude" if geographic else "projection_x_coordinate"
+                    ),
+                    "units": "degrees_east" if geographic else "m",
+                    "axis": "X",
+                    "bounds": "x_bnds",
+                },
+            ),
+            "y": (
+                "y",
+                y_values,
+                {
+                    "standard_name": (
+                        "latitude" if geographic else "projection_y_coordinate"
+                    ),
+                    "units": "degrees_north" if geographic else "m",
+                    "axis": "Y",
+                    "bounds": "y_bnds",
+                },
+            ),
+        },
+        attrs={
+            "Conventions": "CF-1.8",
+            "title": "Temporal land-cover classes for mHM",
+            "source": "mhm-tools format-data land-cover manifest",
+        },
+    )
 
 
 def _format_lc_periods_netcdf_streaming(
@@ -443,43 +477,46 @@ def _format_lc_periods_netcdf_streaming(
     dem_crs=None,
     resampling="auto",
     fill_nodata=True,
+    compression=None,
 ):
     """Write a CF time stack without retaining full period arrays."""
-    reference = rasterio.open(dem_file)
-    reference_crs = _raster_crs(reference, dem_crs, "DEM")
-    _validate_reference_grid(reference)
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory(
         prefix="mhm_tools_lc_stack_", dir=output.parent
-    ) as temp_name:
-        temp = Path(temp_name)
-        dataset, land_cover = _create_lc_netcdf(
-            output, reference, reference_crs, periods
+    ) as temp_name, ExitStack() as stack:
+        reference = stack.enter_context(rasterio.open(dem_file))
+        reference_crs = _raster_crs(reference, dem_crs, "DEM")
+        _validate_reference_grid(reference)
+        period_arrays = []
+        for index, period in enumerate(periods):
+            aligned = Path(temp_name) / f"period_{index}.tif"
+            _write_aligned_lc_period(
+                period["path"],
+                reference,
+                reference_crs,
+                aligned,
+                mapping,
+                input_crs=input_crs,
+                resampling=resampling,
+                fill_nodata=fill_nodata,
+            )
+            raster = stack.enter_context(
+                rioxarray.open_rasterio(aligned, chunks={"band": 1, "y": 256, "x": 256})
+            )
+            period_arrays.append(raster.squeeze("band", drop=True).data)
+        dataset = _create_lc_dataset(
+            reference, reference_crs, periods, da.stack(period_arrays)
         )
-        try:
-            for index, period in enumerate(periods):
-                aligned = temp / f"period_{index}.tif"
-                _write_aligned_lc_period(
-                    period["path"],
-                    reference,
-                    reference_crs,
-                    aligned,
-                    mapping,
-                    input_crs=input_crs,
-                    resampling=resampling,
-                    fill_nodata=fill_nodata,
-                )
-                with rasterio.open(aligned) as raster:
-                    for window in _lc_windows(raster):
-                        row = int(window.row_off)
-                        height = int(window.height)
-                        land_cover[index, row : row + height, :] = raster.read(
-                            1, window=window
-                        )
-        finally:
-            dataset.close()
-            reference.close()
+        temporary_file = Path(temp_name) / output.name
+        with dask.config.set(scheduler="synchronous"):
+            write_xarray_to_file(
+                dataset,
+                temporary_file,
+                compression=compression,
+                encoding={"land_cover": {"_FillValue": int(NO_DATA)}},
+            )
+        temporary_file.replace(output)
     return output
 
 
@@ -499,6 +536,7 @@ def format_lc_data(
     dem_crs: str | None = None,
     resampling="auto",
     fill_nodata: bool = True,
+    compression=None,
 ) -> Path:
     """Map a categorical raster to mHM land-cover classes on the DEM grid.
 
@@ -533,6 +571,7 @@ def format_lc_data(
         dem_crs=dem_crs,
         resampling=resampling,
         fill_nodata=fill_nodata,
+        compression=compression,
     )
 
 
@@ -549,6 +588,7 @@ def format_lc_periods(
     dem_crs: str | None = None,
     resampling="auto",
     fill_nodata: bool = True,
+    compression=None,
 ) -> tuple[Path, ...]:
     """Format historical land-cover rasters listed by a manifest.
 
@@ -631,5 +671,6 @@ def format_lc_periods(
             dem_crs=dem_crs,
             resampling=resampling,
             fill_nodata=fill_nodata,
+            compression=compression,
         ),
     )

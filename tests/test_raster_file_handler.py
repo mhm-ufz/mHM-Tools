@@ -2,6 +2,7 @@
 
 import numpy as np
 import pytest
+import rasterio
 import rioxarray  # noqa: F401
 import xarray as xr
 from rasterio.transform import from_origin
@@ -34,12 +35,17 @@ def test_file_handler_crs_exports_are_compatibility_aliases():
     assert file_handler.resolve_crs is resolve_crs
 
 
-def test_geotiff_roundtrip_preserves_grid_crs_and_zero_nodata(tmp_path):
+@pytest.mark.parametrize("codec", [None, "deflate"])
+def test_geotiff_roundtrip_preserves_grid_crs_and_zero_nodata(tmp_path, codec):
     """GeoTIFF round trips preserve its grid, CRS, values, and zero nodata."""
     data = _raster(nodata=0)
     output = tmp_path / "classes.tif"
 
-    write_xarray_to_file(data, output)
+    write_xarray_to_file(data, output, geotiff_compression=codec)
+    with rasterio.open(output) as raw:
+        assert raw.compression == (
+            None if codec is None else rasterio.enums.Compression.deflate
+        )
 
     dataset = get_xarray_ds_from_file(output)
     assert "spatial_ref" in dataset.coords
@@ -400,3 +406,27 @@ def test_align_raster_reprojects_to_reference_crs():
     assert result.rio.crs == reference.rio.crs
     assert result.rio.transform() == reference.rio.transform()
     assert result.shape == reference.shape
+
+
+def test_ascii_writer_computes_bounded_row_blocks(tmp_path, monkeypatch):
+    """Large lazy ASCII payloads reach the text writer in bounded blocks."""
+    import dask.array as da
+
+    width = 1024 * 1024
+    data = xr.DataArray(
+        da.zeros((3, width), chunks=(1, 256 * 1024), dtype="int32"),
+        dims=("y", "x"),
+        coords={"y": [2.5, 1.5, 0.5], "x": np.arange(width) + 0.5},
+    )
+    written_rows = []
+
+    def record_block(_output, values, fmt):
+        """Record the row count of each bounded values block instead of printing it."""
+        assert values.nbytes <= 8 * 1024**2
+        assert fmt == "%i"
+        written_rows.append(values.shape[0])
+
+    monkeypatch.setattr(file_handler.np, "savetxt", record_block)
+    write_xarray_to_file(data, tmp_path / "large.asc")
+    assert sum(written_rows) == 3
+    assert len(written_rows) > 1

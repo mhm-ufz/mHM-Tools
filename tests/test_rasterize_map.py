@@ -13,6 +13,7 @@ from shapely import geometry as shapely_geometry
 from mhm_tools._cli._main import cli
 from mhm_tools.common.constants import NO_DATA
 from mhm_tools.common.file_handler import get_raster_data
+from mhm_tools.common.netcdf import NetcdfCompression
 from mhm_tools.pre import rasterize_map as rasterize_map_module
 from mhm_tools.pre.rasterize_map import rasterize_map_data
 
@@ -351,12 +352,15 @@ def test_rasterize_map_cli_forwards_options(monkeypatch):
             "EPSG:32631",
             "-r",
             "EPSG:32632",
+            "--compression",
+            "9",
         ],
     )
 
     assert result.exit_code == 0, result.output
     assert captured == {
         "input_file": Path("soil.gpkg"),
+        "compression": NetcdfCompression(complevel=9, shuffle=None),
         "dem_file": Path("dem.asc"),
         "output_file": Path("soil.tif"),
         "burn_field": "SOIL_CLASS",

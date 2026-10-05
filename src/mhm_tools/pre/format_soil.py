@@ -27,18 +27,22 @@ from contextlib import ExitStack
 from pathlib import Path
 from typing import Union
 
+import dask
+import dask.array as da
+import h5py
 import numpy as np
 import pandas as pd
 import rasterio
-from netCDF4 import Dataset
+import rioxarray
+import xarray as xr
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
-from rasterio.shutil import copy as copy_raster
 from rasterio.vrt import WarpedVRT
 from rasterio.warp import transform_bounds
 from rasterio.windows import Window
 
 from mhm_tools.common.constants import NO_DATA
+from mhm_tools.common.file_handler import write_xarray_to_file
 from mhm_tools.common.format_data import (
     fill_grid_nodata,
     format_categorical_data,
@@ -782,7 +786,12 @@ def _stream_classic_soil(
 
     raster_output = output_path / "soil_class.asc"
     definition_output = output_path / "soil_classdefinition.txt"
-    copy_raster(temporary_raster, raster_output, driver="AAIGrid")
+    with rioxarray.open_rasterio(
+        temporary_raster, chunks={"band": 1, "y": _SOIL_BLOCK_ROWS, "x": 256}
+    ) as raster:
+        write_xarray_to_file(
+            raster.squeeze("band", drop=True), raster_output, crs=reference_crs
+        )
     _write_soil_classdefinition_text(
         _classic_definition_text(rows, horizons, composition_step, density_step),
         definition_output,
@@ -790,72 +799,71 @@ def _stream_classic_soil(
     return raster_output, definition_output
 
 
-def _create_soil_netcdf(path, reference, reference_crs, horizons):
-    """Create the CF structure needed for block-wise v6 output."""
-    dataset = Dataset(path, "w", format="NETCDF4")
-    dataset.createDimension("z", len(horizons))
-    dataset.createDimension("y", reference.height)
-    dataset.createDimension("x", reference.width)
-    dataset.createDimension("bnds", 2)
-    transform = reference.transform
-    x = dataset.createVariable("x", "f8", ("x",))
-    y = dataset.createVariable("y", "f8", ("y",))
-    z = dataset.createVariable("z", "f8", ("z",))
-    z_bnds = dataset.createVariable("z_bnds", "f8", ("z", "bnds"))
-    x[:], y[:] = _grid_coordinates(reference)
-    z[:] = [item["lower"] for item in horizons]
-    z_bnds[:] = [[item["upper"], item["lower"]] for item in horizons]
-    x.setncatts({"standard_name": "projection_x_coordinate", "axis": "X"})
-    y.setncatts({"standard_name": "projection_y_coordinate", "axis": "Y"})
-    z.setncatts(
-        {
-            "long_name": "soil horizon lower boundary depth",
-            "standard_name": "depth",
-            "units": "mm",
-            "positive": "down",
-            "axis": "Z",
-            "bounds": "z_bnds",
-        }
-    )
-    z_bnds.long_name = "soil horizon depth bounds"
-    crs = dataset.createVariable("crs", "i4")
-    crs.setncatts(
-        {
-            "spatial_ref": reference_crs.to_wkt(),
-            "crs_wkt": reference_crs.to_wkt(),
-            "GeoTransform": " ".join(str(value) for value in transform.to_gdal()),
-        }
-    )
-    classes = dataset.createVariable(
-        "soil_class",
-        "i4",
-        ("z", "y", "x"),
-        fill_value=int(NO_DATA),
-        zlib=True,
-        complevel=4,
-        shuffle=True,
-        chunksizes=(
-            1,
-            min(_SOIL_BLOCK_ROWS, reference.height),
-            min(512, reference.width),
-        ),
-    )
-    classes.setncatts(
-        {
-            "long_name": "mHM soil class by horizon",
-            "units": "1",
-            "nodata_value": int(NO_DATA),
-            "grid_mapping": "crs",
-        }
-    )
-    dataset.setncatts(
-        {
+def _create_soil_dataset(reference, reference_crs, horizons, values):
+    """Return a CF Dataset from reference, reference_crs, horizons and lazy values."""
+    x_values, y_values = _grid_coordinates(reference)
+    return xr.Dataset(
+        data_vars={
+            "soil_class": (
+                ("z", "y", "x"),
+                values,
+                {
+                    "long_name": "mHM soil class by horizon",
+                    "units": "1",
+                    "nodata_value": int(NO_DATA),
+                    "grid_mapping": "crs",
+                },
+            ),
+            "z_bnds": (
+                ("z", "bnds"),
+                np.asarray(
+                    [[item["upper"], item["lower"]] for item in horizons],
+                    dtype="float64",
+                ),
+                {"long_name": "soil horizon depth bounds"},
+            ),
+            "crs": (
+                (),
+                np.int32(0),
+                {
+                    "spatial_ref": reference_crs.to_wkt(),
+                    "crs_wkt": reference_crs.to_wkt(),
+                    "GeoTransform": " ".join(
+                        str(value) for value in reference.transform.to_gdal()
+                    ),
+                },
+            ),
+        },
+        coords={
+            "x": (
+                "x",
+                x_values,
+                {"standard_name": "projection_x_coordinate", "axis": "X"},
+            ),
+            "y": (
+                "y",
+                y_values,
+                {"standard_name": "projection_y_coordinate", "axis": "Y"},
+            ),
+            "z": (
+                "z",
+                np.asarray([item["lower"] for item in horizons], dtype="float64"),
+                {
+                    "long_name": "soil horizon lower boundary depth",
+                    "standard_name": "depth",
+                    "units": "mm",
+                    "positive": "down",
+                    "axis": "Z",
+                    "bounds": "z_bnds",
+                },
+            ),
+        },
+        attrs={
             "Conventions": "CF-1.8",
             "title": "Horizon-specific soil classes for mHM",
             "source": "mhm-tools format-data soil manifest",
-        }
+        },
     )
-    return dataset, classes
 
 
 def _horizon_definition_text(
@@ -893,6 +901,8 @@ def _stream_horizon_soil(
     density_factor,
     composition_step,
     density_step,
+    temporary_dir,
+    compression=None,
 ):
     """Write v6 horizon classes with memory bounded by one raster window."""
     observed = set()
@@ -917,10 +927,15 @@ def _stream_horizon_soil(
     counts = np.zeros(keys.size, dtype=np.int64)
     raster_output = output_path / "soil_horizon_class.nc"
     definition_output = output_path / "soil_classdefinition_iFlag_soilDB_1.txt"
-    dataset, output = _create_soil_netcdf(
-        raster_output, reference, reference_crs, horizons
-    )
-    try:
+    chunks = (1, min(_SOIL_BLOCK_ROWS, reference.height), min(512, reference.width))
+    with h5py.File(temporary_dir / "horizons.h5", "w") as staged:
+        output = staged.create_dataset(
+            "soil_class",
+            (len(horizons), reference.height, reference.width),
+            dtype="int32",
+            chunks=chunks,
+            fillvalue=int(NO_DATA),
+        )
         for window in _soil_windows(reference):
             row = int(window.row_off)
             height = int(window.height)
@@ -945,8 +960,21 @@ def _stream_horizon_soil(
                     minlength=keys.size,
                 )
                 counts += np.bincount(positions, minlength=keys.size)
-    finally:
-        dataset.close()
+        dataset = _create_soil_dataset(
+            reference,
+            reference_crs,
+            horizons,
+            da.from_array(output, chunks=chunks, lock=True),
+        )
+        temporary_file = temporary_dir / raster_output.name
+        with dask.config.set(scheduler="synchronous"):
+            write_xarray_to_file(
+                dataset,
+                temporary_file,
+                compression=compression,
+                encoding={"soil_class": {"_FillValue": int(NO_DATA)}},
+            )
+        temporary_file.replace(raster_output)
     density_bins = np.floor(density_sum / counts + 0.5).astype(np.int32)
     _write_soil_classdefinition_text(
         _horizon_definition_text(keys, density_bins, composition_step, density_step),
@@ -989,6 +1017,7 @@ def format_soil_data(
     dem_crs: str | None = None,
     resampling="nearest",
     fill_nodata: bool = True,
+    compression=None,
 ) -> Path:
     """Map a categorical raster and write its mHM soil definition.
 
@@ -1052,6 +1081,7 @@ def format_soil_data(
         dem_crs=dem_crs,
         resampling=resampling,
         fill_nodata=fill_nodata,
+        compression=compression,
     )
     _write_soil_classdefinition_text(definition_text, definition_output)
     return raster_output
@@ -1067,8 +1097,9 @@ def format_soil_horizons(
     dem_crs: str | None = None,
     resampling="auto",
     composition_step: float = 5.0,
-    bulk_density_step: float = 0.1,
+    bulkdensity_step: float = 0.1,
     fill_nodata: bool = True,
+    compression=None,
 ) -> tuple[Path, Path]:
     """Classify multi-horizon physical soil rasters from a manifest.
 
@@ -1086,7 +1117,7 @@ def format_soil_horizons(
     steps = {}
     for name, raw_value in (
         ("composition_step", composition_step),
-        ("bulk_density_step", bulk_density_step),
+        ("bulkdensity_step", bulkdensity_step),
     ):
         try:
             value = float(raw_value)
@@ -1156,7 +1187,7 @@ def format_soil_horizons(
                     Path(temporary),
                     density_factor=density_factor,
                     composition_step=steps["composition_step"],
-                    density_step=steps["bulk_density_step"],
+                    density_step=steps["bulkdensity_step"],
                 )
             else:
                 outputs = _stream_horizon_soil(
@@ -1167,7 +1198,9 @@ def format_soil_horizons(
                     output_path,
                     density_factor=density_factor,
                     composition_step=steps["composition_step"],
-                    density_step=steps["bulk_density_step"],
+                    density_step=steps["bulkdensity_step"],
+                    temporary_dir=Path(temporary),
+                    compression=compression,
                 )
         logger.info(
             "Formatted %d soil horizons with bulk density converted from %s.",

@@ -10,6 +10,11 @@ Authors
 
 from pathlib import Path
 
+from mhm_tools.common.cli_utils import (
+    add_netcdf_compression_args,
+    get_netcdf_compression,
+)
+
 
 def add_args(parser):
     """Register arguments for the ``fill-nearest`` subcommand.
@@ -64,6 +69,7 @@ def add_args(parser):
         type=int,
         help="Number of cpus for parallel processing of multiple files.",
     )
+    add_netcdf_compression_args(parser)
 
 
 def run(args):
@@ -79,4 +85,5 @@ def run(args):
         fill_value=float(args.fill_value),
         default_value=args.default_value,
         n_cpus=args.n_cpus,
+        compression=get_netcdf_compression(args),
     )

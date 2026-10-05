@@ -1287,19 +1287,9 @@ class MHMRestartFile:
         logger.info(f"Writing renamed restart file to {self.grid.restart_file}")
         encoding = {}
         for data_var in ds.data_vars:
-            encoding[data_var] = {
-                "dtype": "float32",
-                "_FillValue": -9999.0,
-                "zlib": True,
-                "complevel": 4,
-            }
+            encoding[data_var] = {"dtype": "float32", "_FillValue": -9999.0}
         for coord in ds.coords:
-            encoding[coord] = {
-                "dtype": "float32",
-                "_FillValue": -9999.0,
-                "zlib": True,
-                "complevel": 4,
-            }
+            encoding[coord] = {"dtype": "float32", "_FillValue": -9999.0}
         if not self.output_path.is_dir():
             self.output_path.mkdir(parents=True)
         output_file = self.output_path / self.grid.restart_file.name

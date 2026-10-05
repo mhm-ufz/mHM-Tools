@@ -10,6 +10,8 @@ Authors
 - Simon Lüdke
 """
 
+from mhm_tools.common.cli_utils import add_netcdf_compression_args
+
 
 def add_args(parser):
     """Add CLI arguments for the grdc_validation subcommand."""
@@ -214,6 +216,7 @@ def add_args(parser):
         action="store_true",
         required=False,
     )
+    add_netcdf_compression_args(parser)
     flags.add_argument(
         "--no-input-data-cache",
         help=(
@@ -232,7 +235,11 @@ def run(args):
     args : argparse.Namespace
         parsed command line arguments
     """
-    from mhm_tools.common.cli_utils import get_coords, normalize_cli_sequence
+    from mhm_tools.common.cli_utils import (
+        get_coords,
+        get_netcdf_compression,
+        normalize_cli_sequence,
+    )
     from mhm_tools.post.discharge_evaluation import evaludate_discharge_data
 
     lon_min, lon_max, lat_min, lat_max, _mask = get_coords(
@@ -274,4 +281,5 @@ def run(args):
         mask_var=args.mask_var,
         catchment_map_variables=normalize_cli_sequence(args.catchment_map_variables),
         metric_plot_types=args.metric_plot_types,
+        compression=get_netcdf_compression(args),
     )

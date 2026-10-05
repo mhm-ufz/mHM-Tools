@@ -13,6 +13,10 @@ Authors
 
 import logging
 
+from mhm_tools.common.cli_utils import (
+    add_netcdf_compression_args,
+    get_netcdf_compression,
+)
 from mhm_tools.common.file_handler import get_xarray_ds_from_file
 from mhm_tools.common.resolution_handler import Resolution
 
@@ -89,13 +93,6 @@ def add_args(parser):
         default=1,
         type=int,
         help=("Number of cores used for parallelisation."),
-    )
-    optional.add_argument(
-        "--folder-recursion-depth",
-        required=False,
-        default=5,
-        type=int,
-        help=("How deep in the folder structure should the file be searched?"),
     )
     optional.add_argument(
         "--lonlatbox",
@@ -201,6 +198,7 @@ def add_args(parser):
         default=None,
         help=("""Suffix added to output file names leading to file type conversion."""),
     )
+    add_netcdf_compression_args(parser)
 
 
 def run(args):
@@ -270,4 +268,5 @@ def run(args):
         lat_order=args.lat_order,
         output_suffix=args.output_suffix,
         mask_all=args.mask_all,
+        compression=get_netcdf_compression(args),
     )

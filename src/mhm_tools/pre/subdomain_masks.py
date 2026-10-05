@@ -29,20 +29,14 @@ logger = logging.getLogger(__name__)
 
 # GLOBAL VARIABLES
 REF_FILE_ENCODING = {
-    "elevtn": {"dtype": "float32", "_FillValue": -9999.0, "zlib": True, "complevel": 4},
-    "basin": {"dtype": "int32", "_FillValue": -9999, "zlib": True, "complevel": 4},
-    "flwdir": {"dtype": "int32", "_FillValue": -9999, "zlib": True, "complevel": 4},
-    # "upgrid": {"dtype": "int32", "_FillValue": -9999, "zlib": True, "complevel": 4},
-    "uparea_grid": {
-        "dtype": "float32",
-        "_FillValue": -9999.0,
-        "zlib": True,
-        "complevel": 4,
-    },
-    "lat": {"dtype": "float32", "_FillValue": -9999.0, "zlib": True, "complevel": 4},
-    "lon": {"dtype": "float32", "_FillValue": -9999.0, "zlib": True, "complevel": 4},
+    "elevtn": {"dtype": "float32", "_FillValue": -9999.0},
+    "basin": {"dtype": "int32", "_FillValue": -9999},
+    "flwdir": {"dtype": "int32", "_FillValue": -9999},
+    # "upgrid": {"dtype": "int32", "_FillValue": -9999},
+    "uparea_grid": {"dtype": "float32", "_FillValue": -9999.0},
+    "lat": {"dtype": "float32", "_FillValue": -9999.0},
+    "lon": {"dtype": "float32", "_FillValue": -9999.0},
 }
-COMPRESSION_DICT = {"zlib": True, "complevel": 4}
 FILL_VALUE = -9999
 
 # FUNCTIONS

@@ -193,6 +193,7 @@ def format_geology_data(
     dem_crs: str | None = None,
     resampling="nearest",
     fill_nodata: bool = True,
+    compression=None,
 ) -> Path:
     """Map a categorical raster and write its mHM geology definition.
 
@@ -238,6 +239,7 @@ def format_geology_data(
         dem_crs=dem_crs,
         resampling=resampling,
         fill_nodata=fill_nodata,
+        compression=compression,
     )
     _write_classdefinition_text(definition_text, definition_output)
     return raster_output

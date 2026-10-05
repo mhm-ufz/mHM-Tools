@@ -27,6 +27,7 @@ from mhm_tools.common.file_handler import (
     write_xarray_to_file,
 )
 from mhm_tools.common.lookup_handler import _lookup_mapping
+from mhm_tools.common.netcdf import COMPRESSION_ENCODING_KEYS
 
 logger = logging.getLogger(__name__)
 
@@ -333,7 +334,7 @@ def prepare_categorical_data(
                 variable_name=variable_name,
                 input_file=input_file,
             )
-        return set_grid(
+        output = set_grid(
             values,
             get_grid(reference.to_dataset(name="_dem"), "_dem"),
             variable_name,
@@ -343,6 +344,15 @@ def prepare_categorical_data(
                 "nodata_value": int(_NODATA),
             },
         )
+        if input_file.suffix.lower() == ".nc":
+            output[variable_name].encoding.update(
+                {
+                    key: value
+                    for key, value in source.encoding.items()
+                    if key in COMPRESSION_ENCODING_KEYS
+                }
+            )
+        return output
     finally:
         source.close()
 
@@ -360,6 +370,7 @@ def format_categorical_data(
     dem_crs: str | None = None,
     resampling="nearest",
     fill_nodata: bool = False,
+    compression=None,
 ) -> Path:
     """Map a categorical raster to classes on the exact DEM grid."""
     input_file = Path(input_file)
@@ -405,9 +416,6 @@ def format_categorical_data(
         )
         encoding = {
             variable_name: {
-                "zlib": True,
-                "complevel": 4,
-                "shuffle": True,
                 "_FillValue": int(_NODATA),
                 "dtype": "int32",
             }
@@ -418,6 +426,7 @@ def format_categorical_data(
             var_name=variable_name,
             encoding=encoding if output_file.suffix.lower() == ".nc" else None,
             crs=reference.rio.crs,
+            compression=compression,
         )
     finally:
         reference.close()

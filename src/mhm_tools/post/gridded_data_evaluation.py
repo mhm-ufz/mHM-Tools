@@ -237,6 +237,7 @@ def get_file_stats(
     output_path=None,
     avaiable_years=None,
     direct_comp=False,
+    compression=None,
 ):
     """Get statistics for one file."""
     # logger.debug(f"Get file stats {file}")
@@ -313,7 +314,7 @@ def get_file_stats(
         ts.name = "time_series"
         output = xr.merge([output, ts])
     if output_path is not None:
-        write_xarray_to_file(ds=output, file_path=output_path)
+        write_xarray_to_file(ds=output, file_path=output_path, compression=compression)
     return output
 
 
@@ -799,6 +800,7 @@ def get_stats_one_pass(
     available_years=None,
     file_name="*.*",
     with_period_series=False,
+    compression=None,
 ):
     """Compute streaming statistics from monthly/yearly files.
 
@@ -919,7 +921,7 @@ def get_stats_one_pass(
             else output_path
         )
         logger.info(f"Writing output to {output_file}")
-        write_xarray_to_file(ds=output, file_path=output_file)
+        write_xarray_to_file(ds=output, file_path=output_file, compression=compression)
     return output
 
 
@@ -1640,6 +1642,7 @@ def get_stats(
     mask_var=None,
     file_name="*.*",
     stream_metrics=False,
+    compression=None,
 ):
     """Get statistics dataset from a path to a file or directory with files."""
     logger.info(f"Get stats for {path}")
@@ -1656,6 +1659,7 @@ def get_stats(
                 available_years=available_years,
                 file_name=file_name,
                 with_period_series=stream_metrics,
+                compression=compression,
             )
         elif path.is_dir() or path.is_file():
             if path.is_file() and path.suffix == ".nc":
@@ -1676,6 +1680,7 @@ def get_stats(
                     output_path=output_file,
                     avaiable_years=available_years,
                     direct_comp=direct_comp,
+                    compression=compression,
                 )
             if path.is_dir():
                 file_list = get_files(
@@ -1695,6 +1700,7 @@ def get_stats(
                         output_path=output_file,
                         avaiable_years=available_years,
                         direct_comp=direct_comp,
+                        compression=compression,
                     )
         else:
             msg = f"Path {path} is neither dir nor file."
@@ -1875,6 +1881,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
     input_file_name=None,
     ref_file_name=None,
     result_metric="all",
+    compression=None,
     region_names=(),
     write_region_stats=False,
 ):
@@ -1909,6 +1916,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
         mask_var=mask_var,
         file_name=input_file_name,
         stream_metrics=stream_metrics,
+        compression=compression,
     )
     logger.debug(f"input ds: {input}")
 
@@ -1928,6 +1936,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
         mask_var=mask_var,
         file_name=ref_file_name,
         stream_metrics=stream_metrics,
+        compression=compression,
     )
     logger.debug(f"ref ds: {ref}")
     logger.debug(
@@ -2230,7 +2239,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
     else:
         file_name = output_path / f"{file_name}.nc"
 
-    write_xarray_to_file(ds=output, file_path=file_name)
+    write_xarray_to_file(ds=output, file_path=file_name, compression=compression)
     logger.info(f"Written output to {file_name}")
     if bootstrap_index is None:
         create_relative_stats_table(
@@ -2655,6 +2664,7 @@ def gridded_data_evaluation(  # noqa: PLR0913
     result_metric="all",
     avaiable_mem=None,
     n_cpus=1,
+    compression=None,
     regions="all",
     write_region_stats=False,
 ):
@@ -2751,6 +2761,7 @@ def gridded_data_evaluation(  # noqa: PLR0913
                     coordinate_slice,
                     output_path=output_path / output_name,
                     avaiable_years=available_years,  # keep parameter name as used elsewhere
+                    compression=compression,
                 )
 
         elif (
@@ -2770,6 +2781,7 @@ def gridded_data_evaluation(  # noqa: PLR0913
                     output_path / output_name,
                     available_years=available_years,
                     file_name=input.file_name,
+                    compression=compression,
                 )
                 for bootstrap_index in range(n_bootstrap_selections)
             )
@@ -2784,6 +2796,7 @@ def gridded_data_evaluation(  # noqa: PLR0913
                 output_path=output_path / output_name,
                 available_years=available_years,
                 file_name=input.file_name,
+                compression=compression,
             )
         else:
             with ErrorLogger(logger):
@@ -2828,6 +2841,7 @@ def gridded_data_evaluation(  # noqa: PLR0913
                     mask_da=mask_da,
                     mask_var=mask_var,
                     result_metric=result_metric,
+                    compression=compression,
                     region_names=region_names,
                     write_region_stats=write_region_stats,
                 )
@@ -2929,6 +2943,7 @@ def gridded_data_evaluation(  # noqa: PLR0913
             mask_da=mask_da,
             mask_var=mask_var,
             result_metric=result_metric,
+            compression=compression,
             region_names=region_names,
             write_region_stats=write_region_stats,
         )

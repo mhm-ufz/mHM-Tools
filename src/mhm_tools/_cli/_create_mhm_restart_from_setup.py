@@ -10,6 +10,11 @@ import logging
 import shlex
 from pathlib import Path
 
+from mhm_tools.common.cli_utils import (
+    add_netcdf_compression_args,
+    get_netcdf_compression,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -307,6 +312,7 @@ def add_args(parser):
             "when tiles are freshly created, since their mask is always written."
         ),
     )
+    add_netcdf_compression_args(parser)
 
 
 def _as_list(value):
@@ -428,6 +434,7 @@ def run(args):
             skip_mhm_run=args.skip_mhm_run,
             recreate_restart=args.recreate_restart,
             update_tile_masks=args.update_tile_masks,
+            compression=get_netcdf_compression(args),
         )
         results.append(result)
         all_restart_files.extend(result["restart_files"])
@@ -448,6 +455,7 @@ def run(args):
             output_file=final_restart_file,
             mask_ds=mask_datasets,
             mask_var=args.mask_var,
+            compression=get_netcdf_compression(args),
         )
 
     return results[0] if len(results) == 1 else results

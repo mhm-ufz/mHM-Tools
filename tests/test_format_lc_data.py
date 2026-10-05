@@ -6,9 +6,11 @@ import geopandas as gpd
 import numpy as np
 import pytest
 import rasterio
+import rioxarray
 import xarray as xr
 
 from mhm_tools import pre
+from mhm_tools.common.netcdf import NetcdfCompression
 from mhm_tools.pre.format_lc_data import format_lc_data
 
 
@@ -28,7 +30,10 @@ def _write_raster(path: Path, values, *, cellsize: float) -> None:
         dataset.write(values, 1)
 
 
-def test_format_lc_data_maps_and_aligns_to_dem(tmp_path: Path):
+@pytest.mark.parametrize(("input_suffix", "expected_level"), [(".tif", 4), (".nc", 7)])
+def test_format_lc_data_maps_and_aligns_to_dem(
+    tmp_path: Path, input_suffix, expected_level
+):
     """Land-cover output uses its fixed filename and NetCDF variable name."""
     input_file = tmp_path / "land_cover.tif"
     dem_file = tmp_path / "dem.tif"
@@ -39,6 +44,16 @@ def test_format_lc_data_maps_and_aligns_to_dem(tmp_path: Path):
         cellsize=10,
     )
     _write_raster(dem_file, np.ones((4, 6), dtype=np.float32), cellsize=5)
+    if input_suffix == ".nc":
+        with rioxarray.open_rasterio(input_file) as raster:
+            source = raster.squeeze("band", drop=True).rename("classes")
+            source.encoding = {
+                "zlib": True,
+                "complevel": 7,
+                "grid_mapping": "spatial_ref",
+            }
+            input_file = input_file.with_suffix(".nc")
+            source.to_netcdf(input_file, engine="netcdf4")
     gpd.GeoDataFrame({"Grid value": [10, 20, 30], "Numeric class": [1, 2, 3]}).to_file(
         lookup_file, driver="GPKG"
     )
@@ -51,6 +66,9 @@ def test_format_lc_data_maps_and_aligns_to_dem(tmp_path: Path):
         "Grid value",
         "Numeric class",
         fill_nodata=False,
+        compression=NetcdfCompression(
+            complevel=None, shuffle=False, significant_digits=3
+        ),
     )
 
     assert output == tmp_path / "output" / "lc.nc"
@@ -66,6 +84,11 @@ def test_format_lc_data_maps_and_aligns_to_dem(tmp_path: Path):
     )
     with xr.open_dataset(output, decode_cf=False) as dataset:
         assert set(dataset.data_vars) >= {"land_cover"}
+        assert dataset["land_cover"].encoding["complevel"] == expected_level
+        assert dataset["land_cover"].encoding["shuffle"] is False
+        assert not any(
+            key.startswith("_Quantize") for key in dataset["land_cover"].attrs
+        )
         assert dataset["land_cover"].dtype == np.dtype("int32")
         assert dataset["land_cover"].attrs["_FillValue"] == -9999
         np.testing.assert_array_equal(dataset["land_cover"].values, expected)

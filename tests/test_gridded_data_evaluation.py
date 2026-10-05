@@ -478,9 +478,10 @@ def test_compare_input_with_ref_keeps_rel_fields_as_dataarrays(monkeypatch, tmp_
 
     captured = {}
 
-    def fake_write_xarray_to_file(ds, file_path):
+    def fake_write_xarray_to_file(ds, file_path, **kwargs):
         captured["ds"] = ds.copy(deep=True)
         captured["file_path"] = file_path
+        captured["kwargs"] = kwargs
 
     monkeypatch.setattr(
         "mhm_tools.post.gridded_data_evaluation.get_stats",

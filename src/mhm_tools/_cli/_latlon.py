@@ -16,6 +16,10 @@ import ast
 import logging
 from pathlib import Path
 
+from mhm_tools.common.cli_utils import (
+    add_netcdf_compression_args,
+    get_netcdf_compression,
+)
 from mhm_tools.common.logger import ErrorLogger
 
 logger = logging.getLogger(__name__)
@@ -88,14 +92,7 @@ def add_args(parser):
         default="f4",
         help="Data type for the latlon file and headers.",
     )
-    optional.add_argument(
-        "-x",
-        "--compression",
-        type=int,
-        choices=range(10),
-        default=9,
-        help="Compression level for the NetCDF file.",
-    )
+    add_netcdf_compression_args(parser)
     flags.add_argument(
         "-b",
         "--add-bounds",
@@ -157,7 +154,7 @@ def run(args):
         write_header_l2=args.h2,
         crs=args.crs,
         dtype=args.dtype,
-        compression=args.compression,
+        compression=get_netcdf_compression(args),
         add_bounds=args.add_bounds,
     )
 

@@ -14,6 +14,11 @@ Authors
 
 import logging
 
+from mhm_tools.common.cli_utils import (
+    add_netcdf_compression_args,
+    get_netcdf_compression,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -207,6 +212,7 @@ def add_args(parser):
         action="store_true",
         help="Also write the metrics table of the domain and the regions to CSV.",
     )
+    add_netcdf_compression_args(parser)
 
 
 def select_metrics(requested_metrics):
@@ -281,6 +287,7 @@ def run(args):
             metrics=selected_metrics,
             write_twsa=not args.no_write_twsa,
             max_memory_gib=args.max_memory_gib,
+            compression=get_netcdf_compression(args),
             plot_kge_components=args.plot_kge_components,
             plot_region_cells=args.plot_region_cells,
             write_region_stats=args.write_region_stats,

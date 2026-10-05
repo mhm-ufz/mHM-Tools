@@ -30,6 +30,7 @@ from mhm_tools.common.file_handler import (
     write_xarray_to_file,
 )
 from mhm_tools.common.logger import ErrorLogger, log_arguments
+from mhm_tools.common.netcdf import NetcdfCompression
 from mhm_tools.common.time_utils import timedelta_to_alias
 from mhm_tools.common.xarray_utils import (
     get_coord_key,
@@ -388,6 +389,7 @@ def calculate_pet(  # noqa: PLR0915
     stat_freq: Optional[str] = None,
     method: Optional[str] = "oudin",
     max_workers: int = 1,
+    compression: Optional[NetcdfCompression] = None,
 ) -> None:
     """Calculate PET in parallel across time dimension and save to NetCDF."""
     error_msg = []
@@ -497,7 +499,7 @@ def calculate_pet(  # noqa: PLR0915
         data_attrs["grid_mapping"] = grid_dataarray.attrs["grid_mapping"]
     pet_ds = set_grid(pet_data, grid_definition, "pet", data_attrs)
     logger.info("writing output")
-    write_xarray_to_file(pet_ds, Path(out_file))
+    write_xarray_to_file(pet_ds, Path(out_file), compression=compression)
 
     for dataset in datasets_to_close:
         with contextlib.suppress(AttributeError):

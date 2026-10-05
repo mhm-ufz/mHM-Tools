@@ -11,6 +11,11 @@ Authors
 
 import logging
 
+from mhm_tools.common.cli_utils import (
+    add_netcdf_compression_args,
+    get_netcdf_compression,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -71,6 +76,7 @@ def add_args(parser):
         type=int,
         help=("Number of cores used for parallelisation."),
     )
+    add_netcdf_compression_args(parser)
 
 
 def run(args):
@@ -91,4 +97,5 @@ def run(args):
         out_file=args.output_file,
         max_workers=args.ncpus,
         method=args.method,
+        compression=get_netcdf_compression(args),
     )

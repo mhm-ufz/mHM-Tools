@@ -6,6 +6,7 @@ This module provides helpers for common command-line tasks such as:
 - Converting memory size strings (e.g., "10MB", "2GB") into a budget in GiB
 - Determining coordinate extents from NetCDF mask datasets
 - Consolidating coordinate inputs from strings, mask files, or explicit values
+- Declaring the shared lossy NetCDF quantization options
 """
 
 import argparse
@@ -14,10 +15,116 @@ import re
 
 from mhm_tools.common.file_handler import get_xarray_ds_from_file
 from mhm_tools.common.logger import ErrorLogger
+from mhm_tools.common.netcdf import (
+    DEFAULT_COMPLEVEL,
+    MAX_COMPLEVEL,
+    MIN_COMPLEVEL,
+    QUANTIZE_MODES,
+    NetcdfCompression,
+)
 from mhm_tools.common.resolution_handler import calculate_coordinate_resolution
 from mhm_tools.common.xarray_utils import get_coord_key, get_ds_extend
 
 logger = logging.getLogger(__name__)
+
+
+def add_netcdf_compression_args(parser):
+    """Add the NetCDF compression options to a parser or argument group.
+
+    Beside the zlib level these declare lossy quantization, which zeroes the
+    insignificant mantissa bits of floating point variables so the lossless
+    compression that follows shrinks the file markedly. Integer data such as
+    masks is never quantized.
+
+    Parameters
+    ----------
+    parser : argparse.ArgumentParser or argparse._ArgumentGroup
+        Parser or group the options are added to. A parser gets its own
+        "netcdf output" group so the options stay together in the help.
+
+    Returns
+    -------
+    None
+    """
+    group = (
+        parser.add_argument_group("netcdf output")
+        if isinstance(parser, argparse.ArgumentParser)
+        else parser
+    )
+    group.add_argument(
+        "-x",
+        "--compression",
+        required=False,
+        default=None,
+        type=int,
+        choices=range(MIN_COMPLEVEL, MAX_COMPLEVEL + 1),
+        help=(
+            "Lossless zlib compression level for the output. 0 writes the data "
+            "uncompressed, 9 compresses hardest and slowest. Omit to keep the "
+            f"level of the input file, or {DEFAULT_COMPLEVEL} when it has none."
+        ),
+    )
+    group.add_argument(
+        "--no-shuffle",
+        required=False,
+        action="store_true",
+        help=(
+            "Skip the HDF5 shuffle filter. It normally helps zlib on floating "
+            "point data, so there is rarely a reason to turn it off."
+        ),
+    )
+    group.add_argument(
+        "--significant-digits",
+        required=False,
+        default=None,
+        type=int,
+        help=(
+            "Reduce the stored precision of floating point variables to this "
+            "many significant decimal digits, which makes the file compress "
+            "much better. For --quantize-mode BitRound this counts significant "
+            "BITS instead (9 bits are roughly 3 decimal digits). Omit to keep "
+            "the precision of the input file, or pass 0 to store the full "
+            "precision. Integer data and coordinates are never affected."
+        ),
+    )
+    group.add_argument(
+        "--quantize-mode",
+        required=False,
+        default="BitGroom",
+        choices=list(QUANTIZE_MODES),
+        help=(
+            "Quantization method used with --significant-digits. BitGroom is "
+            "the conservative default, GranularBitRound compresses more at the "
+            "same digit count, BitRound counts bits rather than digits."
+        ),
+    )
+
+
+def get_netcdf_compression(args):
+    """Return the NetCDF compression settings the parsed arguments ask for.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Parsed arguments, which need not carry the compression options.
+
+    Returns
+    -------
+    NetcdfCompression or None
+        Settings for the NetCDF writers, or None when no option was given, so
+        an input file's own compression is kept.
+    """
+    complevel = getattr(args, "compression", None)
+    significant_digits = getattr(args, "significant_digits", None)
+    shuffle = not getattr(args, "no_shuffle", False)
+    if complevel is None and significant_digits is None and shuffle:
+        return None
+    return NetcdfCompression(
+        complevel=complevel,
+        shuffle=None if shuffle else False,
+        significant_digits=significant_digits,
+        quantize_mode=getattr(args, "quantize_mode", "BitGroom"),
+    )
 
 
 def normalize_cli_sequence(values, split_whitespace=True):

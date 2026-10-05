@@ -15,6 +15,11 @@ Authors
 - Sebastian Müller
 """
 
+from mhm_tools.common.cli_utils import (
+    add_netcdf_compression_args,
+    get_netcdf_compression,
+)
+
 
 def add_args(parser):
     """Add cli arguments for the bankfull subcommand.
@@ -63,6 +68,7 @@ def add_args(parser):
         required=True,
         help="The path of the output NetCDF file.",
     )
+    add_netcdf_compression_args(parser)
 
 
 def run(args):
@@ -81,4 +87,5 @@ def run(args):
         return_period=args.return_period,
         wetted_perimeter=args.wetted_perimeter,
         var=args.var,
+        compression=get_netcdf_compression(args),
     )

@@ -236,7 +236,7 @@ def read_snow_data_array(data_path, file_name, var_name, label, max_memory_gib=8
     return da.transpose("time", "lat", "lon", ...)
 
 
-def write_snow_dataset(ds, file_path):
+def write_snow_dataset(ds, file_path, compression=None):
     """Write a snow evaluation dataset to a compressed NetCDF file.
 
     Date variables get explicit time units, so the file states one calendar
@@ -247,6 +247,7 @@ def write_snow_dataset(ds, file_path):
     Args:
         ds: Dataset to write.
         file_path: Target file path; parent folders are created.
+        compression: NetCDF compression settings, or None.
 
     Returns
     -------
@@ -259,12 +260,10 @@ def write_snow_dataset(ds, file_path):
                 "units": "seconds since 1970-01-01",
                 "calendar": "standard",
             }
-        elif name in ds.data_vars:
-            encoding[name] = {"zlib": True, "complevel": 4}
-            if np.issubdtype(ds[name].dtype, np.integer):
-                encoding[name]["_FillValue"] = MISSING_VALUE
+        elif name in ds.data_vars and np.issubdtype(ds[name].dtype, np.integer):
+            encoding[name] = {"_FillValue": MISSING_VALUE}
     logger.info(f"Writing {file_path}")
-    write_xarray_to_file(ds, file_path, encoding=encoding)
+    write_xarray_to_file(ds, file_path, encoding=encoding, compression=compression)
     return Path(file_path)
 
 
@@ -1701,6 +1700,7 @@ def snow_evaluation(  # noqa: PLR0913
     max_gif_frames=0,
     max_memory_gib=8.0,
     ncpus=1,
+    compression=None,
     write_region_stats=False,
 ):
     """Evaluate the snow cover of an input dataset against a reference dataset.
@@ -1732,6 +1732,7 @@ def snow_evaluation(  # noqa: PLR0913
         gif_fps: Playback speed of the gif.
         max_gif_frames: Maximum number of gif frames, 0 for all time steps.
         max_memory_gib: Memory budget one time chunk is sized against.
+        compression: NetCDF compression settings, or None.
         write_region_stats: Also write the statistics table of the domain and
             the regions to CSV; it is always logged.
 
@@ -1857,19 +1858,25 @@ def snow_evaluation(  # noqa: PLR0913
     input_time = pd.DatetimeIndex(input_flag.time.values)
     written_files = {
         "input_metrics": write_snow_dataset(
-            input_metrics, output_dir / f"snow_season_metrics_{input_name}.nc"
+            input_metrics,
+            output_dir / f"snow_season_metrics_{input_name}.nc",
+            compression=compression,
         ),
         "ref_metrics": write_snow_dataset(
-            ref_metrics, output_dir / f"snow_season_metrics_{ref_name}.nc"
+            ref_metrics,
+            output_dir / f"snow_season_metrics_{ref_name}.nc",
+            compression=compression,
         ),
         "difference_metrics": write_snow_dataset(
             difference_metrics,
             output_dir
             / f"snow_season_metrics_difference_{input_name}_minus_{ref_name}.nc",
+            compression=compression,
         ),
         "accuracy": write_snow_dataset(
             accuracy,
             output_dir / f"classification_accuracy_{input_name}_vs_{ref_name}.nc",
+            compression=compression,
         ),
         "accuracy_map": create_classification_accuracy_map(
             accuracy,
@@ -1894,10 +1901,12 @@ def snow_evaluation(  # noqa: PLR0913
         written_files["input_snow_cover"] = write_snow_dataset(
             input_flag.to_dataset(name="snow_cover"),
             output_dir / f"snow_cover_{input_name}.nc",
+            compression=compression,
         )
         written_files["ref_snow_cover"] = write_snow_dataset(
             ref_flag.to_dataset(name="snow_cover"),
             output_dir / f"snow_cover_{ref_name}.nc",
+            compression=compression,
         )
     written_files.update(
         create_region_outputs(

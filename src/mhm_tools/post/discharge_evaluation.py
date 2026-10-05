@@ -875,6 +875,7 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
     gauge_location_method="basinex",
     gauge_max_distance_cells=3,
     gauge_max_error=0.1,
+    compression=None,
 ):
     """Get observed and model Q data and save it as CSV files to be opened later.
 
@@ -1436,7 +1437,7 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
     observed_data = xr.Dataset({"facc": facc_da, "discharge": obs_discharge_data})
     if write_input_data_cache:
         logger.info(f"Saving obs data to {obs_output_file}...")
-        write_xarray_to_file(observed_data, obs_output_file)
+        write_xarray_to_file(observed_data, obs_output_file, compression=compression)
     else:
         logger.info(
             "Skipping saving obs data to file as write_input_data_cache is False."
@@ -1575,7 +1576,7 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
     )
     if write_input_data_cache:
         logger.info(f"Saving sim data to {sim_output_file}...")
-        write_xarray_to_file(sim_data, sim_output_file)
+        write_xarray_to_file(sim_data, sim_output_file, compression=compression)
     else:
         logger.info(
             "Skipping saving sim data to file as write_input_data_cache is False."
@@ -1760,6 +1761,7 @@ def evaludate_discharge_data(  # noqa: PLR0913
     mask_var=None,
     catchment_map_variables=None,
     metric_plot_types=None,
+    compression=None,
 ):
     """Compare simulated with observed discharge directly or via bootstrapping.
 
@@ -1798,6 +1800,7 @@ def evaludate_discharge_data(  # noqa: PLR0913
             gauge_location_method=gauge_location_method,
             gauge_max_distance_cells=gauge_max_distance_cells,
             gauge_max_error=gauge_max_error,
+            compression=compression,
         )
         logger.info("Procured discharge data")
         model_da, observed_da = convert_discharge_to_observed_units(

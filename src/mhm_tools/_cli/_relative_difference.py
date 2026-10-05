@@ -14,6 +14,11 @@ Authors
 
 import argparse
 
+from mhm_tools.common.cli_utils import (
+    add_netcdf_compression_args,
+    get_netcdf_compression,
+)
+
 
 def str2float(value):
     """Convert a string to float, but let None remain None."""
@@ -143,6 +148,7 @@ def add_args(parser):
             "narrowest holding the data without its outliers."
         ),
     )
+    add_netcdf_compression_args(parser)
 
 
 def run(args):
@@ -177,4 +183,5 @@ def run(args):
         cmap=args.cmap,
         vmin=args.vmin,
         vmax=args.vmax,
+        compression=get_netcdf_compression(args),
     )

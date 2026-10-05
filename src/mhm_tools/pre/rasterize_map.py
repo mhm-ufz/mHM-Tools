@@ -68,6 +68,7 @@ def rasterize_map_data(
     mapping_field=None,
     input_crs=None,
     dem_crs=None,
+    compression=None,
 ) -> Path:
     """Rasterize a vector attribute using a DEM as the exact target grid.
 
@@ -190,26 +191,19 @@ def rasterize_map_data(
         )
         encoding = {
             _OUTPUT_VARIABLE: {
-                "zlib": True,
-                "complevel": 4,
-                "shuffle": True,
                 "_FillValue": int(NO_DATA),
                 "dtype": "int32",
             }
         }
-        if output_suffix in {".tif", ".tiff"}:
-            raster = output[_OUTPUT_VARIABLE].rio.write_crs(target_crs)
-            raster = raster.rio.write_nodata(int(NO_DATA), encoded=True)
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            raster.rio.to_raster(output_path, dtype="int32", compress="deflate")
-        else:
-            write_xarray_to_file(
-                output,
-                output_path,
-                var_name=_OUTPUT_VARIABLE,
-                encoding=encoding if output_suffix == ".nc" else None,
-                crs=target_crs,
-            )
+        write_xarray_to_file(
+            output,
+            output_path,
+            var_name=_OUTPUT_VARIABLE,
+            encoding=encoding if output_suffix == ".nc" else None,
+            crs=target_crs,
+            compression=compression,
+            geotiff_compression="deflate",
+        )
     finally:
         reference.close()
 
