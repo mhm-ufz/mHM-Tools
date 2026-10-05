@@ -161,6 +161,8 @@ _ROOT_OPTION_ALIASES = {
     "--log_file_level": "--log-file-level",
     "--no_console_output": "--no-console-output",
 }
+# old names of renamed commands, kept working as hidden aliases of the new name
+_RENAMED_COMMANDS = {"converter-nc-ascii": "file-converter"}
 
 
 def _translate_option_aliases(args, option_aliases):
@@ -708,6 +710,12 @@ for _group_name, _group_help, _group_commands in _COMMAND_GROUPS:
         )
         _add_command_with_aliases(_group, _cmd, _command_name)
         _LEGACY_COMMAND_PATHS.append((_command_name, (_group_name, _command_name)))
+    # an old name answers within the group and, like every command, at the top
+    for _old_name, _new_name in _RENAMED_COMMANDS.items():
+        if _new_name in _group.commands:
+            for _alias in (_old_name, _old_name.replace("-", "_")):
+                _group.add_alias(_alias, _new_name)
+            _LEGACY_COMMAND_PATHS.append((_old_name, (_group_name, _new_name)))
     _add_command_with_aliases(cli, _group, _group_name)
 
 for _command_name, _target_path in _LEGACY_COMMAND_PATHS:
