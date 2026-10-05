@@ -30,19 +30,33 @@ from mhm_tools.common.file_handler import (
     write_xarray_to_file,
 )
 from mhm_tools.common.logger import ErrorLogger, log_arguments, log_errors
-from mhm_tools.common.metrics.metrics_handler import create_results_csv
+from mhm_tools.common.metrics.metrics_handler import (
+    calculate_results_metric,
+    create_results_csv,
+)
 from mhm_tools.common.netcdf import generate_bounds_for_all_coords
-from mhm_tools.common.plotter import plot_single_map, round_sensibly
+from mhm_tools.common.plotter import (
+    get_percent_diff_bounds,
+    plot_single_map,
+    round_sensibly,
+)
 from mhm_tools.common.resolution_handler import Resolution, get_file_res
 from mhm_tools.common.time_utils import (
     resample_to_target_freq,
     timedelta_to_alias,
 )
-from mhm_tools.common.utils import cut_to_filled_area, split_file_list
+from mhm_tools.common.utils import (
+    cut_to_filled_area,
+    select_regions,
+    split_file_list,
+    write_stats_table,
+)
 from mhm_tools.common.xarray_utils import (
     SPEARMAN_BYTES_PER_ELEMENT,
+    calculate_region_medians,
     calculate_spearman_over_time,
     crop_ds,
+    crop_to_region,
     get_clim_from_ds,
     get_coord_key,
     get_ds_extend,
@@ -1331,21 +1345,12 @@ def plot_map_global_climate2(
         title += f" for years {overlapping_years[0]}-{overlapping_years[-1]}"
     fig.suptitle(title, fontweight="normal", fontsize="x-large")
 
-    vmin = np.nanquantile(rel_mean, 0.01)
-    vmax = np.nanquantile(rel_mean, 0.99)
-    mean_diff_1 = max(abs(vmin), abs(vmax))
-    mean_diff_1, round_dec = round_sensibly(mean_diff_1)
-    logger.debug(
-        f"mean_diff_1={mean_diff_1}, vmin={vmin}, vmax={vmax}, round_dec={round_dec}"
-    )
     im0, bounds0, extend0, ticks0 = plot_single_map(
-        ax_rel_mean, rel_mean, mean_diff_1, bounds_type="max", center=0
+        ax_rel_mean, rel_mean, bounds_type="percent"
     )
-    title_rel_mean = (
-        f"b) Relative Mean Difference (median={np.nanmedian(rel_mean):.{round_dec}f}"
-    )
+    title_rel_mean = f"b) Relative Mean Difference (median={np.nanmedian(rel_mean):.1f}"
     if total_rel_mean is not None:
-        title_rel_mean += f", mean={total_rel_mean:.{round_dec}f}"
+        title_rel_mean += f", mean={total_rel_mean:.1f}"
     title_rel_mean += ")"
     ax_rel_mean.set_title(title_rel_mean)
 
@@ -1370,9 +1375,11 @@ def plot_map_global_climate2(
 
     divider0 = make_axes_locatable(ax_rel_mean)
     cax0 = divider0.append_axes("right", size="5%", pad=0.1)
-    fig.colorbar(
+    cbar0 = fig.colorbar(
         im0, cax=cax0, label="%", boundaries=bounds0, extend=extend0, ticks=ticks0
     )
+    # shortest form of every tick, so 25 and 2.5 instead of 25.0 and 2.5
+    cbar0.set_ticks(ticks0, labels=[f"{tick + 0.0:g}" for tick in ticks0])
 
     for ax in [ax_rel_mean, ax_diff]:
         for spine in ax.spines.values():
@@ -1448,12 +1455,17 @@ def plot_map_local_climate(
     rel_monthly = 100.0 * (input_clim - ref_safe) / ref_safe
     abs_monthly = input_clim - ref_clim
 
-    def _plot_monthly_panels(values, panel_title, output_file_name, colorbar_label):
+    def _plot_monthly_panels(
+        values, panel_title, output_file_name, colorbar_label, bounds_type="max"
+    ):
         values = np.where(values == np.inf, np.nan, values)
         values = np.where(values == -np.inf, np.nan, values)
         finite_values = values[np.isfinite(values)]
         if finite_values.size == 0:
             diff_to_mean = 1e-6
+        elif bounds_type == "percent":
+            # the months share one colorbar, so their bins come from all months
+            diff_to_mean = float(get_percent_diff_bounds(finite_values)[-1])
         else:
             q01 = float(np.nanquantile(finite_values, 0.01))
             q99 = float(np.nanquantile(finite_values, 0.99))
@@ -1491,7 +1503,7 @@ def plot_map_local_climate(
                 month_values,
                 diff_to_mean=diff_to_mean,
                 center=0,
-                bounds_type="max",
+                bounds_type=bounds_type,
             )
             ax.set_title(month_labels[month_idx], fontsize="medium")
             ax.set_xticks([])
@@ -1508,6 +1520,8 @@ def plot_map_local_climate(
             ticks=ticks,
             label=colorbar_label,
         )
+        # shortest form of every tick, so 25 and 2.5 instead of 25.0 and 2.5
+        cbar.set_ticks(ticks, labels=[f"{tick + 0.0:g}" for tick in ticks])
         cbar.ax.tick_params(labelsize=8)
         fig.subplots_adjust(left=0.03, right=0.94, bottom=0.04, top=0.89)
         plt.savefig(output_path / output_file_name, dpi=400)
@@ -1525,6 +1539,7 @@ def plot_map_local_climate(
         "Monthly Relative Climatology Difference",
         rel_file_name,
         "Relative Climatology Difference [%]",
+        bounds_type="percent",
     )
     _plot_monthly_panels(
         abs_monthly,
@@ -1587,7 +1602,9 @@ def create_map_from_output(
             input_name=input_name,
             ref_name=ref_name,
             output_path=output_path,
-            total_rel_mean=np.nanmean(input_clim) / np.nanmean(ref_clim),
+            total_rel_mean=100
+            * (np.nanmean(input_clim) - np.nanmean(ref_clim))
+            / np.nanmean(ref_clim),
         )
         plot_map_local_climate(
             input_clim=input_clim,
@@ -1718,6 +1735,118 @@ def get_stats(
     return generate_bounds_for_all_coords(masked_ds)
 
 
+def create_relative_stats_table(
+    relative_stats,
+    input_clim,
+    ref_clim,
+    region_names,
+    input_name,
+    ref_name,
+    output_file=None,
+):
+    """Log the median relative statistics per WMO region and for the domain.
+
+    Args:
+        relative_stats: Mapping holding ``rel_mean`` and optionally ``rel_std``
+            and ``spearman`` as (lat, lon) DataArrays.
+        input_clim: Monthly input climatology as a (month, lat, lon) DataArray.
+        ref_clim: Monthly reference climatology on the same grid.
+        region_names: Keys of ``WMO_REGION_BOUNDS``.
+        input_name: Name of the input dataset.
+        ref_name: Name of the reference dataset.
+        output_file: CSV file path, or None to only log the table.
+
+    Returns
+    -------
+        DataFrame of the medians per region.
+    """
+    stats = xr.Dataset(
+        {
+            name: relative_stats[name]
+            for name in ("rel_mean", "rel_std", "spearman")
+            if relative_stats.get(name) is not None
+        }
+    )
+    stats["mean_diff"] = (input_clim - ref_clim).mean("month", skipna=True)
+    units = input_clim.attrs.get("units")
+    stats_df = calculate_region_medians(stats, list(stats.data_vars), region_names)
+    write_stats_table(
+        stats_df,
+        title=(
+            f"Median relative statistics of {input_name} against {ref_name} "
+            f"(rel_* = input / reference, mean_diff = input - reference"
+            f"{f' [{units}]' if units else ''})"
+        ),
+        output_file=output_file,
+    )
+    return stats_df
+
+
+def create_region_metric_tables(
+    input_maps,
+    ref_maps,
+    lat,
+    lon,
+    global_results,
+    input_name,
+    ref_name,
+    region_names,
+    output_stem=None,
+):
+    """Log every spatial metric per WMO region and for the domain as a table.
+
+    The domain values are taken from `global_results`, so only the regions are
+    calculated here.
+
+    Args:
+        input_maps: Input array with shape (time, lat, lon).
+        ref_maps: Reference array with the same shape and missing pattern.
+        lat: Latitudes of the map rows.
+        lon: Longitudes of the map columns.
+        global_results: Dict of the domain result dict per metric name, as
+            returned by ``create_results_csv``.
+        input_name: Name of the input dataset.
+        ref_name: Name of the reference dataset.
+        region_names: Keys of ``WMO_REGION_BOUNDS``.
+        output_stem: Path prefix of the CSV files, or None to only log them.
+
+    Returns
+    -------
+        Dict of the table per metric name.
+    """
+    coords = {"lat": lat, "lon": lon}
+    input_da = xr.DataArray(input_maps, dims=("time", "lat", "lon"), coords=coords)
+    ref_da = xr.DataArray(ref_maps, dims=("time", "lat", "lon"), coords=coords)
+    tables = {}
+    for metric, global_result in global_results.items():
+        rows = [{"region": "Global", **global_result}]
+        for region_name in region_names:
+            region_input = crop_to_region(input_da, region_name).values
+            region_ref = crop_to_region(ref_da, region_name).values
+            if not (np.isfinite(region_input) & np.isfinite(region_ref)).any():
+                continue
+            try:
+                result = calculate_results_metric(
+                    region_input, region_ref, input_name, ref_name, metric=metric
+                )
+            except ValueError as error:
+                logger.warning(f"Skipping {metric} for region {region_name}: {error}")
+                continue
+            rows.append({"region": region_name, **result})
+        metric_df = pd.DataFrame(rows).drop(columns="name", errors="ignore")
+        tables[metric] = metric_df
+        write_stats_table(
+            metric_df,
+            title=f"{metric} of {input_name} against {ref_name}",
+            output_file=(
+                None
+                if output_stem is None
+                else f"{output_stem}_{metric.lower()}_regions.csv"
+            ),
+        )
+    return tables
+
+
 def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
     input_path,
     input_var,
@@ -1746,8 +1875,16 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
     input_file_name=None,
     ref_file_name=None,
     result_metric="all",
+    region_names=(),
+    write_region_stats=False,
 ):
-    """Compare the two datasets."""
+    """Compare the two datasets.
+
+    The relative statistics and the spatial metrics are logged as tables, for
+    the whole domain and per region in `region_names`, and written to CSV when
+    `write_region_stats` is set. A bootstrap run logs only the spatial metrics;
+    its relative statistics are tabled once all bootstrap runs are combined.
+    """
     output_path = Path(output_path)
     if bootstrap_index is not None:
         random.seed(bootstrap_index)
@@ -1822,6 +1959,11 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
         f"ref_clim={bool(ref['clim'].isnull().all().compute().item())}"
     )
     output_name = f"{input_name}-{ref_name}".replace(" ", "_")
+    region_output_stem = None
+    if write_region_stats:
+        region_output_stem = output_path / output_name
+        if bootstrap_index is not None:
+            region_output_stem = output_path / f"{output_name}_{bootstrap_index}"
     # compare and save statistics
     full_metrics = not bias_only and not global_climate
     with_std = not bias_only
@@ -1884,7 +2026,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
             del paired_valid
             try:
                 spearman, spearman_pval = calculate_spearman_map(input_ts_np, ref_ts_np)
-                create_results_csv(
+                global_results = create_results_csv(
                     map1=input_ts_np,
                     map2=ref_ts_np,
                     ds1_name=input_name,
@@ -1892,6 +2034,18 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
                     out_dir=output_path,
                     out_name=output_name,
                     metric=result_metric,
+                    log_table=False,
+                )
+                create_region_metric_tables(
+                    input_ts_np,
+                    ref_ts_np,
+                    get_coord_values(input, lat=True),
+                    get_coord_values(input, lon=True),
+                    global_results,
+                    input_name,
+                    ref_name,
+                    region_names,
+                    output_stem=region_output_stem,
                 )
             except ValueError as ve:
                 logger.error("Input and ref do not have the same temporal extent.")
@@ -1911,7 +2065,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
             with ErrorLogger(logger):
                 raise ValueError(msg)
         spearman, spearman_pval = calculate_spearman_map(input_clim_np, ref_clim_np)
-        create_results_csv(
+        global_results = create_results_csv(
             map1=input_clim_np,
             map2=ref_clim_np,
             ds1_name=input_name,
@@ -1919,6 +2073,18 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
             out_dir=output_path,
             out_name=output_name,
             metric=result_metric,
+            log_table=False,
+        )
+        create_region_metric_tables(
+            input_clim_np,
+            ref_clim_np,
+            get_coord_values(input, lat=True),
+            get_coord_values(input, lon=True),
+            global_results,
+            input_name,
+            ref_name,
+            region_names,
+            output_stem=region_output_stem,
         )
 
     if input["mean"].shape != ref["mean"].shape:
@@ -2066,6 +2232,20 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
 
     write_xarray_to_file(ds=output, file_path=file_name)
     logger.info(f"Written output to {file_name}")
+    if bootstrap_index is None:
+        create_relative_stats_table(
+            output,
+            input_clim,
+            ref_clim,
+            region_names,
+            input_name,
+            ref_name,
+            output_file=(
+                file_name.with_name(f"{file_name.stem}_regions.csv")
+                if write_region_stats
+                else None
+            ),
+        )
     if plot:
         if full_metrics:
             plot_map(
@@ -2137,6 +2317,11 @@ def evaluate_boostraping_stat_files(stat_files, input_name, ref_name):
         ) as first_file:
             shape = first_file["rel_mean"].shape
             n_bootstrap = len(stat_files)
+            # the coordinates let the combined fields be cropped to regions
+            coords = {
+                "lat": first_file["rel_mean"]["lat"].values,
+                "lon": first_file["rel_mean"]["lon"].values,
+            }
 
             # Determine keys for climatology fields
             input_clim_key = (
@@ -2172,17 +2357,23 @@ def evaluate_boostraping_stat_files(stat_files, input_name, ref_name):
             ref_clim[i] = ds[ref_clim_key].values
 
     # Convert the arrays into xarray DataArrays
-    mean_da = xr.DataArray(mean, dims=["bootstrap", "lat", "lon"])
+    mean_da = xr.DataArray(mean, dims=["bootstrap", "lat", "lon"], coords=coords)
     std_da = (
-        xr.DataArray(std, dims=["bootstrap", "lat", "lon"]) if std is not None else None
+        xr.DataArray(std, dims=["bootstrap", "lat", "lon"], coords=coords)
+        if std is not None
+        else None
     )
     spearman_da = (
-        xr.DataArray(spearman, dims=["bootstrap", "lat", "lon"])
+        xr.DataArray(spearman, dims=["bootstrap", "lat", "lon"], coords=coords)
         if spearman is not None
         else None
     )
-    input_clim_da = xr.DataArray(input_clim, dims=["bootstrap", "month", "lat", "lon"])
-    ref_clim_da = xr.DataArray(ref_clim, dims=["bootstrap", "month", "lat", "lon"])
+    input_clim_da = xr.DataArray(
+        input_clim, dims=["bootstrap", "month", "lat", "lon"], coords=coords
+    )
+    ref_clim_da = xr.DataArray(
+        ref_clim, dims=["bootstrap", "month", "lat", "lon"], coords=coords
+    )
 
     # Combine results into an xarray Dataset
     results = {
@@ -2464,9 +2655,17 @@ def gridded_data_evaluation(  # noqa: PLR0913
     result_metric="all",
     avaiable_mem=None,
     n_cpus=1,
+    regions="all",
+    write_region_stats=False,
 ):
-    """Validate a spatial variable by comparing dataset climatologies."""
+    """Validate a spatial variable by comparing dataset climatologies.
+
+    `regions` ("all", "none" or a comma separated list of WMO regions) selects
+    the regions the statistics are tabled for next to the whole domain;
+    `write_region_stats` also writes those tables to CSV.
+    """
     output_path = Path(output_path)
+    region_names = select_regions(regions)
     input_path = input.path
     ref_path = ref.path
     logger.debug(
@@ -2629,6 +2828,8 @@ def gridded_data_evaluation(  # noqa: PLR0913
                     mask_da=mask_da,
                     mask_var=mask_var,
                     result_metric=result_metric,
+                    region_names=region_names,
+                    write_region_stats=write_region_stats,
                 )
                 for bootstrap_index in range(n_bootstrap_selections)
             )
@@ -2636,6 +2837,20 @@ def gridded_data_evaluation(  # noqa: PLR0913
         if stat_files:
             results = evaluate_boostraping_stat_files(
                 stat_files, input_name=input.name, ref_name=ref.name
+            )
+            rel_stat_file = get_rel_stat_file(output_path, input.name, ref.name)
+            create_relative_stats_table(
+                results,
+                results["input_clim"],
+                results["ref_clim"],
+                region_names,
+                input.name,
+                ref.name,
+                output_file=(
+                    rel_stat_file.with_name(f"{rel_stat_file.stem}_regions.csv")
+                    if write_region_stats
+                    else None
+                ),
             )
             if (
                 "spearman" in results
@@ -2714,4 +2929,6 @@ def gridded_data_evaluation(  # noqa: PLR0913
             mask_da=mask_da,
             mask_var=mask_var,
             result_metric=result_metric,
+            region_names=region_names,
+            write_region_stats=write_region_stats,
         )

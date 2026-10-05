@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 import xarray as xr
 
 import mhm_tools.common.xarray_utils as utils
@@ -578,6 +579,42 @@ class TestCropDs(XarrayUtilsBase):
         out = crop_ds(ds, 100.5, 102.0, 10.5, 12.0, lon_name="X", lat_name="Y")
         self.assertSetEqual(set(np.round(out.X.values, 6)), {101.0, 102.0})
         self.assertSetEqual(set(np.round(out.Y.values, 6)), {11.0, 12.0})
+
+
+def _storage(units=None):
+    """Create a one value storage field with the given units."""
+    attrs = {"long_name": "storage"} if units is None else {"units": units}
+    return xr.DataArray([2.0], dims="cell", attrs=attrs, name="tws")
+
+
+@pytest.mark.parametrize(
+    ("units", "mm"),
+    [("cm", 20.0), ("m", 2000.0), ("kg m-2", 2.0), ("kg/m^2", 2.0)],
+)
+def test_convert_water_storage_to_mm_reads_depth_units(units, mm):
+    """Convert depths of water and kg/m2 to mm."""
+    converted = utils.convert_water_storage_to_mm(_storage(units))
+    np.testing.assert_allclose(converted.values, mm)
+    assert converted.attrs["units"] == "mm"
+
+
+def test_convert_water_storage_to_mm_prefers_the_scale_factor():
+    """Use an explicit scale factor instead of the units attribute."""
+    converted = utils.convert_water_storage_to_mm(_storage("m"), scale_factor=10)
+    np.testing.assert_allclose(converted.values, 20.0)
+
+
+def test_convert_water_storage_to_mm_falls_back_to_the_encoding_units():
+    """Read the units from the encoding when the attribute is gone."""
+    storage = _storage()
+    storage.encoding["units"] = "cm"
+    np.testing.assert_allclose(utils.convert_water_storage_to_mm(storage).values, 20.0)
+
+
+def test_convert_water_storage_to_mm_rejects_unknown_units():
+    """Refuse a storage whose units are no depth of water."""
+    with pytest.raises(ValueError, match="unrecognized unit"):
+        utils.convert_water_storage_to_mm(_storage("m3"))
 
 
 if __name__ == "__main__":

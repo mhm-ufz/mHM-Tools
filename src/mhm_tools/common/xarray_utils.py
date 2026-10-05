@@ -15,7 +15,6 @@ from mhm_tools.common.constants import (
     LAT_KEYS,
     LON_KEYS,
     TIME_KEYS,
-    WATER_STORAGE_UNIT_FACTORS_MM,
     WMO_REGION_BOUNDS,
 )
 from mhm_tools.common.logger import ErrorLogger
@@ -25,6 +24,7 @@ from mhm_tools.common.netcdf import (
     get_netcdf_metadata_data_vars,
 )
 from mhm_tools.common.time_utils import get_data_coverage, timedelta_to_alias
+from mhm_tools.common.units import calculate_conversion_factor
 
 logger = logging.getLogger(__name__)
 MIN_PAIRS_FOR_CORRELATION = 2
@@ -769,6 +769,68 @@ def crop_to_region(da, region_name):
     return crop_ds(da, lon_slice.start, lon_slice.stop, lat_slice.start, lat_slice.stop)
 
 
+def calculate_region_medians(ds, variables, region_names):
+    """Calculate the median of every variable per WMO region and for the domain.
+
+    Inf counts as missing. A region without any valid cell is left out.
+
+    Args:
+        ds: Dataset with ``lat`` and ``lon`` coordinates holding the variables.
+        variables: Names of the variables to summarise.
+        region_names: Keys of ``WMO_REGION_BOUNDS``.
+
+    Returns
+    -------
+        DataFrame with a first row "Global" for the whole domain and one row
+        per region, holding ``region``, the number of grid ``cells`` with a
+        valid value and the median of every variable.
+    """
+    rows = []
+    for region_name in [None, *region_names]:
+        region_ds = ds[variables]
+        if region_name is not None:
+            region_ds = crop_to_region(region_ds, region_name)
+            if region_ds.sizes["lat"] == 0 or region_ds.sizes["lon"] == 0:
+                continue
+        row = {"region": region_name or "Global"}
+        valid_cells = np.zeros((region_ds.sizes["lat"], region_ds.sizes["lon"]), bool)
+        for name in variables:
+            da = region_ds[name].transpose("lat", "lon", ...)
+            values = np.asarray(da.values)
+            finite = np.isfinite(values)
+            # a cell counts once, however many years or months it holds
+            valid_cells |= finite.reshape(*valid_cells.shape, -1).any(axis=-1)
+            row[name] = float(np.median(values[finite])) if finite.any() else np.nan
+        if region_name is not None and not valid_cells.any():
+            continue
+        row["cells"] = int(valid_cells.sum())
+        rows.append(row)
+    return pd.DataFrame(rows, columns=["region", "cells", *variables])
+
+
+def convert_dataarray_units(da, to_units, from_units=None):
+    """Convert a DataArray to other units of the same kind, keeping its attributes.
+
+    Args:
+        da: DataArray to convert.
+        to_units: Target units, e.g. "m3 s-1" or "mm".
+        from_units: Units of `da`, None to read its units attribute.
+
+    Returns
+    -------
+        The DataArray in `to_units` with its units attribute set. Raises
+        ``ValueError`` for missing or incompatible units.
+    """
+    from_units = da.attrs.get("units") if from_units is None else from_units
+    if from_units is None:
+        msg = f"{da.name!r} has no units to convert from."
+        raise ValueError(msg)
+    factor = calculate_conversion_factor(from_units, to_units)
+    converted = da.copy(deep=False) if np.isclose(factor, 1.0) else da * factor
+    converted.attrs = {**da.attrs, "units": to_units}
+    return converted
+
+
 def convert_water_storage_to_mm(da, scale_factor=None, label="input"):
     """Convert a water storage field to millimetres of water.
 
@@ -784,19 +846,17 @@ def convert_water_storage_to_mm(da, scale_factor=None, label="input"):
     -------
         The DataArray in mm, keeping its other attributes.
     """
-    # local import, because common.utils reaches xarray_utils through file_handler
-    from mhm_tools.common.utils import normalize_unit_string
-
     attrs = dict(da.attrs)
     if scale_factor is not None:
         logger.info(f"Scaling {label} by the given factor {scale_factor} to mm.")
         converted = da * float(scale_factor)
     else:
         units = da.attrs.get("units") or da.encoding.get("units")
-        normalized = normalize_unit_string(units) if units else None
-        factor = WATER_STORAGE_UNIT_FACTORS_MM.get(normalized)
+        try:
+            factor = calculate_conversion_factor(units, "mm") if units else None
+        except ValueError:
+            factor = None
         if factor is None:
-            known = ", ".join(sorted(WATER_STORAGE_UNIT_FACTORS_MM))
             reason = (
                 "carries no 'units' attribute"
                 if units is None
@@ -805,7 +865,7 @@ def convert_water_storage_to_mm(da, scale_factor=None, label="input"):
             msg = (
                 f"The {label} variable '{da.name}' {reason}, so it cannot be "
                 f"converted to mm. Pass an explicit scale factor in mm per data "
-                f"unit, or set a known unit ({known})."
+                f"unit, or set a depth of water such as mm, cm, m or kg m-2."
             )
             with ErrorLogger(logger):
                 raise ValueError(msg)

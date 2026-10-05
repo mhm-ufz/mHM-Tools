@@ -11,6 +11,8 @@ from matplotlib import pyplot as plt
 
 from mhm_tools.common.logger import log_errors
 from mhm_tools.common.plotter import (
+    METRIC_LABELS,
+    PERCENT_METRICS,
     PLOT_DPI,
     add_map_colorbar,
     calculate_map_figure_size,
@@ -24,6 +26,9 @@ from mhm_tools.common.resolution_handler import calculate_coordinate_resolution
 from mhm_tools.common.xarray_utils import get_coord_key, get_single_data_var
 
 logger = logging.getLogger(__name__)
+# a row per gauge holds the metric at the outlet of the gauge's catchment
+CATCHMENT_OUTLET_TITLE = "Metrics at the catchment outlets"
+CATCHMENT_MEDIAN_TITLE = "Median metrics per catchment"
 
 
 def create_match_id(value):
@@ -392,6 +397,7 @@ def write_catchment_median_maps(
     dpi=PLOT_DPI,
     title_context=None,
     extent=None,
+    title=CATCHMENT_OUTLET_TITLE,
 ):
     """Write catchment median maps for metric rows.
 
@@ -426,6 +432,8 @@ def write_catchment_median_maps(
         to the matched geometries' own bounds, padded by 10% - which can
         balloon out to (near) the whole globe if a matched geometry is
         malformed or not in the expected lon/lat CRS.
+    title : str, optional
+        Figure title saying what a catchment's value is.
 
     Returns
     -------
@@ -461,6 +469,7 @@ def write_catchment_median_maps(
         dpi=dpi,
         title_context=title_context,
         extent=extent,
+        title=title,
     )
 
 
@@ -474,6 +483,7 @@ def plot_catchment_metric_maps(
     dpi=PLOT_DPI,
     title_context=None,
     extent=None,
+    title=CATCHMENT_OUTLET_TITLE,
 ):
     """Plot metric values on catchment polygons.
 
@@ -497,6 +507,8 @@ def plot_catchment_metric_maps(
         Explicit (lon_min, lon_max, lat_min, lat_max) map extent, e.g. a
         region's prescribed bounding box. Defaults to the plotted
         geometries' own bounds, padded by 10%.
+    title : str, optional
+        Figure title saying what a catchment's value is.
 
     Returns
     -------
@@ -538,8 +550,19 @@ def plot_catchment_metric_maps(
         style = get_metric_plot_style(variable)
         if cmap is not None:
             style["cmap"] = cmap
+        bounds_type = "data"
+        label = create_axis_label(variable)
+        units = METRIC_LABELS.get(variable, (None, None))[1]
+        if variable in PERCENT_METRICS:
+            # stored as a fraction, mapped in percent
+            values = 100 * values
+            bounds_type = "percent"
+            label = create_axis_label(
+                METRIC_LABELS.get(variable, (variable, None))[0], "%"
+            )
+            units = "%"
         cmap_obj, norm, bounds, extend, ticks = create_discrete_colour_norm(
-            values.to_numpy(dtype=float), bounds_type="data", **style
+            values.to_numpy(dtype=float), bounds_type=bounds_type, **style
         )
 
         fig, ax = plt.subplots(
@@ -569,14 +592,15 @@ def plot_catchment_metric_maps(
             bounds,
             extend,
             ticks,
-            create_axis_label(variable),
+            label,
         )
         style_map_axes(ax)
-        title = "Catchment medians"
+        figure_title = title
         if title_context is not None:
-            title = f"{title} ({title_context})"
-        fig.suptitle(title, fontweight="normal", fontsize="x-large")
-        ax.set_title(f"{variable} ({create_summary_text(values, bounds=bounds)})")
+            figure_title = f"{figure_title} ({title_context})"
+        fig.suptitle(figure_title, fontweight="normal", fontsize="x-large")
+        summary = create_summary_text(values, units=units, bounds=bounds)
+        ax.set_title(f"{variable} ({summary})")
         output_file = output_dir / f"{output_prefix}_{variable}.png"
         fig.tight_layout()
         fig.savefig(output_file, dpi=dpi)

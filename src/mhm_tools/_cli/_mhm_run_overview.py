@@ -59,9 +59,9 @@ def add_args(parser: argparse.ArgumentParser):
         "--convert-units",
         action="store_true",
         help=(
-            "Convert output variable units with time denominators (s, d, m, y) "
-            "to the inferred temporal resolution of meteo input files with time coordinates. "
-            "Month length is assumed as 30.4 days."
+            "Convert output variable units with time denominators (s, min, h, d, "
+            "month, year) to the inferred temporal resolution of meteo input files "
+            "with time coordinates. A year is 365.25 days and a month 1/12 of it."
         ),
     )
 

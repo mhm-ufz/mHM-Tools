@@ -20,10 +20,13 @@ import pandas as pd
 import xarray as xr
 from matplotlib import gridspec
 
+from mhm_tools.common.constants import DEFAULT_DISCHARGE_UNITS
 from mhm_tools.common.file_handler import get_xarray_ds_from_file
 from mhm_tools.common.logger import ErrorLogger, log_arguments
 from mhm_tools.common.metrics.kge import calculate_kling_gupta_efficiency
 from mhm_tools.common.metrics.metrics_handler import create_csv_from_dict
+from mhm_tools.common.time_utils import calculate_median_time_step_seconds
+from mhm_tools.common.units import calculate_amount_factor
 from mhm_tools.common.utils import dict_to_multiline_string
 
 logger = logging.getLogger(__name__)
@@ -345,13 +348,52 @@ class Hydrograph:
         self.logger.debug(
             f"sum simulated: {np.nansum(self.sim_discharge_data_clean)}, sum observed: {np.nansum(self.obs_discharge_data_clean)}"
         )
-        self.objectives.diff = np.nansum(self.sim_discharge_data_clean) - np.nansum(
+        rate_difference = np.nansum(self.sim_discharge_data_clean) - np.nansum(
             self.obs_discharge_data_clean
         )
-        self.objectives.rel_diff = self.objectives.diff / np.nansum(
+        self.objectives.diff = self.calculate_discharge_volume(rate_difference)
+        self.objectives.rel_diff = rate_difference / np.nansum(
             self.obs_discharge_data_clean
         )
         return True
+
+    def calculate_discharge_volume(self, rate_sum):
+        """Turn a sum of discharge rates over the compared time steps into m³.
+
+        The time step comes from the observation's time axis and the unit from
+        its units attribute, m³/s when it has none. A depth rate such as mm/d
+        needs the catchment area in km².
+
+        Args:
+            rate_sum: Sum of the discharge rates over the compared time steps.
+
+        Returns
+        -------
+            The volume in m³, NaN when the unit, the time step or a needed area
+            is unknown.
+        """
+        units = self.obs_discharge_data.attrs.get("units")
+        if units is None:
+            logger.warning(
+                f"The observed discharge has no units, assuming {DEFAULT_DISCHARGE_UNITS}."
+            )
+            units = DEFAULT_DISCHARGE_UNITS
+        step_seconds = calculate_median_time_step_seconds(
+            self.obs_discharge_data["time"].values
+        )
+        if step_seconds is None:
+            return np.nan
+        try:
+            area_km2 = float(self.catchment.area)
+        except (TypeError, ValueError):
+            area_km2 = None
+        try:
+            return rate_sum * calculate_amount_factor(
+                units, step_seconds, "m3", area_km2
+            )
+        except ValueError as error:
+            logger.warning(f"No discharge volume difference: {error}")
+            return np.nan
 
     def get_row_col(self):
         """Find the first unused gridcell for the next plot.
@@ -800,14 +842,14 @@ class Hydrograph:
             ax2 = fig.add_subplot(inner_gs_update[1:], sharex=ax2_pre)
             if self.calc_stats:
                 ax2_pre.set_title(
-                    f"sum(sim - obs) = {self.objectives.diff:.0f}$m^3$ or {self.objectives.rel_diff*100:.0f}%",
+                    f"volume difference sim - obs = {self.objectives.diff:.3g} m³ ({self.objectives.rel_diff * 100:.0f}%)",
                     horizontalalignment="center",
                 )
         else:
             ax2 = fig.add_subplot(outer_gs)
             if self.calc_stats:
                 ax2.set_title(
-                    f"sum(sim - obs) = {self.objectives.diff:.0f}$m^3$ or {self.objectives.rel_diff*100:.0f}%",
+                    f"volume difference sim - obs = {self.objectives.diff:.3g} m³ ({self.objectives.rel_diff * 100:.0f}%)",
                     horizontalalignment="center",
                 )
         ax2.spines["top"].set_visible(False)
@@ -1266,7 +1308,7 @@ class Hydrograph:
             ):
                 return False
         if sum(self.plots) == 0:
-            self.logger.warning("Create no plots")
+            self.logger.debug("Hydrograph creates no plots")
             return True
         self._infer_catchment_name()
         # create figure and determining the number of rows and cols

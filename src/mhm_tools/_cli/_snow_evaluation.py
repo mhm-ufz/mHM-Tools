@@ -208,6 +208,11 @@ def add_args(parser):
     flags.add_argument(
         "--no-gif", action="store_true", help="Skip the animated comparison."
     )
+    flags.add_argument(
+        "--write-region-stats",
+        action="store_true",
+        help="Also write the statistics table of the domain and the regions to CSV.",
+    )
 
 
 def run(args):
@@ -246,6 +251,7 @@ def run(args):
         max_gif_frames=args.max_gif_frames,
         max_memory_gib=args.max_memory_gib,
         ncpus=args.ncpus,
+        write_region_stats=args.write_region_stats,
     )
     for label, file_path in written_files.items():
         logger.info(f"{label}: {file_path}")

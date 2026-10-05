@@ -131,48 +131,42 @@ def dict_to_multiline_string(d: dict, spacing: int = 12) -> str:
 def pretty_print_df(df: pd.DataFrame, max_col_width: int = 30, title="") -> None:
     """Pretty-print a DataFrame as an ASCII table with simple truncation.
 
-    Numbers are right-aligned, other columns are left-aligned. Cells longer than
+    Numbers are right-aligned, other columns are left-aligned. Floats are shown
+    with 4 significant digits, integers in full. Cells longer than
     max_col_width are truncated with an ellipsis.
     """
     if df.empty:
         logger.info("There are no results to display.")
         return
 
-    def is_numeric(col: pd.Series) -> bool:
-        return pd.api.types.is_numeric_dtype(col)
+    def format_value(val: object) -> str:
+        if isinstance(val, (bool, np.bool_)):
+            return str(val)
+        if isinstance(val, (int, np.integer)):
+            return str(val)
+        if isinstance(val, (float, np.floating)):
+            return "NaN" if np.isnan(val) else f"{val:.4g}"
+        if val is None or (not isinstance(val, str) and pd.isna(val)):
+            return "NaN"
+        return str(val)
 
-    def fmt_cell(val: object, width: int, right: bool) -> str:
-        s = ""
-        if not pd.isna(val):
-            try:
-                val = float(val)
-                if val < 10:
-                    s = f"{val:.1f}"
-                elif val < 1:
-                    s = f"{val:.2f}"
-                elif val < 0.1:
-                    s = f"{val:.3f}"
-                elif val < 0.01:
-                    s = f"{val:.4f}"
-                else:
-                    s = f"{val:.0f}"
-            except ValueError:
-                s = str(val)
-        else:
-            s = "NaN"
-        if len(s) > width:
-            s = s[: max(1, width - 1)] + "…"
-        return s.rjust(width) if right else s.ljust(width)
+    def fmt_cell(text: str, width: int, right: bool) -> str:
+        if len(text) > width:
+            text = text[: max(1, width - 1)] + "…"
+        return text.rjust(width) if right else text.ljust(width)
 
-    headers = list(df.columns)
-    widths = []
-    aligns_right = []
-    for h in headers:
-        col = df[h]
-        right = is_numeric(col)
-        aligns_right.append(right)
-        max_len = max(len(str(h)), *(len(str(x)) for x in col.fillna("")))
-        widths.append(min(max_col_width, max_len))
+    headers = [str(h) for h in df.columns]
+    cell_texts = [
+        [format_value(val) for val in row] for row in df.itertuples(index=False)
+    ]
+    aligns_right = [pd.api.types.is_numeric_dtype(df[h]) for h in df.columns]
+    widths = [
+        min(
+            max_col_width,
+            max(len(header), *(len(row[index]) for row in cell_texts)),
+        )
+        for index, header in enumerate(headers)
+    ]
 
     def sep() -> str:
         return "+" + "+".join("-" * (w + 2) for w in widths) + "+"
@@ -189,14 +183,35 @@ def pretty_print_df(df: pd.DataFrame, max_col_width: int = 30, title="") -> None
     out_string += sep() + "\n"
 
     # Rows
-    for _, row in df.iterrows():
-        cells = []
-        for h, w, right in zip(headers, widths, aligns_right):
-            cells.append(" " + fmt_cell(row[h], w, right) + " ")
+    for row in cell_texts:
+        cells = [
+            " " + fmt_cell(text, w, right) + " "
+            for text, w, right in zip(row, widths, aligns_right)
+        ]
         out_string += "|" + "|".join(cells) + "|\n"
     out_string += sep() + "\n"
 
     logger.info(out_string)
+
+
+def write_stats_table(stats_df, title, output_file=None):
+    """Log a statistics table and write it to a CSV file if one is given.
+
+    Args:
+        stats_df: DataFrame with one row per region or dataset.
+        title: Title logged above the table.
+        output_file: CSV file path, or None to only log the table.
+
+    Returns
+    -------
+        The written file path, or None.
+    """
+    pretty_print_df(stats_df, title=title)
+    if output_file is None:
+        return None
+    stats_df.to_csv(output_file, index=False)
+    logger.info(f"Wrote {title} to {output_file}")
+    return output_file
 
 
 def coord_to_index(ds, lat, lon):

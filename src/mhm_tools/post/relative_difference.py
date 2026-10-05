@@ -5,10 +5,12 @@ This script is intended for NetCDF files that represent aggregated fields
 (e.g., long-term averages, climatologies, or single-time snapshots), rather
 than full time series. The model dataset is interpolated onto the reference
 grid to ensure spatial alignment. The relative difference is then calculated
-as (reference - model) / reference at each grid cell, with division by zero
-safely masked as NaN.
+in percent as 100 * (reference - model) / reference at each grid cell, with
+division by zero safely masked as NaN.
 
-The result is plotted as a map and, if requested, saved as a NetCDF file.
+The result is plotted as a map whose colours span +-25 %, +-50 %, +-75 % or
++-100 %, the narrowest holding the data without its outliers, unless vmin or
+vmax is given and, if requested, saved as a NetCDF file.
 
 Authors
 -------
@@ -69,11 +71,11 @@ def calc_rel_diff(  # noqa: PLR0913
     # Interpolate model to reference grid to avoid alignment errors
     da_mod_interp = da_mod.interp_like(da_ref)
 
-    # calculating relative difference, if true prevents division by 0
-    diff = xr.where(da_ref != 0, (da_ref - da_mod_interp) / da_ref, np.nan)
+    # calculating relative difference in percent, if true prevents division by 0
+    diff = xr.where(da_ref != 0, 100 * (da_ref - da_mod_interp) / da_ref, np.nan)
     diff.attrs = {
-        "units": "1",
-        "long_name": f"Relative difference of {mod_var} from {ref_var} ((ref - mod) / ref)",
+        "units": "%",
+        "long_name": f"Relative difference of {mod_var} from {ref_var} (100 * (ref - mod) / ref)",
     }
 
     # Sets output path to save plot
@@ -93,6 +95,8 @@ def calc_rel_diff(  # noqa: PLR0913
         y_max=y_max,
         vmin=vmin,
         vmax=vmax,
+        # explicit colour limits replace the +-25/50/75/100 % percent bins
+        percent_difference=vmin is None and vmax is None,
     )
 
     # If set, saves rel. diff file

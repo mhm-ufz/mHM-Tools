@@ -202,6 +202,11 @@ def add_args(parser):
         action="store_true",
         help="Also plot every grid cell over time per region.",
     )
+    flags.add_argument(
+        "--write-region-stats",
+        action="store_true",
+        help="Also write the metrics table of the domain and the regions to CSV.",
+    )
 
 
 def select_metrics(requested_metrics):
@@ -278,6 +283,7 @@ def run(args):
             max_memory_gib=args.max_memory_gib,
             plot_kge_components=args.plot_kge_components,
             plot_region_cells=args.plot_region_cells,
+            write_region_stats=args.write_region_stats,
         )
     for label, file_path in written_files.items():
         logger.info(f"{label}: {file_path}")

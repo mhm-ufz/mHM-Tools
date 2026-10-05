@@ -232,7 +232,7 @@ def run(args):
     args : argparse.Namespace
         parsed command line arguments
     """
-    from mhm_tools.common.cli_utils import get_coords
+    from mhm_tools.common.cli_utils import get_coords, normalize_cli_sequence
     from mhm_tools.post.discharge_evaluation import evaludate_discharge_data
 
     lon_min, lon_max, lat_min, lat_max, _mask = get_coords(
@@ -272,6 +272,6 @@ def run(args):
         shape_folder=args.shape_folder,
         mask_folder=args.mask_folder,
         mask_var=args.mask_var,
-        catchment_map_variables=args.catchment_map_variables,
+        catchment_map_variables=normalize_cli_sequence(args.catchment_map_variables),
         metric_plot_types=args.metric_plot_types,
     )

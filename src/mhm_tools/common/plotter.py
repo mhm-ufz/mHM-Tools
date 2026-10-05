@@ -21,7 +21,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 from matplotlib.backends.backend_pdf import PdfPages
-from matplotlib.colors import BoundaryNorm, ListedColormap
+from matplotlib.colors import BoundaryNorm, ListedColormap, to_rgba
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 from mhm_tools.common.constants import KGE_CONSTANT_MEAN_BOUND, NSE_CONSTANT_MEAN_BOUND
@@ -37,6 +37,25 @@ RATIO_COLOR = "#0000A7"
 KGE_UNDER_COLOR = "lightgray"
 FIGURE_WIDTH = 10.5
 PLOT_DPI = 400
+# name and unit shown for metrics whose column name alone is unclear; the
+# discharge diff is the volume of sim - obs over every compared time step
+METRIC_LABELS = {
+    "diff": ("volume difference sim - obs", "m³"),
+    "rel_diff": ("relative volume difference", "-"),
+}
+# colour bin edges of percent difference maps, by the largest absolute value
+# they cover, each with a neutral bin around 0; never wider than +-100 %
+PERCENT_DIFF_BOUNDS = {
+    25: (-25, -20, -15, -10, -5, -2.5, 2.5, 5, 10, 15, 20, 25),
+    50: (-50, -40, -30, -20, -10, -5, 5, 10, 20, 30, 40, 50),
+    75: (-75, -60, -45, -30, -15, -5, 5, 15, 30, 45, 60, 75),
+    100: (-100, -75, -50, -25, -10, 10, 25, 50, 75, 100),
+}
+# colour of the bin around the center of every diverging map, the grey in the
+# middle of coolwarm
+NEUTRAL_COLOR = "#dcdddd"
+# metrics stored as fractions but mapped in percent
+PERCENT_METRICS = {"rel_diff"}
 # recessive ink for axes, labels and captions
 AXIS_COLOR = "#9aa5ab"
 CAPTION_COLOR = "#5b6770"
@@ -198,6 +217,9 @@ def create_comparison_title(input_name, ref_name, years=None):
 def create_axis_label(name, units=None):
     """Create an axis or colorbar label with units in square brackets.
 
+    A metric in `METRIC_LABELS` gets its name and unit from there when no unit
+    is given.
+
     Args:
         name: Quantity shown on the axis.
         units: Units of the quantity, None or "1" for dimensionless values.
@@ -206,6 +228,8 @@ def create_axis_label(name, units=None):
     -------
         Label of the form ``"name [units]"``.
     """
+    if units is None and name in METRIC_LABELS:
+        name, units = METRIC_LABELS[name]
     if units in (None, "", "1", "-"):
         units = "-"
     return f"{name} [{units}]"
@@ -272,7 +296,11 @@ def get_metric_plot_style(metric_name, kge_vmin=KGE_CONSTANT_MEAN_BOUND):
         style.update(vmax=1.0, max_extended_vmin=0.0)
     elif metric in ONE_CENTERED_METRICS:
         style.update(cmap="coolwarm_r", center=1.0)
-    elif metric in ZERO_CENTERED_METRICS or metric.startswith("diff"):
+    elif (
+        metric in ZERO_CENTERED_METRICS
+        or metric in PERCENT_METRICS
+        or metric.startswith("diff")
+    ):
         style.update(cmap="coolwarm_r", center=0.0)
     elif metric == "rmse":
         style.update(cmap="magma_r", vmin=0.0)
@@ -379,6 +407,77 @@ def calculate_colour_limits(
     return float(lower), float(upper)
 
 
+def get_percent_diff_bounds(values, largest=None):
+    """Return the narrowest percent difference bin edges that hold the values.
+
+    Outliers are ignored the way `calculate_colour_limits` ignores them on
+    every other map, so a few outlying cells get a colorbar arrow instead of
+    widening the bins.
+
+    Parameters
+    ----------
+    values : array_like
+        Differences in percent.
+    largest : float, optional
+        Largest absolute difference to cover instead of the one derived from
+        `values`, so several maps sharing one colorbar get the same bins.
+
+    Returns
+    -------
+    ndarray
+        Bin edges from `PERCENT_DIFF_BOUNDS`: +-25 %, +-50 %, +-75 % or +-100 %
+        when the differences are larger, never wider.
+    """
+    widest = max(PERCENT_DIFF_BOUNDS)
+    if largest is None:
+        largest = calculate_colour_limits(values, center=0.0)[1]
+    limit = next(
+        (limit for limit in sorted(PERCENT_DIFF_BOUNDS) if abs(largest) <= limit),
+        widest,
+    )
+    return np.array(PERCENT_DIFF_BOUNDS[limit], dtype=float)
+
+
+def create_bin_colormap(cmap, bin_count, extent, under_color=None, centred=False):
+    """Create the colormap of a discrete colour norm with one colour per bin.
+
+    An extension gets the colormap colour past the last bin, so values beyond
+    a limit never share the colour of the bin next to it.
+
+    Args:
+        cmap: Colormap or colormap name the bin colours are sampled from.
+        bin_count: Number of colour bins.
+        extent: Colorbar extension, one of "neither", "min", "max" or "both".
+        under_color: Colour of every value below the lowest bin, None for the
+            colormap colour past it.
+        centred: Whether the bins are centred on a no-difference value, which
+            keeps the middle bin neutral and on the colormap midpoint.
+
+    Returns
+    -------
+        ListedColormap of the bin colours with its under and over colours.
+    """
+    reserve_low = extent in {"min", "both"} and under_color is None
+    reserve_high = extent in {"max", "both"}
+    sample_low, sample_high = reserve_low, reserve_high
+    if centred and reserve_low != reserve_high:
+        # an extension on one side only would shift the bins along the colormap,
+        # so both ends are sampled to keep the centre bin on its midpoint
+        sample_low = sample_high = True
+    colours = plt.get_cmap(cmap)(
+        np.linspace(0, 1, bin_count + int(sample_low) + int(sample_high))
+    )
+    bin_colours = colours[int(sample_low) : len(colours) - int(sample_high)].copy()
+    if centred and bin_count % 2 == 1:
+        # the bin around the center is always neutral, whatever the colormap
+        bin_colours[bin_count // 2] = to_rgba(NEUTRAL_COLOR)
+    if under_color is None:
+        under_color = colours[0] if reserve_low else bin_colours[0]
+    return ListedColormap(bin_colours).with_extremes(
+        under=under_color, over=colours[-1] if reserve_high else bin_colours[-1]
+    )
+
+
 def create_discrete_colour_norm(
     values,
     diff_to_mean=None,
@@ -407,6 +506,10 @@ def create_discrete_colour_norm(
       that is not None is kept, a center that is not None makes them symmetric
       and `max_extended_vmin` caps a lower limit that values fall below
     - "given": use vmin/vmax as they are
+    - "percent": use the narrowest `PERCENT_DIFF_BOUNDS` (+-25 %, +-50 %,
+      +-75 % or +-100 %) that holds the values without their outliers, see
+      `get_percent_diff_bounds`, or `diff_to_mean` when given, ignoring center,
+      vmin and vmax; values beyond the bins get an arrow
 
     Returns
     -------
@@ -473,7 +576,10 @@ def create_discrete_colour_norm(
     diverging = bounds_type in {"fixed", "max"} or (
         bounds_type == "data" and center is not None
     )
-    if diverging:
+    if bounds_type == "percent":
+        bounds = get_percent_diff_bounds(values_np, largest=diff_to_mean)
+        ticks = bounds
+    elif diverging:
         # one bin is centred on the center value, so values close to it stand
         # out; steps of 1, 2 or 5 keep the edges at center +- half a step readable
         half_range = max(vmax - center, center - vmin)
@@ -504,7 +610,7 @@ def create_discrete_colour_norm(
             ticks = np.round(np.concatenate(([vmin], even_edges, [vmax])), 6)
 
     extent = "neither"
-    if bounds_type in {"data", "given"}:
+    if bounds_type in {"data", "given", "percent"}:
         # every value outside the bounds gets an arrow on the colorbar
         finite_values = values_np[np.isfinite(values_np)]
         below = finite_values.size > 0 and finite_values.min() < bounds[0]
@@ -521,19 +627,12 @@ def create_discrete_colour_norm(
         if np.nanquantile(values_np, 0.049) < bounds[0]:
             extent = "min" if extent == "neither" else "both"
 
-    # an extension gets the colormap colour past the last bin, so values beyond
-    # a limit never share the colour of the bin next to it
-    reserve_low = extent in {"min", "both"} and under_color is None
-    reserve_high = extent in {"max", "both"}
-    bin_count = bounds.size - 1
-    colours = plt.get_cmap(cmap)(
-        np.linspace(0, 1, bin_count + int(reserve_low) + int(reserve_high))
-    )
-    bin_colours = colours[int(reserve_low) : len(colours) - int(reserve_high)]
-    if under_color is None:
-        under_color = colours[0] if reserve_low else bin_colours[0]
-    cmap = ListedColormap(bin_colours).with_extremes(
-        under=under_color, over=colours[-1] if reserve_high else bin_colours[-1]
+    cmap = create_bin_colormap(
+        cmap,
+        bounds.size - 1,
+        extent,
+        under_color=under_color,
+        centred=diverging or bounds_type == "percent",
     )
     norm = BoundaryNorm(bounds, cmap.N)
     return cmap, norm, bounds, extent, ticks
@@ -849,7 +948,10 @@ def plot_metric_cdf_comparison(
     )
     # one series gets its summary in the panel title, several keep it in the legend
     if len(plotted_labels) == 1:
-        ax.set_title(f"{plotted_labels[0]} ({create_summary_text(all_values)})")
+        summary = create_summary_text(
+            all_values, units=METRIC_LABELS.get(variable_name, (None, None))[1]
+        )
+        ax.set_title(f"{plotted_labels[0]} ({summary})")
     ax.set_xlabel(create_axis_label(variable_name))
     ax.set_ylabel(create_axis_label("CDF"))
     ax.set_ylim(0.0, 1.01)
@@ -1646,18 +1748,24 @@ def plot_discrete_data_map(  # noqa: PLR0913
     under_color=None,
     panel_title=None,
     center=None,
+    percent_difference=False,
 ):
     """Plot a map with about 9 discrete colour bins and a colorbar.
 
     Uses Cartopy for geographic projection and Matplotlib for color mapping.
     `under_color` paints every value below vmin in one colour of its own. A
     `center` makes it a diverging map with one bin centred on that value.
+    `percent_difference` uses the bins of `PERCENT_DIFF_BOUNDS` instead, as
+    narrow as the data allows (+-25 %, +-50 %, +-75 % or +-100 %).
     """
     _require_cartopy()
 
     arr = np.where(np.isinf(arr), np.nan, arr)
     extent, origin = get_map_extent_and_origin(lon, lat)
     fig, ax = _create_geo_map_axes(extent)
+    bounds_type = "given" if center is None else "max"
+    if percent_difference:
+        bounds_type = "percent"
     image, bounds, extend, ticks = plot_single_map(
         ax,
         arr,
@@ -1666,7 +1774,7 @@ def plot_discrete_data_map(  # noqa: PLR0913
         vmin=vmin,
         vmax=vmax,
         cmap=cmap,
-        bounds_type="given" if center is None else "max",
+        bounds_type=bounds_type,
         under_color=under_color,
         extent=extent,
         origin=origin,
@@ -1691,7 +1799,7 @@ def plot_discrete_data_map(  # noqa: PLR0913
 
 
 @log_errors(raise_exceptions=True)
-def plot_map(
+def plot_map(  # noqa: PLR0913
     data: xr.DataArray,
     cb_label: str,
     title: str,
@@ -1707,6 +1815,7 @@ def plot_map(
     center: Optional[float] = None,
     panel_title: Optional[str] = None,
     max_extended_vmin: Optional[float] = None,
+    percent_difference: bool = False,
 ) -> None:
     """
     Plot and save a 2D DataArray over longitude and latitude using Cartopy.
@@ -1738,6 +1847,10 @@ def plot_map(
         Name shown in front of the median and mean above the map.
     max_extended_vmin : float, optional
         Highest derived lower limit once values fall below it.
+    percent_difference : bool, optional
+        Colour the data, given in percent, with the bins of
+        `PERCENT_DIFF_BOUNDS`: +-25 %, +-50 %, +-75 % or +-100 %, the
+        narrowest that holds the data without its outliers.
     """
     _require_cartopy()
 
@@ -1785,7 +1898,12 @@ def plot_map(
             max_extended_vmin=max_extended_vmin,
         )
         plot_discrete_data_map(
-            vmin=vmin, vmax=vmax, under_color=under_color, center=center, **map_args
+            vmin=vmin,
+            vmax=vmax,
+            under_color=under_color,
+            center=center,
+            percent_difference=percent_difference,
+            **map_args,
         )
 
 

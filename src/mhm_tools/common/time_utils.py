@@ -60,6 +60,28 @@ def get_period_freq(target_freq):
     return "D" if alias == "D" else None
 
 
+def calculate_median_time_step_seconds(time_values):
+    """Calculate the median step length of a time axis in seconds.
+
+    Args:
+        time_values: Datetime64 or cftime values of the time axis.
+
+    Returns
+    -------
+        The median of the positive steps in seconds, None for fewer than two
+        distinct time values.
+    """
+    values = np.asarray(time_values)
+    if values.size < 2:
+        return None
+    if np.issubdtype(values.dtype, np.datetime64):
+        steps = np.diff(values.astype("datetime64[ns]").astype(np.int64)) / 1e9
+    else:
+        steps = np.array([step.total_seconds() for step in np.diff(values)])
+    steps = steps[steps > 0]
+    return float(np.median(steps)) if steps.size else None
+
+
 def timedelta_to_alias(ds: xr.DataArray) -> str:
     """Map a median timedelta to a pandas frequency alias.
 
