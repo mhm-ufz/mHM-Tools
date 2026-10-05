@@ -58,7 +58,7 @@ MIN_COMPLEVEL = 0
 """Lowest zlib level, which writes the data uncompressed."""
 MAX_COMPLEVEL = 9
 """Highest zlib level netCDF4 accepts."""
-DEFAULT_COMPLEVEL = 4
+DEFAULT_COMPLEVEL = 1
 """zlib level used when neither a caller nor the input file names one.
 
 Used for newly built variables; inherited and explicitly requested levels

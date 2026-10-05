@@ -860,7 +860,7 @@ def test_direct_compression_helpers_resolve_optional_settings():
     compression = NetcdfCompression(complevel=None, shuffle=None, significant_digits=4)
     assert compression.get_lossless_encoding() == {
         "zlib": True,
-        "complevel": 4,
+        "complevel": DEFAULT_COMPLEVEL,
         "shuffle": True,
     }
     assert compression.create_variable_encoding(dataset, ["v"])["v"] == {

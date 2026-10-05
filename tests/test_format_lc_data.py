@@ -10,7 +10,7 @@ import rioxarray
 import xarray as xr
 
 from mhm_tools import pre
-from mhm_tools.common.netcdf import NetcdfCompression
+from mhm_tools.common.netcdf import DEFAULT_COMPLEVEL, NetcdfCompression
 from mhm_tools.pre.format_lc_data import format_lc_data
 
 
@@ -30,7 +30,9 @@ def _write_raster(path: Path, values, *, cellsize: float) -> None:
         dataset.write(values, 1)
 
 
-@pytest.mark.parametrize(("input_suffix", "expected_level"), [(".tif", 4), (".nc", 7)])
+@pytest.mark.parametrize(
+    ("input_suffix", "expected_level"), [(".tif", DEFAULT_COMPLEVEL), (".nc", 7)]
+)
 def test_format_lc_data_maps_and_aligns_to_dem(
     tmp_path: Path, input_suffix, expected_level
 ):
