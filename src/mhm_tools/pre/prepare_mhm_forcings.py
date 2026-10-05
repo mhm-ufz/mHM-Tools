@@ -14,42 +14,69 @@ Authors
 
 import logging
 from pathlib import Path
-from typing import Optional, Union
+from typing import Optional, Tuple, Union
 
-import pandas as pd
 import xarray as xr
 
 from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_to_file
 from mhm_tools.common.logger import ErrorLogger, log_arguments
-from mhm_tools.common.time_utils import resample_to_daily_or_hourly_adaptive
-from mhm_tools.common.utils import normalize_unit_string
+from mhm_tools.common.time_utils import (
+    calculate_median_time_step_seconds,
+    resample_to_daily_or_hourly_adaptive,
+)
+from mhm_tools.common.units import (
+    calculate_amount_factor,
+    calculate_conversion_factor,
+    convert_temperature_to_celsius,
+    split_units,
+)
 from mhm_tools.common.xarray_utils import crop_ds, get_single_data_var
 
 logger = logging.getLogger(__name__)
 
-# Define acceptable input unit lists for detection
-TEMPERATURE_UNITS = [
-    "K",
-    "Kelvin",
-    "kelvin",
-    "C",
-    "°C",
-    "degC",
-    "celsius",
-    "F",
-    "°F",
-    "degF",
-    "fahrenheit",
-]
-PRECIPITATION_UNITS = ["m", "kg m-2", "mm"]
-PRECIPITATION_RATE_UNITS = ["kg m-2 s-1", "mm s-1", "mm d-1"]
+
+def convert_precipitation_to_mm(da: xr.DataArray, units: str, var: str):
+    """Convert a precipitation amount or rate to millimetres per time step.
+
+    Args:
+        da: Precipitation DataArray with a time axis.
+        units: Its units, an amount such as "kg m-2" or a rate such as "mm s-1".
+        var: Variable name used in the error messages.
+
+    Returns
+    -------
+        The precipitation in mm per time step of the record.
+    """
+    try:
+        parts = split_units(units)
+    except ValueError:
+        parts = None
+    if parts is None or parts.kind != "depth":
+        msg = f"Unexpected units '{units}' for variable '{var}'."
+        raise ValueError(msg)
+    if parts.time_seconds is None:
+        return da * calculate_conversion_factor(units, "mm")
+    # a rate becomes the amount that falls within one time step
+    step_seconds = calculate_median_time_step_seconds(da["time"].values)
+    if step_seconds is None:
+        msg = f"Cannot infer the time step of '{var}' to turn {units} into mm."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    return da * calculate_amount_factor(units, step_seconds, "mm")
 
 
-def convert_units(ds: Union[xr.Dataset, xr.DataArray], var: str) -> xr.DataArray:
+def convert_units(
+    ds: Union[xr.Dataset, xr.DataArray], var: str
+) -> Tuple[xr.DataArray, dict]:
     """Convert variable to standard units.
 
-    Temperature variables are converted to degrees Celsius (degC),
-    and precipitation variables are converted to millimeters (mm).
+    Temperatures become degrees Celsius (degC). Precipitation amounts become
+    millimetres (mm), where 1 kg m-2 of water is 1 mm, and precipitation rates
+    millimetres per time step of the record, the step taken from its time axis.
+
+    Returns
+    -------
+        Tuple of (converted DataArray, encoding with the fill values).
     """
     logger.info(f"Converting units for variable '{var}'")
     logger.debug(f"Original dataset: {ds}")
@@ -65,54 +92,17 @@ def convert_units(ds: Union[xr.Dataset, xr.DataArray], var: str) -> xr.DataArray
         msg = f"Variable '{var}' missing 'units' attribute."
         raise ValueError(msg)
     original_attrs = dict(da.attrs)
-    normalized_units = normalize_unit_string(units)
-    logger.info(f"units are: {units} (normalized: {normalized_units})")
-    # Temperature
-    if normalized_units in [normalize_unit_string(u) for u in TEMPERATURE_UNITS]:
-        if normalized_units in ["k", "kelvin"]:
-            da = da - 273.15
-        elif normalized_units in ["f", "°f", "degf", "fahrenheit"]:
-            da = (da - 32) * (5 / 9)
-        da.attrs = original_attrs
-        da.attrs["units"] = "degC"
-    # Total precipitation
-    elif normalized_units in [normalize_unit_string(u) for u in PRECIPITATION_UNITS]:
-        if normalized_units in ["m", "kg m-2"]:
-            da = da * 1000
-        da.attrs = original_attrs
-        da.attrs["units"] = "mm"
-
-    # Precipitation rate
-    elif normalized_units in [
-        normalize_unit_string(u) for u in PRECIPITATION_RATE_UNITS
-    ]:
-        freq = pd.infer_freq(da.indexes["time"])
-        if not freq or not freq.startswith(("h", "D")):
-            msg = (
-                f"Cannot infer frequency from time coordinate with freq={freq!r}. "
-                f"Expected hourly or daily frequency."
-            )
-            with ErrorLogger(logger):
-                raise ValueError(msg)
-        factor = 1.0
-        if "kg" in normalized_units and "s-1" in normalized_units:
-            factor = (
-                86400 if freq.startswith("D") else 3600 if freq.startswith("h") else 1
-            )
-        elif normalized_units == "mm d-1" and freq:
-            factor = (
-                1 if freq.startswith("D") else 1 / 24 if freq.startswith("h") else 1
-            )
-        elif normalized_units == "mm s-1":
-            factor = (
-                90000 if freq.startswith("D") else 3600 if freq.startswith("h") else 1
-            )
-        da = da * factor
-        da.attrs = original_attrs
-        da.attrs["units"] = "mm"
+    logger.info(f"units are: {units}")
+    try:
+        celsius = convert_temperature_to_celsius(da, units)
+    except ValueError:
+        celsius = None
+    if celsius is not None:
+        da, new_units = celsius, "degC"
     else:
-        msg = f"Unexpected units '{units}' for variable '{var}'."
-        raise ValueError(msg)
+        da, new_units = convert_precipitation_to_mm(da, units, var), "mm"
+    da.attrs = original_attrs
+    da.attrs["units"] = new_units
 
     mv = -9999.0
     encoding = {"_FillValue": mv, "missing_value": mv}

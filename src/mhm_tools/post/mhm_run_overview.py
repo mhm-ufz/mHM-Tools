@@ -36,6 +36,8 @@ import pandas as pd
 import xarray as xr
 
 from mhm_tools.common.file_handler import get_xarray_ds_from_file
+from mhm_tools.common.time_utils import calculate_median_time_step_seconds
+from mhm_tools.common.units import convert_rate_time_unit, get_closest_time_unit
 from mhm_tools.common.utils import pretty_print_df
 
 logger = logging.getLogger(__name__)
@@ -74,13 +76,6 @@ _TABLE_COLUMNS = [
     "file_path",
 ]
 _VARTYPE_ORDER = {"input": 0, "output": 1}
-_SECONDS_PER_TIME_UNIT = {
-    "s": 1.0,
-    "d": 86400.0,
-    "month": 30.4 * 86400.0,
-    "y": 12.0 * 30.4 * 86400.0,
-    "year": 12.0 * 30.4 * 86400.0,
-}
 
 
 @dataclass(frozen=True)
@@ -325,7 +320,7 @@ def _to_float(value) -> float:
 
 def _infer_time_resolution_seconds(dataset_paths: Sequence[Path]) -> Optional[float]:
     """Infer input temporal resolution in seconds from time coordinates."""
-    deltas_seconds: List[float] = []
+    step_lengths: List[float] = []
     for dataset_path in dataset_paths:
         with get_xarray_ds_from_file(dataset_path) as ds:
             for da in ds.data_vars.values():
@@ -340,97 +335,34 @@ def _infer_time_resolution_seconds(dataset_paths: Sequence[Path]) -> Optional[fl
                         continue
                 except TypeError:
                     continue
-                values = coord.values.astype("datetime64[s]").astype("int64")
-                diffs = np.diff(values).astype(float)
-                positive_diffs = diffs[diffs > 0]
-                if positive_diffs.size > 0:
-                    deltas_seconds.extend(positive_diffs.tolist())
-    if not deltas_seconds:
+                step_seconds = calculate_median_time_step_seconds(coord.values)
+                if step_seconds is not None:
+                    step_lengths.append(step_seconds)
+    if not step_lengths:
         return None
-    return float(np.median(np.asarray(deltas_seconds)))
-
-
-def _closest_time_unit_code(seconds: float) -> str:
-    """Return closest supported time unit code for given seconds."""
-    return min(
-        _SECONDS_PER_TIME_UNIT,
-        key=lambda code: abs(seconds - _SECONDS_PER_TIME_UNIT[code]),
-    )
-
-
-def _find_rate_time_unit(unit: str) -> Optional[dict]:
-    """Find denominator time unit markers like `/s` or `d-1`."""
-    if not unit:
-        return None
-    token_map = {
-        "s": ["seconds", "second", "secs", "sec", "s"],
-        "d": ["days", "day", "d"],
-        "month": ["months", "month", "mons", "mon"],
-        "y": ["years", "year", "yrs", "yr", "y"],
-    }
-    for code, tokens in token_map.items():
-        alt = "|".join(sorted(tokens, key=len, reverse=True))
-        slash_pattern = re.compile(rf"/\s*({alt})\b", re.IGNORECASE)
-        slash_match = slash_pattern.search(unit)
-        if slash_match is not None:
-            return {
-                "code": code,
-                "style": "slash",
-                "start": slash_match.start(),
-                "end": slash_match.end(),
-                "text": slash_match.group(0),
-            }
-
-        exp_pattern = re.compile(
-            rf"(?<![A-Za-z0-9_])({alt})\s*\^?\s*-\s*1\b",
-            re.IGNORECASE,
-        )
-        exp_match = exp_pattern.search(unit)
-        if exp_match is not None:
-            return {
-                "code": code,
-                "style": "exp",
-                "start": exp_match.start(),
-                "end": exp_match.end(),
-                "text": exp_match.group(0),
-            }
-    return None
-
-
-def _rewrite_unit_to_target_time(unit: str, target_code: str) -> str:
-    """Rewrite denominator time unit in `unit` to target code."""
-    found = _find_rate_time_unit(unit)
-    if found is None:
-        return unit
-    source_text = found["text"]
-    if found["style"] == "slash":
-        replacement = f"/{target_code}"
-    else:
-        replacement = f"{target_code}-1"
-        if "^" in source_text:
-            replacement = f"{target_code}^-1"
-    return f"{unit[:found['start']]}{replacement}{unit[found['end']:]}"
+    return float(np.median(step_lengths))
 
 
 def _convert_stats_to_target_time_unit(
     stats: dict,
     target_time_seconds: float,
 ) -> dict:
-    """Convert rate-like stats to a target temporal resolution."""
+    """Convert rate-like stats to a target temporal resolution.
+
+    Stats whose unit is no known amount per time unit are returned unchanged.
+    """
     unit = str(stats.get("unit", "")).strip()
-    found = _find_rate_time_unit(unit)
-    if found is None:
+    try:
+        factor, new_unit = convert_rate_time_unit(
+            unit, get_closest_time_unit(target_time_seconds)
+        )
+    except ValueError:
         return stats
-    source_code = found["code"]
-    source_seconds = _SECONDS_PER_TIME_UNIT[source_code]
-    target_code = _closest_time_unit_code(target_time_seconds)
-    target_seconds = _SECONDS_PER_TIME_UNIT[target_code]
-    factor = target_seconds / source_seconds
     converted = dict(stats)
     converted["min_value"] = _to_float(converted["min_value"]) * factor
     converted["mean_value"] = _to_float(converted["mean_value"]) * factor
     converted["max_value"] = _to_float(converted["max_value"]) * factor
-    converted["unit"] = _rewrite_unit_to_target_time(unit, target_code)
+    converted["unit"] = new_unit
     return converted
 
 
@@ -645,7 +577,7 @@ def create_mhm_run_overview(
         if convert_units and target_time_seconds is not None:
             logger.info(
                 f"Inferred input temporal resolution: {target_time_seconds:.3f} "
-                f"seconds (closest: {_closest_time_unit_code(target_time_seconds)})."
+                f"seconds (closest: {get_closest_time_unit(target_time_seconds)})."
             )
         if convert_units and target_time_seconds is None:
             logger.warning(

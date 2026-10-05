@@ -107,9 +107,15 @@ from mhm_tools.common.time_utils import (
     resample_to_reference_windows,
     set_time_bounds,
 )
-from mhm_tools.common.utils import format_region_title, sanitize_name, select_regions
+from mhm_tools.common.utils import (
+    format_region_title,
+    sanitize_name,
+    select_regions,
+    write_stats_table,
+)
 from mhm_tools.common.xarray_utils import (
     calculate_anomaly,
+    calculate_region_medians,
     convert_water_storage_to_mm,
     crop_to_region,
     get_overlapping_time_slice,
@@ -713,6 +719,35 @@ def write_twsa_dataset(ds, file_path):
     return Path(file_path)
 
 
+def create_twsa_stats_table(
+    metric_ds, region_names, input_name, ref_name, output_file=None
+):
+    """Log the median TWSA metrics per WMO region and for the domain.
+
+    Args:
+        metric_ds: Dataset holding the calculated metrics.
+        region_names: Keys of ``WMO_REGION_BOUNDS``.
+        input_name: Input dataset name.
+        ref_name: Reference dataset name.
+        output_file: CSV file path, or None to only log the table.
+
+    Returns
+    -------
+        DataFrame of the medians per region.
+    """
+    variables = [name for name in ("kge", *KGE_COMPONENTS, "rmse") if name in metric_ds]
+    stats_df = calculate_region_medians(metric_ds, variables, region_names)
+    rmse_note = ""
+    if "rmse" in variables:
+        rmse_note = f" (rmse in {metric_ds['rmse'].attrs.get('units', 'mm')})"
+    write_stats_table(
+        stats_df,
+        title=f"Median TWSA metrics of {input_name} against {ref_name}{rmse_note}",
+        output_file=output_file,
+    )
+    return stats_df
+
+
 def create_metric_maps(
     metric_ds,
     output_dir,
@@ -1013,6 +1048,7 @@ def twsa_evaluation(  # noqa: PLR0913
     max_memory_gib=8.0,
     plot_kge_components=False,
     plot_region_cells=False,
+    write_region_stats=False,
 ):
     """Evaluate a modelled total water storage anomaly against a reference.
 
@@ -1043,6 +1079,8 @@ def twsa_evaluation(  # noqa: PLR0913
         max_memory_gib: Memory budget the time chunks are sized against.
         plot_kge_components: Also map alpha, beta and gamma for the whole domain.
         plot_region_cells: Also plot every grid cell over time per region.
+        write_region_stats: Also write the metrics table of the domain and the
+            regions to CSV; it is always logged.
 
     Returns
     -------
@@ -1168,6 +1206,21 @@ def twsa_evaluation(  # noqa: PLR0913
             metric_ds, output_dir / f"twsa_metrics_{suffix}.nc"
         )
         # the components are always written, but only mapped on request
+        region_stats_file = (
+            output_dir / f"twsa_region_stats_{suffix}.csv"
+            if write_region_stats
+            else None
+        )
+        create_twsa_stats_table(
+            metric_ds,
+            region_names,
+            input_name,
+            ref_name,
+            output_file=region_stats_file,
+        )
+        if region_stats_file is not None:
+            written_files["region_stats"] = region_stats_file
+        # a KGE is only readable next to its components, so they are mapped with it
         map_metrics = []
         for metric in selected_metrics:
             map_metrics.append(metric)

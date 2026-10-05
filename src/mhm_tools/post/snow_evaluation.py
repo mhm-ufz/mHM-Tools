@@ -104,11 +104,13 @@ from mhm_tools.common.utils import (
     sanitize_name,
     select_regions,
     split_file_list,
+    write_stats_table,
 )
 from mhm_tools.common.xarray_utils import (
     aggregate_to_target_grid,
     align_to_target_grid,
     calculate_coordinate_resolution,
+    calculate_region_medians,
     crop_to_region,
     get_coord_key,
     get_single_data_var,
@@ -1013,6 +1015,51 @@ def compare_snow_season_metrics(input_metrics, ref_metrics):
     return difference
 
 
+def create_snow_stats_table(
+    accuracy_ds,
+    difference_metrics,
+    region_names,
+    input_name,
+    ref_name,
+    output_file=None,
+):
+    """Log the median snow statistics per WMO region and for the domain.
+
+    Args:
+        accuracy_ds: Dataset from ``calculate_classification_accuracy``.
+        difference_metrics: Dataset from ``compare_snow_season_metrics``.
+        region_names: Keys of ``WMO_REGION_BOUNDS``.
+        input_name: Label of the input dataset.
+        ref_name: Label of the reference dataset.
+        output_file: CSV file path, or None to only log the table.
+
+    Returns
+    -------
+        DataFrame of the medians per region.
+    """
+    # short names keep the table narrow, the title explains them
+    stats = xr.Dataset(
+        {
+            "accuracy": accuracy_ds["classification_accuracy"],
+            "first_snow_day_diff": difference_metrics["first_snow_day_of_window"],
+            "last_snow_day_diff": difference_metrics["last_snow_day_of_window"],
+            "season_span_diff": difference_metrics["season_span_days"],
+            "snow_cover_days_diff": difference_metrics["snow_cover_days"],
+        }
+    )
+    stats_df = calculate_region_medians(stats, list(stats.data_vars), region_names)
+    write_stats_table(
+        stats_df,
+        title=(
+            f"Median snow statistics of {input_name} against {ref_name} "
+            "(accuracy = share of matching time steps, *_diff = input - reference "
+            "in days, taken over every cell and year)"
+        ),
+        output_file=output_file,
+    )
+    return stats_df
+
+
 def calculate_classification_accuracy(input_flag, ref_flag):
     """Calculate the share of time steps in which both snow flags agree per cell.
 
@@ -1654,6 +1701,7 @@ def snow_evaluation(  # noqa: PLR0913
     max_gif_frames=0,
     max_memory_gib=8.0,
     ncpus=1,
+    write_region_stats=False,
 ):
     """Evaluate the snow cover of an input dataset against a reference dataset.
 
@@ -1684,6 +1732,8 @@ def snow_evaluation(  # noqa: PLR0913
         gif_fps: Playback speed of the gif.
         max_gif_frames: Maximum number of gif frames, 0 for all time steps.
         max_memory_gib: Memory budget one time chunk is sized against.
+        write_region_stats: Also write the statistics table of the domain and
+            the regions to CSV; it is always logged.
 
     Returns
     -------
@@ -1790,6 +1840,19 @@ def snow_evaluation(  # noqa: PLR0913
         {**common_attrs, "dataset": f"{input_name} minus {ref_name}"}
     )
     accuracy.attrs.update({**common_attrs, "dataset": f"{input_name} vs {ref_name}"})
+    region_stats_file = (
+        output_dir / f"snow_region_stats_{input_name}_vs_{ref_name}.csv"
+        if write_region_stats
+        else None
+    )
+    create_snow_stats_table(
+        accuracy,
+        difference_metrics,
+        region_names,
+        input_name,
+        ref_name,
+        output_file=region_stats_file,
+    )
 
     input_time = pd.DatetimeIndex(input_flag.time.values)
     written_files = {
@@ -1825,6 +1888,8 @@ def snow_evaluation(  # noqa: PLR0913
             ref_name=ref_name,
         ),
     }
+    if region_stats_file is not None:
+        written_files["region_stats"] = region_stats_file
     if write_snow_cover:
         written_files["input_snow_cover"] = write_snow_dataset(
             input_flag.to_dataset(name="snow_cover"),

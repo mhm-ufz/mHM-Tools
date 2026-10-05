@@ -22,11 +22,18 @@ import xarray as xr
 from joblib import Parallel, delayed
 from scipy.spatial import cKDTree
 
-from mhm_tools.common.catchment_maps import write_catchment_median_maps
+from mhm_tools.common.catchment_maps import (
+    calculate_metric_medians,
+    create_catchment_metric_geodataframe,
+    get_metric_variables,
+    plot_catchment_metric_maps,
+)
 from mhm_tools.common.constants import (
+    DEFAULT_DISCHARGE_UNITS,
     KGE_CONSTANT_MEAN_BOUND,
     NSE_CONSTANT_MEAN_BOUND,
     WMO_INDEX_TO_REGION,
+    WMO_REGION_BOUNDS,
 )
 from mhm_tools.common.file_handler import (
     get_dataset_from_path,
@@ -34,6 +41,8 @@ from mhm_tools.common.file_handler import (
 )
 from mhm_tools.common.logger import ErrorLogger, log_arguments, log_errors
 from mhm_tools.common.plotter import (
+    METRIC_LABELS,
+    PERCENT_METRICS,
     PLOT_DPI,
     add_map_colorbar,
     calculate_map_figure_size,
@@ -49,8 +58,15 @@ from mhm_tools.common.plotter import (
     style_map_axes,
     write_metric_plot_overview_pdf,
 )
-from mhm_tools.common.utils import coord_to_index, find_best_gauge_location_by_area
+from mhm_tools.common.units import calculate_conversion_factor
+from mhm_tools.common.utils import (
+    coord_to_index,
+    find_best_gauge_location_by_area,
+    sanitize_name,
+    write_stats_table,
+)
 from mhm_tools.common.xarray_utils import (
+    convert_dataarray_units,
     get_clim_from_ds,
     get_coord_key,
     get_overlapping_time_slice,
@@ -1670,6 +1686,43 @@ def _filter_ids_by_overlapping_years(model_da, observed_da, min_overlapping_year
     return np.asarray(eligible_ids), dropped_ids
 
 
+def convert_discharge_to_observed_units(model_da, observed_da):
+    """Convert the simulated discharge to the unit of the observed discharge.
+
+    A record without a units attribute is taken as ``DEFAULT_DISCHARGE_UNITS``.
+    Both returned records carry their units, which the volume difference of the
+    hydrographs is derived from.
+
+    Args:
+        model_da: Simulated discharge DataArray.
+        observed_da: Observed discharge DataArray.
+
+    Returns
+    -------
+        Tuple of (simulated, observed) DataArrays in the observed unit. Raises
+        ``ValueError`` for an unknown unit or a volume and a depth rate.
+    """
+    units = {}
+    for label, da in (("simulated", model_da), ("observed", observed_da)):
+        units[label] = da.attrs.get("units")
+        if units[label] is None:
+            logger.warning(
+                f"The {label} discharge has no units, assuming {DEFAULT_DISCHARGE_UNITS}."
+            )
+            units[label] = DEFAULT_DISCHARGE_UNITS
+    factor = calculate_conversion_factor(units["simulated"], units["observed"])
+    if not np.isclose(factor, 1.0):
+        logger.info(
+            f"Converting the simulated discharge from {units['simulated']} to "
+            f"{units['observed']} (factor {factor:g})."
+        )
+    model_da = convert_dataarray_units(
+        model_da, units["observed"], from_units=units["simulated"]
+    )
+    observed_da.attrs = {**observed_da.attrs, "units": units["observed"]}
+    return model_da, observed_da
+
+
 @log_arguments()
 def evaludate_discharge_data(  # noqa: PLR0913
     model_data_path,
@@ -1747,8 +1800,9 @@ def evaludate_discharge_data(  # noqa: PLR0913
             gauge_max_error=gauge_max_error,
         )
         logger.info("Procured discharge data")
-        model_da = model_ds["discharge"]
-        observed_da = observed_ds["discharge"]
+        model_da, observed_da = convert_discharge_to_observed_units(
+            model_ds["discharge"], observed_ds["discharge"]
+        )
         logger.debug(f"Model dataarray: {model_da}")
         logger.debug(f"Observed dataarray: {observed_da}")
         logger.info("Starting to calculate metrics")
@@ -1817,6 +1871,22 @@ def evaludate_discharge_data(  # noqa: PLR0913
     else:
         logger.info(f"Reading results from {stats_output_file}...")
         results_df = pd.read_csv(stats_output_file, index_col=0)
+    # logging summary of results
+    logger.info(
+        f"In total there are {len(results_df['id'].unique())} catchments of which "
+    )
+    logger.info(
+        f"   {len(results_df.dropna(subset=['alpha'], how='any')['id'].unique())} have all alpha values"
+    )
+    logger.info(
+        f"   {len(results_df.dropna(subset=['beta'], how='any')['id'].unique())} have beta values "
+    )
+    logger.info(
+        f"   {len(results_df.dropna(subset=['gamma'], how='any')['id'].unique())} have all gamma values "
+    )
+    logger.info(
+        f"   {len(results_df.dropna(subset=['alpha', 'beta', 'gamma'], how='any')['id'].unique())} have all values "
+    )
     log_discharge_region_medians(results_df)
     metric_plot_files = []
     # only plot cdf if more than 5 results to avoid plots without enough data points
@@ -1842,15 +1912,14 @@ def evaludate_discharge_data(  # noqa: PLR0913
         shape_folder is not None or mask_folder is not None
     ):
         metric_plot_files.extend(
-            write_catchment_median_maps(
-                metric_df=results_df,
-                output_dir=output_path,
+            write_catchment_maps_by_region(
+                results_df,
+                output_path,
                 variables=catchment_map_variables,
                 shape_folder=shape_folder,
                 mask_folder=mask_folder,
                 mask_var=mask_var,
             )
-            or []
         )
     values_by_variable = get_discharge_metric_values_by_variable(
         results_df,
@@ -1966,8 +2035,17 @@ def plot_map(
         style = get_metric_plot_style(var)
         if cmap is not None:
             style["cmap"] = cmap
+        bounds_type = "data"
+        label = create_axis_label(var)
+        units = METRIC_LABELS.get(var, (None, None))[1]
+        if var in PERCENT_METRICS:
+            # stored as a fraction, mapped in percent
+            vals = 100 * vals
+            bounds_type = "percent"
+            label = create_axis_label(METRIC_LABELS.get(var, (var, None))[0], "%")
+            units = "%"
         cmap_obj, norm, bounds, extend, ticks = create_discrete_colour_norm(
-            vals, bounds_type="data", **style
+            vals, bounds_type=bounds_type, **style
         )
 
         fig, ax = plt.subplots(
@@ -1991,20 +2069,88 @@ def plot_map(
             linewidth=0.25,
             transform=ccrs.PlateCarree(),
         )
-        add_map_colorbar(fig, ax, sc, bounds, extend, ticks, create_axis_label(var))
+        add_map_colorbar(fig, ax, sc, bounds, extend, ticks, label)
         style_map_axes(ax)
         fig.suptitle(
             create_comparison_title(input_name, ref_name, years),
             fontweight="normal",
             fontsize="x-large",
         )
-        ax.set_title(f"{var} by gauge ({create_summary_text(vals, bounds=bounds)})")
+        summary = create_summary_text(vals, units=units, bounds=bounds)
+        ax.set_title(f"{var} by gauge ({summary})")
         fig.tight_layout()
         output_file = output_path / f"map_{var}.png"
         fig.savefig(output_file, dpi=dpi)
         plt.close(fig)
         output_files.append(output_file)
         logger.info(f"Wrote gauge map to {output_file}")
+    return output_files
+
+
+def write_catchment_maps_by_region(
+    results_df,
+    output_path,
+    variables=None,
+    shape_folder=None,
+    mask_folder=None,
+    mask_var=None,
+):
+    """Write the catchment maps of all gauges and again per WMO region.
+
+    The catchment geometries are matched once and reused for every region. A
+    gauge belongs to the region its id starts with, and a region map is framed
+    by the region's bounds.
+
+    Args:
+        results_df: Discharge metric rows with an ``id`` column.
+        output_path: Directory the PNG files are written to.
+        variables: Metric columns to map, None for every metric.
+        shape_folder: Folder with shapefiles matched by gauge id.
+        mask_folder: Folder with NetCDF masks matched by gauge id.
+        mask_var: Mask variable name.
+
+    Returns
+    -------
+        List of the written PNG files.
+    """
+    # repeated bootstrap rows of a gauge are reduced to their median
+    metric_rows = calculate_metric_medians(results_df, variables=variables)
+    if metric_rows.empty:
+        logger.warning("No metric rows available for catchment maps.")
+        return []
+    metric_gdf = create_catchment_metric_geodataframe(
+        metric_rows=metric_rows,
+        shape_folder=shape_folder,
+        mask_folder=mask_folder,
+        mask_var=mask_var,
+    )
+    if metric_gdf.empty:
+        logger.warning("No catchment geometries available for catchment maps.")
+        return []
+    variables = get_metric_variables(metric_gdf, variables=variables)
+    output_files = plot_catchment_metric_maps(
+        metric_gdf=metric_gdf, variables=variables, output_dir=output_path
+    )
+    gauge_regions = metric_gdf["id"].apply(get_region_from_id)
+    for region_name, bounds in WMO_REGION_BOUNDS.items():
+        region_gdf = metric_gdf[gauge_regions == region_name]
+        if region_gdf.empty:
+            continue
+        output_files.extend(
+            plot_catchment_metric_maps(
+                metric_gdf=region_gdf,
+                variables=variables,
+                output_dir=output_path,
+                output_prefix=f"catchment_map_region_{sanitize_name(region_name)}",
+                title_context=region_name,
+                extent=(
+                    bounds["lon_slice"].start,
+                    bounds["lon_slice"].stop,
+                    bounds["lat_slice"].start,
+                    bounds["lat_slice"].stop,
+                ),
+            )
+        )
     return output_files
 
 
@@ -2201,10 +2347,12 @@ def log_discharge_region_medians(results_df):
     )
     metric_df["region"] = metric_df["id"].apply(get_region_from_id)
     region_groups = [
-        (region_name, metric_df[metric_df["region"] == region_name])
-        for region_name in (*WMO_INDEX_TO_REGION.values(), "Unknown")
+        ("Global", metric_df),
+        *(
+            (region_name, metric_df[metric_df["region"] == region_name])
+            for region_name in (*WMO_INDEX_TO_REGION.values(), "Unknown")
+        ),
     ]
-    region_groups.append(("All regions", metric_df))
     summary_rows = []
     for region_name, region_df in region_groups:
         if region_df.empty:
@@ -2212,10 +2360,12 @@ def log_discharge_region_medians(results_df):
         summary_row = {"region": region_name, "gauges": region_df["id"].nunique()}
         summary_row.update(region_df[metrics].median().to_dict())
         summary_rows.append(summary_row)
-    logger.info(
-        "Median metric values per WMO region (gauges = number of gauges, "
-        "NaN and inf values are left out):\n"
-        f"{create_table_text(summary_rows, ['region', 'gauges', *metrics])}"
+    write_stats_table(
+        pd.DataFrame(summary_rows, columns=["region", "gauges", *metrics]),
+        title=(
+            "Median discharge metrics per WMO region (gauges = number of "
+            "gauges, NaN and inf values are left out)"
+        ),
     )
 
 
@@ -2261,8 +2411,8 @@ def log_discharge_results_preview(results_df, row_count=5):
         f"First {len(preview_rows)} of {len(results_df)} rows of the discharge "
         "results table (one row per gauge, or per bootstrap sample):\n"
         f"{create_table_text(preview_rows, columns)}\n"
-        "diff = sum(sim) - sum(obs) over the compared time steps [m3/s], "
-        "rel_diff = diff / sum(obs) [-]"
+        "diff = volume of sim - obs over the compared time steps [m³], "
+        "rel_diff = (sum(sim) - sum(obs)) / sum(obs) [-]"
     )
 
 
@@ -2272,22 +2422,10 @@ def plot_cdf(df, output_path, boostrap_iterations=None):
 
     The plots are generated for global values and with one CDF per WMO region.
     """
-    logger.info(f"In total there are {len(df['id'].unique())} catchments of which ")
-    logger.info(
-        f"   {len(df.dropna(subset=['alpha'], how='any')['id'].unique())} have all alpha values"
-    )
-    logger.info(
-        f"   {len(df.dropna(subset=['beta'], how='any')['id'].unique())} have beta values "
-    )
-    logger.info(
-        f"   {len(df.dropna(subset=['gamma'], how='any')['id'].unique())} have all gamma values "
-    )
-    logger.info(
-        f"   {len(df.dropna(subset=['alpha', 'beta', 'gamma'], how='any')['id'].unique())} have all values "
-    )
     # NaN values are dropped per variable below, so one missing component does
     # not remove a gauge from the kge and nse plots
-    log_discharge_results_preview(df)
+    if logger.isEnabledFor(logging.DEBUG):
+        log_discharge_results_preview(df)
     variables = ["alpha", "beta", "gamma", "kge", "nse"]
     cb_colors = [
         "#000000",

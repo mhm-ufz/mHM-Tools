@@ -2,7 +2,8 @@
 Compute and plot the spatial relative difference between a model dataset and a reference dataset.
 
 This script reads CF-compliant NetCDF files for both model and reference datasets, computes
-the spatial realtive difference as: diff = (da_ref - da_mod) / da_ref for a specified variable,
+the spatial relative difference in percent as: diff = 100 * (da_ref - da_mod) / da_ref
+for a specified variable,
 applies any provided geographic or data range limits, and generates a high-resolution PNG
 showing that difference with customizable title, colorbar label, and colormap.
 
@@ -40,7 +41,7 @@ def add_args(parser):
     """Add CLI arguments for the relative_difference subcommand."""
     parser.description = (
         "Compute and plot the spatial relative difference between a model dataset and a reference dataset "
-        "for a specified variable: diff = (da_ref - da_mod) / da_ref. "
+        "for a specified variable in percent: diff = 100 * (da_ref - da_mod) / da_ref. "
         "Supports wildcard matching, custom variable names, colorbar labels, "
         "titles, output file naming, optional axis limits, custom colormap, and explicit colormap range."
     )
@@ -126,13 +127,21 @@ def add_args(parser):
         "--vmin",
         type=str2float,
         default=None,
-        help="Minimum data value for colormap (optional)",
+        help=(
+            "Minimum data value for colormap (optional). Without --vmin and "
+            "--vmax the colours span +-25 %, +-50 %, +-75 % or +-100 %, the "
+            "narrowest holding the data without its outliers."
+        ),
     )
     optional.add_argument(
         "--vmax",
         type=str2float,
         default=None,
-        help="Maximum data value for colormap (optional)",
+        help=(
+            "Maximum data value for colormap (optional). Without --vmin and "
+            "--vmax the colours span +-25 %, +-50 %, +-75 % or +-100 %, the "
+            "narrowest holding the data without its outliers."
+        ),
     )
 
 

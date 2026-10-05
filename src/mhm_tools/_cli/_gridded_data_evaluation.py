@@ -285,6 +285,21 @@ def add_args(parser):
         default="SPAEF",
         help="Result metric written to results.csv. Accepted values: TSM, SPAEF, ESP, WASPAEF, MSPAEF, all.",
     )
+    optional.add_argument(
+        "--regions",
+        required=False,
+        default="all",
+        help=(
+            "WMO regions the statistics are tabled for next to the whole domain: "
+            "'all', 'none' or a comma separated list."
+        ),
+    )
+    flags.add_argument(
+        "--write-region-stats",
+        action="store_true",
+        required=False,
+        help="Also write the statistics tables of the domain and the regions to CSV.",
+    )
 
 
 def run(args):
@@ -385,4 +400,6 @@ def run(args):
         target_time_freq=target_freq,
         mask_var=args.mask_var,
         result_metric=args.metric,
+        regions=args.regions,
+        write_region_stats=args.write_region_stats,
     )

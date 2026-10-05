@@ -15,6 +15,8 @@ import numpy as np
 import pandas as pd
 
 from mhm_tools.common.catchment_maps import (
+    CATCHMENT_MEDIAN_TITLE,
+    CATCHMENT_OUTLET_TITLE,
     calculate_metric_medians,
     find_matching_geometry_file,
     write_catchment_median_maps,
@@ -936,6 +938,8 @@ def write_metric_catchment_maps(
     output_files = []
     for input_path, input_name in zip(input_paths, names):
         metric_rows = []
+        # a CSV without gauge ids is summarised by its median, not an outlet value
+        has_median_rows = False
         csv_files = get_metric_csv_files(input_path, file_names=file_names)
         for csv_file in csv_files:
             metric_df = pd.read_csv(csv_file)
@@ -961,6 +965,7 @@ def write_metric_catchment_maps(
                     row_id=match_id,
                 )
             )
+            has_median_rows = True
         if not metric_rows:
             logger.warning(f"No metric CSV rows available for {input_name}")
             continue
@@ -976,6 +981,11 @@ def write_metric_catchment_maps(
                 mask_folder=mask_folder,
                 mask_var=mask_var,
                 title_context=input_name if split_by_input else None,
+                title=(
+                    CATCHMENT_MEDIAN_TITLE
+                    if has_median_rows
+                    else CATCHMENT_OUTLET_TITLE
+                ),
             )
         )
     return output_files
@@ -1053,6 +1063,7 @@ def _write_metric_catchment_maps_for_explicit_geometry(
         mask_files_by_id=mask_files_by_id or None,
         mask_var=mask_var,
         title_context=title_context,
+        title=CATCHMENT_MEDIAN_TITLE,
     )
 
 

@@ -130,24 +130,32 @@ MHM_TWS_STORAGE_VARS = (
 """mHM storage variables that sum up to total water storage, without the soil layers."""
 MHM_SOIL_MOISTURE_PREFIX = "SWC_L"
 """Prefix of the per-layer mHM soil water content variables (SWC_L01, SWC_L02, ...)."""
-WATER_STORAGE_UNIT_FACTORS_MM = {
-    "mm": 1.0,
-    "mm of water": 1.0,
-    "mm water equivalent": 1.0,
-    "mm h2o": 1.0,
-    "kg m-2": 1.0,
-    "kg/m2": 1.0,
-    "kg m^-2": 1.0,
-    "cm": 10.0,
-    "cm of water": 10.0,
-    "cm water equivalent": 10.0,
-    "cm h2o": 10.0,
-    "m": 1000.0,
-    "meter": 1000.0,
-    "metre": 1000.0,
-}
-"""Millimetres of water per unit, for the CF `units` attribute of a storage field."""
 KGE_CONSTANT_MEAN_BOUND = -0.41
 """Lower end of every KGE scale, the score of a constant mean value predictor."""
 NSE_CONSTANT_MEAN_BOUND = 0.0
 """Lower end of every NSE scale, the score of a constant mean value predictor."""
+DEFAULT_DISCHARGE_UNITS = "m3 s-1"
+"""Unit assumed for a discharge record without a units attribute, as GRDC and mRM use."""
+SECONDS_PER_YEAR = 365.25 * 86400.0
+"""Length of a year of units such as mm/year, the mean Julian year."""
+TIME_UNIT_SECONDS = {
+    "s": 1.0,
+    "min": 60.0,
+    "h": 3600.0,
+    "d": 86400.0,
+    "month": SECONDS_PER_YEAR / 12,
+    "year": SECONDS_PER_YEAR,
+}
+"""Seconds per time unit of a rate, keyed by the canonical names of `common.units`."""
+AMOUNT_UNITS = {
+    (("m", 3),): ("volume", 1.0),
+    (("hm", 3),): ("volume", 1e6),
+    (("km", 3),): ("volume", 1e9),
+    (("l", 1),): ("volume", 1e-3),
+    (("mm", 1),): ("depth", 1e-3),
+    (("cm", 1),): ("depth", 1e-2),
+    (("m", 1),): ("depth", 1.0),
+    (("kg", 1), ("m", -2)): ("depth", 1e-3),
+}
+"""Kind and size of an amount, keyed by its unit exponents: m3 per volume unit or
+metres of water per depth unit, where 1 kg/m2 of water is 1 mm."""
