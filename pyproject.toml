@@ -65,7 +65,7 @@ Homepage = "https://mhm-ufz.org/"
 Documentation = "https://mhm.pages.ufz.de/mhm-tools"
 Source = "https://git.ufz.de/mhm/mhm-tools"
 Tracker = "https://git.ufz.de/mhm/mhm-tools/-/issues"
-Changelog = "https://git.ufz.de/mhm/mhm/-/blob/main/CHANGELOG.md"
+Changelog = "https://git.ufz.de/mhm/mhm-tools/-/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 doc = [
