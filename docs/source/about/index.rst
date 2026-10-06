@@ -2,7 +2,7 @@
 About
 =====
 
-Here you find further information about licensing, the developers team and the changelog of mHM-Tools.
+Here you find the release notes, the changelog, licensing information and the developers team of mHM-Tools.
 
 .. toctree::
     :hidden:
@@ -13,6 +13,7 @@ Here you find further information about licensing, the developers team and the c
 .. toctree::
     :maxdepth: 1
 
+    release_notes
     changelog
     license
     authors
