@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 import xarray as xr
 
 import mhm_tools.common.xarray_utils as utils
@@ -17,7 +18,6 @@ from mhm_tools.common.xarray_utils import (
     normalize_lat_lon,
     regrid_mask,
     snap_to_target,
-    timedelta_to_alias,
 )
 
 
@@ -48,31 +48,6 @@ class XarrayUtilsBase(unittest.TestCase):
             name="var",
         )
         return da.to_dataset()
-
-    def make_time_da(self, start, periods, step):
-        """
-        Build a 1-D DataArray with a 'time' coord using fixed timedelta steps.
-
-        start : str or np.datetime64 (e.g. '2021-01-01' or '2021-01-01T00')
-        periods : int
-        step : str like 'h', '6h', 'D', '7D', '30D' (NO 'W' or 'M')
-        """
-        # normalize to high precision to avoid odd dtype promotion
-        start_ts = np.datetime64(start, "ns")
-
-        # parse step like 'h'/'6h' or 'D'/'7D'/'30D'
-        if step.endswith("h"):
-            n = int(step[:-1]) if step != "h" else 1
-            delta = np.timedelta64(n, "h")
-        elif step.endswith("D"):
-            n = int(step[:-1]) if step != "D" else 1
-            delta = np.timedelta64(n, "D")
-        else:
-            raise ValueError("step must be 'h', 'Nh', 'D', or 'ND'")
-
-        offsets = np.arange(periods) * delta
-        time = start_ts + offsets
-        return xr.DataArray(np.zeros(time.size), coords={"time": time}, dims=("time",))
 
 
 class TestNormalizeLatLon(XarrayUtilsBase):
@@ -114,6 +89,114 @@ class TestNormalizeLatLon(XarrayUtilsBase):
         self.assertEqual(out.dims, ("lat", "lon"))
         np.testing.assert_array_equal(out["lat"].values, target_lat)
         np.testing.assert_array_equal(out["lon"].values, target_lon)
+
+
+class TestNormalizeLatLonCoordinateLayouts(XarrayUtilsBase):
+    """Cover the coordinate layouts that leave a dimension without an index."""
+
+    LAT = np.array([40.0, 30.0, 20.0, 10.0])
+    LON = np.array([1.0, 2.0, 3.0])
+
+    def make_aliased_coords_ds(self):
+        """Dims lat/lon, but the coordinates are named latitude/longitude."""
+        return xr.Dataset(
+            {"tws": (("lat", "lon"), np.zeros((4, 3)))},
+            coords={"latitude": ("lat", self.LAT), "longitude": ("lon", self.LON)},
+        )
+
+    def make_coord_data_vars_ds(self):
+        """The coordinates are stored as data variables, only the dims point to them."""
+        return xr.Dataset(
+            {
+                "tws": (("lat", "lon"), np.zeros((4, 3))),
+                "latitude": ("lat", self.LAT),
+                "longitude": ("lon", self.LON),
+            }
+        )
+
+    def test_aliased_coordinate_becomes_an_indexed_dimension_coordinate(self):
+        out = normalize_lat_lon(self.make_aliased_coords_ds())
+        self.assertIn("lat", out.coords)
+        self.assertNotIn("latitude", out.coords)
+        # without an index every label based selection turns positional
+        self.assertIn("lat", out.indexes)
+        self.assertIn("lon", out.indexes)
+        np.testing.assert_array_equal(out["lat"].values, self.LAT)
+
+    def test_coordinate_data_variables_are_promoted_and_indexed(self):
+        out = normalize_lat_lon(self.make_coord_data_vars_ds())
+        self.assertEqual(tuple(out.data_vars), ("tws",))
+        self.assertIn("lat", out.indexes)
+        self.assertIn("lon", out.indexes)
+        np.testing.assert_array_equal(out["lat"].values, self.LAT)
+
+    def test_label_selection_works_after_normalization(self):
+        for ds in (self.make_aliased_coords_ds(), self.make_coord_data_vars_ds()):
+            out = normalize_lat_lon(ds)
+            # a missing index made this silently positional and raise on a float
+            cropped = crop_ds(out["tws"], 1.0, 3.0, 20.0, 40.0)
+            self.assertEqual(cropped.sizes["lat"], 3)
+
+    def test_descending_latitude_is_detected_after_normalization(self):
+        for ds in (self.make_aliased_coords_ds(), self.make_coord_data_vars_ds()):
+            out = normalize_lat_lon(ds)
+            # positional indices would compare as ascending and never flip
+            self.assertGreater(float(out["lat"][0]), float(out["lat"][-1]))
+
+    def test_already_normalized_dataset_is_untouched(self):
+        ds = xr.Dataset(
+            {"tws": (("lat", "lon"), np.zeros((4, 3)))},
+            coords={"lat": self.LAT, "lon": self.LON},
+        )
+        out = normalize_lat_lon(ds)
+        self.assertEqual(tuple(out.coords), tuple(ds.coords))
+        self.assertIn("lat", out.indexes)
+
+    def test_existing_lat_coordinate_is_not_clobbered_by_an_alias(self):
+        ds = xr.Dataset(
+            {"tws": (("lat", "lon"), np.zeros((4, 3)))},
+            coords={
+                "lat": self.LAT,
+                "lon": self.LON,
+                "latitude": ("lat", self.LAT + 100),
+            },
+        )
+        out = normalize_lat_lon(ds)
+        np.testing.assert_array_equal(out["lat"].values, self.LAT)
+        self.assertIn("latitude", out.coords)
+
+    def test_unrelated_lat_dimension_blocks_the_rename(self):
+        ds = xr.Dataset(
+            {
+                "tws": (("latitude", "lon"), np.zeros((4, 3))),
+                "other": (("lat",), np.zeros(2)),
+            },
+            coords={"latitude": self.LAT, "lon": self.LON, "lat": np.array([0.0, 1.0])},
+        )
+        out = normalize_lat_lon(ds)
+        # renaming latitude onto the unrelated lat dimension would collide
+        self.assertIn("latitude", out.coords)
+        np.testing.assert_array_equal(out["lat"].values, np.array([0.0, 1.0]))
+
+    def test_two_dimensional_coordinates_are_left_without_an_index(self):
+        ds = xr.Dataset(
+            {"tws": (("y", "x"), np.zeros((4, 3)))},
+            coords={
+                "latitude": (("y", "x"), np.zeros((4, 3))),
+                "longitude": (("y", "x"), np.zeros((4, 3))),
+            },
+        )
+        out = normalize_lat_lon(ds)
+        self.assertNotIn("lat", out.indexes)
+
+    def test_dataset_without_lat_lon_is_returned_unchanged(self):
+        ds = xr.Dataset({"tws": (("a", "b"), np.zeros((4, 3)))})
+        out = normalize_lat_lon(ds)
+        self.assertEqual(tuple(out.sizes), tuple(ds.sizes))
+
+    def test_data_array_input_is_also_normalized(self):
+        out = normalize_lat_lon(self.make_aliased_coords_ds()["tws"])
+        self.assertIn("lat", out.indexes)
 
 
 class TestRegridMask(XarrayUtilsBase):
@@ -379,39 +462,6 @@ class TestInduceDataVarFromFileName(XarrayUtilsBase):
         self.assertIsNone(induce_data_var_from_file_name(ds, Path("v_component.nc")))
 
 
-class TestTimedeltaToAlias(XarrayUtilsBase):
-    def test_daily(self):
-        da = self.make_time_da("2021-01-01", periods=5, step="D")
-        hours, alias = timedelta_to_alias(da)
-        self.assertEqual(alias, "D")
-        self.assertEqual(hours, 24)
-
-    def test_weekly_every_7_days(self):
-        # fixed 7-day step (not weekday-anchored)
-        da = self.make_time_da("2021-01-01", periods=4, step="7D")
-        hours, alias = timedelta_to_alias(da)
-        self.assertEqual(alias, "W")
-        self.assertEqual(hours, 24 * 7)
-
-    def test_monthly_like_30d(self):
-        # fixed 30-day step (calendar-ish, but deterministic)
-        da = self.make_time_da("2021-01-01", periods=3, step="30D")
-        hours, alias = timedelta_to_alias(da)
-        self.assertEqual(alias, "ME")
-
-    def test_fallback_hours(self):
-        # 6-hourly → "<N>H"
-        da = self.make_time_da("2021-01-01T00", periods=4, step="6h")
-        hours, alias = timedelta_to_alias(da)
-        self.assertEqual(hours, 6)
-        self.assertEqual(alias, "6h")
-
-    def test_raises_with_single_timestamp(self):
-        da = self.make_time_da("2021-01-01", periods=1, step="D")
-        with self.assertRaises(ValueError):
-            timedelta_to_alias(da)
-
-
 class TestGetOverlappingTimeSlice(XarrayUtilsBase):
     def test_normal_overlap(self):
         t1 = np.array(np.arange("2021-01-01", "2021-01-07", dtype="datetime64[D]"))
@@ -529,6 +579,42 @@ class TestCropDs(XarrayUtilsBase):
         out = crop_ds(ds, 100.5, 102.0, 10.5, 12.0, lon_name="X", lat_name="Y")
         self.assertSetEqual(set(np.round(out.X.values, 6)), {101.0, 102.0})
         self.assertSetEqual(set(np.round(out.Y.values, 6)), {11.0, 12.0})
+
+
+def _storage(units=None):
+    """Create a one value storage field with the given units."""
+    attrs = {"long_name": "storage"} if units is None else {"units": units}
+    return xr.DataArray([2.0], dims="cell", attrs=attrs, name="tws")
+
+
+@pytest.mark.parametrize(
+    ("units", "mm"),
+    [("cm", 20.0), ("m", 2000.0), ("kg m-2", 2.0), ("kg/m^2", 2.0)],
+)
+def test_convert_water_storage_to_mm_reads_depth_units(units, mm):
+    """Convert depths of water and kg/m2 to mm."""
+    converted = utils.convert_water_storage_to_mm(_storage(units))
+    np.testing.assert_allclose(converted.values, mm)
+    assert converted.attrs["units"] == "mm"
+
+
+def test_convert_water_storage_to_mm_prefers_the_scale_factor():
+    """Use an explicit scale factor instead of the units attribute."""
+    converted = utils.convert_water_storage_to_mm(_storage("m"), scale_factor=10)
+    np.testing.assert_allclose(converted.values, 20.0)
+
+
+def test_convert_water_storage_to_mm_falls_back_to_the_encoding_units():
+    """Read the units from the encoding when the attribute is gone."""
+    storage = _storage()
+    storage.encoding["units"] = "cm"
+    np.testing.assert_allclose(utils.convert_water_storage_to_mm(storage).values, 20.0)
+
+
+def test_convert_water_storage_to_mm_rejects_unknown_units():
+    """Refuse a storage whose units are no depth of water."""
+    with pytest.raises(ValueError, match="unrecognized unit"):
+        utils.convert_water_storage_to_mm(_storage("m3"))
 
 
 if __name__ == "__main__":

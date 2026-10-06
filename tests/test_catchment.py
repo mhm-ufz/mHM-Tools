@@ -10,7 +10,11 @@ import mhm_tools.common.utils
 from mhm_tools import __version__
 from mhm_tools.common.file_handler import get_xarray_ds_from_file
 from mhm_tools.common.provenance import CREATED_ATTR, HISTORY_ATTR, VERSION_ATTR
-from mhm_tools.common.utils import distance_100m_units, find_best_gauge_location_by_area
+from mhm_tools.common.utils import (
+    distance_100m_units,
+    find_best_gauge_location_by_area,
+    get_candidate_search_window,
+)
 from mhm_tools.common.xarray_utils import get_coord_key
 from mhm_tools.pre import catchment
 
@@ -444,6 +448,105 @@ class TestCatchment(unittest.TestCase):
         self.assertAlmostEqual(error_basinex, 0.0)
         self.assertEqual(best_coord_burek, (2, 1))
         self.assertAlmostEqual(error_burek, 0.0)
+
+    def test_area_delimiter_can_be_disabled(self):
+        """Select the best candidate inside the radius despite its area error."""
+        c = self._make_small_catchment()
+        upstream_area = np.full((5, 5), np.nan)
+        upstream_area[2, 2] = 50.0
+        upstream_area[2, 3] = 80.0
+
+        with self.assertRaises(ValueError):
+            find_best_gauge_location_by_area(
+                ds=c.ds,
+                upstream_area=upstream_area,
+                gauge_coords=(2.0, 2.0),
+                ref_catchment_area=100.0,
+                resolutions=c.resolutions,
+                max_distance_m=1.5,
+                max_error=0.1,
+                raise_on_fallback=True,
+            )
+
+        best_coord, error, _ = find_best_gauge_location_by_area(
+            ds=c.ds,
+            upstream_area=upstream_area,
+            gauge_coords=(2.0, 2.0),
+            ref_catchment_area=100.0,
+            resolutions=c.resolutions,
+            max_distance_m=1.5,
+            max_error=0.1,
+            use_max_error=False,
+            raise_on_fallback=True,
+        )
+
+        self.assertEqual(best_coord, (2, 3))
+        self.assertAlmostEqual(error, 0.2)
+
+    def test_max_distance_m_uses_strict_radial_mask(self):
+        """Exclude square-window corners beyond the meter radius."""
+        c = self._make_small_catchment()
+        upstream_area = np.full((5, 5), np.nan)
+        upstream_area[1, 1] = 100.0
+        upstream_area[1, 2] = 90.0
+
+        best_coord, _, _ = find_best_gauge_location_by_area(
+            ds=c.ds,
+            upstream_area=upstream_area,
+            gauge_coords=(2.0, 2.0),
+            ref_catchment_area=100.0,
+            resolutions=c.resolutions,
+            max_distance_m=1.1,
+            use_max_error=False,
+            raise_on_fallback=True,
+        )
+
+        self.assertEqual(best_coord, (1, 2))
+
+    def test_latlon_max_distance_m_is_coordinate_aware(self):
+        """Apply a radial meter limit to a latitude/longitude grid."""
+        coordinates = np.array([-0.01, 0.0, 0.01])
+        _, _, _, _, distance_mask, distances_m = get_candidate_search_window(
+            lat_values=coordinates,
+            lon_values=coordinates,
+            gauge_row=1,
+            gauge_col=1,
+            max_distance_m=1200,
+            latlon=True,
+        )
+
+        self.assertTrue(distance_mask[0, 1])
+        self.assertFalse(distance_mask[0, 0])
+        self.assertGreater(distances_m[0, 0], 1200)
+
+    def test_candidate_distance_arguments_are_validated(self):
+        """Reject conflicting and negative candidate distance limits."""
+        coordinates = np.arange(3, dtype=float)
+        with self.assertRaises(ValueError):
+            get_candidate_search_window(
+                coordinates,
+                coordinates,
+                1,
+                1,
+                max_distance_cells=1,
+                max_distance_m=1,
+            )
+        with self.assertRaises(ValueError):
+            get_candidate_search_window(
+                coordinates, coordinates, 1, 1, max_distance_m=-1
+            )
+
+    def test_zero_meter_distance_selects_only_gauge_cell(self):
+        """Restrict a zero-meter candidate search to the gauge cell."""
+        coordinates = np.arange(3, dtype=float)
+
+        _, _, _, _, distance_mask, distances_m = get_candidate_search_window(
+            coordinates, coordinates, 1, 1, max_distance_m=0
+        )
+
+        self.assertEqual(distance_mask.shape, (1, 1))
+        self.assertTrue(distance_mask[0, 0])
+        self.assertEqual(distances_m[0, 0], 0)
 
     def test_distance_100m_units_3_arcsec(self):
         res = 1.0 / 1200.0  # 3 arc sec in degrees
@@ -1089,7 +1192,7 @@ class TestCatchment(unittest.TestCase):
             self.assertTrue(np.isfinite(shape_error))
             self.assertGreaterEqual(shape_error, 0.0)
             self.assertLessEqual(shape_error, 1.0)
-            self.assertEqual(method, "shape-area")
+            self.assertEqual(method, "shape_iou")
             linear = np.ravel_multi_index(candidate_idx, c._fdir.shape)
             basin = c._fdir.basins(idxs=np.array([linear], dtype=np.int64))
             candidate_mask = basin > 0
@@ -1267,3 +1370,159 @@ class TestCatchment(unittest.TestCase):
             self.assertEqual(int(merged["basin"].sel(lat=1.0, lon=0.0)), 2)
             self.assertGreater(int(merged["basin"].sel(lat=1.0, lon=-179.0)), 3)
             self.assertGreater(int(merged["basin"].sel(lat=1.0, lon=179.0)), 3)
+
+    def _make_narrow_basin_catchment(self, nlat=120, nlon=60):
+        """Build a catchment whose L2 grid is only one cell wide.
+
+        The L0 window is a whole number of L2 cells tall but a single one
+        wide, which is what a basin smaller than one coarse cell produces.
+        """
+        l0, l2 = 1 / 600, 0.1
+        lat = 48.209166 - np.arange(nlat) * l0
+        lon = 9.58 + np.arange(nlon) * l0
+        basin = np.zeros((nlat, nlon), dtype=np.uint32)
+        basin[10:110, 5:55] = 1
+        dem_ds = xr.Dataset(
+            {"dem": (["lat", "lon"], np.zeros((nlat, nlon)))},
+            coords={"lat": lat, "lon": lon},
+        )
+        basin_ds = xr.Dataset(
+            {"basin": (["lat", "lon"], basin)}, coords={"lat": lat, "lon": lon}
+        )
+        catchment_obj = catchment.Catchment(
+            dem_ds,
+            "dem",
+            var="dem",
+            ftype="ldd",
+            transform=(l0, 0.0, lon[0], 0.0, -l0, lat[0]),
+            resolutions=catchment.Resolution(l0=l0, l1=l2, l11=l2, l2=l2),
+            latlon=True,
+        )
+        return catchment_obj, basin_ds, l0, l2
+
+    def test_write_mask_file_generates_bounds_for_single_cell_l2_domain(self):
+        """A basin narrower than one L2 cell still gets CF bounds.
+
+        The upscaled grid then has a single longitude value, which has no
+        neighbour to derive a cell width from, so the L2 resolution is used.
+        """
+        catchment_obj, basin_ds, l0, l2 = self._make_narrow_basin_catchment()
+        mask_file = self.tmp_path / "mask_single_cell.nc"
+
+        catchment_obj.write_mask_file(basin_ds, mask_file)
+
+        with xr.open_dataset(mask_file) as mask_ds:
+            self.assertEqual(mask_ds["mask_l2"].shape, (2, 1))
+            self.assertIn("lon_l2_bnds", mask_ds.coords)
+            lon_bnds = mask_ds["lon_l2_bnds"].values
+            self.assertAlmostEqual(abs(lon_bnds[0, 1] - lon_bnds[0, 0]), l2)
+            self.assertEqual(mask_ds["lon_l2"].attrs["bounds"], "lon_l2_bnds")
+            # the fine coordinates keep the width derived from their own
+            # spacing rather than the resolution handed in for the coarse one
+            fine_bnds = mask_ds["lon_bnds"].values
+            self.assertAlmostEqual(abs(fine_bnds[0, 1] - fine_bnds[0, 0]), l0)
+
+    def test_write_mask_file_bounds_unchanged_for_multi_cell_domain(self):
+        """Handing in a resolution does not override real coordinate spacing."""
+        catchment_obj, basin_ds, _, l2 = self._make_narrow_basin_catchment(nlon=180)
+        mask_file = self.tmp_path / "mask_multi_cell.nc"
+
+        catchment_obj.write_mask_file(basin_ds, mask_file)
+
+        with xr.open_dataset(mask_file) as mask_ds:
+            self.assertEqual(mask_ds["mask_l2"].shape, (2, 3))
+            lon_bnds = mask_ds["lon_l2_bnds"].values
+            widths = np.abs(lon_bnds[:, 1] - lon_bnds[:, 0])
+            np.testing.assert_allclose(widths, l2, rtol=1e-6)
+
+    def _make_upscaled_catchment(self, l2, nlat, nlon, l1=0.1):
+        """Build a catchment whose mask is already upscaled to L1.
+
+        Mirrors the state `upscale` leaves behind, where the working grid is
+        L1 rather than L0 and the mask still has to reach L2.
+        """
+        l0 = 1 / 600
+        lat = 48.2 - np.arange(nlat) * l1
+        lon = 9.6 + np.arange(nlon) * l1
+        dem_ds = xr.Dataset(
+            {"dem": (["lat", "lon"], np.zeros((nlat, nlon)))},
+            coords={"lat": lat, "lon": lon},
+        )
+        basin_ds = xr.Dataset(
+            {"basin": (["lat", "lon"], np.ones((nlat, nlon), dtype=np.uint32))},
+            coords={"lat": lat, "lon": lon},
+        )
+        catchment_obj = catchment.Catchment(
+            dem_ds,
+            "dem",
+            var="dem",
+            ftype="ldd",
+            transform=(l1, 0.0, lon[0], 0.0, -l1, lat[0]),
+            resolutions=catchment.Resolution(l0=l0, l1=l1, l11=l1, l2=l2),
+            latlon=True,
+        )
+        catchment_obj.do_upscale = True
+        catchment_obj.is_upscaled = True
+        catchment_obj.upscaled_resolution = l1
+        return catchment_obj, basin_ds
+
+    def test_upscale_mask_with_correct_coords_accepts_an_explicit_factor(self):
+        """An explicit factor still reports the resolution it upscales to."""
+        catchment_obj, basin_ds = self._make_upscaled_catchment(0.5, 10, 10)
+        mask_da = basin_ds["basin"].astype("int8")
+
+        upscaled = catchment_obj.upscale_mask_with_correct_coords(mask_da, factor=5)
+
+        self.assertEqual(upscaled.shape, (2, 2))
+        self.assertAlmostEqual(abs(float(upscaled["lon"][1] - upscaled["lon"][0])), 0.5)
+
+    def test_write_mask_file_coarsens_an_upscaled_mask_to_l2(self):
+        """An already upscaled mask still reaches L2 when L1 and L2 differ.
+
+        The coordinates and their bounds have to describe the same grid; an
+        L1 mask carrying the L2 name would leave them contradicting.
+        """
+        catchment_obj, basin_ds = self._make_upscaled_catchment(0.5, 10, 10)
+        mask_file = self.tmp_path / "mask_upscaled_to_l2.nc"
+
+        catchment_obj.write_mask_file(basin_ds, mask_file)
+
+        with xr.open_dataset(mask_file) as mask_ds:
+            self.assertEqual(mask_ds["mask_l2"].shape, (2, 2))
+            spacing = abs(float(mask_ds["lon_l2"][1] - mask_ds["lon_l2"][0]))
+            self.assertAlmostEqual(spacing, 0.5)
+            bnds = mask_ds["lon_l2_bnds"].values
+            self.assertAlmostEqual(abs(bnds[0, 1] - bnds[0, 0]), 0.5)
+
+    def test_write_mask_file_keeps_a_single_cell_domain_needing_no_coarsening(self):
+        """A one cell wide mask survives when L1 already equals L2.
+
+        There is nothing to coarsen at a factor of one, so the mask is written
+        as it stands instead of being run through the cell edge arithmetic.
+        """
+        catchment_obj, basin_ds = self._make_upscaled_catchment(0.1, 3, 1)
+        mask_file = self.tmp_path / "mask_single_cell_factor_one.nc"
+
+        catchment_obj.write_mask_file(basin_ds, mask_file)
+
+        with xr.open_dataset(mask_file) as mask_ds:
+            self.assertEqual(mask_ds["mask_l2"].shape, (3, 1))
+            bnds = mask_ds["lon_l2_bnds"].values
+            self.assertAlmostEqual(abs(bnds[0, 1] - bnds[0, 0]), 0.1)
+
+    def test_write_mask_file_reports_a_domain_too_narrow_to_coarsen(self):
+        """A mask thinner than one L2 cell is refused with a readable message.
+
+        Coarsening trims the axis to nothing, so the message has to name the
+        axis and both resolutions rather than surfacing an index error.
+        """
+        catchment_obj, basin_ds = self._make_upscaled_catchment(0.5, 10, 1)
+        mask_file = self.tmp_path / "mask_too_narrow.nc"
+
+        with self.assertRaises(ValueError) as ctx:
+            catchment_obj.write_mask_file(basin_ds, mask_file)
+
+        message = str(ctx.exception).lower()
+        self.assertIn("lon", message)
+        self.assertIn("0.5", message)
+        self.assertIn("0.1", message)

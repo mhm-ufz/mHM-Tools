@@ -173,13 +173,30 @@ def add_args(parser):
         help=(
             "Reference catchment area in km^2 used to identify the outlet cell near the gauge coordinates. "
             "For multiple gauges, pass a comma-separated list."
+            "Shape-based matching takes precedence; area matching only runs if it finds no candidate."
         ),
     )
-    optional_args.add_argument(
+    distance_args = optional_args.add_mutually_exclusive_group()
+    distance_args.add_argument(
         "--max-distance-cells",
-        default=5,
+        default=None,
         type=int,
-        help=("""Maximum distance in cells to search for the outlet cell."""),
+        help="Maximum square distance in cells to search for the outlet cell.",
+    )
+    distance_args.add_argument(
+        "--max-distance-m",
+        default=None,
+        type=float,
+        help="Maximum radial cell-center distance in meters for outlet candidates.",
+    )
+    optional_args.add_argument(
+        "--no-max-error",
+        "--no-area-delimiter",
+        action="store_false",
+        dest="use_max_error",
+        help="Do not disqualify outlet candidates by catchment-area error, or by "
+        "shape overlap where a reference shape is used, and always take the best "
+        "ranked candidate instead.",
     )
     optional_args.add_argument(
         "--max-error",
@@ -192,7 +209,7 @@ def add_args(parser):
         default=None,
         help=(
             "Folder with gauge shapefiles used for shape-based outlet matching. "
-            "Files are matched by gauge id contained in the filename."
+            "Files are matched by gauge id contained in the filename. Providing a shape file disables the area-based outlet matching. If both are provided, the shape-based matching is used."
         ),
     )
     optional_args.add_argument(
@@ -328,7 +345,7 @@ def run(args):  # noqa: PLR0912,PLR0915
             or args.ref_catchment_area is not None
         ):
             logger.warning(
-                "Using gauges from --gauges_csv and ignoring --gauge_coords, --gauge_id and --ref_catchment_area."
+                "Using gauges from --gauges-csv and ignoring --gauge-coords, --gauge-id and --ref-catchment-area."
             )
         logger.info(
             f"Loaded {len(gauge_coords)} gauges from CSV '{csv_path}'. "
@@ -443,7 +460,9 @@ def run(args):  # noqa: PLR0912,PLR0915
         available_mem=available_mem,
         ref_catchment_area=ref_catchment_area,
         max_distance_cells=args.max_distance_cells,
+        max_distance_m=args.max_distance_m,
         max_error=args.max_error,
+        use_max_error=args.use_max_error,
         gauge_ids=gauge_ids,
         ncpus=args.ncpus,
         output_vars=(

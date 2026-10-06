@@ -18,14 +18,30 @@ from typing import Dict, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import xarray as xr
+from rasterio.crs import CRS
+from rasterio.enums import Resampling
+from rasterio.transform import from_origin
+from rasterio.warp import calculate_default_transform
 
-from mhm_tools.common.constants import NC_ENCODE_DEFAULTS, NO_DATA
-from mhm_tools.common.esri_grid import standardize_header, write_grid, write_header
+from mhm_tools.common.constants import NC_ENCODE_DEFAULTS, NC_ENCODE_MASK, NO_DATA
+from mhm_tools.common.crs_handler import (
+    MissingCRSError,
+    resolve_crs,
+    set_spatial_dims,
+    write_object_crs,
+)
+from mhm_tools.common.esri_grid import standardize_header, write_header
 from mhm_tools.common.logger import ErrorLogger, log_arguments
 from mhm_tools.common.netcdf import (
+    QUANTIZATION_ATTRS,
+    QUANTIZATION_ENCODING_KEYS,
+    NetcdfCompression,
+    add_variable_hard_link,
     apply_cf_baseline_metadata,
+    generate_bounds,
     generate_bounds_for_all_coords,
     get_netcdf_metadata_data_vars,
+    normalize_variable_selection,
     prepare_dataset_for_netcdf_write,
     prepare_time_bounds_encoding,
     read_dataset,
@@ -39,6 +55,8 @@ from mhm_tools.common.xarray_utils import (
 )
 
 logger = logging.getLogger(__name__)
+# Re-exported so raster callers need only this module.
+__all__ = ["MissingCRSError", "get_nodata"]
 
 
 @dataclass
@@ -47,6 +65,259 @@ class GridDefinition:
 
     template: xr.Dataset
     dims: Tuple[str, ...]
+
+
+def get_raster_data(file_path, var_name=None, crs=None) -> xr.DataArray:
+    """Read one two-dimensional, georeferenced raster payload."""
+    ds = get_xarray_ds_from_file(
+        file_path,
+        var_name=var_name,
+        load_crs=Path(file_path).suffix.lower() == ".nc",
+    )
+    try:
+        name = var_name or get_single_data_var(ds)
+        if name is None or name not in ds.data_vars:
+            msg = "Raster input must contain exactly one payload data variable."
+            raise ValueError(msg)
+        data = ds[name]
+        if data.ndim != 2:
+            msg = f"Raster payload {name!r} must be two-dimensional, got {data.ndim}."
+            raise ValueError(msg)
+        data = set_spatial_dims(data)
+        dataset_crs = resolve_crs(ds, crs)
+        resolved = resolve_crs(data, dataset_crs, required=True)
+        result = data.rio.write_crs(resolved, inplace=False)
+        result.set_close(ds.close)
+        return result
+    except Exception:
+        ds.close()
+        raise
+
+
+def align_raster_to_reference(
+    data: xr.DataArray,
+    reference: xr.DataArray,
+    *,
+    nodata=NO_DATA,
+    resampling="nearest",
+    data_kind=None,
+    mask_reference=False,
+) -> xr.DataArray:
+    """Match a raster to a reference grid with explicit or automatic resampling."""
+    data = _as_yx(data)
+    reference = _as_yx(reference)
+    resolve_crs(data, required=True)
+    reference_crs = resolve_crs(reference, required=True)
+    source_nodata = get_nodata(data)
+    data = _ensure_nodata_dtype(data, nodata)
+    resampling = _resolve_raster_resampling(
+        data,
+        reference,
+        resampling=resampling,
+        data_kind=data_kind,
+    )
+
+    if _same_raster_grid(data, reference):
+        values = _restated_nodata(data, source_nodata, nodata)
+    else:
+        values = data.rio.reproject_match(
+            reference,
+            resampling=resampling,
+            nodata=nodata,
+        ).data
+    if mask_reference:
+        values = _blank_outside_reference(values, reference, nodata)
+
+    coords = {
+        name: coord
+        for name, coord in reference.coords.items()
+        if set(coord.dims).issubset(set(reference.dims))
+    }
+    attrs = dict(data.attrs)
+    for key in ("_FillValue", "missing_value"):
+        attrs.pop(key, None)
+    attrs["nodata_value"] = nodata
+    result = xr.DataArray(
+        values,
+        dims=reference.dims,
+        coords=coords,
+        name=data.name,
+        attrs=attrs,
+    )
+    result = set_spatial_dims(result).rio.write_crs(reference_crs, inplace=False)
+    result = result.rio.write_transform(reference.rio.transform(), inplace=False)
+    result.attrs["nodata_value"] = nodata
+    return result.rio.write_nodata(nodata, inplace=False)
+
+
+def _as_yx(data: xr.DataArray) -> xr.DataArray:
+    """Return a raster tagged as spatial and transposed to ``(y, x)`` order."""
+    data = set_spatial_dims(data)
+    y_dim, x_dim = data.rio.y_dim, data.rio.x_dim
+    return data.transpose(y_dim, x_dim).rio.set_spatial_dims(x_dim=x_dim, y_dim=y_dim)
+
+
+def _restated_nodata(data, source_nodata, nodata):
+    """Return the values of an already aligned raster on the requested nodata."""
+    normalized = data
+    if source_nodata is not None and not _is_nan(source_nodata):
+        normalized = normalized.where(normalized != source_nodata, nodata)
+    if np.issubdtype(data.dtype, np.integer):
+        return normalized.astype(data.dtype).data
+    return normalized.where(normalized.notnull(), nodata).data
+
+
+def _blank_outside_reference(values, reference, nodata):
+    """Set the cells the reference itself marks as nodata back to nodata."""
+    reference_values = np.asarray(reference.values)
+    valid = np.ones(reference.shape, dtype=bool)
+    if np.issubdtype(reference_values.dtype, np.floating):
+        valid &= np.isfinite(reference_values)
+    for reference_nodata in _raster_nodata_values(reference):
+        valid &= reference_values != reference_nodata
+    return np.where(valid, values, nodata)
+
+
+def _resolve_raster_resampling(data, reference, *, resampling, data_kind):
+    """Resolve a Rasterio resampling enum, including data-aware ``auto`` mode."""
+    if isinstance(resampling, Resampling):
+        return resampling
+
+    method = str(resampling).strip().lower()
+    if method in {"categorical", "continuous"}:
+        data_kind = method
+        method = "auto"
+    if method != "auto":
+        try:
+            return Resampling[method]
+        except KeyError as exc:
+            choices = ", ".join(member.name for member in Resampling)
+            msg = (
+                f"Unsupported resampling method {resampling!r}. "
+                f"Choose from: {choices}."
+            )
+            raise ValueError(msg) from exc
+
+    if data_kind is None:
+        data_kind = (
+            "categorical" if np.issubdtype(data.dtype, np.integer) else "continuous"
+        )
+    data_kind = str(data_kind).strip().lower()
+    if data_kind not in {"categorical", "continuous"}:
+        msg = "data_kind must be 'categorical' or 'continuous'."
+        raise ValueError(msg)
+
+    downsampling = _is_raster_downsampling(data, reference)
+    if data_kind == "categorical":
+        return Resampling.mode if downsampling else Resampling.nearest
+    return Resampling.average if downsampling else Resampling.bilinear
+
+
+def _is_raster_downsampling(data, reference) -> bool:
+    """Return whether a reference pixel covers more area than a source pixel."""
+    source_transform = data.rio.transform()
+    source_crs = resolve_crs(data, required=True)
+    reference_crs = resolve_crs(reference, required=True)
+    if source_crs != reference_crs:
+        source_transform, _, _ = calculate_default_transform(
+            source_crs,
+            reference_crs,
+            data.sizes[data.rio.x_dim],
+            data.sizes[data.rio.y_dim],
+            *data.rio.bounds(),
+        )
+    reference_transform = reference.rio.transform()
+    source_area = abs(
+        source_transform.a * source_transform.e
+        - source_transform.b * source_transform.d
+    )
+    reference_area = abs(
+        reference_transform.a * reference_transform.e
+        - reference_transform.b * reference_transform.d
+    )
+    return bool(
+        reference_area > source_area
+        and not np.isclose(reference_area, source_area, rtol=1e-9, atol=0.0)
+    )
+
+
+def _declared_nodata(data):
+    """Return every nodata sentinel a raster declares, most authoritative first."""
+    values = []
+    with contextlib.suppress(Exception):
+        values.extend([data.rio.encoded_nodata, data.rio.nodata])
+    values.extend(
+        data.attrs.get(key) for key in ("nodata_value", "_FillValue", "missing_value")
+    )
+    values.extend(data.encoding.get(key) for key in ("_FillValue", "missing_value"))
+    return values
+
+
+def get_nodata(data):
+    """Return the first nodata value a raster declares, preserving zero."""
+    return next((value for value in _declared_nodata(data) if value is not None), None)
+
+
+def _raster_nodata_values(data):
+    """Yield the distinct finite nodata sentinels a raster declares."""
+    seen = set()
+    for value in _declared_nodata(data):
+        if value is None or _is_nan(value):
+            continue
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            continue
+        if np.isfinite(number) and number not in seen:
+            seen.add(number)
+            yield number
+
+
+def _same_raster_grid(data: xr.DataArray, reference: xr.DataArray) -> bool:
+    if data.dims != (data.rio.y_dim, data.rio.x_dim):
+        return False
+    if reference.dims != (reference.rio.y_dim, reference.rio.x_dim):
+        return False
+    if data.shape != reference.shape or data.rio.crs != reference.rio.crs:
+        return False
+    return data.rio.transform().almost_equals(reference.rio.transform())
+
+
+def _dtype_holding_nodata(dtype, nodata):
+    """Return the narrowest dtype holding both the range of ``dtype`` and ``nodata``.
+
+    Falls back to float64 for a non-integral nodata, and raises when no integer
+    dtype can represent both.
+    """
+    dtype = np.dtype(dtype)
+    info = np.iinfo(dtype)
+    if info.min <= nodata <= info.max:
+        return dtype
+    if not np.isfinite(nodata) or float(nodata) != int(nodata):
+        return np.dtype("float64")
+    minimum = min(info.min, int(nodata))
+    maximum = max(info.max, int(nodata))
+    for candidate in (np.int8, np.int16, np.int32, np.int64):
+        candidate_info = np.iinfo(candidate)
+        if candidate_info.min <= minimum and maximum <= candidate_info.max:
+            return np.dtype(candidate)
+    msg = f"Raster dtype {dtype} and nodata {nodata} have no safe integer dtype."
+    raise ValueError(msg)
+
+
+def _ensure_nodata_dtype(data: xr.DataArray, nodata) -> xr.DataArray:
+    """Promote integer data when needed to represent the requested nodata."""
+    if nodata is None or not np.issubdtype(data.dtype, np.integer):
+        return data
+    dtype = _dtype_holding_nodata(data.dtype, nodata)
+    return data if dtype == data.dtype else data.astype(dtype)
+
+
+def _is_nan(value):
+    """Return whether a scalar value is NaN."""
+    with contextlib.suppress(TypeError):
+        return bool(np.isnan(value))
+    return False
 
 
 def get_grid(
@@ -134,9 +405,18 @@ def create_header(
         elif len(y) > 1:
             cellsize = abs(y[1] - y[0])
         else:
-            msg = "Cannot determine cellsize from dataset with only one x and one y value. Please provide cellsize as an argument."
-            with ErrorLogger(logger):
-                raise ValueError(msg)
+            with contextlib.suppress(Exception):
+                transform = ds.rio.transform()
+                x_size, y_size = abs(transform.a), abs(transform.e)
+                if x_size > 0 and np.isclose(x_size, y_size):
+                    cellsize = x_size
+            if cellsize is None:
+                msg = (
+                    "Cannot determine cellsize from dataset with only one x "
+                    "and one y value. Please provide cellsize as an argument."
+                )
+                with ErrorLogger(logger):
+                    raise ValueError(msg)
     if xllcorner is None:
         xllcorner = np.nanmin(x) - 0.5 * cellsize
     if yllcorner is None:
@@ -193,7 +473,7 @@ def chunk_dataset_space_only(
 ) -> Dict[str, int]:
     """Chunk only in space (lat/lon), leaving time whole, sized to available memory.
 
-    - Uses 80% of available_mem_gib for a single chunk.
+    - Uses 10% of available_mem_gib for a single chunk.
     - Computes how many total cells (t * y * x) fit, then allocates all t,
       and splits y/x so that t·y·x·bytes_per_cell ≤ work_bytes.
     - If no time dimension, behaves similarly with t=1.
@@ -218,7 +498,7 @@ def chunk_dataset_space_only(
     nx = ds.sizes[lon_key]
     nt = ds.sizes.get(time_key, 1)
 
-    # --- memory budget in bytes (80%) ---
+    # --- memory budget in bytes (10%) ---
     work_bytes = max(int(0.1 * available_mem_gib * 1024**3), 4 * 1024**2)
     # how many total cells fit
     max_cells = work_bytes // dtype_sz
@@ -328,6 +608,7 @@ def write_xarray_to_netcdf(
     var_name=None,
     encoding=None,
     engine="netcdf4",
+    compression=None,
 ):
     """Write an xarray Dataset or DataArray to a NetCDF file.
 
@@ -340,9 +621,14 @@ def write_xarray_to_netcdf(
     var_name : str, optional
         Data variable to write or DataArray name override.
     encoding : dict, optional
-        Per-variable NetCDF encoding.
+        Per-variable NetCDF encoding. Its compression keys are replaced by
+        `compression`, every other key it holds is kept.
     engine : str, default "netcdf4"
-        Xarray NetCDF backend engine.
+        Xarray NetCDF backend engine. Quantization needs "netcdf4".
+    compression : NetcdfCompression, optional
+        Lossless and lossy compression settings. None keeps the compression a
+        dataset read from a NetCDF file carries, falling back to the defaults
+        when it carries none.
 
     Returns
     -------
@@ -351,31 +637,83 @@ def write_xarray_to_netcdf(
     ds, data_vars = _get_netcdf_write_dataset_and_data_vars(ds, var_name)
     ds = apply_output_provenance(ds)
     apply_cf_baseline_metadata(ds, data_vars)
+    compression = (
+        NetcdfCompression(complevel=None, shuffle=None)
+        if compression is None
+        else compression
+    )
+    compression_encoding = compression.create_variable_encoding(ds, data_vars)
+    drop_quantization = engine != "netcdf4"
+    if drop_quantization and any(
+        "significant_digits" in settings for settings in compression_encoding.values()
+    ):
+        logger.warning(
+            f"Ignoring quantization for {file_path} because the {engine} engine "
+            "does not support it. Use engine='netcdf4' to quantize."
+        )
+    for name in set(data_vars) | set(ds.coords) | get_netcdf_metadata_data_vars(ds):
+        for attr in QUANTIZATION_ATTRS:
+            ds[name].attrs.pop(attr, None)
+        for key in QUANTIZATION_ENCODING_KEYS:
+            ds[name].encoding.pop(key, None)
+            ds[name].attrs.pop(key, None)
+    if drop_quantization:
+        for settings in compression_encoding.values():
+            for key in QUANTIZATION_ENCODING_KEYS:
+                settings.pop(key, None)
     if encoding is None:
         encoding = {
-            var: {
-                "zlib": True,
-                "complevel": 4,
-                "shuffle": True,
-                **NC_ENCODE_DEFAULTS,
-            }
+            var: {**NC_ENCODE_DEFAULTS, **compression_encoding[var]}
             for var in data_vars
         }
     else:
-        encoding = {key: value for key, value in encoding.items() if key in data_vars}
+        # the caller owns dtype and the fill values, the compression settings
+        # own the rest, so one option reaches every write that names variables
+        encoding = {
+            key: {**value, **compression_encoding.get(key, {})}
+            for key, value in encoding.items()
+            if key in data_vars
+        }
+        for var, settings in compression_encoding.items():
+            if var not in encoding:
+                encoding[var] = dict(settings)
 
+    numeric_coord_attrs = {
+        name: {
+            key: value
+            for key, value in {**ds[name].encoding, **ds[name].attrs}.items()
+            if key in {"units", "calendar"}
+        }
+        for name in set(ds.coords) | get_netcdf_metadata_data_vars(ds)
+        if np.issubdtype(ds[name].dtype, np.number)
+    }
     ds = prepare_time_bounds_encoding(ds)
     try:
         ds_clean, safe_encoding = prepare_dataset_for_netcdf_write(
-            ds, data_vars, encoding
+            ds, data_vars, encoding, compression
         )
+        # Restate resolved settings after inherited encoding has been merged.
+        for var, settings in compression_encoding.items():
+            if var in safe_encoding:
+                for key in QUANTIZATION_ENCODING_KEYS:
+                    safe_encoding[var].pop(key, None)
+                safe_encoding[var].update(settings)
+        # Numeric time axes (including LAI months) store units as attributes.
+        for name, attrs in numeric_coord_attrs.items():
+            if np.issubdtype(ds_clean[name].dtype, np.number):
+                ds_clean[name].attrs.update(attrs)
+                for key in ("units", "calendar"):
+                    ds_clean[name].encoding.pop(key, None)
         ds_clean.to_netcdf(
             file_path, engine=engine, format="NETCDF4", encoding=safe_encoding
         )
     except ValueError:
         logger.error(f"Error while writing to {file_path}")
         logger.error(ds)
-        logger.info(f"Trying to write without encoding {encoding}")
+        logger.info(
+            f"Trying to write without encoding {encoding}. This drops "
+            "compression, fill values and any quantization."
+        )
         ds = prepare_time_bounds_encoding(ds, strip_time_attrs=True)
         ds.to_netcdf(file_path, engine=engine, format="NETCDF4")
     except Exception as e:
@@ -440,8 +778,13 @@ def get_xarray_ds_from_file(  # noqa: PLR0912
     landcover=False,
     landcover_year_start=None,
     create_bounds=False,
+    load_crs=False,
 ):
-    """Read file and return xarray dataset."""
+    """Read file and return xarray dataset.
+
+    Set ``load_crs`` to also decode the grid-mapping variable that carries the
+    CRS; it is left out by default because it is not payload data.
+    """
     file_path = Path(file_path)
     logger.debug(f"Reading {file_path} to xarray with chunking = {chunking}")
     ds_out = None
@@ -470,6 +813,9 @@ def get_xarray_ds_from_file(  # noqa: PLR0912
             file_path=file_path,
             use_mfdataset=use_mfdataset,
             engine=engine,
+            # "all" also decodes the grid mapping variable holding the CRS
+            decode_coords="all" if load_crs else "coordinates",
+            variables=normalize_variable_selection(var_name),
         )
     elif suffix in {".tif", ".tiff"}:
         import rioxarray as rxr
@@ -492,8 +838,6 @@ def get_xarray_ds_from_file(  # noqa: PLR0912
         if "y" in da.coords:
             da["y"].attrs.setdefault("axis", "Y")
         ds_out = da.to_dataset()
-        if "spatial_ref" in ds_out.coords:
-            ds_out = ds_out.drop_vars("spatial_ref")
     else:
         msg = (
             "Reading file types other than asci, netcdf, and geotiff is not "
@@ -503,6 +847,16 @@ def get_xarray_ds_from_file(  # noqa: PLR0912
             raise NotImplementedError(msg)
     lat_key = get_coord_key(ds_out, lat=True, raise_exception=False)
     lon_key = get_coord_key(ds_out, lon=True, raise_exception=False)
+    # normalize before the axis order is read, because a coordinate that is not
+    # an index yet makes the comparison below positional and therefore always
+    # ascending, which would silently keep a flipped grid
+    if normalize_latlon_coords:
+        # re-name input coords to lat and lon
+        ds_out = normalize_lat_lon(
+            ds_out, lat_key=lat_key, lon_key=lon_key, raise_exceptions=False
+        )
+        lat_key = get_coord_key(ds_out, lat=True, raise_exception=False)
+        lon_key = get_coord_key(ds_out, lon=True, raise_exception=False)
     # force correct order of y coordinate
     if lat_key is not None and (
         (force_decending_y and ds_out[lat_key].data[0] < ds_out[lat_key].data[-1])
@@ -512,11 +866,6 @@ def get_xarray_ds_from_file(  # noqa: PLR0912
     logger.debug(ds_out)
     logger.debug(lat_key)
     logger.debug(lon_key)
-    if normalize_latlon_coords:
-        # re-name input coords to lat and lon
-        ds_out = normalize_lat_lon(
-            ds_out, lat_key=lat_key, lon_key=lon_key, raise_exceptions=False
-        )
     if create_bounds:
         ds_out = generate_bounds_for_all_coords(ds_out)
     if lon_key is None and lat_key is None:
@@ -525,7 +874,12 @@ def get_xarray_ds_from_file(  # noqa: PLR0912
         logger.error("Dataset has only one of lon at lat keys.")
 
     if chunking and available_mem_gib is not None:
-        ds_out = chunk_dataset(ds_out, chunk_type, available_mem_gib, var_name)
+        # several variables share one dtype and shape, so sizing the chunks on
+        # the first of them sizes them for each
+        selected = normalize_variable_selection(var_name)
+        ds_out = chunk_dataset(
+            ds_out, chunk_type, available_mem_gib, selected[0] if selected else None
+        )
     else:
         # if no chunking remove chunking encoding because this might cause errors while writing
         for name in list(ds_out.variables):
@@ -550,31 +904,160 @@ def write_xarray_to_file(
     encoding=None,
     engine="netcdf4",
     resolution=None,
+    crs=None,
+    compression=None,
+    geotiff_compression=None,
 ):
-    """Write xarray Datasets to file with file type depending on the file suffix."""
+    """Write xarray Datasets to file with file type depending on the file suffix.
+
+    Parameters
+    ----------
+    ds : xr.Dataset or xr.DataArray
+        Dataset or data array to write.
+    file_path : str or pathlib.Path
+        Target file path. The suffix selects ascii, NetCDF or GeoTIFF.
+    var_name : str, optional
+        Data variable to write or DataArray name override.
+    create_folder : bool, default True
+        Create the parent directory when it is missing.
+    encoding : dict, optional
+        Per-variable NetCDF encoding. Its compression keys are replaced by
+        `compression`, every other key it holds is kept.
+    engine : str, default "netcdf4"
+        Xarray NetCDF backend engine. Quantization needs "netcdf4".
+    resolution : float, optional
+        Cell size used by the ascii writer.
+    crs : Any, optional
+        Coordinate reference system written to the file.
+    compression : NetcdfCompression, optional
+        Lossless and lossy compression settings for a NetCDF file. None uses
+        inherited settings or defaults. Ignored by ASCII and GeoTIFF writers.
+    geotiff_compression : str, optional
+        GeoTIFF codec, such as "deflate". None keeps the raster writer default.
+
+    Returns
+    -------
+    None
+    """
     file_path = Path(file_path)
-    if file_path.suffix not in {".asc", ".nc"}:
+    suffix = file_path.suffix.lower()
+    if suffix not in {".asc", ".nc", ".tif", ".tiff"}:
         msg = (
-            "Writing to file types other than asci and netcdf is not implemented. "
+            "Writing to file types other than asci, netcdf, and geotiff is not "
+            "implemented. "
             f"The suffix of the file was: {file_path.suffix}"
         )
         with ErrorLogger(logger):
             raise NotImplementedError(msg)
     if create_folder and not file_path.parent.is_dir():
         file_path.parent.mkdir(parents=True, exist_ok=True)
-    if file_path.is_file():
-        file_path.unlink()
     logger.info(f"Writing file to {file_path}")
     # ds = chunk_if_too_big(ds)
     # ds = ds.chunk({'time': 512, 'lat': 121, 'lon': 131})
-    if file_path.suffix == ".asc":
-        write_xarray_to_ascii(ds, file_path, var_name, resolution=resolution)
-    elif file_path.suffix == ".nc":
-        write_xarray_to_netcdf(ds, file_path, var_name, encoding, engine)
+    if suffix == ".asc":
+        write_xarray_to_ascii(
+            ds,
+            file_path,
+            var_name,
+            resolution=resolution,
+            crs=crs,
+        )
+    elif suffix == ".nc":
+        if crs is not None:
+            resolved = resolve_crs(ds, crs)
+            if resolved is not None:
+                ds = write_object_crs(ds, resolved)
+        write_xarray_to_netcdf(
+            ds, file_path, var_name, encoding, engine, compression=compression
+        )
+    else:
+        write_xarray_to_geotiff(
+            ds,
+            file_path,
+            var_name,
+            crs=crs,
+            geotiff_compression=geotiff_compression,
+        )
+
+
+def write_mask_to_file(
+    mask_array, lat, lon, file_path, long_name="mask", var_name="mask"
+):
+    """Write a boolean mask array to a NetCDF file with CF lat/lon metadata.
+
+    Adds a ``land_mask`` alias for `var_name` via an HDF5 hard link (no data
+    duplication), unless `var_name` is already ``"land_mask"``.
+
+    Parameters
+    ----------
+    mask_array : numpy.ndarray or xarray.DataArray
+        2D boolean/int mask, `(lat, lon)` ordered.
+    lat, lon : array-like
+        Coordinate values for the mask grid.
+    file_path : str or pathlib.Path
+        NetCDF file to write.
+    long_name : str, optional
+        CF `long_name` attribute for the mask variable.
+    var_name : str, optional
+        Name of the mask data variable, by default ``"mask"``.
+
+    Returns
+    -------
+    pathlib.Path
+        The written file path.
+    """
+    file_path = Path(file_path)
+    mask_values = np.where(np.asarray(mask_array), 1, 0)
+    mask_da = xr.DataArray(
+        mask_values, coords={"lat": lat, "lon": lon}, dims=["lat", "lon"]
+    )
+    mask_da["lat"].attrs.update(
+        {
+            "units": "degrees_north",
+            "long_name": "latitude",
+            "standard_name": "latitude",
+            "axis": "Y",
+        }
+    )
+    mask_da["lon"].attrs.update(
+        {
+            "units": "degrees_east",
+            "long_name": "longitude",
+            "standard_name": "longitude",
+            "axis": "X",
+        }
+    )
+    mask_da.attrs.update(
+        {
+            "units": "1",
+            "long_name": long_name,
+            "flag_values": np.array([0, 1], dtype=mask_da.dtype),
+            "flag_meanings": "outside_mask inside_mask",
+        }
+    )
+    mask_ds = xr.Dataset({var_name: mask_da})
+    for coord in ("lat", "lon"):
+        bounds_name = f"{coord}_bnds"
+        try:
+            mask_ds.coords[bounds_name] = generate_bounds(mask_ds[coord])
+            mask_ds[coord].attrs["bounds"] = bounds_name
+        except IndexError:
+            logger.info(f"Could not generate bounds for coord {coord}")
+    encoding = {var_name: dict(NC_ENCODE_MASK)}
+    write_xarray_to_file(mask_ds, file_path, encoding=encoding)
+    if var_name != "land_mask":
+        add_variable_hard_link(file_path, existing_var=var_name, alias_var="land_mask")
+    logger.info(f"Mask file has been written to {file_path}")
+    return file_path
 
 
 def write_xarray_to_ascii(
-    dataset, filepath, data_var=None, nodata_value=None, resolution=None
+    dataset,
+    filepath,
+    data_var=None,
+    nodata_value=None,
+    resolution=None,
+    crs=None,
 ):
     """Write xarray Dataset to an ASCII file that can be read by mHM."""
     # check if a data_var can be optained for writing the data
@@ -587,30 +1070,125 @@ def write_xarray_to_ascii(
             return
     # get the data from the dataset
     data = dataset[data_var] if isinstance(dataset, xr.Dataset) else dataset
+    data = _as_yx(data)
+    x_dim, y_dim = data.rio.x_dim, data.rio.y_dim
+    _validate_ascii_grid(data)
+    if data.sizes[x_dim] > 1 and data[x_dim].values[0] > data[x_dim].values[-1]:
+        data = data.isel({x_dim: slice(None, None, -1)})
+    if data.sizes[y_dim] > 1 and data[y_dim].values[0] < data[y_dim].values[-1]:
+        data = data.isel({y_dim: slice(None, None, -1)})
+    resolved = resolve_crs(dataset, crs)
 
     # set the nodata value
     dtype = get_dtype(data)
     if nodata_value is None:
-        is_int = issubclass(np.dtype(dtype).type, (np.integer, np.unsignedinteger))
-        typ = int if is_int else float
-        nodata_value = typ(NO_DATA)
+        nodata_value = get_nodata(data)
+        if nodata_value is None:
+            is_int = issubclass(np.dtype(dtype).type, (np.integer, np.unsignedinteger))
+            typ = int if is_int else float
+            nodata_value = typ(NO_DATA)
 
-    header = create_header(dataset, no_data_value=nodata_value)
+    header = create_header(data, no_data_value=nodata_value)
     if resolution is not None:
         header["cellsize"] = resolution
 
-    data_to_write = data
-    if isinstance(data_to_write, xr.DataArray):
-        data_to_write = data_to_write.data
-
-    if data_to_write.dtype.kind in ["i", "u", "f"]:  # i=int, u=unsigned, f=float
-        data_to_write = np.where(np.isnan(data_to_write), nodata_value, data_to_write)
-
-    out_header_str = write_grid(
-        file=filepath, header=header, dtype=dtype, data=data_to_write
+    out_header_str = write_header(filepath, header, dtype=dtype)
+    rows_per_block = max(
+        1, (8 * 1024**2) // (data.sizes[x_dim] * np.dtype(dtype).itemsize)
     )
+    is_int = np.issubdtype(np.dtype(dtype), np.integer)
+    with Path(filepath).open("a") as output:
+        for start in range(0, data.sizes[y_dim], rows_per_block):
+            values = data.isel({y_dim: slice(start, start + rows_per_block)}).values
+            values = np.where(np.isnan(values), nodata_value, values).astype(dtype)
+            np.savetxt(output, values, fmt="%i" if is_int else "%f")
     logger.info(f"Writting file to {filepath}")
     logger.debug(f"Header written:\n{out_header_str}")
+    prj_path = Path(filepath).with_suffix(".prj")
+    upper_prj_path = prj_path.with_suffix(".PRJ")
+    if resolved is None:
+        prj_path.unlink(missing_ok=True)
+        upper_prj_path.unlink(missing_ok=True)
+    else:
+        upper_prj_path.unlink(missing_ok=True)
+        prj_path.write_text(resolved.to_wkt(), encoding="utf-8")
+
+
+def _validate_ascii_grid(data):
+    """Reject grids that the single-cellsize ASCII format cannot represent."""
+    if data.ndim != 2:
+        msg = f"ASCII output requires two-dimensional data, got {data.ndim}."
+        raise ValueError(msg)
+    spatial = set_spatial_dims(data)
+    transform = spatial.rio.transform()
+    scale = max(abs(transform.a), abs(transform.e), 1.0)
+    tolerance = scale * 1e-10
+    if not np.isclose(transform.b, 0.0, atol=tolerance) or not np.isclose(
+        transform.d, 0.0, atol=tolerance
+    ):
+        msg = "ASCII output does not support rotated or sheared grids."
+        raise ValueError(msg)
+    if not np.isclose(abs(transform.a), abs(transform.e)):
+        msg = "ASCII output requires equal X and Y cell sizes."
+        raise ValueError(msg)
+
+
+def write_xarray_to_geotiff(
+    dataset,
+    filepath,
+    data_var=None,
+    nodata_value=None,
+    crs=None,
+    geotiff_compression=None,
+):
+    """Write a 2D payload to filepath, optionally using geotiff_compression."""
+    if isinstance(dataset, xr.Dataset):
+        data_var = data_var or get_single_data_var(dataset)
+        if data_var is None or data_var not in dataset.data_vars:
+            msg = "GeoTIFF output requires exactly one payload data variable."
+            raise ValueError(msg)
+        data = dataset[data_var]
+    else:
+        data = dataset.rename(data_var) if data_var is not None else dataset
+    if data.ndim != 2:
+        msg = f"GeoTIFF output requires two-dimensional data, got {data.ndim}."
+        raise ValueError(msg)
+
+    data = _as_yx(data)
+    resolved = resolve_crs(data, crs, required=True)
+    data = data.rio.write_crs(resolved, inplace=False)
+    nodata_value = get_nodata(data) if nodata_value is None else nodata_value
+    has_missing = bool(data.isnull().any().compute().item())
+    if nodata_value is None and has_missing:
+        nodata_value = NO_DATA
+
+    output_dtype = _geotiff_dtype(data, nodata_value)
+    if nodata_value is not None:
+        data = data.where(data.notnull(), nodata_value)
+    data = data.astype(output_dtype)
+    data.encoding = {}
+    for key in ("_FillValue", "missing_value", "scale_factor", "add_offset"):
+        data.attrs.pop(key, None)
+    if nodata_value is not None:
+        data = data.rio.write_nodata(nodata_value, encoded=True, inplace=False)
+    Path(filepath).parent.mkdir(parents=True, exist_ok=True)
+    options = {} if geotiff_compression is None else {"compress": geotiff_compression}
+    data.rio.to_raster(filepath, dtype=output_dtype.name, **options)
+
+
+def _geotiff_dtype(data, nodata_value):
+    """Choose a numeric output dtype compatible with decoded raster values."""
+    encoded_dtype = data.encoding.get("rasterio_dtype") or data.encoding.get("dtype")
+    scaled = any(key in data.encoding for key in ("scale_factor", "add_offset"))
+    try:
+        dtype = np.dtype(encoded_dtype) if encoded_dtype is not None else data.dtype
+    except TypeError:
+        dtype = data.dtype
+    if scaled or dtype.kind not in "iuf":
+        dtype = data.dtype if data.dtype.kind in "iuf" else np.dtype("float64")
+    if nodata_value is None or dtype.kind == "f":
+        return np.dtype(dtype)
+    return _dtype_holding_nodata(dtype, nodata_value)
 
 
 def read_ascii_to_xarray(
@@ -642,7 +1220,7 @@ def read_ascii_to_xarray(
         nodata_value = header["nodata_value"]
 
     # Load the data values
-    data_values = np.loadtxt(filepath, skiprows=i + 1)
+    data_values = np.asarray(np.loadtxt(filepath, skiprows=i + 1)).reshape(nrows, ncols)
     if isinstance(nodata_value, int):
         data_values = data_values.astype(np.int32)
 
@@ -681,14 +1259,26 @@ def read_ascii_to_xarray(
         name=name,
         attrs={"nodata_value": nodata_value, "_FillValue": nodata_value},
     )
+    da = set_spatial_dims(da).rio.write_transform(
+        from_origin(
+            xllcorner,
+            yllcorner + nrows * cellsize,
+            cellsize,
+            cellsize,
+        ),
+        inplace=False,
+    )
 
-    # Convert to Dataset
-    ds = da.to_dataset()
-
-    # Drop spatial_ref if present
-    if "spatial_ref" in ds.coords:
-        ds = ds.reset_coords("spatial_ref", drop=True)
-    return ds
+    prj_path = Path(filepath).with_suffix(".prj")
+    if not prj_path.is_file():
+        upper_prj = prj_path.with_suffix(".PRJ")
+        prj_path = upper_prj if upper_prj.is_file() else prj_path
+    if prj_path.is_file():
+        da = da.rio.write_crs(
+            CRS.from_wkt(prj_path.read_text(encoding="utf-8")),
+            inplace=False,
+        )
+    return da.to_dataset()
 
 
 def get_coord_values(ds, lat=False, lon=False):
@@ -734,6 +1324,16 @@ def get_dataset_from_path(
     def _postprocess(ds_out):
         lat_key = get_coord_key(ds_out, lat=True, raise_exception=False)
         lon_key = get_coord_key(ds_out, lon=True, raise_exception=False)
+        # normalize before the axis order is read, because a coordinate that is
+        # not an index yet makes the comparison below positional and therefore
+        # always ascending, which would silently keep a flipped grid
+        if normalize_latlon_coords:
+            ds_out = normalize_lat_lon(
+                ds_out, lat_key=lat_key, lon_key=lon_key, raise_exceptions=False
+            )
+            lat_key = get_coord_key(ds_out, lat=True, raise_exception=False)
+            lon_key = get_coord_key(ds_out, lon=True, raise_exception=False)
+
         if lat_key is not None and (
             (force_decending_y and ds_out[lat_key].data[0] < ds_out[lat_key].data[-1])
             or (
@@ -748,18 +1348,17 @@ def get_dataset_from_path(
         logger.debug(lat_key)
         logger.debug(lon_key)
 
-        if normalize_latlon_coords:
-            ds_out = normalize_lat_lon(
-                ds_out, lat_key=lat_key, lon_key=lon_key, raise_exceptions=False
-            )
-
         if lon_key is None and lat_key is None:
             logger.warning("Dataset does not have lon and lat key.")
         elif lon_key is None or lat_key is None:
             logger.error("Dataset has only one of lon at lat keys.")
 
         if chunking and available_mem_gib is not None:
-            ds_out = chunk_dataset(ds_out, chunk_type, available_mem_gib, var_name)
+            # several variables share one dtype and shape, so sizing the chunks
+            # on the first of them sizes them for each
+            selected = normalize_variable_selection(var_name)
+            chunk_var = selected[0] if selected else None
+            ds_out = chunk_dataset(ds_out, chunk_type, available_mem_gib, chunk_var)
         else:
             for name in list(ds_out.variables):
                 enc = ds_out.variables[name].encoding
@@ -814,7 +1413,12 @@ def get_dataset_from_path(
             with ErrorLogger(logger):
                 msg = "Multi-file loading supports NetCDF files only."
                 raise ValueError(msg)
-        ds_out = read_dataset(file_list, use_mfdataset=use_mfdataset, engine=engine)
+        ds_out = read_dataset(
+            file_list,
+            use_mfdataset=use_mfdataset,
+            engine=engine,
+            variables=normalize_variable_selection(var_name),
+        )
         return _postprocess(ds_out)
 
     path_in = path
@@ -839,7 +1443,12 @@ def get_dataset_from_path(
 
     path_str = str(path_in)
     if any(w in path_str for w in ("*", "?", "[", "]")) and path_str.endswith(".nc"):
-        ds_out = read_dataset(path_str, use_mfdataset=use_mfdataset, engine=engine)
+        ds_out = read_dataset(
+            path_str,
+            use_mfdataset=use_mfdataset,
+            engine=engine,
+            variables=normalize_variable_selection(var_name),
+        )
         return _postprocess(ds_out)
 
     with ErrorLogger(logger):

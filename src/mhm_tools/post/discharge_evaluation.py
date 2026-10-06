@@ -18,27 +18,55 @@ from types import SimpleNamespace
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import seaborn as sns
 import xarray as xr
 from joblib import Parallel, delayed
-from matplotlib import colors as mcolors
 from scipy.spatial import cKDTree
 
-from mhm_tools.common.catchment_maps import write_catchment_median_maps
+from mhm_tools.common.catchment_maps import (
+    calculate_metric_medians,
+    create_catchment_metric_geodataframe,
+    get_metric_variables,
+    plot_catchment_metric_maps,
+)
+from mhm_tools.common.constants import (
+    DEFAULT_DISCHARGE_UNITS,
+    KGE_CONSTANT_MEAN_BOUND,
+    NSE_CONSTANT_MEAN_BOUND,
+    WMO_INDEX_TO_REGION,
+    WMO_REGION_BOUNDS,
+)
 from mhm_tools.common.file_handler import (
     get_dataset_from_path,
     write_xarray_to_file,
 )
 from mhm_tools.common.logger import ErrorLogger, log_arguments, log_errors
 from mhm_tools.common.plotter import (
+    METRIC_LABELS,
+    PERCENT_METRICS,
+    PLOT_DPI,
+    add_map_colorbar,
+    calculate_map_figure_size,
+    create_axis_label,
+    create_comparison_title,
+    create_discrete_colour_norm,
     create_metric_summary_rows,
-    plot_cdf_values,
+    create_summary_text,
+    create_table_text,
+    get_metric_plot_style,
     plot_metric_cdf_comparison,
     plot_metric_violin_comparison,
+    style_map_axes,
     write_metric_plot_overview_pdf,
 )
-from mhm_tools.common.utils import coord_to_index, find_best_gauge_location_by_area
+from mhm_tools.common.units import calculate_conversion_factor
+from mhm_tools.common.utils import (
+    coord_to_index,
+    find_best_gauge_location_by_area,
+    sanitize_name,
+    write_stats_table,
+)
 from mhm_tools.common.xarray_utils import (
+    convert_dataarray_units,
     get_clim_from_ds,
     get_coord_key,
     get_overlapping_time_slice,
@@ -51,6 +79,26 @@ from mhm_tools.post.gridded_data_evaluation import (
 from mhm_tools.post.hydrograph import gen_hydrograph_by_data_sets
 
 logger = logging.getLogger(__name__)
+
+
+def get_region_from_id(gauge_id):
+    """Get the discharge region name from a GRDC-style gauge id.
+
+    Parameters
+    ----------
+    gauge_id : int or str
+        Gauge identifier whose leading digit is a `WMO_INDEX_TO_REGION` region code.
+
+    Returns
+    -------
+    str
+        Region name, or "Unknown" if the id matches no region code.
+    """
+    gauge_id_str = str(gauge_id)
+    for region_id, region_name in WMO_INDEX_TO_REGION.items():
+        if gauge_id_str.startswith(str(region_id)):
+            return region_name
+    return "Unknown"
 
 
 def flatten_list(nested_list):
@@ -827,6 +875,7 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
     gauge_location_method="basinex",
     gauge_max_distance_cells=3,
     gauge_max_error=0.1,
+    compression=None,
 ):
     """Get observed and model Q data and save it as CSV files to be opened later.
 
@@ -1388,7 +1437,7 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
     observed_data = xr.Dataset({"facc": facc_da, "discharge": obs_discharge_data})
     if write_input_data_cache:
         logger.info(f"Saving obs data to {obs_output_file}...")
-        write_xarray_to_file(observed_data, obs_output_file)
+        write_xarray_to_file(observed_data, obs_output_file, compression=compression)
     else:
         logger.info(
             "Skipping saving obs data to file as write_input_data_cache is False."
@@ -1527,7 +1576,7 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
     )
     if write_input_data_cache:
         logger.info(f"Saving sim data to {sim_output_file}...")
-        write_xarray_to_file(sim_data, sim_output_file)
+        write_xarray_to_file(sim_data, sim_output_file, compression=compression)
     else:
         logger.info(
             "Skipping saving sim data to file as write_input_data_cache is False."
@@ -1638,6 +1687,43 @@ def _filter_ids_by_overlapping_years(model_da, observed_da, min_overlapping_year
     return np.asarray(eligible_ids), dropped_ids
 
 
+def convert_discharge_to_observed_units(model_da, observed_da):
+    """Convert the simulated discharge to the unit of the observed discharge.
+
+    A record without a units attribute is taken as ``DEFAULT_DISCHARGE_UNITS``.
+    Both returned records carry their units, which the volume difference of the
+    hydrographs is derived from.
+
+    Args:
+        model_da: Simulated discharge DataArray.
+        observed_da: Observed discharge DataArray.
+
+    Returns
+    -------
+        Tuple of (simulated, observed) DataArrays in the observed unit. Raises
+        ``ValueError`` for an unknown unit or a volume and a depth rate.
+    """
+    units = {}
+    for label, da in (("simulated", model_da), ("observed", observed_da)):
+        units[label] = da.attrs.get("units")
+        if units[label] is None:
+            logger.warning(
+                f"The {label} discharge has no units, assuming {DEFAULT_DISCHARGE_UNITS}."
+            )
+            units[label] = DEFAULT_DISCHARGE_UNITS
+    factor = calculate_conversion_factor(units["simulated"], units["observed"])
+    if not np.isclose(factor, 1.0):
+        logger.info(
+            f"Converting the simulated discharge from {units['simulated']} to "
+            f"{units['observed']} (factor {factor:g})."
+        )
+    model_da = convert_dataarray_units(
+        model_da, units["observed"], from_units=units["simulated"]
+    )
+    observed_da.attrs = {**observed_da.attrs, "units": units["observed"]}
+    return model_da, observed_da
+
+
 @log_arguments()
 def evaludate_discharge_data(  # noqa: PLR0913
     model_data_path,
@@ -1675,6 +1761,7 @@ def evaludate_discharge_data(  # noqa: PLR0913
     mask_var=None,
     catchment_map_variables=None,
     metric_plot_types=None,
+    compression=None,
 ):
     """Compare simulated with observed discharge directly or via bootstrapping.
 
@@ -1684,7 +1771,7 @@ def evaludate_discharge_data(  # noqa: PLR0913
     output_path = Path(output_path)
     stats_output_file = output_path / "results.csv"
     if metric_plot_types is None:
-        metric_plot_types = ["cdf", "violin", "map", "catchment-map"]
+        metric_plot_types = ["cdf", "map", "catchment-map"]
     metric_plot_types = list(metric_plot_types)
     if not only_plot or not stats_output_file.is_file():
         observed_ds, model_ds = Q_data_to_xarray(
@@ -1713,10 +1800,12 @@ def evaludate_discharge_data(  # noqa: PLR0913
             gauge_location_method=gauge_location_method,
             gauge_max_distance_cells=gauge_max_distance_cells,
             gauge_max_error=gauge_max_error,
+            compression=compression,
         )
         logger.info("Procured discharge data")
-        model_da = model_ds["discharge"]
-        observed_da = observed_ds["discharge"]
+        model_da, observed_da = convert_discharge_to_observed_units(
+            model_ds["discharge"], observed_ds["discharge"]
+        )
         logger.debug(f"Model dataarray: {model_da}")
         logger.debug(f"Observed dataarray: {observed_da}")
         logger.info("Starting to calculate metrics")
@@ -1776,7 +1865,7 @@ def evaludate_discharge_data(  # noqa: PLR0913
         )
         if not results:
             logger.info("Using the results from direct comparison.")
-            logger.info(results_direct)
+            logger.debug(results_direct)
             results_df = pd.DataFrame(results_direct)
         else:
             logger.info("Using the results from bootstraping.")
@@ -1785,6 +1874,23 @@ def evaludate_discharge_data(  # noqa: PLR0913
     else:
         logger.info(f"Reading results from {stats_output_file}...")
         results_df = pd.read_csv(stats_output_file, index_col=0)
+    # logging summary of results
+    logger.info(
+        f"In total there are {len(results_df['id'].unique())} catchments of which "
+    )
+    logger.info(
+        f"   {len(results_df.dropna(subset=['alpha'], how='any')['id'].unique())} have all alpha values"
+    )
+    logger.info(
+        f"   {len(results_df.dropna(subset=['beta'], how='any')['id'].unique())} have beta values "
+    )
+    logger.info(
+        f"   {len(results_df.dropna(subset=['gamma'], how='any')['id'].unique())} have all gamma values "
+    )
+    logger.info(
+        f"   {len(results_df.dropna(subset=['alpha', 'beta', 'gamma'], how='any')['id'].unique())} have all values "
+    )
+    log_discharge_region_medians(results_df)
     metric_plot_files = []
     # only plot cdf if more than 5 results to avoid plots without enough data points
     if "cdf" in metric_plot_types and len(results_df) > 5:
@@ -1801,20 +1907,22 @@ def evaludate_discharge_data(  # noqa: PLR0913
     if "violin" in metric_plot_types:
         metric_plot_files.extend(plot_metric_violins(results_df, output_path) or [])
     if "map" in metric_plot_types:
-        metric_plot_files.extend(plot_map(results_df, output_path) or [])
+        years = None
+        if start_date is not None and end_date is not None:
+            years = (pd.Timestamp(start_date).year, pd.Timestamp(end_date).year)
+        metric_plot_files.extend(plot_map(results_df, output_path, years=years) or [])
     if "catchment-map" in metric_plot_types and (
         shape_folder is not None or mask_folder is not None
     ):
         metric_plot_files.extend(
-            write_catchment_median_maps(
-                metric_df=results_df,
-                output_dir=output_path,
+            write_catchment_maps_by_region(
+                results_df,
+                output_path,
                 variables=catchment_map_variables,
                 shape_folder=shape_folder,
                 mask_folder=mask_folder,
                 mask_var=mask_var,
             )
-            or []
         )
     values_by_variable = get_discharge_metric_values_by_variable(
         results_df,
@@ -1836,91 +1944,25 @@ def evaludate_discharge_data(  # noqa: PLR0913
         logger.info(f"Wrote discharge metric overview PDF to {overview_file}.")
 
 
-def plot_kde(results_df, output_path):
-    """Create kde plots of alpha, beta and gamma."""
-    sns.kdeplot(
-        data=results_df,  # The DataFrame with results
-        x="alpha",  # The x-axis is the alpha value
-        hue="id",  # Use column names for coloring
-        palette="tab10",  # Set a color palette
-        fill=True,  # Fill the KDE areas for better visualization
-        alpha=0.6,  # Set transparency
-        common_norm=False,  # Ensure each column has its own normalization
-    )
-    sns.kdeplot(
-        data=results_df,
-        x="alpha",
-        hue="id",
-        palette="tab10",
-        cumulative=True,
-        linestyle="--",
-        common_norm=False,
-    )
-    plt.axvline(x=1, color="black", linestyle="--", linewidth=1)
-    plt.xlim(-0.05, 2)
-    plt.savefig(output_path / "alpha.png")
-    plt.close()
-
-    sns.kdeplot(
-        data=results_df,  # The DataFrame with results
-        x="beta",  # The x-axis is the alpha value
-        hue="id",  # Use column names for coloring
-        palette="tab10",  # Set a color palette
-        fill=True,  # Fill the KDE areas for better visualization
-        alpha=0.6,  # Set transparency
-        common_norm=False,  # Ensure each column has its own normalization
-    )
-    sns.kdeplot(
-        data=results_df,
-        x="beta",
-        hue="id",
-        palette="tab10",
-        cumulative=True,
-        linestyle="--",
-        common_norm=False,
-    )
-    plt.axvline(x=1, color="black", linestyle="--", linewidth=1)
-    plt.xlim(-0.05, 2)
-    plt.savefig(output_path / "beta.png")
-    plt.close()
-
-    sns.kdeplot(
-        data=results_df,  # The DataFrame with results
-        x="gamma",  # The x-axis is the alpha value
-        hue="id",  # Use column names for coloring
-        palette="tab10",  # Set a color palette
-        fill=True,  # Fill the KDE areas for better visualization
-        alpha=0.6,  # Set transparency
-        common_norm=False,  # Ensure each column has its own normalization
-    )
-    sns.kdeplot(
-        data=results_df,
-        x="gamma",
-        hue="id",
-        palette="tab10",
-        cumulative=True,
-        linestyle="--",
-        common_norm=False,
-    )
-    plt.axvline(x=1, color="black", linestyle="--", linewidth=1)
-    plt.xlim(-0.05, 2)
-    plt.savefig(output_path / "gamma.png")
-    plt.close()
-
-
-def plot_map(  # noqa: PLR0915
+@log_errors(raise_exceptions=True)
+def plot_map(
     results_df,
     output_path,
     variables=None,
     lon_col="x",
     lat_col="y",
-    cmap="viridis",
+    cmap=None,
     point_size=6,
-    dpi=200,
+    dpi=PLOT_DPI,
+    input_name="simulated",
+    ref_name="observed discharge",
+    years=None,
 ):
     """Plot gauge maps for each variable using color-coded points.
 
     The map extent is expanded by 10% of the lon/lat range in each direction.
+    Colours and limits follow `get_metric_plot_style` unless `cmap` is given.
+    `input_name`, `ref_name` and `years` (first and last year) form the title.
     """
     try:
         import cartopy.crs as ccrs
@@ -1974,6 +2016,12 @@ def plot_map(  # noqa: PLR0915
     lat_range = max_lat - min_lat
     lon_pad = lon_range * 0.1 if lon_range > 0 else 0.1
     lat_pad = lat_range * 0.1 if lat_range > 0 else 0.1
+    extent = (
+        min_lon - lon_pad,
+        max_lon + lon_pad,
+        min_lat - lat_pad,
+        max_lat + lat_pad,
+    )
 
     size_scale = 1.0
     if len(df) > 200:
@@ -1987,47 +2035,31 @@ def plot_map(  # noqa: PLR0915
             logger.warning(f"Skipping map for {var}: all values are NaN.")
             continue
 
-        # Determine value range and colorbar extension
-        extend = "neither"
-        if var == "kge":
-            logger.info("Setting kge colorbar limits to -0.5 and 1.0")
-            vmin, vmax = -0.5, 1.0
-            if np.nanmin(vals) < vmin:
-                extend = "min"
-        elif var == "nse":
-            logger.info("Setting nse colorbar limits to -0.1 and 1.0")
-            vmin, vmax = -0.1, 1.0
-            if np.nanmin(vals) < vmin:
-                extend = "min"
-        else:
-            logger.info(f"Setting colorbar limits for {var} based on data range.")
-            vmin = np.nanmin(vals)
-            vmax = np.nanmax(vals)
-
-        if np.isfinite(vmin) and np.isfinite(vmax) and vmin == vmax:
-            vmin -= 1.0
-            vmax += 1.0
-
-        fig = plt.figure(figsize=(7, 5))
-        ax = plt.axes(projection=ccrs.PlateCarree())
-        ax.set_extent(
-            [
-                min_lon - lon_pad,
-                max_lon + lon_pad,
-                min_lat - lat_pad,
-                max_lat + lat_pad,
-            ],
-            crs=ccrs.PlateCarree(),
+        style = get_metric_plot_style(var)
+        if cmap is not None:
+            style["cmap"] = cmap
+        bounds_type = "data"
+        label = create_axis_label(var)
+        units = METRIC_LABELS.get(var, (None, None))[1]
+        if var in PERCENT_METRICS:
+            # stored as a fraction, mapped in percent
+            vals = 100 * vals
+            bounds_type = "percent"
+            label = create_axis_label(METRIC_LABELS.get(var, (var, None))[0], "%")
+            units = "%"
+        cmap_obj, norm, bounds, extend, ticks = create_discrete_colour_norm(
+            vals, bounds_type=bounds_type, **style
         )
-        ax.add_feature(cfeature.BORDERS, linewidth=0.6)
-        ax.add_feature(cfeature.COASTLINE, linewidth=0.5)
-        ax.add_feature(cfeature.LAND, facecolor="0.95")
-        ax.add_feature(cfeature.OCEAN, facecolor="0.97")
 
-        cmap_obj = plt.get_cmap(cmap).copy()
-        if extend == "min":
-            cmap_obj.set_under("lightgray")
-        norm = mcolors.Normalize(vmin=vmin, vmax=vmax, clip=False)
+        fig, ax = plt.subplots(
+            figsize=calculate_map_figure_size(extent),
+            subplot_kw={"projection": ccrs.PlateCarree()},
+        )
+        ax.set_extent(extent, crs=ccrs.PlateCarree())
+        ax.add_feature(cfeature.BORDERS, linewidth=0.3)
+        ax.add_feature(cfeature.COASTLINE, linewidth=0.5)
+        ax.add_feature(cfeature.LAND, facecolor="0.97")
+        ax.add_feature(cfeature.OCEAN, facecolor="0.85")
         sc = ax.scatter(
             lons,
             lats,
@@ -2040,24 +2072,92 @@ def plot_map(  # noqa: PLR0915
             linewidth=0.25,
             transform=ccrs.PlateCarree(),
         )
-        cb = plt.colorbar(
-            sc,
-            ax=ax,
-            orientation="vertical",
-            shrink=0.8,
-            extend=extend,
+        add_map_colorbar(fig, ax, sc, bounds, extend, ticks, label)
+        style_map_axes(ax)
+        fig.suptitle(
+            create_comparison_title(input_name, ref_name, years),
+            fontweight="normal",
+            fontsize="x-large",
         )
-        cb.set_label(var)
-        ax.set_title(f"{var} by gauge")
+        summary = create_summary_text(vals, units=units, bounds=bounds)
+        ax.set_title(f"{var} by gauge ({summary})")
         fig.tight_layout()
         output_file = output_path / f"map_{var}.png"
         fig.savefig(output_file, dpi=dpi)
         plt.close(fig)
         output_files.append(output_file)
+        logger.info(f"Wrote gauge map to {output_file}")
     return output_files
 
 
-def _get_discharge_cdf_x_limits(variable, values):
+def write_catchment_maps_by_region(
+    results_df,
+    output_path,
+    variables=None,
+    shape_folder=None,
+    mask_folder=None,
+    mask_var=None,
+):
+    """Write the catchment maps of all gauges and again per WMO region.
+
+    The catchment geometries are matched once and reused for every region. A
+    gauge belongs to the region its id starts with, and a region map is framed
+    by the region's bounds.
+
+    Args:
+        results_df: Discharge metric rows with an ``id`` column.
+        output_path: Directory the PNG files are written to.
+        variables: Metric columns to map, None for every metric.
+        shape_folder: Folder with shapefiles matched by gauge id.
+        mask_folder: Folder with NetCDF masks matched by gauge id.
+        mask_var: Mask variable name.
+
+    Returns
+    -------
+        List of the written PNG files.
+    """
+    # repeated bootstrap rows of a gauge are reduced to their median
+    metric_rows = calculate_metric_medians(results_df, variables=variables)
+    if metric_rows.empty:
+        logger.warning("No metric rows available for catchment maps.")
+        return []
+    metric_gdf = create_catchment_metric_geodataframe(
+        metric_rows=metric_rows,
+        shape_folder=shape_folder,
+        mask_folder=mask_folder,
+        mask_var=mask_var,
+    )
+    if metric_gdf.empty:
+        logger.warning("No catchment geometries available for catchment maps.")
+        return []
+    variables = get_metric_variables(metric_gdf, variables=variables)
+    output_files = plot_catchment_metric_maps(
+        metric_gdf=metric_gdf, variables=variables, output_dir=output_path
+    )
+    gauge_regions = metric_gdf["id"].apply(get_region_from_id)
+    for region_name, bounds in WMO_REGION_BOUNDS.items():
+        region_gdf = metric_gdf[gauge_regions == region_name]
+        if region_gdf.empty:
+            continue
+        output_files.extend(
+            plot_catchment_metric_maps(
+                metric_gdf=region_gdf,
+                variables=variables,
+                output_dir=output_path,
+                output_prefix=f"catchment_map_region_{sanitize_name(region_name)}",
+                title_context=region_name,
+                extent=(
+                    bounds["lon_slice"].start,
+                    bounds["lon_slice"].stop,
+                    bounds["lat_slice"].start,
+                    bounds["lat_slice"].stop,
+                ),
+            )
+        )
+    return output_files
+
+
+def get_discharge_cdf_x_limits(variable, values):
     """Get discharge CDF x-axis limits.
 
     Parameters
@@ -2072,8 +2172,10 @@ def _get_discharge_cdf_x_limits(variable, values):
     tuple[float, float]
         Lower and upper x-axis limits.
     """
-    if variable in ["kge", "nse"]:
-        return -0.5, 1.0
+    if variable == "kge":
+        return KGE_CONSTANT_MEAN_BOUND, 1.0
+    if variable == "nse":
+        return NSE_CONSTANT_MEAN_BOUND, 1.0
     values = np.asarray(values, dtype=float)
     xmin = values.min() if values.min() > -2 else np.quantile(values, 0.05)
     xmax = values.max() if values.max() < 3 else np.quantile(values, 0.95)
@@ -2183,8 +2285,8 @@ def _get_hydrograph_sort_key(hydrograph_file):
         return 1, gauge_id
 
 
-@log_errors()
-def plot_metric_violins(df, output_path, variables=None, dpi=450):
+@log_errors(raise_exceptions=True)
+def plot_metric_violins(df, output_path, variables=None, dpi=PLOT_DPI):
     """Create violin plots for finite discharge metric rows.
 
     Parameters
@@ -2228,37 +2330,106 @@ def plot_metric_violins(df, output_path, variables=None, dpi=450):
     return output_files
 
 
-@log_errors()
+def log_discharge_region_medians(results_df):
+    """Log the median of every metric per WMO region as an aligned table.
+
+    Args:
+        results_df: Discharge metric rows with an ``id`` column, whose leading
+            digit is the WMO region.
+    """
+    metrics = [
+        metric
+        for metric in ("kge", "nse", "alpha", "beta", "gamma", "diff", "rel_diff")
+        if metric in results_df.columns
+    ]
+    metric_df = results_df[["id", *metrics]].copy()
+    metric_df[metrics] = (
+        metric_df[metrics]
+        .apply(pd.to_numeric, errors="coerce")
+        .replace([np.inf, -np.inf], np.nan)
+    )
+    metric_df["region"] = metric_df["id"].apply(get_region_from_id)
+    region_groups = [
+        ("Global", metric_df),
+        *(
+            (region_name, metric_df[metric_df["region"] == region_name])
+            for region_name in (*WMO_INDEX_TO_REGION.values(), "Unknown")
+        ),
+    ]
+    summary_rows = []
+    for region_name, region_df in region_groups:
+        if region_df.empty:
+            continue
+        summary_row = {"region": region_name, "gauges": region_df["id"].nunique()}
+        summary_row.update(region_df[metrics].median().to_dict())
+        summary_rows.append(summary_row)
+    write_stats_table(
+        pd.DataFrame(summary_rows, columns=["region", "gauges", *metrics]),
+        title=(
+            "Median discharge metrics per WMO region (gauges = number of "
+            "gauges, NaN and inf values are left out)"
+        ),
+    )
+
+
+def log_discharge_results_preview(results_df, row_count=5):
+    """Log the first rows of the discharge results table as an aligned table.
+
+    Args:
+        results_df: Discharge metric rows with an ``id`` column.
+        row_count: Number of rows to show.
+    """
+    columns = [
+        column
+        for column in (
+            "id",
+            "region",
+            "x",
+            "y",
+            "kge",
+            "nse",
+            "alpha",
+            "beta",
+            "gamma",
+            "diff",
+            "rel_diff",
+        )
+        if column == "region" or column in results_df.columns
+    ]
+    preview_rows = []
+    for row in results_df.head(row_count).to_dict("records"):
+        preview_row = {column: _as_scalar_or_nan(row.get(column)) for column in columns}
+        # ids are stored as floats, their leading digit is the WMO region
+        gauge_id = pd.to_numeric(preview_row["id"], errors="coerce")
+        if pd.notna(gauge_id):
+            preview_row["id"] = int(gauge_id)
+            preview_row["region"] = get_region_from_id(preview_row["id"])
+        for coord in ("x", "y"):
+            if coord in preview_row:
+                preview_row[coord] = float(
+                    pd.to_numeric(preview_row[coord], errors="coerce")
+                )
+        preview_rows.append(preview_row)
+    logger.debug(
+        f"First {len(preview_rows)} of {len(results_df)} rows of the discharge "
+        "results table (one row per gauge, or per bootstrap sample):\n"
+        f"{create_table_text(preview_rows, columns)}\n"
+        "diff = volume of sim - obs over the compared time steps [m³], "
+        "rel_diff = (sum(sim) - sum(obs)) / sum(obs) [-]"
+    )
+
+
+@log_errors(raise_exceptions=True)
 def plot_cdf(df, output_path, boostrap_iterations=None):
     """Create CDF plots for alpha, beta, gamma, KGE, and NSE.
 
-    The plots are generated for global values, global values colored by region,
-    and per-region values.
+    The plots are generated for global values and with one CDF per WMO region.
     """
-    logger.info(f"In total there are {len(df['id'].unique())} catchments of which ")
-    logger.info(
-        f"   {len(df.dropna(subset=['alpha'], how='any')['id'].unique())} have all alpha values"
-    )
-    logger.info(
-        f"   {len(df.dropna(subset=['beta'], how='any')['id'].unique())} have beta values "
-    )
-    logger.info(
-        f"   {len(df.dropna(subset=['gamma'], how='any')['id'].unique())} have all gamma values "
-    )
-    logger.info(
-        f"   {len(df.dropna(subset=['alpha', 'beta', 'gamma'], how='any')['id'].unique())} have all values "
-    )
-    df = df.dropna(subset=["alpha", "beta", "gamma"], how="any")
-    logger.info(df.head())
+    # NaN values are dropped per variable below, so one missing component does
+    # not remove a gauge from the kge and nse plots
+    if logger.isEnabledFor(logging.DEBUG):
+        log_discharge_results_preview(df)
     variables = ["alpha", "beta", "gamma", "kge", "nse"]
-    regions = {
-        1: "Africa",
-        2: "Asia",
-        3: "South America",
-        4: "North/Central America",
-        5: "SW Pacific",
-        6: "Europe",
-    }
     cb_colors = [
         "#000000",
         "#E69F00",
@@ -2273,53 +2444,34 @@ def plot_cdf(df, output_path, boostrap_iterations=None):
     unique_ids = df["id"].unique()
     logger.info(f"Creating a cdf plot with {len(unique_ids)} stations")
     logger.info("All values")
-    plot_modes = ["global", "global_color_by_region", "regions"]
+    plot_modes = ["global", "regions"]
     region_colors = {
         region: cb_colors[i % len(cb_colors)]
-        for i, region in enumerate(regions.values())
+        for i, region in enumerate(WMO_INDEX_TO_REGION.values())
     }
     output_files = []
 
-    def _region_from_id(gauge_id):
-        """Get the discharge region name from a gauge id.
-
-        Parameters
-        ----------
-        gauge_id : int or str
-            Gauge identifier with the region prefix.
-
-        Returns
-        -------
-        str
-            Region name.
-        """
-        gauge_id_str = str(gauge_id)
-        for region_id, region_name in regions.items():
-            if gauge_id_str.startswith(str(region_id)):
-                return region_name
-        return "Unknown"
-
     for plot in plot_modes:
         for var in variables:
-            var_df = df[["id", var]].dropna(subset=[var]).copy()
+            var_df = (
+                df[["id", var]]
+                .replace([np.inf, -np.inf], np.nan)
+                .dropna(subset=[var])
+                .copy()
+            )
             if var_df.empty:
                 logger.warning(f"No valid values for {var}. Skipping {plot} plot.")
                 continue
 
-            var_df["region"] = var_df["id"].apply(_region_from_id)
-            global_sorted = var_df.sort_values(by=var).reset_index(drop=True)
-            values = global_sorted[var].values
-            x_limits = _get_discharge_cdf_x_limits(var, values)
-            title = f"CDF of {var} "
-            if plot == "global_color_by_region":
-                title += " (global, points colored by region)"
-            elif plot == "regions":
+            var_df["region"] = var_df["id"].apply(get_region_from_id)
+            values = np.sort(var_df[var].values)
+            x_limits = get_discharge_cdf_x_limits(var, values)
+            title = f"CDF of {var}"
+            if plot == "regions":
                 title += " (per-region CDFs)"
             if boostrap_iterations is not None and boostrap_iterations > 0:
                 title += f" and {boostrap_iterations} bootstrap iterations"
-            output_file = (
-                output_path / f"cdf_{var}_{plot.strip().lower().replace(' ', '_')}.png"
-            )
+            output_file = output_path / f"cdf_{var}_{plot}.png"
 
             if plot == "global":
                 plot_metric_cdf_comparison(
@@ -2328,15 +2480,12 @@ def plot_cdf(df, output_path, boostrap_iterations=None):
                     output_file=output_file,
                     title=title,
                     x_limits=x_limits,
-                    dpi=450,
+                    dpi=PLOT_DPI,
                     show_median_line=True,
                 )
-                output_files.append(output_file)
-                continue
-
-            if plot == "regions":
+            else:
                 region_values = {}
-                for region_name in regions.values():
+                for region_name in WMO_INDEX_TO_REGION.values():
                     region_df = var_df[var_df["region"] == region_name]
                     if not region_df.empty:
                         region_values[region_name] = region_df[var].values
@@ -2351,55 +2500,10 @@ def plot_cdf(df, output_path, boostrap_iterations=None):
                     output_file=output_file,
                     title=title,
                     x_limits=x_limits,
-                    dpi=450,
+                    dpi=PLOT_DPI,
                     colors=region_colors,
                     show_median_line=False,
                 )
-                output_files.append(output_file)
-                continue
-
-            global_cdf = np.arange(1, len(global_sorted) + 1) / len(global_sorted)
-            global_sorted["cdf"] = global_cdf
-            fig, ax = plt.subplots(figsize=(6, 4))
-            for region_name in regions.values():
-                region_df = global_sorted[global_sorted["region"] == region_name]
-                if region_df.empty:
-                    continue
-                plot_cdf_values(
-                    ax,
-                    region_df[var].values,
-                    label=f"{region_name} (n={len(region_df)})",
-                    color=region_colors[region_name],
-                    cdf_values=region_df["cdf"].values,
-                    draw_line=False,
-                )
-            # Draw the global reference line last so it stays visible on top
-            # of the per-region points instead of being buried under them.
-            plot_cdf_values(
-                ax,
-                values,
-                label="all stations",
-                color="lightgray",
-                cdf_values=global_cdf,
-                draw_points=False,
-            )
-            med = float(np.nanmedian(values))
-            ax.axvline(
-                med,
-                color="red",
-                linestyle="dotted",
-                linewidth=1,
-                label=f"median = {med:.3f}",
-            )
-            ax.set_title(title)
-            ax.set_xlabel(var)
-            ax.set_ylabel("CDF")
-            ax.set_ylim(0.0, 1.01)
-            ax.set_xlim(x_limits[0], x_limits[1])
-            ax.legend()
-            plt.tight_layout()
-            plt.savefig(output_file, dpi=450)
-            plt.close(fig)
             output_files.append(output_file)
 
     logger.info("Done! Check the saved PNG files for your CDF plots.")

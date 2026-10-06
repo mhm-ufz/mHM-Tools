@@ -9,6 +9,7 @@ The mHM-Tools project was created by the following people.
 
 ## Working Group members
 
+- Sanjeev Bashyal (E-mail: <sanjeev.bashyal@ufz.de>)
 - Jeisson Javier Leal Rojas (E-mail: <jeisson-javier.leal-rojas@ufz.de>)
 - Carla Peter (E-mail: <carla.peter@ufz.de>)
 - Matthias Kelbling (E-mail <matthias.kelbling@ufz.de>)

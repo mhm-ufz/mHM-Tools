@@ -1,6 +1,7 @@
 """Common NetCDF/xarray routines and utilities for reading, encoding, and bounds generation."""
 
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, List, Optional, Sequence, Set, Union
 
@@ -34,7 +35,48 @@ RESERVED_FOR_ENCODING = {
     "chunksizes",
     "endian",
     "least_significant_digit",
+    "significant_digits",
+    "quantize_mode",
 }
+QUANTIZE_MODES = ("BitGroom", "GranularBitRound", "BitRound")
+"""Lossy mantissa quantization modes offered by netcdf-c."""
+QUANTIZATION_ENCODING_KEYS = {"significant_digits", "quantize_mode"}
+COMPRESSION_ENCODING_KEYS = {"zlib", "complevel", "shuffle"}
+QUANTIZATION_ATTRS = (
+    "_QuantizeBitGroomNumberOfSignificantDigits",
+    "_QuantizeGranularBitRoundNumberOfSignificantDigits",
+    "_QuantizeBitRoundNumberOfSignificantBits",
+)
+"""Attributes netcdf-c writes to record a variable's quantization.
+
+Xarray reads them as ordinary attributes and writes them back verbatim, which
+is how an input file's quantization reaches an output. They have to be dropped
+whenever this write decides the quantization itself, or the file would end up
+stating two different ones.
+"""
+MIN_COMPLEVEL = 0
+"""Lowest zlib level, which writes the data uncompressed."""
+MAX_COMPLEVEL = 9
+"""Highest zlib level netCDF4 accepts."""
+DEFAULT_COMPLEVEL = 1
+"""zlib level used when neither a caller nor the input file names one.
+
+Used for newly built variables; inherited and explicitly requested levels
+take precedence.
+"""
+NO_QUANTIZATION = 0
+"""`significant_digits` value that turns quantization off.
+
+None means unspecified, so an input file's quantization is kept; this asks for
+full precision explicitly, the way a `complevel` of 0 asks for no zlib.
+"""
+MIN_COORD_COMPRESSION_VALUES = 1024
+"""Values a coordinate needs before compressing it beats the per-chunk cost.
+
+A two dimensional coordinate can be as large as a payload variable, such as the
+800x1000 latitude grid of a latlon file, while a bounds variable holds a handful
+of values and only grows when chunked.
+"""
 COORD_ALLOWED_ENCODING = {"dtype", "_FillValue", "units", "calendar"}
 STALE_COORD_ENCODING_KEYS = {
     "zlib",
@@ -102,10 +144,73 @@ def _fallback_open(
         raise exc
 
 
+def normalize_variable_selection(var_name):
+    """Turn a variable selection into a list of names for `read_dataset`.
+
+    Accepts a single name or a sequence of names, so a caller that needs
+    several variables of one file does not have to read all of them.
+
+    Parameters
+    ----------
+    var_name : str or Sequence[str] or None
+        One variable name, several names, or None for no selection.
+
+    Returns
+    -------
+    list or None
+        The names as a list, or None when nothing was requested.
+    """
+    if var_name is None:
+        return None
+    if isinstance(var_name, str):
+        return [var_name] if var_name else None
+    names = [name for name in var_name if name]
+    return names or None
+
+
+def select_dataset_variables(ds, variables):
+    """Keep only the requested data variables, plus any coordinate bounds.
+
+    A model output file often holds dozens of variables while a tool needs one.
+    Dropping the rest at open time keeps them out of the combine and out of
+    memory.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        Dataset to reduce.
+    variables : Sequence[str] or None
+        Names to keep. None or an empty sequence returns the dataset unchanged.
+
+    Returns
+    -------
+    xr.Dataset
+        The reduced dataset.
+    """
+    if not variables:
+        return ds
+    keep = [name for name in variables if name in ds.data_vars]
+    if not keep:
+        return ds
+    # A file can store its coordinates as data variables instead of coordinates.
+    # They and the bounds are tiny and describe the grid, so dropping them would
+    # leave the dimensions without an index.
+    coord_names = LAT_KEYS + LON_KEYS + TIME_KEYS
+    keep += [
+        name
+        for name in ds.data_vars
+        if name.endswith(("_bnds", "_bounds"))
+        or (name in coord_names and ds[name].ndim == 1)
+    ]
+    return ds[list(dict.fromkeys(keep))]
+
+
 def read_dataset(
     file_path: Union[str, Path, List[Union[str, Path]]],
     use_mfdataset: bool = False,
     engine: str = "netcdf4",
+    decode_coords: str = "coordinates",
+    variables=None,
 ) -> xr.Dataset:
     """
     Load one or more NetCDF files into a single xarray.Dataset.
@@ -131,6 +236,8 @@ def read_dataset(
         `xr.open_dataset` and combine.
     engine : str, default "netcdf4"
         The backend engine to use for opening NetCDF files.
+    decode_coords : str, default "coordinates"
+        Coordinate decoding mode passed to xarray.
 
     Returns
     -------
@@ -185,7 +292,17 @@ def read_dataset(
         logger.debug(f"{len(paths)} files to open; use_mfdataset={use_mfdataset}")
         if use_mfdataset:
             try:
-                ds = _fallback_open(xr.open_mfdataset, paths=paths, engine=engine)
+                ds = _fallback_open(
+                    xr.open_mfdataset,
+                    paths=paths,
+                    engine=engine,
+                    decode_coords=decode_coords,
+                    preprocess=(
+                        None
+                        if not variables
+                        else lambda part: select_dataset_variables(part, variables)
+                    ),
+                )
             except Exception as exc:
                 logger.error(f"open_mfdataset failed on {paths!r}: {exc}")
                 raise
@@ -195,12 +312,15 @@ def read_dataset(
             logger.debug(f"Opening (single) {p}")
             try:
                 ds_tmp = _fallback_open(
-                    xr.open_dataset, filename_or_obj=p, engine=engine
+                    xr.open_dataset,
+                    filename_or_obj=p,
+                    engine=engine,
+                    decode_coords=decode_coords,
                 )
             except Exception as exc:
                 logger.error(f"Failed opening {p}: {exc}")
                 raise
-            arrays.append(ds_tmp)
+            arrays.append(select_dataset_variables(ds_tmp, variables))
         try:
             return xr.combine_by_coords(
                 arrays,
@@ -215,11 +335,16 @@ def read_dataset(
     single = paths[0]
     logger.debug(f"Reading single NetCDF file: {single}")
     try:
-        ds = _fallback_open(xr.open_dataset, filename_or_obj=single, engine=engine)
+        ds = _fallback_open(
+            xr.open_dataset,
+            filename_or_obj=single,
+            engine=engine,
+            decode_coords=decode_coords,
+        )
     except Exception as exc:
         logger.error(f"Failed opening {single}: {exc}")
         raise
-    return ds
+    return select_dataset_variables(ds, variables)
 
 
 def set_netcdf_encoding(
@@ -270,6 +395,8 @@ def _ensure_bounds_exist(ds: xr.Dataset, bounds_dim: str = "bnds") -> None:
     skipped: List[str] = []
     for coord in ds.coords:
         da = ds[coord]
+        if coord == bounds_dim:
+            continue
         # only handle 1D coordinates with at least two points
         if da.ndim != 1 or da.sizes[da.dims[0]] < 2:
             skipped.append(coord)
@@ -308,6 +435,227 @@ def _ensure_bounds_exist(ds: xr.Dataset, bounds_dim: str = "bnds") -> None:
         )
 
 
+def is_coordinate_like_variable(ds: xr.Dataset, name: str) -> bool:
+    """Return whether a data variable carries coordinates rather than payload.
+
+    Some outputs store positions as data variables, such as the gauge `x` and
+    `y` of a discharge evaluation, so a check against `ds.coords` alone would
+    miss them.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        Dataset holding the variable.
+    name : str
+        Variable name to classify.
+
+    Returns
+    -------
+    bool
+        True when the variable names or declares itself a horizontal
+        coordinate, or is referenced as bounds or a grid mapping.
+    """
+    if name in ds.coords or name in get_netcdf_metadata_data_vars(ds):
+        return True
+    if name in LAT_KEYS or name in LON_KEYS:
+        return True
+    attrs = ds[name].attrs
+    standard_name = str(attrs.get("standard_name", "")).lower()
+    if standard_name in {
+        "latitude",
+        "longitude",
+        "projection_x_coordinate",
+        "projection_y_coordinate",
+    }:
+        return True
+    return str(attrs.get("units", "")).lower() in {"degrees_north", "degrees_east"}
+
+
+def create_quantization_encoding(
+    ds: xr.Dataset,
+    data_vars: Sequence[str],
+    significant_digits: Optional[int] = None,
+    quantize_mode: str = "BitGroom",
+) -> dict:
+    """Create the lossy quantization encoding for floating point data variables.
+
+    Quantization zeroes the insignificant mantissa bits so the lossless
+    compressor that follows has less entropy to encode. Integer variables are
+    skipped, because netcdf-c raises on them, and so is anything holding
+    coordinates, because shifting a position is not an acceptable loss.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        Dataset that is about to be written.
+    data_vars : Sequence[str]
+        Data variables considered for quantization.
+    significant_digits : int, optional
+        Precision to keep. Decimal digits for "BitGroom" and
+        "GranularBitRound", but significant *bits* for "BitRound". ``None``
+        disables quantization.
+    quantize_mode : str, default "BitGroom"
+        One of `QUANTIZE_MODES`.
+
+    Returns
+    -------
+    dict
+        Per-variable encoding, empty when quantization is disabled or no
+        floating point variable qualifies.
+    """
+    if significant_digits is None or int(significant_digits) == NO_QUANTIZATION:
+        return {}
+    if quantize_mode not in QUANTIZE_MODES:
+        msg = (
+            f"Unknown quantize_mode {quantize_mode!r}. "
+            f"Use one of {', '.join(QUANTIZE_MODES)}."
+        )
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    if int(significant_digits) < NO_QUANTIZATION:
+        msg = f"significant_digits cannot be negative but is {significant_digits}."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+
+    encoding = {}
+    skipped_coords = []
+    for name in data_vars:
+        if name not in ds.data_vars:
+            continue
+        if not np.issubdtype(np.dtype(ds[name].dtype), np.floating):
+            continue
+        if is_coordinate_like_variable(ds, name):
+            skipped_coords.append(name)
+            continue
+        encoding[name] = {
+            "significant_digits": int(significant_digits),
+            "quantize_mode": quantize_mode,
+        }
+    if skipped_coords:
+        logger.info(f"Not quantizing {sorted(skipped_coords)}, they hold coordinates.")
+    if encoding:
+        logger.info(
+            f"Quantizing {sorted(encoding)} with {quantize_mode} "
+            f"to {int(significant_digits)} significant digits."
+        )
+    else:
+        logger.debug("No floating point data variable to quantize.")
+    return encoding
+
+
+@dataclass
+class NetcdfCompression:
+    """Lossless and lossy compression settings for one NetCDF write.
+
+    Attributes
+    ----------
+    complevel : int, optional
+        zlib compression level, 0 to 9, `DEFAULT_COMPLEVEL` by default. 0 writes
+        the data uncompressed. None inherits the input level.
+    shuffle : bool, default True
+        Apply the HDF5 shuffle filter. None inherits the input setting.
+    significant_digits : int, optional
+        Lossy quantization precision for floating point variables. Decimal
+        digits for "BitGroom" and "GranularBitRound", but significant *bits*
+        for "BitRound". ``None`` keeps the quantization of an input file, and
+        `NO_QUANTIZATION` writes the full precision explicitly.
+    quantize_mode : str, default "BitGroom"
+        Quantization mode, one of `QUANTIZE_MODES`.
+    """
+
+    complevel: Optional[int] = DEFAULT_COMPLEVEL
+    shuffle: Optional[bool] = True
+    significant_digits: Optional[int] = None
+    quantize_mode: str = "BitGroom"
+
+    def __post_init__(self):
+        """Validate the settings so a bad value fails before any data is read."""
+        if self.complevel is not None:
+            self.complevel = int(self.complevel)
+        if self.complevel is not None and not (
+            MIN_COMPLEVEL <= self.complevel <= MAX_COMPLEVEL
+        ):
+            msg = (
+                f"complevel must be between {MIN_COMPLEVEL} and {MAX_COMPLEVEL} "
+                f"but is {self.complevel}."
+            )
+            with ErrorLogger(logger):
+                raise ValueError(msg)
+        if self.quantize_mode not in QUANTIZE_MODES:
+            msg = (
+                f"Unknown quantize_mode {self.quantize_mode!r}. "
+                f"Use one of {', '.join(QUANTIZE_MODES)}."
+            )
+            with ErrorLogger(logger):
+                raise ValueError(msg)
+        if self.significant_digits is not None:
+            self.significant_digits = int(self.significant_digits)
+            if self.significant_digits < NO_QUANTIZATION:
+                msg = (
+                    "significant_digits cannot be negative but is "
+                    f"{self.significant_digits}."
+                )
+                with ErrorLogger(logger):
+                    raise ValueError(msg)
+
+    def get_lossless_encoding(self, source_encoding=None) -> dict:
+        """Return zlib settings, inheriting omitted fields from source_encoding."""
+        source_encoding = source_encoding or {}
+        complevel = self.complevel
+        if complevel is None:
+            complevel = (
+                0
+                if "zlib" in source_encoding and not source_encoding["zlib"]
+                else source_encoding.get("complevel", DEFAULT_COMPLEVEL)
+            )
+        shuffle = (
+            source_encoding.get("shuffle", True)
+            if self.shuffle is None
+            else self.shuffle
+        )
+        return {"zlib": complevel > 0, "complevel": complevel, "shuffle": shuffle}
+
+    def create_variable_encoding(
+        self, ds: xr.Dataset, data_vars: Sequence[str]
+    ) -> dict:
+        """Create the per-variable encoding these settings imply.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            Dataset that is about to be written.
+        data_vars : Sequence[str]
+            Data variables the encoding is built for.
+
+        Returns
+        -------
+        dict
+            Per-variable encoding holding the lossless keys for every variable
+            and the quantization keys for the floating point ones.
+        """
+        encoding = {}
+        for name in data_vars:
+            source_encoding = {**ds[name].encoding, **ds[name].attrs}
+            settings = self.get_lossless_encoding(source_encoding)
+            significant_digits = self.significant_digits
+            quantize_mode = self.quantize_mode
+            if significant_digits is None:
+                significant_digits = source_encoding.get("significant_digits")
+                quantize_mode = source_encoding.get("quantize_mode", quantize_mode)
+                for attr, mode in zip(QUANTIZATION_ATTRS, QUANTIZE_MODES):
+                    if attr in ds[name].attrs:
+                        significant_digits = int(ds[name].attrs[attr])
+                        quantize_mode = mode
+                        break
+            settings.update(
+                create_quantization_encoding(
+                    ds, [name], significant_digits, quantize_mode
+                ).get(name, {})
+            )
+            encoding[name] = settings
+        return encoding
+
+
 def sanitize_nc_encoding(ds: "xr.Dataset", encoding: dict) -> dict:  # noqa: PLR0912
     """Return a safe encoding dict and clean ds attrs so netCDF4 won't error."""
     enc_out = {}
@@ -318,9 +666,17 @@ def sanitize_nc_encoding(ds: "xr.Dataset", encoding: dict) -> dict:  # noqa: PLR
         dtype = np.dtype(da.dtype)
         e = dict(encoding[name])  # shallow copy
 
-        # Always keep compression settings
+        # Always keep compression settings. Quantization survives only on a
+        # floating point variable, because netcdf-c raises on any other dtype.
+        allowed_keys = {"zlib", "complevel", "shuffle", "_FillValue"}
+        if np.issubdtype(dtype, np.floating):
+            allowed_keys = allowed_keys | QUANTIZATION_ENCODING_KEYS
+        elif QUANTIZATION_ENCODING_KEYS & set(e):
+            logger.debug(
+                f"Dropping quantization for '{name}', it is {dtype} and not floating point."
+            )
         for k in list(e.keys()):
-            if k not in {"zlib", "complevel", "shuffle", "_FillValue"}:
+            if k not in allowed_keys:
                 # 'missing_value' and any other stray keys should not live in 'encoding'
                 e.pop(k, None)
 
@@ -421,9 +777,14 @@ def get_netcdf_metadata_data_vars(dataset: xr.Dataset) -> Set[str]:
         if bounds in dataset:
             metadata_vars.add(bounds)
     for var in dataset.data_vars.values():
-        grid_mapping = var.attrs.get("grid_mapping")
+        grid_mapping = var.attrs.get("grid_mapping") or var.encoding.get("grid_mapping")
         if grid_mapping in dataset:
             metadata_vars.add(grid_mapping)
+    for name, var in dataset.data_vars.items():
+        if var.ndim == 0 and any(
+            key in var.attrs for key in ("grid_mapping_name", "spatial_ref", "crs_wkt")
+        ):
+            metadata_vars.add(name)
     return metadata_vars
 
 
@@ -452,6 +813,7 @@ def apply_cf_baseline_metadata(ds: xr.Dataset, data_vars: Sequence[str]) -> None
     lat_key = _get_axis_coord_key(ds, axis="Y", candidate_names=LAT_KEYS)
     lon_key = _get_axis_coord_key(ds, axis="X", candidate_names=LON_KEYS)
     time_key = _get_time_coord_key(ds)
+    projected = _has_projected_crs(ds)
 
     if lat_key is None:
         logger.warning(
@@ -464,8 +826,12 @@ def apply_cf_baseline_metadata(ds: xr.Dataset, data_vars: Sequence[str]) -> None
                 f"using inferred coordinate {lat_key!r}."
             )
         lat = ds[lat_key]
-        lat.attrs.setdefault("standard_name", "latitude")
-        lat.attrs.setdefault("units", "degrees_north")
+        lat.attrs.setdefault(
+            "standard_name",
+            "projection_y_coordinate" if projected else "latitude",
+        )
+        if not projected:
+            lat.attrs.setdefault("units", "degrees_north")
         lat.attrs.setdefault("axis", "Y")
 
     if lon_key is None:
@@ -479,8 +845,12 @@ def apply_cf_baseline_metadata(ds: xr.Dataset, data_vars: Sequence[str]) -> None
                 f"using inferred coordinate {lon_key!r}."
             )
         lon = ds[lon_key]
-        lon.attrs.setdefault("standard_name", "longitude")
-        lon.attrs.setdefault("units", "degrees_east")
+        lon.attrs.setdefault(
+            "standard_name",
+            "projection_x_coordinate" if projected else "longitude",
+        )
+        if not projected:
+            lon.attrs.setdefault("units", "degrees_east")
         lon.attrs.setdefault("axis", "X")
 
     if time_key is None:
@@ -592,6 +962,7 @@ def prepare_dataset_for_netcdf_write(
     ds: xr.Dataset,
     data_vars: Sequence[str],
     encoding: Optional[dict] = None,
+    compression: Optional["NetcdfCompression"] = None,
 ) -> tuple:
     """Return a cleaned dataset and encoding for NetCDF output.
 
@@ -603,6 +974,9 @@ def prepare_dataset_for_netcdf_write(
         Payload data variables that should receive data encoding.
     encoding : dict, optional
         Initial per-variable encoding.
+    compression : NetcdfCompression, optional
+        Settings applied to the multi-dimensional coordinates. None leaves
+        every coordinate uncompressed.
 
     Returns
     -------
@@ -634,32 +1008,56 @@ def prepare_dataset_for_netcdf_write(
     logger.info(f"Using encoding: {safe_encoding}")
     set_netcdf_encoding(ds_clean, safe_encoding)
     ds_clean = prepare_time_bounds_encoding(ds_clean, strip_time_attrs=True)
-    sanitize_coordinate_encoding(ds_clean)
+    sanitize_coordinate_encoding(ds_clean, compression)
     return ds_clean, safe_encoding
 
 
-def sanitize_coordinate_encoding(ds: xr.Dataset) -> None:
+def sanitize_coordinate_encoding(
+    ds: xr.Dataset, compression: Optional["NetcdfCompression"] = None
+) -> None:
     """Remove stale backend encoding from coordinates and metadata variables.
+
+    A multi-dimensional coordinate can hold as much data as a payload variable,
+    so a large one is compressed with the requested settings. Axes and bounds
+    below `MIN_COORD_COMPRESSION_VALUES` stay uncompressed, because chunking
+    them costs more than it saves. Inherited compression is dropped either way,
+    so the source file's level never carries over.
 
     Parameters
     ----------
     ds : xr.Dataset
         Dataset to update in place.
+    compression : NetcdfCompression, optional
+        Settings applied to the large coordinates. None leaves every
+        coordinate uncompressed.
 
     Returns
     -------
     None
     """
+    lossless = compression.get_lossless_encoding() if compression is not None else {}
+
+    def _compress(name):
+        return (
+            bool(lossless)
+            and ds[name].ndim > 1
+            and ds[name].size >= MIN_COORD_COMPRESSION_VALUES
+        )
+
     for coord in ds.coords:
         enc = _safe_coordinate_encoding(ds[coord].encoding)
         if coord in ds.dims:
             enc["_FillValue"] = None
+        if _compress(coord):
+            enc.update(lossless)
         ds[coord].encoding = enc
     for name in get_netcdf_metadata_data_vars(ds):
         if name not in ds or name in ds.coords:
             continue
         enc = _safe_coordinate_encoding(ds[name].encoding)
         enc["_FillValue"] = None
+        if _compress(name):
+            enc.update(lossless)
         ds[name].encoding = enc
         ds[name].attrs.pop("_FillValue", None)
         ds[name].attrs.pop("missing_value", None)
@@ -764,6 +1162,18 @@ def _get_axis_coord_key(
     return None
 
 
+def _has_projected_crs(ds: xr.Dataset) -> bool:
+    """Return whether rioxarray can resolve a projected dataset CRS."""
+    try:
+        import rioxarray as rxr
+
+        _ = rxr  # register the ``rio`` accessor
+        crs = ds.rio.crs
+    except Exception:
+        return False
+    return bool(crs and crs.is_projected)
+
+
 def _get_time_coord_key(ds: xr.Dataset) -> Optional[str]:
     """Return the time coordinate key without importing xarray_utils."""
     return _get_axis_coord_key(ds, axis="T", candidate_names=TIME_KEYS)
@@ -828,11 +1238,6 @@ def _normalize_data_vars_for_netcdf(
             ds[name] = data_array.astype("uint8")
             encoding.pop(name, None)
             continue
-        if np.issubdtype(dtype, np.integer):
-            has_nan = bool(np.any(np.isnan(data_array.values)))
-            if has_nan:
-                fill_value = data_array.attrs.get("_FillValue", NO_DATA)
-                ds[name] = data_array.fillna(fill_value).astype(dtype)
 
 
 def _safe_coordinate_encoding(encoding: dict) -> dict:

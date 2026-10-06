@@ -10,6 +10,11 @@ import logging
 import shlex
 from pathlib import Path
 
+from mhm_tools.common.cli_utils import (
+    add_netcdf_compression_args,
+    get_netcdf_compression,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -28,16 +33,10 @@ def _parse_fill_nearest_files(value):
 
 
 def _split_values(value):
-    """Flatten repeated and quoted whitespace-separated CLI values."""
-    if value is None:
-        return []
-    values = value if isinstance(value, (list, tuple)) else [value]
-    parsed = []
-    for item in values:
-        if item is None:
-            continue
-        parsed.extend(str(item).split())
-    return parsed
+    """Flatten repeated, quoted and comma-separated CLI values into a list."""
+    from mhm_tools.common.cli_utils import normalize_cli_sequence
+
+    return normalize_cli_sequence(value) or []
 
 
 def add_args(parser):
@@ -106,8 +105,10 @@ def add_args(parser):
         ),
     )
     optional.add_argument(
+        "--ncpus",
         "--n-cpus",
         "--n_cpus",
+        dest="n_cpus",
         required=False,
         default=1,
         type=int,
@@ -311,6 +312,7 @@ def add_args(parser):
             "when tiles are freshly created, since their mask is always written."
         ),
     )
+    add_netcdf_compression_args(parser)
 
 
 def _as_list(value):
@@ -432,6 +434,7 @@ def run(args):
             skip_mhm_run=args.skip_mhm_run,
             recreate_restart=args.recreate_restart,
             update_tile_masks=args.update_tile_masks,
+            compression=get_netcdf_compression(args),
         )
         results.append(result)
         all_restart_files.extend(result["restart_files"])
@@ -452,6 +455,7 @@ def run(args):
             output_file=final_restart_file,
             mask_ds=mask_datasets,
             mask_var=args.mask_var,
+            compression=get_netcdf_compression(args),
         )
 
     return results[0] if len(results) == 1 else results

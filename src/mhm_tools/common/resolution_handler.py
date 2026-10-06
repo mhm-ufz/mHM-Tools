@@ -7,6 +7,7 @@ import numpy as np
 
 from mhm_tools.common.file_handler import get_coord_values, get_xarray_ds_from_file
 from mhm_tools.common.logger import ErrorLogger
+from mhm_tools.common.xarray_utils import get_coord_key
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +55,7 @@ class Resolution:
             if self.l2_file.suffix == ".nc":
                 with get_xarray_ds_from_file(self.l2_file) as ds:
                     lon = get_coord_values(ds, lon=True)
-                    file_res = round(abs(lon[1] - lon[0]), 9)
+                    file_res = round(calculate_coordinate_resolution(lon), 9)
                     if self.l2 is not None and abs(file_res - self.l2) > 1e-6:
                         msg = f"Provided l2_resolution {self.l2} differs from resolution derived from file {file_res}. Either provide the correct l2_resolution or remove it to use the resolution derived from the file."
                         if raise_on_missmatch:
@@ -142,23 +143,71 @@ class Resolution:
         return None
 
 
-def get_file_res(lon=None, lat=None, resolutions=None):
-    """Get resolution from coordinates and match it to provided resolutions if close enough."""
+def get_file_res(lon=None, lat=None, resolutions=None, ds=None, raise_exception=True):
+    """Get resolution from coordinates and match it to provided resolutions if close enough.
+
+    Args:
+        lon: Longitude coordinate with at least two values.
+        lat: Latitude coordinate, used if lon holds less than two values.
+        resolutions (Resolution): Resolutions to snap the derived resolution to.
+        ds: Dataset or DataArray to take the coordinates and the
+            "spatial_resolution" attribute from instead of lon and lat.
+        raise_exception (bool): Raise a ValueError if the resolution cannot be
+            determined at all. Returns NaN instead if False. Defaults to True.
+
+    Returns
+    -------
+        The file resolution as positive float, NaN if it cannot be determined
+        and raise_exception is False.
+    """
     if resolutions is None:
         resolutions = Resolution()
-    if lon is not None and len(lon) > 1:
-        file_res = np.diff(lon.data).mean()
-    elif lat is not None and len(lat) > 1:
-        file_res = np.diff(lat.data).mean()
+    attribute_res = None
+    if ds is not None:
+        lon = ds[get_coord_key(ds, lon=True)]
+        lat = ds[get_coord_key(ds, lat=True)]
+        attribute_res = ds.attrs.get("spatial_resolution")
+    coord = lon if lon is not None and len(lon) > 1 else lat
+    if coord is not None and len(coord) > 1:
+        file_res = calculate_coordinate_resolution(coord)
+    elif attribute_res is not None:
+        # nothing to measure against, so the attribute has to be trusted
+        file_res = attribute_res
     elif resolutions.only_one_resolution() is not None:
         file_res = resolutions.only_one_resolution()
         logger.warning(
             "Taken resolution from provided resolutions as ds was to small to derive it."
         )
-    else:
+    elif raise_exception:
         with ErrorLogger(logger):
             error_msg = "Cannot determine file resolution: no valid lon or lat coordinates provided (need len > 1)."
             raise ValueError(error_msg)
+    else:
+        logger.warning(
+            "Cannot determine file resolution from the given coordinates, using NaN."
+        )
+        file_res = float("nan")
+
+    # a resolution is a magnitude; descending coordinates would otherwise
+    # yield a negative diff and break the abs()-based matching below
+    file_res = abs(file_res)
+
+    # a measured resolution wins over the attribute, which is only reported here
+    if attribute_res is not None and abs(file_res - abs(attribute_res)) > 1e-5:
+        logger.warning(
+            f"Spatial resolution attribute {attribute_res} differs from the resolution "
+            f"{file_res} derived from the coordinates. Using the derived resolution."
+        )
+    elif attribute_res is not None:
+        logger.debug(
+            f"Spatial resolution attribute {attribute_res} matches the resolution "
+            f"{file_res} derived from the coordinates."
+        )
+        file_res = abs(attribute_res)
+
+    # a resolution is a magnitude; descending coordinates would otherwise
+    # yield a negative diff and break the abs()-based matching below
+    file_res = abs(file_res)
 
     # a resolution is a magnitude; descending coordinates would otherwise
     # yield a negative diff and break the abs()-based matching below
@@ -189,3 +238,42 @@ def get_file_res(lon=None, lat=None, resolutions=None):
         f"File resolution {file_res} does not match any provided resolution ({resolutions.l0}, {resolutions.l1}, {resolutions.l2}, {resolutions.l11})."
     )
     return file_res
+
+
+def calculate_coordinate_resolution(coord, outlier_rtol=0.5):
+    """Return the spacing of a 1-D coordinate.
+
+    Uses the average step over the whole coordinate, which averages out the
+    rounding noise of the stored values. Falls back to the median step and warns
+    if single steps deviate strongly, e.g. for gaps or a wrapped longitude.
+
+    Args:
+        coord: Coordinate DataArray or array with at least two values.
+        outlier_rtol (float): Relative deviation from the median step above which
+            a step counts as a defect. Defaults to 0.5.
+
+    Returns
+    -------
+        The spacing as positive float.
+    """
+    values = np.asarray(coord, dtype=float)
+    if values.ndim != 1 or values.size < 2:
+        msg = (
+            f"Cannot determine the resolution of a coordinate with shape "
+            f"{values.shape}. Two-dimensional or single-cell grids are not supported."
+        )
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    steps = np.diff(values)
+    median_step = np.nanmedian(steps)
+    # few strongly deviating steps are defects (gaps, wrapped longitudes),
+    # many slightly deviating ones are only rounding noise of the stored values
+    if not np.all(np.isfinite(steps)) or np.any(
+        np.abs(steps - median_step) > outlier_rtol * abs(median_step)
+    ):
+        logger.warning(
+            f"Coordinate is not evenly spaced. Using the median step "
+            f"{abs(median_step)} instead of the average step."
+        )
+        return abs(float(median_step))
+    return abs(float(values[-1] - values[0]) / (values.size - 1))

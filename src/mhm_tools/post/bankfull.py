@@ -72,7 +72,12 @@ def calc_q_bkfl(q_yearly_peak, return_period):
 
 @log_arguments()
 def bankfull_discharge(
-    in_file, out_file, return_period=1.5, wetted_perimeter=False, var="Qrouted"
+    in_file,
+    out_file,
+    return_period=1.5,
+    wetted_perimeter=False,
+    var="Qrouted",
+    compression=None,
 ):
     """Calculate bankfull discharge and perimeter.
 
@@ -99,6 +104,8 @@ def bankfull_discharge(
     var : :class:`str`, optional
         Variable name for routed streamflow in the input NetCDF file,
         by default "Qrouted"
+    compression : :class:`NetcdfCompression`, optional
+        NetCDF compression settings for the output file, by default None
 
     References
     ----------
@@ -140,4 +147,4 @@ def bankfull_discharge(
     set_netcdf_encoding(ds=ds, var_encoding=var_encode)
 
     # save
-    write_xarray_to_file(ds=ds, file_path=out_file)
+    write_xarray_to_file(ds=ds, file_path=out_file, compression=compression)

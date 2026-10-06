@@ -177,22 +177,42 @@ def create_results_csv(
     out_dir,
     out_name="",
     metric="all",
+    log_table=True,
 ):
-    """Calculate the selected metric and create a CSV file."""
+    """Calculate the selected metric and create a CSV file.
+
+    Args:
+        map1: First 3D array with shape ``(time, lat, lon)``.
+        map2: Second 3D array with the same shape.
+        ds1_name: Name of the first dataset.
+        ds2_name: Name of the second dataset.
+        out_dir: Directory the CSV files are written to.
+        out_name: Prefix of the CSV file names.
+        metric: One of `ACCEPTED_RESULT_METRICS`, or "all".
+        log_table: Log the results of every metric as a table.
+
+    Returns
+    -------
+        Dict of the result dict per calculated metric name.
+    """
     norm_metric = normalize_results_metric(metric)
     if isinstance(norm_metric, tuple):
         logger.info("Create csv for all metrics")
+        results = {}
         for nm in norm_metric:
-            create_results_csv(
-                map1=map1,
-                map2=map2,
-                ds1_name=ds1_name,
-                ds2_name=ds2_name,
-                out_dir=out_dir,
-                out_name=out_name,
-                metric=nm,
+            results.update(
+                create_results_csv(
+                    map1=map1,
+                    map2=map2,
+                    ds1_name=ds1_name,
+                    ds2_name=ds2_name,
+                    out_dir=out_dir,
+                    out_name=out_name,
+                    metric=nm,
+                    log_table=log_table,
+                )
             )
-        return
+        return results
     logger.info(f"Calculating metrics for {metric}")
     results_dict = calculate_results_metric(
         map1=map1,
@@ -205,5 +225,7 @@ def create_results_csv(
     metric_name = norm_metric.lower()
     file_name = f"{out_name}_{metric_name}.csv" if out_name else f"{metric_name}.csv"
     create_csv_from_dict(results_dict=results_dict, out_path=out_dir / file_name)
-    df = pd.DataFrame(results_dict, index=[0])
-    pretty_print_df(df, title=norm_metric)
+    if log_table:
+        df = pd.DataFrame(results_dict, index=[0])
+        pretty_print_df(df, title=norm_metric)
+    return {norm_metric: results_dict}

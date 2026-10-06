@@ -13,6 +13,10 @@ Authors
 
 import logging
 
+from mhm_tools.common.cli_utils import (
+    add_netcdf_compression_args,
+    get_netcdf_compression,
+)
 from mhm_tools.common.file_handler import get_xarray_ds_from_file
 from mhm_tools.common.resolution_handler import Resolution
 
@@ -91,13 +95,6 @@ def add_args(parser):
         help=("Number of cores used for parallelisation."),
     )
     optional.add_argument(
-        "--folder-recursion-depth",
-        required=False,
-        default=5,
-        type=int,
-        help=("How deep in the folder structure should the file be searched?"),
-    )
-    optional.add_argument(
         "--lonlatbox",
         required=False,
         default=None,
@@ -121,32 +118,40 @@ def add_args(parser):
         "--lon-min",
         required=False,
         default=None,
-        help=("""minimum longitude of the target grid
-            required unless --mask_file is provided"""),
+        help=(
+            """minimum longitude of the target grid
+            required unless --mask_file is provided"""
+        ),
     )
 
     optional.add_argument(
         "--lon-max",
         required=False,
         default=None,
-        help=("""maximum longitude of the target grid
-            required unless --mask_file is provided"""),
+        help=(
+            """maximum longitude of the target grid
+            required unless --mask_file is provided"""
+        ),
     )
 
     optional.add_argument(
         "--lat-min",
         required=False,
         default=None,
-        help=("""minimum latitude of the target grid
-            required unless --mask_file is provided"""),
+        help=(
+            """minimum latitude of the target grid
+            required unless --mask_file is provided"""
+        ),
     )
 
     optional.add_argument(
         "--lat-max",
         required=False,
         default=None,
-        help=("""maximum latitude of the target grid
-            required unless --mask_file is provided"""),
+        help=(
+            """maximum latitude of the target grid
+            required unless --mask_file is provided"""
+        ),
     )
     flags.add_argument(
         "--create-header",
@@ -193,6 +198,7 @@ def add_args(parser):
         default=None,
         help=("""Suffix added to output file names leading to file type conversion."""),
     )
+    add_netcdf_compression_args(parser)
 
 
 def run(args):
@@ -262,4 +268,5 @@ def run(args):
         lat_order=args.lat_order,
         output_suffix=args.output_suffix,
         mask_all=args.mask_all,
+        compression=get_netcdf_compression(args),
     )

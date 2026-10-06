@@ -309,6 +309,170 @@ def test_plot_metric_violin_comparison_skips_empty_series(tmp_path, monkeypatch)
     assert plotted_values[0].tolist() == [1.0, 2.0]
 
 
+def test_get_lower_axis_limit_floors_extreme_low_values():
+    """Cut off at -1 once the data reaches at or below it."""
+    assert plotter._get_lower_axis_limit([-5.0, 0.2, 0.5]) == -1.0
+    assert plotter._get_lower_axis_limit([-1.0, 0.5]) == -1.0
+
+
+def test_get_lower_axis_limit_pads_slightly_when_min_above_floor():
+    """Use a small pad below the data's own minimum when it never nears -1."""
+    limit = plotter._get_lower_axis_limit([0.2, 0.3, 0.4])
+    assert -1.0 < limit < 0.2
+
+
+def test_plot_metric_violin_comparison_floors_kge_y_axis_at_constant_mean_bound(
+    tmp_path, monkeypatch
+):
+    """Violin plots must cut the KGE y-axis off at -0.41 for extreme low outliers."""
+    fig, ax = plotter.plt.subplots()
+    monkeypatch.setattr(fig, "savefig", lambda output_file, **kwargs: None)
+    monkeypatch.setattr(plotter.plt, "subplots", lambda **kwargs: (fig, ax))
+
+    plotter.plot_metric_violin_comparison(
+        values_by_label={"run1": [-5.0, 0.2, 0.5], "run2": [0.1, 0.3, 0.6]},
+        variable_name="kge",
+        output_file=tmp_path / "violin_kge.png",
+    )
+
+    assert ax.get_ylim()[0] == plotter.KGE_CONSTANT_MEAN_BOUND
+
+
+def test_plot_metric_cdf_comparison_floors_kge_x_axis_at_constant_mean_bound(
+    tmp_path, monkeypatch
+):
+    """CDF plots must cut the KGE x-axis off at -0.41 for extreme low outliers."""
+    fig, ax = plotter.plt.subplots()
+    monkeypatch.setattr(fig, "savefig", lambda output_file, **kwargs: None)
+    monkeypatch.setattr(plotter.plt, "subplots", lambda **kwargs: (fig, ax))
+
+    plotter.plot_metric_cdf_comparison(
+        values_by_label={"run1": [-5.0, 0.2, 0.5], "run2": [0.1, 0.3, 0.6]},
+        variable_name="kge",
+        output_file=tmp_path / "cdf_kge.png",
+    )
+
+    assert ax.get_xlim()[0] == plotter.KGE_CONSTANT_MEAN_BOUND
+
+
+def test_plot_metric_cdf_comparison_respects_explicit_x_limits(tmp_path, monkeypatch):
+    """An explicit x_limits argument must override the -1 default floor."""
+    fig, ax = plotter.plt.subplots()
+    monkeypatch.setattr(fig, "savefig", lambda output_file, **kwargs: None)
+    monkeypatch.setattr(plotter.plt, "subplots", lambda **kwargs: (fig, ax))
+
+    plotter.plot_metric_cdf_comparison(
+        values_by_label={"run1": [-5.0, 0.2, 0.5]},
+        variable_name="kge",
+        output_file=tmp_path / "cdf_kge.png",
+        x_limits=(-0.5, 1.0),
+    )
+
+    assert ax.get_xlim() == (-0.5, 1.0)
+
+
+def test_plot_metric_violin_comparison_respects_explicit_y_limits(
+    tmp_path, monkeypatch
+):
+    """An explicit y_limits argument must override the -1 default floor."""
+    fig, ax = plotter.plt.subplots()
+    monkeypatch.setattr(fig, "savefig", lambda output_file, **kwargs: None)
+    monkeypatch.setattr(plotter.plt, "subplots", lambda **kwargs: (fig, ax))
+
+    plotter.plot_metric_violin_comparison(
+        values_by_label={"run1": [-5.0, 0.2, 0.5]},
+        variable_name="kge",
+        output_file=tmp_path / "violin_kge.png",
+        y_limits=(-0.5, 1.0),
+    )
+
+    assert ax.get_ylim() == (-0.5, 1.0)
+
+
+def test_plot_metric_violin_comparison_excludes_out_of_window_values_from_kde(
+    tmp_path, monkeypatch
+):
+    """An out-of-range outlier must not squash the in-range KDE shape.
+
+    The violin's KDE bandwidth/shape is computed from every value handed to
+    it, so a value far outside y_limits (never actually visible) would still
+    flatten the visible portion if it weren't excluded first.
+    """
+    plotted_values = []
+
+    def fake_violinplot(values, **kwargs):
+        plotted_values.extend(values)
+        return {"bodies": []}
+
+    fig, ax = plotter.plt.subplots()
+    monkeypatch.setattr(ax, "violinplot", fake_violinplot)
+    monkeypatch.setattr(fig, "savefig", lambda output_file, **kwargs: None)
+    monkeypatch.setattr(plotter.plt, "subplots", lambda **kwargs: (fig, ax))
+
+    plotter.plot_metric_violin_comparison(
+        values_by_label={"run1": [0.5, 0.6, 0.7, -50.0]},
+        variable_name="kge",
+        output_file=tmp_path / "violin_kge.png",
+        y_limits=(-0.5, 1.0),
+    )
+
+    assert plotted_values[0].tolist() == [0.5, 0.6, 0.7]
+
+
+def test_plot_metric_violin_comparison_label_keeps_full_stats_despite_window(
+    tmp_path, monkeypatch
+):
+    """n= and median= in the label must reflect all finite values, not just
+    the in-window subset used for the KDE shape."""
+    fig, ax = plotter.plt.subplots()
+    monkeypatch.setattr(ax, "violinplot", lambda values, **kwargs: {"bodies": []})
+    monkeypatch.setattr(fig, "savefig", lambda output_file, **kwargs: None)
+    monkeypatch.setattr(plotter.plt, "subplots", lambda **kwargs: (fig, ax))
+
+    plotter.plot_metric_violin_comparison(
+        values_by_label={"run1": [0.5, 0.6, 0.7, -50.0]},
+        variable_name="kge",
+        output_file=tmp_path / "violin_kge.png",
+        y_limits=(-0.5, 1.0),
+    )
+
+    assert "n=4" in ax.get_xticklabels()[0].get_text()
+
+
+def test_write_metric_plots_applies_axis_limits_to_cdf_and_violin(
+    tmp_path, monkeypatch
+):
+    """axis_limits_by_variable must reach both the CDF x-axis and violin y-axis."""
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    pd.DataFrame({"kge": [-5.0, 0.2, 0.5]}).to_csv(
+        input_dir / "metrics.csv", index=False
+    )
+    cdf_calls, violin_calls = [], []
+    monkeypatch.setattr(
+        metric_plots,
+        "plot_metric_cdf_comparison",
+        lambda **kwargs: cdf_calls.append(kwargs),
+    )
+    monkeypatch.setattr(
+        metric_plots,
+        "plot_metric_violin_comparison",
+        lambda **kwargs: violin_calls.append(kwargs),
+    )
+
+    metric_plots.write_metric_plots(
+        input_paths=[str(input_dir)],
+        input_names=["run1"],
+        variables=["kge"],
+        output_dir=tmp_path / "plots",
+        plot_types=["cdf", "violin"],
+        axis_limits_by_variable={"kge": (-0.5, 1.0)},
+    )
+
+    assert cdf_calls[0]["x_limits"] == (-0.5, 1.0)
+    assert violin_calls[0]["y_limits"] == (-0.5, 1.0)
+
+
 def test_discharge_plot_cdf_delegates_to_shared_plotter(tmp_path, monkeypatch):
     """Use the shared CDF plotter from the discharge CDF wrapper."""
     rows = []
@@ -325,23 +489,16 @@ def test_discharge_plot_cdf_delegates_to_shared_plotter(tmp_path, monkeypatch):
         )
     df = pd.DataFrame(rows)
     comparison_calls = []
-    cdf_value_calls = []
 
     def fake_plot_metric_cdf_comparison(**kwargs):
         """Capture CDF comparison plot arguments."""
         comparison_calls.append(kwargs)
-
-    def fake_plot_cdf_values(*args, **kwargs):
-        """Capture CDF value plot arguments."""
-        cdf_value_calls.append((args, kwargs))
-        return np.asarray(args[1]), np.linspace(0, 1, len(args[1]))
 
     monkeypatch.setattr(
         discharge_evaluation,
         "plot_metric_cdf_comparison",
         fake_plot_metric_cdf_comparison,
     )
-    monkeypatch.setattr(discharge_evaluation, "plot_cdf_values", fake_plot_cdf_values)
     monkeypatch.setattr(
         discharge_evaluation.plt, "savefig", lambda *args, **kwargs: None
     )
@@ -349,7 +506,6 @@ def test_discharge_plot_cdf_delegates_to_shared_plotter(tmp_path, monkeypatch):
     discharge_evaluation.plot_cdf(df, Path(tmp_path))
 
     assert comparison_calls
-    assert cdf_value_calls
     assert tmp_path / "cdf_alpha_global.png" in [
         call["output_file"] for call in comparison_calls
     ]

@@ -187,7 +187,8 @@ def write_grid(file, header, data=None, dtype="f4"):
             raise ValueError(msg)
     is_int = issubclass(np.dtype(dtype).type, (np.integer, np.unsignedinteger))
     if data is not None:
-        data = np.array(data, dtype=dtype, copy=False, ndmin=2)
+        data = np.asarray(data, dtype=dtype)
+        data = np.atleast_2d(data)
         if data.ndim != 2:
             msg = f"write_grid: data needs to be 2D. Got: {data.ndim}D"
             with ErrorLogger(logger):
@@ -204,14 +205,16 @@ def write_grid(file, header, data=None, dtype="f4"):
     header_path = Path(file)
     header_path.parent.mkdir(parents=True, exist_ok=True)
     typ = int if is_int else float
-    header_str = dedent(f"""
+    header_str = dedent(
+        f"""
         ncols                {header["ncols"]}
         nrows                {header["nrows"]}
         xllcorner            {header["xllcorner"]}
         yllcorner            {header["yllcorner"]}
         cellsize             {header["cellsize"]}
         nodata_value         {typ(header["nodata_value"])}
-        """).lstrip()
+        """
+    ).lstrip()
     with header_path.open("w") as f:
         f.write(header_str)
         if data is not None:

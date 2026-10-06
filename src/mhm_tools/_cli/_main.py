@@ -67,6 +67,10 @@ _COMMAND_GROUPS: List[Tuple[str, str, List[Tuple[str, object]]]] = [
             ("crop-mhm-setup", "mhm_tools._cli._crop_mhm_setup"),
             ("latlon", "mhm_tools._cli._latlon"),
             ("create-header", "mhm_tools._cli._create_header"),
+            (
+                "create-dem-derivatives",
+                "mhm_tools._cli._create_dem_derivatives",
+            ),
             ("calculate-pet", "mhm_tools._cli._calculate_pet"),
             ("prepare-mhm-forcings", "mhm_tools._cli._prepare_mhm_forcings"),
         ],
@@ -75,7 +79,7 @@ _COMMAND_GROUPS: List[Tuple[str, str, List[Tuple[str, object]]]] = [
         "data-processing",
         "Convert, regrid, merge, and derive gridded data products.",
         [
-            ("converter-nc-ascii", "mhm_tools._cli._file_converter"),
+            ("file-converter", "mhm_tools._cli._file_converter"),
             ("merge-files", "mhm_tools._cli._merge"),
             ("fill-nearest", "mhm_tools._cli._fill_nearest"),
             ("regrid-file", "mhm_tools._cli._regrid"),
@@ -88,12 +92,21 @@ _COMMAND_GROUPS: List[Tuple[str, str, List[Tuple[str, object]]]] = [
         ],
     ),
     (
+        "data-converter",
+        "Convert maps and categorical data for mHM.",
+        [
+            ("rasterize-map", "mhm_tools._cli._rasterize_map"),
+            ("format-data", "mhm_tools._cli._format_data"),
+        ],
+    ),
+    (
         "evaluation",
         "Evaluate simulations against observations or reference data.",
         [
             ("discharge-evaluation", "mhm_tools._cli._discharge_evaluation"),
             ("hydrograph", "mhm_tools._cli._hydrograph"),
             ("gridded-data-evaluation", "mhm_tools._cli._gridded_data_evaluation"),
+            ("twsa-evaluation", "mhm_tools._cli._twsa_evaluation"),
             ("run-overview", "mhm_tools._cli._mhm_run_overview"),
         ],
     ),
@@ -110,6 +123,7 @@ _COMMAND_GROUPS: List[Tuple[str, str, List[Tuple[str, object]]]] = [
         [
             ("2d-map", "mhm_tools._cli._2d_map"),
             ("metric-plots", "mhm_tools._cli._metric_plots"),
+            ("discharge-eval-comparison", "mhm_tools._cli._discharge_eval_comparison"),
             ("taylor-diagram", "mhm_tools._cli._taylor_diagram"),
         ],
     ),
@@ -131,6 +145,8 @@ _COMMAND_GROUPS: List[Tuple[str, str, List[Tuple[str, object]]]] = [
                 "create-mhm-restart-from-setup",
                 "mhm_tools._cli._create_mhm_restart_from_setup",
             ),
+            ("create-wmo-region-masks", "mhm_tools._cli._create_wmo_region_masks"),
+            ("snow-evaluation", "mhm_tools._cli._snow_evaluation"),
         ],
     ),
 ]
@@ -145,6 +161,8 @@ _ROOT_OPTION_ALIASES = {
     "--log_file_level": "--log-file-level",
     "--no_console_output": "--no-console-output",
 }
+# old names of renamed commands, kept working as hidden aliases of the new name
+_RENAMED_COMMANDS = {"converter-nc-ascii": "file-converter"}
 
 
 def _translate_option_aliases(args, option_aliases):
@@ -469,17 +487,33 @@ def _action_to_click_option(action: argparse.Action, option_group: str = "option
 
     if isinstance(action, argparse._CountAction):
         kwargs["count"] = True
-    elif isinstance(action, argparse._StoreTrueAction):
+    elif isinstance(action, (argparse._StoreTrueAction, argparse._StoreFalseAction)):
+        # Click derives a bool flag's value from its own default, so declaring
+        # both a default and a flag_value turns the flag into a constant. Take
+        # the flag as presence only and map it back to the parser's semantics.
+        stored_value = isinstance(action, argparse._StoreTrueAction)
+        parser_default = kwargs.get("default", _normalize_default(action))
         kwargs["is_flag"] = True
-        kwargs["flag_value"] = True
-    elif isinstance(action, argparse._StoreFalseAction):
-        kwargs["is_flag"] = True
-        kwargs["flag_value"] = False
+        kwargs["default"] = False
+        kwargs["show_default"] = str(parser_default)
+
+        def flag_callback(
+            _ctx, _param, given, stored=stored_value, default=parser_default
+        ):
+            """Return the stored value if the flag was given, else the default."""
+            return stored if given else default
+
+        kwargs["callback"] = flag_callback
     else:
         if action.nargs in ("+", "*"):
             kwargs["multiple"] = True
-            if kwargs.get("default") is None and not action.required:
+            # a repeatable option needs a sequence default, and click raises for
+            # a bare one, so a single value is wrapped instead of passed through
+            default = kwargs.get("default")
+            if default is None and not action.required:
                 kwargs["default"] = ()
+            elif default is not None and not isinstance(default, (list, tuple)):
+                kwargs["default"] = (default,)
         elif isinstance(action.nargs, int) and action.nargs > 1:
             kwargs["nargs"] = action.nargs
         if action.type in (int, float, str, bool):
@@ -545,6 +579,9 @@ def _build_click_command(command_name: str, module, prog_path: Optional[str] = N
         callback=_callback,
         params=params,
         help=module.__doc__,
+        # Opt-in: only modules defining a module-level EPILOG get one, so adding
+        # this never surfaces the parser.epilog blocks other modules still set.
+        epilog=getattr(module, "EPILOG", None),
         option_aliases=option_aliases,
         context_settings={"help_option_names": ["-h", "--help"]},
     )
@@ -673,6 +710,12 @@ for _group_name, _group_help, _group_commands in _COMMAND_GROUPS:
         )
         _add_command_with_aliases(_group, _cmd, _command_name)
         _LEGACY_COMMAND_PATHS.append((_command_name, (_group_name, _command_name)))
+    # an old name answers within the group and, like every command, at the top
+    for _old_name, _new_name in _RENAMED_COMMANDS.items():
+        if _new_name in _group.commands:
+            for _alias in (_old_name, _old_name.replace("-", "_")):
+                _group.add_alias(_alias, _new_name)
+            _LEGACY_COMMAND_PATHS.append((_old_name, (_group_name, _new_name)))
     _add_command_with_aliases(cli, _group, _group_name)
 
 for _command_name, _target_path in _LEGACY_COMMAND_PATHS:

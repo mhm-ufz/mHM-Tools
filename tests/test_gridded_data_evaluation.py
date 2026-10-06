@@ -4,16 +4,22 @@ import pytest
 import xarray as xr
 
 from mhm_tools.common.logger import configure_mhm_tools_logger
+from mhm_tools.common.time_utils import (
+    normalize_time_axis,
+    resample_to_target_freq,
+)
 from mhm_tools.common.xarray_utils import get_ds_extend
 from mhm_tools.post.gridded_data_evaluation import (
     apply_spatial_mask,
+    combine_results,
     compare_input_with_ref,
+    create_period_mean_series,
     crop_datasets_to_spatial_overlap,
     get_file_stats,
     get_stats,
     get_stats_one_pass,
+    get_stats_one_pass_subset,
     infer_time_resolution_hours_from_files,
-    normalize_time_axis,
     regridd_to_higher_spatial_resolution,
     resample_to_target_freq,
 )
@@ -472,9 +478,10 @@ def test_compare_input_with_ref_keeps_rel_fields_as_dataarrays(monkeypatch, tmp_
 
     captured = {}
 
-    def fake_write_xarray_to_file(ds, file_path):
+    def fake_write_xarray_to_file(ds, file_path, **kwargs):
         captured["ds"] = ds.copy(deep=True)
         captured["file_path"] = file_path
+        captured["kwargs"] = kwargs
 
     monkeypatch.setattr(
         "mhm_tools.post.gridded_data_evaluation.get_stats",
@@ -564,3 +571,164 @@ def test_resample_to_target_freq_ignores_other_dims_during_align():
     assert resampled_ref.sizes["lon"] == len(lon_nominal)
     assert np.isfinite(resampled_input.values).all()
     assert np.isfinite(resampled_ref.values).all()
+
+
+def _period_subset(period_sums, period_counts, shape=(2, 2)):
+    """Build one `get_stats_one_pass_subset` result around given buckets."""
+    return (
+        np.zeros(shape),
+        np.zeros(shape),
+        1,
+        np.zeros((12, *shape)),
+        np.zeros((12, *shape), dtype=np.uint32),
+        period_sums,
+        period_counts,
+    )
+
+
+def _write_daily_year(path, year, var, lat, lon, values, nan_cell=None):
+    """Write one file of daily steps for `year`, optionally holing one cell."""
+    time = pd.date_range(f"{year}-01-01", f"{year}-12-31", freq="D")
+    data = np.full((time.size, len(lat), len(lon)), values, dtype=np.float32)
+    if nan_cell is not None:
+        data[::2, nan_cell[0], nan_cell[1]] = np.nan
+    ds = xr.Dataset(
+        {var: (("time", "lat", "lon"), data)},
+        coords={"time": time, "lat": lat, "lon": lon},
+    )
+    ds.to_netcdf(path / f"{var}_{year}_daily.nc")
+
+
+def test_create_period_mean_series_divides_each_bucket_by_its_count():
+    """Each bucket becomes sum/count, and an empty bucket becomes NaN."""
+    period_sums = {
+        (2000, 1): np.array([[6.0, 9.0], [0.0, 4.0]], dtype=np.float32),
+        (2000, 2): np.array([[2.0, 0.0], [8.0, 0.0]], dtype=np.float32),
+    }
+    period_counts = {
+        (2000, 1): np.array([[3, 3], [0, 2]], dtype=np.uint16),
+        (2000, 2): np.array([[1, 0], [4, 0]], dtype=np.uint16),
+    }
+
+    series = create_period_mean_series(
+        period_sums, period_counts, [0.0, 1.0], [0.0, 1.0], "v", units="mm/day"
+    )["time_series"]
+
+    assert series.dtype == np.float32
+    np.testing.assert_array_equal(
+        series.values[0], np.array([[2.0, 3.0], [np.nan, 2.0]], dtype=np.float32)
+    )
+    np.testing.assert_array_equal(
+        series.values[1], np.array([[2.0, np.nan], [2.0, np.nan]], dtype=np.float32)
+    )
+    assert series.attrs["units"] == "mm/day"
+
+
+def test_combine_results_merges_buckets_split_across_subsets():
+    """A calendar month present in two subsets is summed element-wise."""
+    shared = (2000, 5)
+    first = _period_subset(
+        {shared: np.full((2, 2), 3.0, dtype=np.float32)},
+        {shared: np.full((2, 2), 2, dtype=np.uint16)},
+    )
+    second = _period_subset(
+        {
+            shared: np.full((2, 2), 4.0, dtype=np.float32),
+            (2000, 6): np.full((2, 2), 1.0, dtype=np.float32),
+        },
+        {
+            shared: np.full((2, 2), 5, dtype=np.uint16),
+            (2000, 6): np.full((2, 2), 1, dtype=np.uint16),
+        },
+    )
+
+    *_, period_sums, period_counts = combine_results([first, second])
+
+    assert sorted(period_sums) == [(2000, 5), (2000, 6)]
+    np.testing.assert_array_equal(period_sums[shared], np.full((2, 2), 7.0))
+    np.testing.assert_array_equal(period_counts[shared], np.full((2, 2), 7))
+    np.testing.assert_array_equal(period_sums[(2000, 6)], np.full((2, 2), 1.0))
+
+
+def test_combine_results_consumes_subset_results():
+    """The subsets are released during the merge, not held alongside it."""
+    subsets = [
+        _period_subset(
+            {(2000, month): np.ones((2, 2), dtype=np.float32)},
+            {(2000, month): np.ones((2, 2), dtype=np.uint16)},
+        )
+        for month in (1, 2)
+    ]
+    kept_sums, kept_counts = subsets[0][5], subsets[0][6]
+
+    combine_results(subsets)
+
+    assert subsets == []
+    assert kept_sums == {}
+    assert kept_counts == {}
+
+
+def test_create_period_mean_series_empties_its_input_buckets():
+    """Each bucket is dropped once divided, so the record is never held twice."""
+    period_sums = {(2000, 1): np.ones((2, 2), dtype=np.float32)}
+    period_counts = {(2000, 1): np.ones((2, 2), dtype=np.uint16)}
+
+    create_period_mean_series(period_sums, period_counts, [0.0, 1.0], [0.0, 1.0], "v")
+
+    assert period_sums == {}
+    assert period_counts == {}
+
+
+def test_period_buckets_use_compact_dtypes(tmp_path):
+    """The streamed accumulators stay compact, which bounds the peak memory.
+
+    `monthly_counts` spans the whole record, so it needs uint32: uint16 would
+    wrap at 65535, which 15-minute input over 44 years exceeds. A period bucket
+    only ever holds one month, so uint16 is safe there.
+    """
+    lat, lon = np.array([1.0, 0.0]), np.array([0.0, 1.0])
+    _write_daily_year(tmp_path, 2000, "v", lat, lon, 2.0)
+
+    (
+        _,
+        _,
+        _,
+        monthly_sums,
+        monthly_counts,
+        period_sums,
+        period_counts,
+    ) = get_stats_one_pass_subset(
+        sorted(tmp_path.glob("*.nc")), "v", with_period_series=True
+    )
+
+    assert monthly_counts.dtype == np.uint32
+    assert monthly_sums.dtype == np.float64
+    assert all(values.dtype == np.float32 for values in period_sums.values())
+    assert all(values.dtype == np.uint16 for values in period_counts.values())
+    assert np.iinfo(np.uint16).max < 44 * 12 * 31 * 96 // 12
+
+
+@pytest.mark.parametrize("ncpus", [1, 2])
+def test_get_stats_one_pass_period_series_matches_monthly_mean(tmp_path, ncpus):
+    """The streamed series equals a direct monthly resample, serial or parallel."""
+    lat, lon = np.array([1.0, 0.0]), np.array([0.0, 1.0])
+    for year, value in ((2000, 2.0), (2001, 5.0)):
+        _write_daily_year(tmp_path, year, "v", lat, lon, value, nan_cell=(0, 1))
+
+    output = get_stats_one_pass(
+        path=tmp_path,
+        var="v",
+        ncpus=ncpus,
+        available_years=[2000, 2001],
+        with_period_series=True,
+    )
+
+    with xr.open_mfdataset(sorted(tmp_path.glob("*.nc"))) as ds:
+        expected = ds["v"].resample(time="MS").mean(skipna=True).compute()
+
+    series = output["time_series"].transpose("time", "lat", "lon")
+    assert series.sizes["time"] == 24
+    np.testing.assert_array_equal(series["time"].values, expected["time"].values)
+    np.testing.assert_allclose(
+        series.values, expected.values.astype(np.float32), rtol=1e-6
+    )

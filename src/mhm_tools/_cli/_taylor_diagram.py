@@ -92,10 +92,18 @@ def run(args):
     args : argparse.Namespace
         parsed command line arguments
     """
+    from mhm_tools.common.cli_utils import normalize_cli_sequence
+
     from ..post.taylor_diagram import generate_taylor_diagram
 
+    mod_input_dirs = normalize_cli_sequence(args.mod_input_dirs)
+    model_patterns = normalize_cli_sequence(args.model_patterns)
+    mod_vars = normalize_cli_sequence(args.mod_vars)
+    # a plot label may hold a space, so it is only split on commas
+    mod_labels = normalize_cli_sequence(args.mod_labels, split_whitespace=False)
+
     # sanity check to ensure matched lists
-    if not (len(args.mod_input_dirs) == len(args.model_patterns) == len(args.mod_vars)):
+    if not (len(mod_input_dirs) == len(model_patterns) == len(mod_vars)):
         msg = (
             "The number of --mod_input_dirs, --model_patterns, "
             "and --mod_vars must all match."
@@ -107,10 +115,10 @@ def run(args):
         reference_pattern=args.reference_pattern,
         ref_var=args.ref_var,
         ref_label=args.ref_label,
-        mod_input_dirs=args.mod_input_dirs,
-        model_patterns=args.model_patterns,
-        mod_vars=args.mod_vars,
-        mod_labels=args.mod_labels,
+        mod_input_dirs=mod_input_dirs,
+        model_patterns=model_patterns,
+        mod_vars=mod_vars,
+        mod_labels=mod_labels,
         title=args.title,
         output_dir=args.output_dir,
         output_file=args.output_file,

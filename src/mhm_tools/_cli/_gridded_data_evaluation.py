@@ -12,6 +12,10 @@ Authors
 
 import logging
 
+from mhm_tools.common.cli_utils import (
+    add_netcdf_compression_args,
+    get_netcdf_compression,
+)
 from mhm_tools.common.logger import ErrorLogger
 
 logger = logging.getLogger(__name__)
@@ -201,8 +205,10 @@ def add_args(parser):
         required=False,
         default=None,
         type=float,
-        help=("""minimum longitude of the target grid
-            required unless --mask_file is provided"""),
+        help=(
+            """minimum longitude of the target grid
+            required unless --mask_file is provided"""
+        ),
     )
 
     optional.add_argument(
@@ -210,8 +216,10 @@ def add_args(parser):
         required=False,
         default=None,
         type=float,
-        help=("""maximum longitude of the target grid
-            required unless --mask_file is provided"""),
+        help=(
+            """maximum longitude of the target grid
+            required unless --mask_file is provided"""
+        ),
     )
 
     optional.add_argument(
@@ -219,8 +227,10 @@ def add_args(parser):
         required=False,
         default=None,
         type=float,
-        help=("""minimum latitude of the target grid
-            required unless --mask_file is provided"""),
+        help=(
+            """minimum latitude of the target grid
+            required unless --mask_file is provided"""
+        ),
     )
 
     optional.add_argument(
@@ -228,8 +238,10 @@ def add_args(parser):
         required=False,
         default=None,
         type=float,
-        help=("""maximum latitude of the target grid
-            required unless --mask_file is provided"""),
+        help=(
+            """maximum latitude of the target grid
+            required unless --mask_file is provided"""
+        ),
     )
     flags.add_argument(
         "--bias-only",
@@ -242,6 +254,24 @@ def add_args(parser):
         action="store_true",
         required=False,
         help=("Only compare bias and temporal standard deviation (no Spearman)."),
+    )
+    flags.add_argument(
+        "--stream-metrics",
+        action="store_true",
+        required=False,
+        help=(
+            """calculate the result metrics from monthly means accumulated while
+            streaming the files, so neither record is ever held in memory"""
+        ),
+    )
+    flags.add_argument(
+        "--compare-on-coarser-grid",
+        action="store_true",
+        required=False,
+        help=(
+            """compare on the coarser of the two grids instead of the finer one
+            lowers peak memory a lot but changes the grid every metric is calculated on"""
+        ),
     )
 
     optional.add_argument(
@@ -259,6 +289,22 @@ def add_args(parser):
         default="SPAEF",
         help="Result metric written to results.csv. Accepted values: TSM, SPAEF, ESP, WASPAEF, MSPAEF, all.",
     )
+    optional.add_argument(
+        "--regions",
+        required=False,
+        default="all",
+        help=(
+            "WMO regions the statistics are tabled for next to the whole domain: "
+            "'all', 'none' or a comma separated list."
+        ),
+    )
+    flags.add_argument(
+        "--write-region-stats",
+        action="store_true",
+        required=False,
+        help="Also write the statistics tables of the domain and the regions to CSV.",
+    )
+    add_netcdf_compression_args(parser)
 
 
 def run(args):
@@ -347,12 +393,19 @@ def run(args):
         direct_comp=(
             args.n_bootstrap_selections is None and args.n_boostrap_years is None
         )
-        and not (args.global_climate or args.no_direct_comparison),
+        and not (
+            args.global_climate or args.no_direct_comparison or args.stream_metrics
+        ),
         year_slice=year_slice,
         avaiable_mem=available_mem,
         bias_only=args.bias_only,
         global_climate=args.global_climate,
+        compare_on_coarser_grid=args.compare_on_coarser_grid,
+        stream_metrics=args.stream_metrics,
         target_time_freq=target_freq,
         mask_var=args.mask_var,
         result_metric=args.metric,
+        compression=get_netcdf_compression(args),
+        regions=args.regions,
+        write_region_stats=args.write_region_stats,
     )

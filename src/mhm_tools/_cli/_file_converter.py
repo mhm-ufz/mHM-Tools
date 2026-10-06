@@ -12,6 +12,11 @@ Authors
 
 from pathlib import Path
 
+from mhm_tools.common.cli_utils import (
+    add_netcdf_compression_args,
+    get_netcdf_compression,
+)
+
 
 def add_args(parser):
     """Add cli arguments for the file_converter subcommand.
@@ -38,7 +43,12 @@ def add_args(parser):
         "--output",
         dest="output",
         required=True,
-        help="The name of the output file. Can be ASCII or NetCDF. The file type is determined by the file suffix.",
+        help="The output ASCII, GeoTIFF, or NetCDF file; type is inferred from its suffix.",
+    )
+    optional.add_argument(
+        "-c",
+        "--crs",
+        help="CRS to assign when the input has no CRS metadata.",
     )
     flags.add_argument(
         "-f",
@@ -73,10 +83,11 @@ def add_args(parser):
         required=False,
         help=("Only write header output."),
     )
+    add_netcdf_compression_args(parser)
 
 
 def run(args):
-    """Convert between ASCII and NetCDF based on file suffix.
+    """Convert between ASCII, GeoTIFF, and NetCDF formats based on file suffix.
 
     Parameters
     ----------
@@ -96,10 +107,23 @@ def run(args):
         var_name = input.stem
     elif args.varname_eq_out_filename:
         var_name = output.stem
+    # The georeferenced output formats need the CRS; NetCDF carries it already.
     ds = get_xarray_ds_from_file(
-        input, var_name=var_name, normalize_latlon_coords=args.latlon
+        input,
+        var_name=var_name,
+        normalize_latlon_coords=args.latlon,
+        load_crs=output.suffix.lower() in {".asc", ".tif", ".tiff"},
     )
-    if args.only_header:
-        create_header(ds, output_path=output, no_data_value=None)
-    else:
-        write_xarray_to_file(ds, output, var_name=var_name)
+    try:
+        if args.only_header:
+            create_header(ds, output_path=output, no_data_value=None)
+        else:
+            write_xarray_to_file(
+                ds,
+                output,
+                var_name=var_name,
+                crs=args.crs,
+                compression=get_netcdf_compression(args),
+            )
+    finally:
+        ds.close()

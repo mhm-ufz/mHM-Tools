@@ -7,12 +7,28 @@ from typing import Mapping, Optional
 import numpy as np
 import pandas as pd
 import xarray as xr
-from matplotlib import colors as mcolors
 from matplotlib import pyplot as plt
 
+from mhm_tools.common.logger import log_errors
+from mhm_tools.common.plotter import (
+    METRIC_LABELS,
+    PERCENT_METRICS,
+    PLOT_DPI,
+    add_map_colorbar,
+    calculate_map_figure_size,
+    create_axis_label,
+    create_discrete_colour_norm,
+    create_summary_text,
+    get_metric_plot_style,
+    style_map_axes,
+)
+from mhm_tools.common.resolution_handler import calculate_coordinate_resolution
 from mhm_tools.common.xarray_utils import get_coord_key, get_single_data_var
 
 logger = logging.getLogger(__name__)
+# a row per gauge holds the metric at the outlet of the gauge's catchment
+CATCHMENT_OUTLET_TITLE = "Metrics at the catchment outlets"
+CATCHMENT_MEDIAN_TITLE = "Median metrics per catchment"
 
 
 def create_match_id(value):
@@ -153,8 +169,8 @@ def read_mask_geometry(mask_file, mask_var=None, geometry_id=None):
         values = np.fliplr(values)
         lon_values = lon_values[::-1]
 
-    lat_res = float(np.nanmedian(np.abs(np.diff(lat_values))))
-    lon_res = float(np.nanmedian(np.abs(np.diff(lon_values))))
+    lat_res = calculate_coordinate_resolution(lat_values)
+    lon_res = calculate_coordinate_resolution(lon_values)
     transform = from_origin(
         float(np.nanmin(lon_values) - lon_res / 2.0),
         float(np.nanmax(lat_values) + lat_res / 2.0),
@@ -378,8 +394,10 @@ def write_catchment_median_maps(
     mask_files_by_id: Optional[Mapping[object, Path]] = None,
     id_col="id",
     output_prefix="catchment_map",
-    dpi=200,
+    dpi=PLOT_DPI,
     title_context=None,
+    extent=None,
+    title=CATCHMENT_OUTLET_TITLE,
 ):
     """Write catchment median maps for metric rows.
 
@@ -409,6 +427,13 @@ def write_catchment_median_maps(
         Output image resolution.
     title_context : str, optional
         Context added to map titles.
+    extent : tuple[float, float, float, float], optional
+        Explicit (lon_min, lon_max, lat_min, lat_max) map extent. Defaults
+        to the matched geometries' own bounds, padded by 10% - which can
+        balloon out to (near) the whole globe if a matched geometry is
+        malformed or not in the expected lon/lat CRS.
+    title : str, optional
+        Figure title saying what a catchment's value is.
 
     Returns
     -------
@@ -443,17 +468,22 @@ def write_catchment_median_maps(
         output_prefix=output_prefix,
         dpi=dpi,
         title_context=title_context,
+        extent=extent,
+        title=title,
     )
 
 
+@log_errors(raise_exceptions=True)
 def plot_catchment_metric_maps(
     metric_gdf,
     variables,
     output_dir,
     output_prefix="catchment_map",
-    cmap="viridis",
-    dpi=200,
+    cmap=None,
+    dpi=PLOT_DPI,
     title_context=None,
+    extent=None,
+    title=CATCHMENT_OUTLET_TITLE,
 ):
     """Plot metric values on catchment polygons.
 
@@ -468,11 +498,17 @@ def plot_catchment_metric_maps(
     output_prefix : str, optional
         Output filename prefix.
     cmap : str, optional
-        Matplotlib colormap.
+        Matplotlib colormap, None for the metric's own (`get_metric_plot_style`).
     dpi : int, optional
         Output image resolution.
     title_context : str, optional
         Context added to map titles.
+    extent : tuple[float, float, float, float], optional
+        Explicit (lon_min, lon_max, lat_min, lat_max) map extent, e.g. a
+        region's prescribed bounding box. Defaults to the plotted
+        geometries' own bounds, padded by 10%.
+    title : str, optional
+        Figure title saying what a catchment's value is.
 
     Returns
     -------
@@ -489,9 +525,16 @@ def plot_catchment_metric_maps(
     output_dir = Path(output_dir)
     output_files = []
     plot_gdf = sort_geodataframe_by_area_desc(metric_gdf)
-    min_lon, min_lat, max_lon, max_lat = plot_gdf.total_bounds
-    lon_pad = (max_lon - min_lon) * 0.1 if max_lon > min_lon else 0.1
-    lat_pad = (max_lat - min_lat) * 0.1 if max_lat > min_lat else 0.1
+    if extent is None:
+        min_lon, min_lat, max_lon, max_lat = plot_gdf.total_bounds
+        lon_pad = (max_lon - min_lon) * 0.1 if max_lon > min_lon else 0.1
+        lat_pad = (max_lat - min_lat) * 0.1 if max_lat > min_lat else 0.1
+        extent = (
+            min_lon - lon_pad,
+            max_lon + lon_pad,
+            min_lat - lat_pad,
+            max_lat + lat_pad,
+        )
 
     for variable in variables:
         if variable not in plot_gdf.columns:
@@ -503,29 +546,34 @@ def plot_catchment_metric_maps(
                 f"Skipping catchment map for {variable}: all values are NaN."
             )
             continue
-        vmin, vmax, extend = _get_metric_color_limits(variable, values.to_numpy())
-        cmap_obj = plt.get_cmap(cmap).copy()
-        if extend in ["min", "both"]:
-            cmap_obj.set_under("lightgray")
-        if extend in ["max", "both"]:
-            cmap_obj.set_over("darkred")
-        norm = mcolors.Normalize(vmin=vmin, vmax=vmax, clip=False)
-
-        fig = plt.figure(figsize=(7, 5))
-        ax = plt.axes(projection=ccrs.PlateCarree())
-        ax.set_extent(
-            [
-                min_lon - lon_pad,
-                max_lon + lon_pad,
-                min_lat - lat_pad,
-                max_lat + lat_pad,
-            ],
-            crs=ccrs.PlateCarree(),
+        values = values.replace([np.inf, -np.inf], np.nan)
+        style = get_metric_plot_style(variable)
+        if cmap is not None:
+            style["cmap"] = cmap
+        bounds_type = "data"
+        label = create_axis_label(variable)
+        units = METRIC_LABELS.get(variable, (None, None))[1]
+        if variable in PERCENT_METRICS:
+            # stored as a fraction, mapped in percent
+            values = 100 * values
+            bounds_type = "percent"
+            label = create_axis_label(
+                METRIC_LABELS.get(variable, (variable, None))[0], "%"
+            )
+            units = "%"
+        cmap_obj, norm, bounds, extend, ticks = create_discrete_colour_norm(
+            values.to_numpy(dtype=float), bounds_type=bounds_type, **style
         )
-        ax.add_feature(cfeature.BORDERS, linewidth=0.6)
+
+        fig, ax = plt.subplots(
+            figsize=calculate_map_figure_size(extent),
+            subplot_kw={"projection": ccrs.PlateCarree()},
+        )
+        ax.set_extent(extent, crs=ccrs.PlateCarree())
+        ax.add_feature(cfeature.BORDERS, linewidth=0.3)
         ax.add_feature(cfeature.COASTLINE, linewidth=0.5)
-        ax.add_feature(cfeature.LAND, facecolor="0.95")
-        ax.add_feature(cfeature.OCEAN, facecolor="0.97")
+        ax.add_feature(cfeature.LAND, facecolor="0.97")
+        ax.add_feature(cfeature.OCEAN, facecolor="0.85")
         plot_gdf.assign(**{variable: values}).plot(
             column=variable,
             ax=ax,
@@ -537,18 +585,22 @@ def plot_catchment_metric_maps(
         )
         scalar_mappable = plt.cm.ScalarMappable(cmap=cmap_obj, norm=norm)
         scalar_mappable.set_array([])
-        cb = plt.colorbar(
+        add_map_colorbar(
+            fig,
+            ax,
             scalar_mappable,
-            ax=ax,
-            orientation="vertical",
-            shrink=0.8,
-            extend=extend,
+            bounds,
+            extend,
+            ticks,
+            label,
         )
-        cb.set_label(variable)
-        title = f"{variable} by catchment"
+        style_map_axes(ax)
+        figure_title = title
         if title_context is not None:
-            title = f"{title} ({title_context})"
-        ax.set_title(title)
+            figure_title = f"{figure_title} ({title_context})"
+        fig.suptitle(figure_title, fontweight="normal", fontsize="x-large")
+        summary = create_summary_text(values, units=units, bounds=bounds)
+        ax.set_title(f"{variable} ({summary})")
         output_file = output_dir / f"{output_prefix}_{variable}.png"
         fig.tight_layout()
         fig.savefig(output_file, dpi=dpi)
@@ -619,42 +671,3 @@ def _geometry_union(geometry):
     if hasattr(geometry, "union_all"):
         return geometry.union_all()
     return geometry.unary_union
-
-
-def _get_metric_color_limits(variable, values):
-    """Get color limits for a metric variable.
-
-    Parameters
-    ----------
-    variable : str
-        Metric variable name.
-    values : Sequence[float]
-        Numeric values.
-
-    Returns
-    -------
-    tuple[float, float, str]
-        Minimum, maximum, and colorbar extension.
-    """
-    finite_values = np.asarray(values, dtype=float)
-    finite_values = finite_values[np.isfinite(finite_values)]
-    if finite_values.size == 0:
-        msg = f"No finite values available for {variable}."
-        raise ValueError(msg)
-    if variable == "kge":
-        vmin, vmax = -0.5, 1.0
-    elif variable == "nse":
-        vmin, vmax = -0.1, 1.0
-    else:
-        vmin, vmax = float(np.nanmin(finite_values)), float(np.nanmax(finite_values))
-    if np.isfinite(vmin) and np.isfinite(vmax) and vmin == vmax:
-        vmin -= 1.0
-        vmax += 1.0
-    extend = "neither"
-    if np.nanmin(finite_values) < vmin and np.nanmax(finite_values) > vmax:
-        extend = "both"
-    elif np.nanmin(finite_values) < vmin:
-        extend = "min"
-    elif np.nanmax(finite_values) > vmax:
-        extend = "max"
-    return vmin, vmax, extend

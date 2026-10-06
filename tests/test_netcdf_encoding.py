@@ -1,13 +1,23 @@
 import logging
 
+import netCDF4
 import numpy as np
 import pytest
 import xarray as xr
 
 from mhm_tools.common.file_handler import write_xarray_to_file, write_xarray_to_netcdf
 from mhm_tools.common.netcdf import (
+    COMPRESSION_ENCODING_KEYS,
+    DEFAULT_COMPLEVEL,
+    MIN_COORD_COMPRESSION_VALUES,
+    NO_QUANTIZATION,
+    QUANTIZATION_ENCODING_KEYS,
+    QUANTIZE_MODES,
+    NetcdfCompression,
     apply_cf_baseline_metadata,
+    create_quantization_encoding,
     get_netcdf_metadata_data_vars,
+    is_coordinate_like_variable,
     move_reserved_attrs_to_encoding,
     prepare_dataset_for_netcdf_write,
     prepare_time_bounds_encoding,
@@ -375,3 +385,488 @@ def test_write_xarray_to_file_warns_and_falls_back_if_var_name_missing(
     assert "v" in ds_read.data_vars
     warnings = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
     assert any("Requested var_name" in msg for msg in warnings)
+
+
+def _make_field(nt=4, ny=40, nx=50, dtype="float32"):
+    """Build a smooth float field with a couple of NaN rows."""
+    lat = np.linspace(47.0, 55.0, ny)
+    plane = (np.cos(np.deg2rad(lat))[:, None] * np.ones(nx)[None, :] * 10).astype(dtype)
+    data = np.stack([plane] * nt)
+    return xr.Dataset(
+        {"v": (("time", "lat", "lon"), data)},
+        coords={
+            "time": np.arange(nt),
+            "lat": lat,
+            "lon": np.linspace(5.0, 15.0, nx),
+        },
+    )
+
+
+def _write_source(path, complevel=None, significant_digits=None, mode="BitGroom"):
+    """Write an input file with a chosen compression, bypassing the writers."""
+    encoding = {}
+    if complevel is not None:
+        encoding.update({"zlib": complevel > 0, "complevel": complevel})
+    if significant_digits is not None:
+        encoding.update(
+            {"significant_digits": significant_digits, "quantize_mode": mode}
+        )
+    _make_field().to_netcdf(
+        path, engine="netcdf4", encoding={"v": encoding} if encoding else None
+    )
+    return path
+
+
+def _on_disk(path, name="v"):
+    """Return the complevel, quantization and _Quantize* attrs of a variable."""
+    with netCDF4.Dataset(path) as dataset:
+        variable = dataset[name]
+        return (
+            variable.filters()["complevel"],
+            variable.quantization(),
+            [a for a in variable.ncattrs() if a.startswith("_Quantize")],
+        )
+
+
+# --- coordinates ------------------------------------------------------------
+
+
+@pytest.mark.parametrize("complevel", [4, 9])
+def test_sanitize_coordinate_encoding_never_compresses_a_1d_coordinate(complevel):
+    """Leave one-dimensional axes uncompressed, whatever level is requested."""
+    ds = _make_ds(dtype=np.float32)
+
+    sanitize_coordinate_encoding(ds, NetcdfCompression(complevel=complevel))
+
+    for coord in ("lat", "lon"):
+        assert not COMPRESSION_ENCODING_KEYS & set(ds[coord].encoding)
+
+
+def test_sanitize_coordinate_encoding_compresses_a_large_2d_coordinate():
+    """Compress a two-dimensional coordinate that is payload sized."""
+    side = int(np.ceil(np.sqrt(MIN_COORD_COMPRESSION_VALUES))) + 1
+    ds = xr.Dataset(
+        coords={"lat2d": (("y", "x"), np.zeros((side, side), dtype="float32"))}
+    )
+
+    sanitize_coordinate_encoding(ds, NetcdfCompression(complevel=9))
+
+    assert ds["lat2d"].encoding["complevel"] == 9
+    assert ds["lat2d"].encoding["zlib"] is True
+
+
+def test_sanitize_coordinate_encoding_skips_a_small_2d_coordinate():
+    """Leave a bounds sized two-dimensional coordinate uncompressed."""
+    ds = xr.Dataset(coords={"lat_bnds": (("lat", "bnds"), np.zeros((2, 2)))})
+
+    sanitize_coordinate_encoding(ds, NetcdfCompression(complevel=9))
+
+    assert not COMPRESSION_ENCODING_KEYS & set(ds["lat_bnds"].encoding)
+
+
+def test_sanitize_coordinate_encoding_never_quantizes_a_coordinate():
+    """Keep every coordinate free of lossy quantization keys."""
+    side = int(np.ceil(np.sqrt(MIN_COORD_COMPRESSION_VALUES))) + 1
+    ds = xr.Dataset(
+        coords={"lat2d": (("y", "x"), np.zeros((side, side), dtype="float32"))}
+    )
+
+    sanitize_coordinate_encoding(
+        ds, NetcdfCompression(complevel=9, significant_digits=3)
+    )
+
+    assert not QUANTIZATION_ENCODING_KEYS & set(ds["lat2d"].encoding)
+
+
+def test_sanitize_coordinate_encoding_without_compression_leaves_coordinates_bare():
+    """Add no compression to coordinates when no settings are given."""
+    side = int(np.ceil(np.sqrt(MIN_COORD_COMPRESSION_VALUES))) + 1
+    ds = xr.Dataset(
+        coords={"lat2d": (("y", "x"), np.zeros((side, side), dtype="float32"))}
+    )
+
+    sanitize_coordinate_encoding(ds)
+
+    assert not COMPRESSION_ENCODING_KEYS & set(ds["lat2d"].encoding)
+
+
+@pytest.mark.parametrize(
+    ("name", "attrs", "expected"),
+    [
+        ("x", {}, True),
+        ("y", {}, True),
+        ("geo_x", {}, True),
+        ("gauge_position", {"standard_name": "latitude"}, True),
+        ("northing_m", {"standard_name": "projection_x_coordinate"}, True),
+        ("some_angle", {"units": "degrees_east"}, True),
+        ("discharge", {"units": "m3 s-1"}, False),
+        ("interception", {}, False),
+    ],
+)
+def test_is_coordinate_like_variable_classifies_by_name_and_metadata(
+    name, attrs, expected
+):
+    """Detect a variable that holds coordinates rather than payload data."""
+    ds = xr.Dataset({name: (("id",), np.zeros(3))})
+    ds[name].attrs.update(attrs)
+
+    assert is_coordinate_like_variable(ds, name) is expected
+
+
+def test_is_coordinate_like_variable_detects_a_bounds_variable():
+    """Treat a variable referenced as coordinate bounds as coordinate data."""
+    ds = _make_ds(dtype=np.float32)
+    ds["lat"].attrs["bounds"] = "lat_bnds"
+    ds["lat_bnds"] = (("lat", "bnds"), np.zeros((2, 2)))
+
+    assert is_coordinate_like_variable(ds, "lat_bnds") is True
+
+
+def test_create_quantization_encoding_skips_coordinate_like_data_variables():
+    """Quantize the payload but never the gauge positions beside it."""
+    ds = xr.Dataset(
+        {
+            "discharge": (("id",), np.array([1.0, 2.0, 3.0])),
+            "x": (("id",), np.array([10.0, 11.0, 12.0])),
+            "y": (("id",), np.array([50.0, 51.0, 52.0])),
+        }
+    )
+
+    encoding = create_quantization_encoding(ds, ["discharge", "x", "y"], 4)
+
+    assert set(encoding) == {"discharge"}
+    assert encoding["discharge"]["significant_digits"] == 4
+
+
+# --- pre-existing compression, lossless -------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("source_complevel", "requested", "expected"),
+    [
+        (9, None, 9),
+        (9, 1, 1),
+        (0, None, 0),
+        (0, 1, 1),
+    ],
+)
+def test_write_keeps_or_overrides_the_input_complevel(
+    tmp_path, source_complevel, requested, expected
+):
+    """Keep an input file's level unless a level was explicitly requested."""
+    source = _write_source(tmp_path / "src.nc", complevel=source_complevel)
+    compression = None if requested is None else NetcdfCompression(complevel=requested)
+
+    out = tmp_path / "out.nc"
+    write_xarray_to_file(xr.open_dataset(source), out, compression=compression)
+
+    assert _on_disk(out)[0] == expected
+
+
+def test_write_falls_back_to_the_default_level_without_an_input_to_inherit(tmp_path):
+    """Use the default level for a dataset that carries no encoding."""
+    out = tmp_path / "fresh.nc"
+    write_xarray_to_file(_make_field(), out, compression=None)
+
+    assert _on_disk(out)[0] == DEFAULT_COMPLEVEL
+    with xr.open_dataset(out) as dataset:
+        np.testing.assert_array_equal(dataset["time"].values, np.arange(4))
+
+
+def test_write_level_beats_a_caller_encoding_while_keeping_its_fill_value(tmp_path):
+    """Let the settings own compression and the caller own the fill value."""
+    out = tmp_path / "enc.nc"
+    write_xarray_to_file(
+        _make_field(),
+        out,
+        encoding={"v": {"zlib": True, "complevel": 1, "_FillValue": -9999.0}},
+        compression=NetcdfCompression(complevel=9),
+    )
+
+    assert _on_disk(out)[0] == 9
+    with netCDF4.Dataset(out) as dataset:
+        assert dataset["v"]._FillValue == np.float32(-9999.0)
+
+
+# --- pre-existing compression, lossy ----------------------------------------
+
+
+def test_quantization_travels_as_an_attribute_on_read(tmp_path):
+    """Read a quantized file back as the attribute netcdf-c records."""
+    source = _write_source(
+        tmp_path / "q.nc", complevel=9, significant_digits=3, mode="GranularBitRound"
+    )
+
+    ds = xr.open_dataset(source)
+
+    assert [a for a in ds["v"].attrs if a.startswith("_Quantize")] == [
+        "_QuantizeGranularBitRoundNumberOfSignificantDigits"
+    ]
+
+
+@pytest.mark.parametrize("reader", [xr.open_dataset, xr.load_dataset])
+def test_write_keeps_an_input_quantization_without_settings(tmp_path, reader):
+    """Carry an input file's quantization over whichever reader opened it."""
+    source = _write_source(
+        tmp_path / "q.nc", complevel=9, significant_digits=3, mode="GranularBitRound"
+    )
+
+    out = tmp_path / "out.nc"
+    write_xarray_to_file(reader(source), out, compression=None)
+
+    complevel, quantization, attrs = _on_disk(out)
+    assert quantization == (3, "GranularBitRound")
+    assert complevel == 9
+    assert len(attrs) == 1
+
+
+def test_write_level_only_keeps_the_inherited_quantization(tmp_path):
+    """Change the level without disturbing an inherited precision."""
+    source = _write_source(
+        tmp_path / "q.nc", complevel=9, significant_digits=3, mode="GranularBitRound"
+    )
+
+    out = tmp_path / "out.nc"
+    write_xarray_to_file(
+        xr.open_dataset(source), out, compression=NetcdfCompression(complevel=1)
+    )
+
+    complevel, quantization, _attrs = _on_disk(out)
+    assert complevel == 1
+    assert quantization == (3, "GranularBitRound")
+
+
+def test_write_significant_digits_replaces_the_inherited_quantization(tmp_path):
+    """Leave exactly one quantization on the file when it is overridden."""
+    source = _write_source(
+        tmp_path / "q.nc", complevel=9, significant_digits=3, mode="GranularBitRound"
+    )
+
+    out = tmp_path / "out.nc"
+    write_xarray_to_file(
+        xr.open_dataset(source),
+        out,
+        compression=NetcdfCompression(complevel=9, significant_digits=5),
+    )
+
+    _complevel, quantization, attrs = _on_disk(out)
+    assert quantization == (5, "BitGroom")
+    assert len(attrs) == 1
+
+
+def test_write_no_quantization_removes_an_inherited_quantization(tmp_path):
+    """Write full precision when quantization is switched off explicitly."""
+    source = _write_source(
+        tmp_path / "q.nc", complevel=9, significant_digits=3, mode="GranularBitRound"
+    )
+
+    out = tmp_path / "out.nc"
+    write_xarray_to_file(
+        xr.open_dataset(source),
+        out,
+        compression=NetcdfCompression(complevel=9, significant_digits=NO_QUANTIZATION),
+    )
+
+    complevel, quantization, attrs = _on_disk(out)
+    assert quantization is None
+    assert attrs == []
+    assert complevel == 9
+
+
+def test_write_no_quantization_is_harmless_without_one_to_remove(tmp_path):
+    """Switching quantization off on a plain input changes nothing but stays off."""
+    source = _write_source(tmp_path / "plain.nc", complevel=4)
+
+    out = tmp_path / "out.nc"
+    write_xarray_to_file(
+        xr.open_dataset(source),
+        out,
+        compression=NetcdfCompression(significant_digits=NO_QUANTIZATION),
+    )
+
+    complevel, quantization, attrs = _on_disk(out)
+    assert quantization is None
+    assert attrs == []
+    assert complevel == DEFAULT_COMPLEVEL
+
+
+# --- lossy and lossless application -----------------------------------------
+
+
+@pytest.mark.parametrize("mode", list(QUANTIZE_MODES))
+def test_write_applies_each_quantize_mode(tmp_path, mode):
+    """Record the requested mode and precision on the written variable."""
+    digits = 9 if mode == "BitRound" else 3
+    out = tmp_path / "q.nc"
+    write_xarray_to_file(
+        _make_field(),
+        out,
+        compression=NetcdfCompression(significant_digits=digits, quantize_mode=mode),
+    )
+
+    assert _on_disk(out)[1] == (digits, mode)
+
+
+def test_write_does_not_quantize_an_integer_variable(tmp_path):
+    """Skip quantization for integers, which netcdf-c refuses."""
+    ds = xr.Dataset({"flag": (("y", "x"), np.ones((20, 20), dtype="int8"))})
+
+    out = tmp_path / "int.nc"
+    write_xarray_to_file(ds, out, compression=NetcdfCompression(significant_digits=4))
+
+    with netCDF4.Dataset(out) as dataset:
+        assert dataset["flag"].quantization() is None
+
+
+@pytest.mark.parametrize(("complevel", "zlib"), [(0, False), (4, True), (9, True)])
+def test_get_lossless_encoding_matches_the_written_file(tmp_path, complevel, zlib):
+    """Report the zlib flag the file ends up carrying."""
+    compression = NetcdfCompression(complevel=complevel)
+    assert compression.get_lossless_encoding()["zlib"] is zlib
+
+    out = tmp_path / "lossless.nc"
+    write_xarray_to_file(_make_field(), out, compression=compression)
+
+    with netCDF4.Dataset(out) as dataset:
+        assert dataset["v"].filters()["zlib"] is zlib
+        assert dataset["v"].filters()["complevel"] == complevel
+
+
+def test_bitgroom_keeps_the_round_trip_error_within_four_digits(tmp_path):
+    """Hold the relative error of four significant digits below 1e-4."""
+    ds = _make_field()
+    out = tmp_path / "bg.nc"
+    write_xarray_to_file(ds, out, compression=NetcdfCompression(significant_digits=4))
+
+    written = xr.open_dataset(out)["v"].values.astype("float64")
+    original = ds["v"].values.astype("float64")
+    finite = np.isfinite(original) & np.isfinite(written)
+    error = np.abs(written[finite] - original[finite]) / np.abs(original[finite]).max()
+
+    assert error.max() < 1e-4
+
+
+def test_write_warns_and_drops_quantization_for_another_engine(tmp_path, caplog):
+    """Refuse to pretend a non-netcdf4 engine applied the quantization."""
+    out = tmp_path / "h5.nc"
+    with caplog.at_level(logging.WARNING, logger="mhm_tools.common.file_handler"):
+        write_xarray_to_file(
+            _make_field(),
+            out,
+            engine="h5netcdf",
+            compression=NetcdfCompression(significant_digits=4),
+        )
+
+    assert "does not support it" in caplog.text
+    with netCDF4.Dataset(out) as dataset:
+        assert dataset["v"].quantization() is None
+
+
+def test_write_drops_an_inherited_quantization_for_another_engine(tmp_path):
+    """Keep an inherited quantization out of a file another engine writes."""
+    source = _write_source(tmp_path / "q.nc", complevel=4, significant_digits=3)
+
+    out = tmp_path / "h5.nc"
+    write_xarray_to_file(xr.open_dataset(source), out, engine="h5netcdf")
+
+    with netCDF4.Dataset(out) as dataset:
+        assert dataset["v"].quantization() is None
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"complevel": 12},
+        {"complevel": -1},
+        {"quantize_mode": "nonsense"},
+        {"significant_digits": -1},
+    ],
+)
+def test_netcdf_compression_rejects_invalid_settings(kwargs):
+    """Fail on a bad setting before any data is read."""
+    with pytest.raises(ValueError):
+        NetcdfCompression(**kwargs)
+
+
+def test_netcdf_compression_accepts_no_quantization():
+    """Treat zero significant digits as a valid request for full precision."""
+    assert NetcdfCompression(significant_digits=NO_QUANTIZATION).significant_digits == 0
+
+
+def test_integer_netcdf_preparation_keeps_delayed_payload_lazy():
+    """Preparing integer encoding must not evaluate the delayed payload."""
+    import dask.array as da
+    from dask import delayed
+
+    @delayed
+    def unexpected_read():
+        """Fail if the writer computes the payload during preparation."""
+        msg = "Integer payload was loaded before writing"
+        raise AssertionError(msg)
+
+    data = da.from_delayed(unexpected_read(), shape=(2, 2), dtype="int32")
+    dataset = xr.Dataset({"classes": (("y", "x"), data)})
+    prepared, encoding = prepare_dataset_for_netcdf_write(
+        dataset, ["classes"], {"classes": {"_FillValue": -9999}}
+    )
+    assert prepared["classes"].chunks is not None
+    assert prepared["classes"].dtype == np.dtype("int32")
+    assert encoding["classes"]["_FillValue"] == -9999
+
+
+@pytest.mark.parametrize(
+    ("arguments", "digits", "shuffle"),
+    [
+        (["--significant-digits", "4"], 4, True),
+        (["--significant-digits", "0"], None, True),
+        (["--no-shuffle"], 3, False),
+    ],
+)
+def test_cli_compression_overrides_only_requested_fields(
+    tmp_path, arguments, digits, shuffle
+):
+    """Precision and shuffle options preserve each variable's input level."""
+    import argparse
+
+    from mhm_tools.common.cli_utils import (
+        add_netcdf_compression_args,
+        get_netcdf_compression,
+    )
+
+    parser = argparse.ArgumentParser()
+    add_netcdf_compression_args(parser)
+    compression = get_netcdf_compression(parser.parse_args(arguments))
+    dataset = _make_field()
+    dataset["second"] = dataset["v"].copy(deep=False)
+    for name, level in (("v", 9), ("second", 1)):
+        dataset[name].encoding.update(zlib=True, complevel=level, shuffle=True)
+        dataset[name].attrs["_QuantizeBitGroomNumberOfSignificantDigits"] = 3
+    output = tmp_path / "partial.nc"
+    write_xarray_to_file(dataset, output, compression=compression)
+
+    with netCDF4.Dataset(output) as result:
+        for name, level in (("v", 9), ("second", 1)):
+            assert result[name].filters()["complevel"] == level
+            assert result[name].filters()["shuffle"] is shuffle
+            assert result[name].quantization() == (
+                None if digits is None else (digits, "BitGroom")
+            )
+
+
+def test_direct_compression_helpers_resolve_optional_settings():
+    """Direct writer callers get concrete settings with or without input encoding."""
+    dataset = _make_field()
+    dataset["v"].encoding.update(zlib=True, complevel=9, shuffle=False)
+    compression = NetcdfCompression(complevel=None, shuffle=None, significant_digits=4)
+    assert compression.get_lossless_encoding() == {
+        "zlib": True,
+        "complevel": DEFAULT_COMPLEVEL,
+        "shuffle": True,
+    }
+    assert compression.create_variable_encoding(dataset, ["v"])["v"] == {
+        "zlib": True,
+        "complevel": 9,
+        "shuffle": False,
+        "significant_digits": 4,
+        "quantize_mode": "BitGroom",
+    }

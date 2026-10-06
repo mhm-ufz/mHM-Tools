@@ -135,7 +135,7 @@ def create_latlon(
     write_header_l2=None,
     crs=None,
     dtype="f4",
-    compression=9,
+    compression=None,
     add_bounds=False,
 ):
     """Create the latlon.nc file from given ASCII headers.
@@ -173,8 +173,9 @@ def create_latlon(
         If not given, headers will be interpreted as given in lat-lon ('epsg:4326').
     dtype : str, optional
         Data type for the latlon file and headers, by default "f4"
-    compression : int, optional
-        Compression level for the NetCDF file, by default 9
+    compression : NetcdfCompression, optional
+        Lossless and lossy compression settings for the NetCDF file.
+        None uses the defaults.
     add_bounds : bool, optional
         Add bounds to the NetCDF axis, by default False
     """
@@ -267,10 +268,8 @@ def create_latlon(
             latlon.coords[bounds_name] = generate_bounds(latlon[var])
             latlon[var].attrs["bounds"] = bounds_name
 
-    # compression
-    encoding = NC_ENCODE_DEFAULTS.copy()
-    if 0 < compression < 10:
-        encoding.update({"zlib": True, "complevel": compression})
-    set_netcdf_encoding(latlon, encoding)
+    # the fill values also reach the coordinates this way; the compression
+    # settings are passed to the writer instead, which owns them
+    set_netcdf_encoding(latlon, NC_ENCODE_DEFAULTS.copy())
     # save netcdf file
-    write_xarray_to_file(ds=latlon, file_path=out_file)  # , encoding=encoding)
+    write_xarray_to_file(ds=latlon, file_path=out_file, compression=compression)

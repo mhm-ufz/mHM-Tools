@@ -8,18 +8,21 @@ Authors
 
 import logging
 from pathlib import Path
-from typing import List, Optional, Sequence
+from typing import List, Mapping, Optional, Sequence
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
 from mhm_tools.common.catchment_maps import (
+    CATCHMENT_MEDIAN_TITLE,
+    CATCHMENT_OUTLET_TITLE,
     calculate_metric_medians,
     find_matching_geometry_file,
     write_catchment_median_maps,
 )
 from mhm_tools.common.plotter import (
+    PLOT_DPI,
     create_metric_summary_rows,
     plot_metric_cdf_comparison,
     plot_metric_violin_comparison,
@@ -353,7 +356,7 @@ def _write_grouped_metric_plots(
     label_metadata,
     colors_by_label=None,
     linestyles_by_label=None,
-    dpi=450,
+    dpi=PLOT_DPI,
 ):
     """Write additional metric plots grouped by metadata fields.
 
@@ -646,7 +649,7 @@ def write_metric_plots(  # noqa: PLR0913
     file_names: str = "*.csv",
     output_prefix: str = "cdf",
     plot_types: Optional[Sequence[str]] = None,
-    dpi: int = 450,
+    dpi: int = PLOT_DPI,
     shape_paths: Optional[Sequence[str]] = None,
     shape_folder=None,
     mask_paths: Optional[Sequence[str]] = None,
@@ -658,6 +661,7 @@ def write_metric_plots(  # noqa: PLR0913
     group_by: Optional[Sequence[str]] = None,
     color_by: Optional[str] = None,
     style_by: Optional[str] = None,
+    axis_limits_by_variable: Optional[Mapping[str, Sequence[float]]] = None,
 ) -> List[Path]:
     """Write metric comparison plots from metric CSV files.
 
@@ -701,6 +705,9 @@ def write_metric_plots(  # noqa: PLR0913
         Metadata field used for plot colors.
     style_by : str, optional
         Metadata field used for CDF line styles.
+    axis_limits_by_variable : Mapping[str, Sequence[float]], optional
+        Explicit value-axis limits by variable (x-axis for CDF, y-axis for
+        violin plots), overriding the shared plotter's own default.
 
     Returns
     -------
@@ -709,7 +716,7 @@ def write_metric_plots(  # noqa: PLR0913
         anything to show), and ``metric_summary.csv``.
     """
     if plot_types is None:
-        plot_types = ["cdf", "violin"]
+        plot_types = ["cdf"]
     plot_types = list(plot_types)
 
     output_dir = Path(output_dir)
@@ -757,6 +764,7 @@ def write_metric_plots(  # noqa: PLR0913
                 values_by_label=values_by_input,
                 variable_name=variable,
                 output_file=output_file,
+                x_limits=(axis_limits_by_variable or {}).get(variable),
                 dpi=dpi,
                 colors=colors_by_label,
                 linestyles=linestyles_by_label,
@@ -771,6 +779,7 @@ def write_metric_plots(  # noqa: PLR0913
                 values_by_label=values_by_input,
                 variable_name=variable,
                 output_file=output_file,
+                y_limits=(axis_limits_by_variable or {}).get(variable),
                 dpi=dpi,
                 colors=colors_by_label,
             )
@@ -929,6 +938,8 @@ def write_metric_catchment_maps(
     output_files = []
     for input_path, input_name in zip(input_paths, names):
         metric_rows = []
+        # a CSV without gauge ids is summarised by its median, not an outlet value
+        has_median_rows = False
         csv_files = get_metric_csv_files(input_path, file_names=file_names)
         for csv_file in csv_files:
             metric_df = pd.read_csv(csv_file)
@@ -954,6 +965,7 @@ def write_metric_catchment_maps(
                     row_id=match_id,
                 )
             )
+            has_median_rows = True
         if not metric_rows:
             logger.warning(f"No metric CSV rows available for {input_name}")
             continue
@@ -969,6 +981,11 @@ def write_metric_catchment_maps(
                 mask_folder=mask_folder,
                 mask_var=mask_var,
                 title_context=input_name if split_by_input else None,
+                title=(
+                    CATCHMENT_MEDIAN_TITLE
+                    if has_median_rows
+                    else CATCHMENT_OUTLET_TITLE
+                ),
             )
         )
     return output_files
@@ -1046,6 +1063,7 @@ def _write_metric_catchment_maps_for_explicit_geometry(
         mask_files_by_id=mask_files_by_id or None,
         mask_var=mask_var,
         title_context=title_context,
+        title=CATCHMENT_MEDIAN_TITLE,
     )
 
 

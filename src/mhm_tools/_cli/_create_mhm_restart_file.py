@@ -73,40 +73,50 @@ def add_args(parser):
         "--lon-min",
         required=False,
         default=None,
-        help=("""minimum longitude of the target grid
-            required unless --mask_file is provided"""),
+        help=(
+            """minimum longitude of the target grid
+            required unless --mask_file is provided"""
+        ),
     )
 
     optional.add_argument(
         "--lon-max",
         required=False,
         default=None,
-        help=("""maximum longitude of the target grid
-            required unless --mask_file is provided"""),
+        help=(
+            """maximum longitude of the target grid
+            required unless --mask_file is provided"""
+        ),
     )
 
     optional.add_argument(
         "--lat-min",
         required=False,
         default=None,
-        help=("""minimum latitude of the target grid
-            required unless --mask_file is provided"""),
+        help=(
+            """minimum latitude of the target grid
+            required unless --mask_file is provided"""
+        ),
     )
 
     optional.add_argument(
         "--lat-max",
         required=False,
         default=None,
-        help=("""maximum latitude of the target grid
-            required unless --mask_file is provided"""),
+        help=(
+            """maximum latitude of the target grid
+            required unless --mask_file is provided"""
+        ),
     )
 
     optional.add_argument(
         "--l0-resolution",
         required=False,
         default=None,
-        help=("""resolution of the morphological input data grid in degrees
-            required unless --mask_file is provided"""),
+        help=(
+            """resolution of the morphological input data grid in degrees
+            required unless --mask_file is provided"""
+        ),
     )
 
     optional.add_argument(

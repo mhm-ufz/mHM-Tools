@@ -16,6 +16,7 @@ import unittest
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import pytest
 import xarray as xr
 
@@ -241,3 +242,39 @@ def test_load_precipitation_data_dir_without_pre_nc(tmp_path):
     hydro = Hydrograph(calc_stats=False)
     hydro.load_precipiation_data(tmp_path)
     assert hydro.pre is None
+
+
+def _hydrograph_with_offset(units, area_km2=None):
+    """Score a simulation lying 2 units above a daily observation for 10 days."""
+    time = pd.date_range("1990-01-01", periods=10, freq="D")
+    # the variation sums to zero, so the observed sum is 10 times 10
+    observed_values = 10.0 + np.tile([-1.0, 1.0], 5)
+    observed = xr.DataArray(
+        observed_values, dims="time", coords={"time": time}, attrs={"units": units}
+    )
+    simulated = (observed + 2.0).assign_attrs(units=units)
+    hydro = Hydrograph(calc_stats=True)
+    hydro.set_discharge(simulation=simulated, observation=observed)
+    hydro.catchment.area = area_km2
+    hydro.calc_objectives(hydro.obs_discharge_data, hydro.sim_discharge_data)
+    return hydro
+
+
+def test_calc_objectives_gives_diff_as_a_volume():
+    """Give diff in m3, the rate difference times the daily step."""
+    hydro = _hydrograph_with_offset("m3 s-1")
+    assert hydro.objectives.diff == pytest.approx(10 * 2.0 * 86400)
+    assert hydro.objectives.rel_diff == pytest.approx(0.2)
+
+
+def test_calc_objectives_turns_a_depth_rate_into_a_volume_with_the_area():
+    """Turn a mm/d difference into m3 over the catchment area."""
+    hydro = _hydrograph_with_offset("mm d-1", area_km2=100.0)
+    # 20 mm over 100 km2
+    assert hydro.objectives.diff == pytest.approx(0.02 * 100.0 * 1e6)
+
+
+def test_calc_objectives_gives_no_volume_for_a_depth_rate_without_area():
+    """Give NaN for a depth rate when the catchment area is unknown."""
+    hydro = _hydrograph_with_offset("mm d-1")
+    assert np.isnan(hydro.objectives.diff)

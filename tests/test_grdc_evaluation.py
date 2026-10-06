@@ -79,6 +79,13 @@ class TestLowLevelHelpers(unittest.TestCase):
             gv.flatten_list([1, [2, [3, None], 4], None, 5]), [1, 2, 3, 4, 5]
         )
 
+    def test_get_region_from_id_matches_leading_digit(self):
+        self.assertEqual(gv.get_region_from_id(1001), "Africa")
+        self.assertEqual(gv.get_region_from_id("6042"), "Europe")
+
+    def test_get_region_from_id_unknown_prefix(self):
+        self.assertEqual(gv.get_region_from_id(9001), "Unknown")
+
     def test_gen_list_of_result_dicts_all_nan(self):
         times = pd.date_range("2000-01-01", periods=3, freq="h")
         da = xr.DataArray(
