@@ -79,6 +79,9 @@ from mhm_tools.post.gridded_data_evaluation import (
 from mhm_tools.post.hydrograph import gen_hydrograph_by_data_sets
 
 logger = logging.getLogger(__name__)
+# names of the variable holding the station id of every river node in mRM node
+# output; gauges are matched to nodes by these ids before any coordinates
+NODE_STATION_ID_NAMES = ("station", "station_id")
 
 
 def get_region_from_id(gauge_id):
@@ -468,6 +471,10 @@ def _read_model_file_part(  # noqa: PLR0911
                     keep_vars.append(x_name)
                 if y_name in ds_sim.data_vars:
                     keep_vars.append(y_name)
+                # a station id stored as data variable would be dropped otherwise
+                keep_vars.extend(
+                    name for name in NODE_STATION_ID_NAMES if name in ds_sim.data_vars
+                )
                 ds_part = ds_sim[keep_vars]
                 if x_name in ds_sim.coords and x_name not in ds_part.coords:
                     ds_part = ds_part.assign_coords({x_name: ds_sim.coords[x_name]})
@@ -562,16 +569,91 @@ def _read_model_file_part(  # noqa: PLR0911
         return sim_var_local, ds_part
 
 
-def get_sim_data_for_gauges_from_nodes(
-    sim_ds,
-    sim_variable,
-    x_new,
-    y_new,
-    gauge_ids,
-    resolution=None,
+def _get_node_station_ids(sim_ds, sim_da):
+    """Return the station ids of the river nodes, if the node output holds them.
+
+    Parameters
+    ----------
+    sim_ds : xr.Dataset
+        Node output dataset.
+    sim_da : xr.DataArray
+        Simulated discharge with one dimension along the river nodes.
+
+    Returns
+    -------
+    xr.DataArray or None
+        One-dimensional station ids along a dimension of `sim_da`, or None when
+        no variable of `NODE_STATION_ID_NAMES` lies along one.
+    """
+    for name in NODE_STATION_ID_NAMES:
+        if name in sim_ds.variables:
+            ids_da = sim_ds[name]
+            if ids_da.ndim == 1 and ids_da.dims[0] in sim_da.dims:
+                return ids_da
+    return None
+
+
+def _match_gauges_to_nodes_by_station_id(node_ids, gauge_ids):
+    """Find the river node carrying the station id of every gauge.
+
+    Nodes without an id hold the fill value, decoded to NaN, and are ignored.
+    Of several nodes sharing an id the first one is used.
+
+    Parameters
+    ----------
+    node_ids : np.ndarray
+        Station id of every river node.
+    gauge_ids : np.ndarray
+        Ids of the gauges to match.
+
+    Returns
+    -------
+    tuple
+        ``(indices, found)``: the node index of every matched gauge, and a
+        boolean mask over `gauge_ids` marking the matched gauges.
+    """
+    node_index = pd.Index(node_ids)
+    has_id = node_index.notna()
+    repeated = node_index.duplicated() & has_id
+    if repeated.any():
+        logger.warning(
+            f"{int(repeated.sum())} river node(s) repeat a station id; "
+            "the first node with each id is used."
+        )
+    keep = has_id & ~node_index.duplicated()
+    # numeric lookup, so integer gauge ids find float-decoded node ids
+    positions = pd.Series(np.flatnonzero(keep), index=node_index[keep])
+    matched = positions.reindex(gauge_ids).to_numpy()
+    found = ~np.isnan(matched)
+    return matched[found].astype(int), found
+
+
+def _match_gauges_to_nodes_by_coordinates(
+    sim_ds, sim_da, x_arr, y_arr, ids_arr, resolution=None
 ):
-    """Extract discharge series by nearest river node to gauge coordinates."""
-    logger.info("Extracting gauge discharge from node output: start.")
+    """Find the river node nearest to every gauge by coordinates.
+
+    Parameters
+    ----------
+    sim_ds : xr.Dataset
+        Node output dataset holding the node coordinates.
+    sim_da : xr.DataArray
+        Simulated discharge with one dimension along the river nodes.
+    x_arr, y_arr : np.ndarray
+        Gauge coordinates, in the coordinate system of the nodes.
+    ids_arr : np.ndarray
+        Gauge ids.
+    resolution : float, optional
+        Grid resolution; gauges farther than 1.5 cells from their node are
+        reported.
+
+    Returns
+    -------
+    tuple
+        ``(node_dim, indices, matched_x, matched_y, ids_arr)``: the node
+        dimension, the node index of every gauge with valid coordinates, and
+        the node coordinates and ids of those gauges.
+    """
     x_name, y_name = _find_node_xy_vars(sim_ds)
     logger.info(
         "Resolved node coordinate vars",
@@ -591,13 +673,9 @@ def get_sim_data_for_gauges_from_nodes(
         with ErrorLogger(logger):
             raise ValueError(msg)
 
-    sim_da = sim_ds[sim_variable]
     node_dim = _find_node_dim(sim_da, node_x.size)
     logger.info("Resolved node dimension")
 
-    x_arr = np.asarray(x_new)
-    y_arr = np.asarray(y_new)
-    ids_arr = np.asarray(gauge_ids)
     valid = np.isfinite(x_arr) & np.isfinite(y_arr)
     if not np.any(valid):
         msg = "No valid gauge coordinates found in scc gauges file."
@@ -623,18 +701,100 @@ def get_sim_data_for_gauges_from_nodes(
                 f"Some gauges are farther than {max_dist:.6f} from nearest node; "
                 f"using nearest anyway (max {float(np.max(distances[far_mask])):.6f})."
             )
+    return node_dim, indices, node_x[indices], node_y[indices], ids_arr
+
+
+def get_sim_data_for_gauges_from_nodes(
+    sim_ds,
+    sim_variable,
+    x_new,
+    y_new,
+    gauge_ids,
+    resolution=None,
+):
+    """Extract the discharge series of every gauge from river node output.
+
+    A gauge takes the node carrying its station id when the node output holds
+    station ids (`NODE_STATION_ID_NAMES`), and the nearest node by coordinates
+    only when it holds none.
+
+    Parameters
+    ----------
+    sim_ds : xr.Dataset
+        Node output dataset.
+    sim_variable : str
+        Name of the simulated discharge variable.
+    x_new, y_new : array_like
+        Gauge coordinates from the gauges file.
+    gauge_ids : array_like
+        Gauge ids from the gauges file.
+    resolution : float, optional
+        Grid resolution for the distance check of the coordinate matching.
+
+    Returns
+    -------
+    tuple
+        ``(sim_sel, matched_x, matched_y, ids_arr)``: the discharge along an
+        ``id`` dimension, the coordinates of the matched gauges (gauge
+        coordinates for id matching, node coordinates for coordinate matching)
+        and their ids.
+    """
+    logger.debug("Extracting gauge discharge from node output: start.")
+    sim_da = sim_ds[sim_variable]
+    x_arr = np.asarray(x_new)
+    y_arr = np.asarray(y_new)
+    ids_arr = np.asarray(gauge_ids)
+    node_ids_da = _get_node_station_ids(sim_ds, sim_da)
+    if node_ids_da is not None:
+        node_dim = node_ids_da.dims[0]
+        logger.debug(
+            f"Matching gauges to river nodes by station id ('{node_ids_da.name}')."
+        )
+        indices, found = _match_gauges_to_nodes_by_station_id(
+            np.asarray(node_ids_da.values), ids_arr
+        )
+        if not found.any():
+            msg = (
+                f"None of the {ids_arr.size} gauge ids occurs in the station ids "
+                f"'{node_ids_da.name}' of the node output, e.g. {ids_arr[:3].tolist()}."
+            )
+            with ErrorLogger(logger):
+                raise ValueError(msg)
+        if not found.all():
+            logger.warning(
+                f"Dropping {int((~found).sum())} gauge(s) whose id no river node "
+                f"carries, e.g. {ids_arr[~found][:5].tolist()}."
+            )
+        # the gauges file knows where the gauges are, so their coordinates stay
+        matched_x, matched_y, ids_arr = x_arr[found], y_arr[found], ids_arr[found]
+    else:
+        logger.debug(
+            "Node output holds no station ids; matching gauges to the nearest "
+            "river node by coordinates."
+        )
+        node_dim, indices, matched_x, matched_y, ids_arr = (
+            _match_gauges_to_nodes_by_coordinates(
+                sim_ds, sim_da, x_arr, y_arr, ids_arr, resolution=resolution
+            )
+        )
 
     id_indexer = xr.DataArray(ids_arr, dims="id", coords={"id": ids_arr})
     sim_sel = sim_da.isel({node_dim: xr.DataArray(indices, dims="id")})
     sim_sel = sim_sel.assign_coords(id=id_indexer)
     if "id" not in sim_sel.dims and node_dim in sim_sel.dims:
         sim_sel = sim_sel.rename({node_dim: "id"})
+    # node coordinates such as x/y would clash with the returned gauge
+    # coordinates once both end up in one dataset
+    sim_sel = sim_sel.drop_vars(
+        [
+            name
+            for name, coord in sim_sel.coords.items()
+            if name != "id" and "id" in coord.dims
+        ]
+    )
     logger.info(
         "Selected discharge for all gauges.",
     )
-
-    matched_x = node_x[indices]
-    matched_y = node_y[indices]
     return sim_sel, matched_x, matched_y, ids_arr
 
 
