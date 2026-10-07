@@ -30,6 +30,7 @@ Where privious versions focussed on the creation of local setups from existing g
   - Excludes Greenland, and writes one mask per region plus a four-panel overview plot.
 
 #### Changes to existing tools 
+- **`create-catchment`**: outlets are matched by shape overlap and the crop is sized to the reference shape, taking a 194 km² catchment from 4 min 18 s to 5 s. New option `--max-distance-m`.
 - **`create-catchment`**: delineates catchments on projected grids such as EPSG:3035 (`--coords-are-not-latlon`).
   - Cell and upstream areas come from the grid spacing in metres, and the 2D `lat`/`lon` that projected NetCDF files often carry next to `x`/`y` are ignored.
   - Gauge coordinates and reference shapes have to be in the CRS of the grid. `examples/02_correct_gauges_on_projected_grid.py` projects both from lat/lon, corrects every gauge in its own run and writes a new scc gauges file with the corrected `x`/`y`.
@@ -39,16 +40,16 @@ Where privious versions focussed on the creation of local setups from existing g
 #### New evaluation tools
 - **`twsa-evaluation`**: compares simulated total water storage anomalies (TWSA) against a gridded reference such as GRACE.
   - Accepts an mHM fluxes-and-states record, a total water storage or a ready anomaly, and brings both records onto the coarser grid and the reference's own observation windows.
-  - Scores every grid cell with KGE and RMSE (`--metrics`), with anomalies relative to a baseline period (`--baseline-start-year`, `--baseline-end-year`).
+  - Scores every grid cell with KGE and RMSE (`--metric`), with anomalies relative to a baseline period (`--baseline-start-year`, `--baseline-end-year`).
   - Writes the metrics, the anomaly fields and a map of each metric for the whole domain and per WMO region; maps of the KGE components and time series per region on request (`--plot-kge-components`, `--plot-region-cells`).
   - Refuses a gap in the record, a missing unit or a reference coarser than the input instead of guessing.
 - **`snow-evaluation`**: compares a simulated snow field against a gridded snow reference.
   - Brings both onto the coarser grid and calendar (8-day composites at the finest) and reduces them to a binary snow flag (`--snow-threshold`).
   - Writes per snow year and grid cell the first and last snow-covered day, the season length and the number of snow-covered days, plus classification accuracy maps and the snow-covered share over time per hemisphere.
   - Adds an animated three-panel comparison (skip it with `--no-gif`) and repeats every output per WMO region.
-  - Streams through the record, so memory follows the compared grid rather than the record length (`--max-memory-gib`).
+  - Streams through the record, so memory follows the compared grid rather than the record length (`--available-mem`).
 - **`discharge-eval-comparison`**: compares the `results.csv` of two or more `discharge-evaluation` runs side by side, e.g. different model realisations or calibrations.
-  - Draws CDFs, catchment maps and a per-gauge difference map against a reference run (`--reference-name`); violin plots on request (`--plot-types`).
+  - Draws CDFs, catchment maps and a per-gauge difference map against a reference run (`--ref-name`); violin plots on request (`--plot-types`).
   - Breaks every plot down per GRDC region, derived from the gauge id, and collects them in one overview PDF.
   - Discards values that cannot occur, such as a KGE or NSE above 1, so one diverged run cannot distort an axis.
 
@@ -58,11 +59,17 @@ Where privious versions focussed on the creation of local setups from existing g
 - **Statistics per WMO region**: every evaluation logs a `Global` row and one row per WMO region; `--write-region-stats` also writes them to CSV.
 
 ### Additional Highlights
-- **`create-catchment`**: outlets are matched by shape overlap and the crop is sized to the reference shape, taking a 194 km² catchment from 4 min 18 s to 5 s. New option `--max-distance-m`.
 - **NetCDF compression**: `--compression`, `--significant-digits` and `--quantize-mode` on every tool writing gridded NetCDF. Lossy quantization never touches integers or coordinates, and an input file's compression is kept unless you override it.
+
+### Harmonized CLI arguments
+All tools now name their arguments the same way. Every former name keeps working, so existing commands and scripts run unchanged, and `--help` shows only the new names.
+- Compared data use `--input-*` for the model and `--ref-*` for the reference: `--input-path`/`--ref-path`, or `--input-dir`/`--ref-dir` where only a directory is accepted, and `--input-file-name`, `--input-var` and `--input-name` for the file name pattern, the variable and the label.
+- File name patterns are `--input-file-name` and `--output-file-name`, directories end in `-dir`, single output files are `--output-file` and variable options end in `-var`.
+- One concept has one name, e.g. `--resample-time-to`, `--available-mem` (now also with a unit such as `500mb`), `--metric` (`all`, `none`, one metric or a list) and `--lonlatbox`, which takes four bounds and an optional L0 resolution in every tool.
 
 ### Upgrade notes
 - `converter-nc-ascii` is now called `file-converter`.
+- `create-mhm-restart-from-setup --create-header` had no effect and is gone; `--no-forced-header-creation` switches the forced header creation off.
 - New dependency: `rasterio`.
 - Violin plots are only drawn on request, and `cdf_<var>_global_color_by_region.png` is no longer written; `cdf_<var>_regions.png` shows the same breakdown.
 

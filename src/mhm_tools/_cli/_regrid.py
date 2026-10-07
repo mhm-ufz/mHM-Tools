@@ -40,7 +40,13 @@ def add_args(parser):
         required=True,
         help="Output NetCDF (L2 grid)",
     )
-    optional.add_argument("--l2", required=True, help="L2 resolution: e.g. 0.05, 0.1")
+    optional.add_argument(
+        "--l2-resolution",
+        "--l2",
+        dest="l2",
+        required=True,
+        help="L2 resolution: e.g. 0.05, 0.1",
+    )
     optional.add_argument(
         "--method",
         default="nearest",

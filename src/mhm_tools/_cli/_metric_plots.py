@@ -46,6 +46,7 @@ def add_args(parser):
         help="Plot labels matching --input-paths. Defaults to path names.",
     )
     optional.add_argument(
+        "--input-file-name",
         "--file-names",
         "--file-pattern",
         dest="file_names",
@@ -82,9 +83,11 @@ def add_args(parser):
         help="Shapefiles matched one-to-one with --input-paths.",
     )
     optional.add_argument(
+        "--shape-dir",
         "--shape-folder",
+        dest="shape_folder",
         default=None,
-        help="Folder with shapefiles matched by CSV stem, parent name, or id column.",
+        help="Directory with shapefiles matched by CSV stem, parent name, or id column.",
     )
     optional.add_argument(
         "--mask-path",
@@ -95,9 +98,11 @@ def add_args(parser):
         help="NetCDF mask files matched one-to-one with --input-paths.",
     )
     optional.add_argument(
+        "--mask-dir",
         "--mask-folder",
+        dest="mask_folder",
         default=None,
-        help="Folder with NetCDF mask files matched by CSV stem, parent name, or id column.",
+        help="Directory with NetCDF mask files matched by CSV stem, parent name, or id column.",
     )
     optional.add_argument(
         "--mask-var",

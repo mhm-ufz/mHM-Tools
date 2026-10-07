@@ -58,6 +58,7 @@ def add_args(parser):
         help="Metric columns to plot. Defaults to kge.",
     )
     optional.add_argument(
+        "--input-file-name",
         "--file-names",
         "--file-pattern",
         dest="file_names",
@@ -73,7 +74,7 @@ def add_args(parser):
         help=(
             "Comparison plot types to create: cdf, violin, catchment-map, "
             "map-diff. Defaults to cdf, map-diff, plus catchment-map "
-            "whenever --shape-folder or --mask-folder is given."
+            "whenever --shape-dir or --mask-dir is given."
         ),
     )
     optional.add_argument(
@@ -83,14 +84,18 @@ def add_args(parser):
         help="Output image resolution for cdf/violin plots.",
     )
     optional.add_argument(
+        "--shape-dir",
         "--shape-folder",
+        dest="shape_folder",
         default=None,
-        help="Folder with shapefiles matched by gauge id, for catchment maps.",
+        help="Directory with shapefiles matched by gauge id, for catchment maps.",
     )
     optional.add_argument(
+        "--mask-dir",
         "--mask-folder",
+        dest="mask_folder",
         default=None,
-        help="Folder with NetCDF mask files matched by gauge id, for catchment maps.",
+        help="Directory with NetCDF mask files matched by gauge id, for catchment maps.",
     )
     optional.add_argument(
         "--mask-var",
@@ -98,7 +103,9 @@ def add_args(parser):
         help="Variable in NetCDF mask files used for catchment median maps.",
     )
     optional.add_argument(
+        "--ref-name",
         "--reference-name",
+        dest="reference_name",
         default=None,
         help="Baseline run's label for map-diff. Defaults to the first --input-path.",
     )

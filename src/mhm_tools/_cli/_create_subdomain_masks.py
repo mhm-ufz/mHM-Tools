@@ -49,13 +49,16 @@ def add_args(parser):
     )
     required_args.add_argument(
         "-l",
+        "--mask-file",
         "--land-mask",
+        dest="land_mask",
         required=True,
         help=(
             "file containing land surface mask at target resolution default variable name is 'land_mask'"
         ),
     )
     optional.add_argument(
+        "--mask-var",
         "--land-mask-variable",
         "--land_mask_var",
         dest="land_mask_variable",

@@ -6,9 +6,11 @@ import xarray as xr
 
 from mhm_tools.common.cli_utils import (
     add_netcdf_compression_args,
+    get_coords,
     get_coords_from_mask,
     get_netcdf_compression,
     normalize_cli_sequence,
+    parse_lonlatbox,
 )
 from mhm_tools.common.netcdf import NO_QUANTIZATION
 
@@ -170,3 +172,30 @@ def test_get_netcdf_compression_carries_the_quantize_mode():
 def test_add_netcdf_compression_args_rejects_invalid_values(argv):
     with pytest.raises(SystemExit):
         _compression_parser().parse_args(argv)
+
+
+@pytest.mark.parametrize(
+    ("lonlatbox", "expected"),
+    [
+        ("5,15,45,55", (5.0, 15.0, 45.0, 55.0, None)),
+        ("5,15,45,55,0.0625", (5.0, 15.0, 45.0, 55.0, 0.0625)),
+    ],
+)
+def test_parse_lonlatbox_takes_four_bounds_and_an_optional_resolution(
+    lonlatbox, expected
+):
+    """Return the bounds, and the L0 resolution only when a fifth value is given."""
+    assert parse_lonlatbox(lonlatbox) == expected
+
+
+@pytest.mark.parametrize("lonlatbox", ["5,15,45", "5,15,45,55,0.0625,1"])
+def test_parse_lonlatbox_rejects_other_value_counts(lonlatbox):
+    """Refuse a lonlatbox with neither four nor five values, naming the form."""
+    with pytest.raises(ValueError, match="lon_min,lon_max,lat_min,lat_max"):
+        parse_lonlatbox(lonlatbox)
+
+
+@pytest.mark.parametrize("lonlatbox", ["5,15,45,55", "5,15,45,55,0.0625"])
+def test_get_coords_reads_the_same_bounds_from_four_and_five_values(lonlatbox):
+    """Take the bounds of a lonlatbox with or without an L0 resolution."""
+    assert get_coords(lonlatbox) == (5.0, 15.0, 45.0, 55.0, None)

@@ -47,7 +47,9 @@ def add_args(parser):
     )
     optional.add_argument(
         "-v",
+        "--input-var",
         "--var",
+        dest="var",
         default="Qrouted",
         help="Variable name for routed streamflow in the NetCDF file",
     )

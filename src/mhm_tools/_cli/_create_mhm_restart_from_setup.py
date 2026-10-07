@@ -77,6 +77,7 @@ def add_args(parser):
     flags = parser.add_argument_group("flags")
     optional.add_argument(
         "-f",
+        "--input-file-name",
         "--input-name",
         "--file-name",
         dest="file_name",
@@ -237,9 +238,9 @@ def add_args(parser):
         help="Set if each dataset should be read as a chunked dask array.",
     )
     flags.add_argument(
-        "--create-header",
+        "--no-forced-header-creation",
         required=False,
-        default=True,
+        default=False,
         action="store_true",
         help="Force creation of header file for all files.",
     )
@@ -414,7 +415,7 @@ def run(args):
             crop_n_jobs=args.crop_ncpus,
             filename=args.file_name,
             available_mem_gib=available_mem,
-            force_header_creation=args.create_header,
+            force_header_creation=not args.no_forced_header_creation,
             chunking=args.chunking,
             output_var=args.output_var,
             no_cropping=args.no_cropping,

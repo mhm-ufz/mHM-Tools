@@ -51,7 +51,9 @@ def add_args(parser):
     )
     optional.add_argument(
         "-v",
+        "--input-var",
         "--varname",
+        dest="varname",
         default=None,
         help="Elevation variable to read when the input holds several.",
     )

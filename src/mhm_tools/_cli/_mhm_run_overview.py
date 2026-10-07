@@ -36,7 +36,9 @@ def add_args(parser: argparse.ArgumentParser):
 
     optional = parser.add_argument_group("optional arguments")
     optional.add_argument(
+        "--base-dir",
         "--base-path",
+        dest="base_path",
         type=Path,
         default=None,
         help=(

@@ -100,33 +100,41 @@ def add_args(parser):
         default=False,
         help="Add bounds to the NetCDF axis.",
     )
+    # the descriptive name comes first, since only the first long option is
+    # shown in the help
     optional.add_argument(
-        "--h0",
         "--write-header-l0",
+        "--h0",
+        dest="h0",
         default=None,
         help="Write the level-0 header to a given file path.",
     )
     optional.add_argument(
-        "--h1",
         "--write-header-l1",
+        "--h1",
+        dest="h1",
         default=None,
         help="Write the level-1 header to a given file path.",
     )
     optional.add_argument(
-        "--h11",
         "--write-header-l11",
+        "--h11",
+        dest="h11",
         default=None,
         help="Write the level-11 header to a given file path.",
     )
     optional.add_argument(
-        "--h2",
         "--write-header-l2",
+        "--h2",
+        dest="h2",
         default=None,
         help="Write the level-2 header to a given file path.",
     )
     optional.add_argument(
         "-o",
+        "--output-file",
         "--out-file",
+        dest="out_file",
         default="latlon.nc",
         help="The path of the output NetCDF file containing the latlon information.",
     )

@@ -16,6 +16,7 @@ import logging
 
 from mhm_tools.common.cli_utils import (
     add_netcdf_compression_args,
+    get_available_mem_in_unit,
     get_netcdf_compression,
 )
 
@@ -73,7 +74,9 @@ def add_args(parser):
         help="Glob pattern for the recursive reference search.",
     )
     optional.add_argument(
+        "--input-var",
         "--input-variable",
+        dest="input_variable",
         default=None,
         help=(
             "Variable in the model file. Detected when the file holds one "
@@ -81,7 +84,9 @@ def add_args(parser):
         ),
     )
     optional.add_argument(
+        "--ref-var",
         "--ref-variable",
+        dest="ref_variable",
         default=None,
         help="Variable in the reference file. Detected when the file holds one.",
     )
@@ -112,7 +117,9 @@ def add_args(parser):
         help="Reference input format. 'auto' detects it from the variable.",
     )
     optional.add_argument(
+        "--input-factor",
         "--input-scale",
+        dest="input_scale",
         type=float,
         default=None,
         help=(
@@ -121,7 +128,9 @@ def add_args(parser):
         ),
     )
     optional.add_argument(
+        "--ref-factor",
         "--ref-scale",
+        dest="ref_scale",
         type=float,
         default=None,
         help="Millimetres of water per reference data unit.",
@@ -145,12 +154,14 @@ def add_args(parser):
         help="Fewest compared months a cell needs for a metric, else it stays empty.",
     )
     optional.add_argument(
+        "--metric",
         "--metrics",
+        dest="metrics",
         default="all",
         help=(
-            "Metrics every cell is scored with: 'all', 'none' or a comma "
-            f"separated list of {', '.join(AVAILABLE_METRICS)}. A metric that "
-            "is not selected is neither written nor plotted."
+            "Metrics every cell is scored with: 'all', 'none', one of "
+            f"{', '.join(AVAILABLE_METRICS)} or a comma separated list of them. "
+            "A metric that is not selected is neither written nor plotted."
         ),
     )
     optional.add_argument(
@@ -186,10 +197,14 @@ def add_args(parser):
         ),
     )
     optional.add_argument(
+        "--available-mem",
         "--max-memory-gib",
-        type=float,
-        default=8.0,
-        help="Memory budget the time chunks are sized against.",
+        dest="max_memory_gib",
+        default="8",
+        help=(
+            "Memory budget the time chunks are sized against, in Gb or with a "
+            "unit such as 500mb (default Gb)."
+        ),
     )
 
     flags.add_argument(
@@ -257,7 +272,7 @@ def run(args):
     selected_metrics = select_metrics(args.metrics)
     if not selected_metrics and args.no_write_twsa:
         msg = (
-            "--metrics none and --no-write-twsa leave nothing to calculate. "
+            "--metric none and --no-write-twsa leave nothing to calculate. "
             "Select a metric or drop --no-write-twsa."
         )
         with ErrorLogger(logger):
@@ -286,7 +301,7 @@ def run(args):
             kge_vmin=args.kge_vmin,
             metrics=selected_metrics,
             write_twsa=not args.no_write_twsa,
-            max_memory_gib=args.max_memory_gib,
+            max_memory_gib=get_available_mem_in_unit(args.max_memory_gib),
             compression=get_netcdf_compression(args),
             plot_kge_components=args.plot_kge_components,
             plot_region_cells=args.plot_region_cells,

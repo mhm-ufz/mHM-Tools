@@ -16,24 +16,31 @@ def add_args(parser):
     parser.description = "Compute and plot a Taylor diagram comparing multiple model datasets against a single reference dataset."
     parser.epilog = (
         "Example:\n"
-        "  mhm-tools taylor_diagram \\\n"
-        "    --ref_input_dir /path/to/obs \\\n"
-        '    --reference_pattern "obs.nc" \\\n'
-        "    --ref_var pre \\\n"
-        "    --mod_input_dirs /path/to/model1 /path/to/model2 \\\n"
-        "    --model_patterns model1.nc model2.nc \\\n"
-        "    --mod_vars mod1 mod2 \\\n"
+        "  mhm-tools taylor-diagram \\\n"
+        "    --ref-dir /path/to/obs \\\n"
+        '    --ref-file-name "obs.nc" \\\n'
+        "    --ref-var pre \\\n"
+        "    --input-dir /path/to/model1 /path/to/model2 \\\n"
+        "    --input-file-name model1.nc model2.nc \\\n"
+        "    --input-var mod1 mod2 \\\n"
         '    --title "Taylor Diagram for Precipitation" \\\n'
-        "    -o /out/dir --output_file taylor.png"
+        "    -o /out/dir --output-file taylor.png"
     )
 
-    # Required arguments
+    # Required arguments, named like the evaluation tools with the former
+    # reference/model names as hidden aliases
     req = parser.add_argument_group("required arguments")
     req.add_argument(
-        "--ref-input-dir", required=True, help="Directory with reference NetCDF file"
+        "--ref-dir",
+        "--ref-input-dir",
+        dest="ref_input_dir",
+        required=True,
+        help="Directory with reference NetCDF file",
     )
     req.add_argument(
+        "--ref-file-name",
         "--reference-pattern",
+        dest="reference_pattern",
         required=True,
         help="Filename pattern for reference NetCDF file",
     )
@@ -41,19 +48,28 @@ def add_args(parser):
         "--ref-var", required=True, help="Variable name in reference dataset"
     )
     req.add_argument(
+        "--input-dir",
+        "--input-dirs",
         "--mod-input-dirs",
+        dest="mod_input_dirs",
         nargs="+",
         required=True,
         help="List of directories containing model NetCDF files (one per model)",
     )
     req.add_argument(
+        "--input-file-name",
+        "--input-file-names",
         "--model-patterns",
+        dest="model_patterns",
         nargs="+",
         required=True,
         help="List of filename patterns for model NetCDF files (one per model)",
     )
     req.add_argument(
+        "--input-var",
+        "--input-vars",
         "--mod-vars",
+        dest="mod_vars",
         nargs="+",
         required=True,
         help="List of variable names in model datasets (one per model)",
@@ -72,10 +88,19 @@ def add_args(parser):
         "--title", default="Taylor Diagram", help="Title for the Taylor diagram."
     )
     optional.add_argument(
-        "--ref-label", default="Ref", help="Label to use for the reference data."
+        "--ref-name",
+        "--ref-label",
+        dest="ref_label",
+        default="Ref",
+        help="Label to use for the reference data.",
     )
     optional.add_argument(
-        "--mod-labels", nargs="+", help="List of labels to use for the model data."
+        "--input-name",
+        "--input-names",
+        "--mod-labels",
+        dest="mod_labels",
+        nargs="+",
+        help="List of labels to use for the model data.",
     )
     flags.add_argument(
         "--normalize",
@@ -105,8 +130,8 @@ def run(args):
     # sanity check to ensure matched lists
     if not (len(mod_input_dirs) == len(model_patterns) == len(mod_vars)):
         msg = (
-            "The number of --mod_input_dirs, --model_patterns, "
-            "and --mod_vars must all match."
+            "The number of --input-dir, --input-file-name "
+            "and --input-var values must all match."
         )
         raise ValueError(msg)
 

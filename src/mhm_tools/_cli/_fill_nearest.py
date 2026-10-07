@@ -33,8 +33,10 @@ def add_args(parser):
     )
     optional.add_argument(
         "-f",
+        "--input-file-name",
         "--fname",
         "--input-name",
+        dest="fname",
         default="precipitation_*.nc",
         help="Input filename pattern, for example 'precipitation_*.nc'.",
     )

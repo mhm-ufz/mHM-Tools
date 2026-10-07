@@ -32,36 +32,39 @@ def add_args(parser):
         "--input-file",
         required=True,
         help=(
-            "Path to the input file. This is usually a flow direction file, but can also be a digital elevation model. In the latter case var must be set to 'dem'."
+            "Path to the input file. This is usually a flow direction file, but can also be a digital elevation model. In the latter case --input-type must be set to 'dem'."
         ),
     )
     required_args.add_argument(
         "-o",
+        "--output-dir",
         "--output-path",
+        dest="output_path",
         required=True,
-        help=(
-            "Path to the output file. If a single file is written "
-            "this is the path to this file, if multiple files are "
-            "written, this is the prefix."
-        ),
+        help=("Directory the catchment files are written to."),
     )
     # optional
     optional_args = parser.add_argument_group("optional arguments")
     optional_args.add_argument(
+        "--input-var",
         "--vn",
         "--varname",
+        dest="vn",
         default="fdir",
-        help=("Name of variable in output file"),
+        help=("Name of the flow direction or DEM variable in the input file."),
     )
     optional_args.add_argument(
         "-v",
+        "--input-type",
         "--var",
+        dest="var",
         default="fdir",
-        help=("Input variable, use 'fdir' or 'dem'"),
+        help=("Type of the input file, use 'fdir' or 'dem'"),
     )
     optional_args.add_argument(
-        "--ftp",
         "--ftype",
+        "--ftp",
+        dest="ftp",
         default="d8",
         help=("ftype of input variable, use 'nextxy', 'ldd' or 'd8'"),
     )
@@ -86,7 +89,7 @@ def add_args(parser):
         required=False,
         default=None,
         help=(
-            """coordinates in the form of 'lon_min,lon_max,lat_min,lat_max,resolution_l0'"""
+            """coordinates in the form of 'lon_min,lon_max,lat_min,lat_max', optionally followed by ',resolution_l0'"""
         ),
     )
     optional_args.add_argument(
@@ -146,7 +149,7 @@ def add_args(parser):
         "--mask-file",
         default="mask.nc",
         help=(
-            "Path where to save the mask file. Default saving to output_path/mask.nc"
+            "Path where to save the mask file. A bare file name is saved into --output-dir (default: mask.nc)."
         ),
     )
     optional_args.add_argument(
@@ -205,10 +208,12 @@ def add_args(parser):
         help=("""Maximum error allowed when searching for the outlet cell."""),
     )
     optional_args.add_argument(
+        "--shape-dir",
         "--shape-folder",
+        dest="shape_folder",
         default=None,
         help=(
-            "Folder with gauge shapefiles used for shape-based outlet matching. "
+            "Directory with gauge shapefiles used for shape-based outlet matching. "
             "Files are matched by gauge id contained in the filename. Providing a shape file disables the area-based outlet matching. If both are provided, the shape-based matching is used."
         ),
     )
@@ -232,12 +237,14 @@ def add_args(parser):
         ),
     )
     optional_args.add_argument(
+        "--id-gauges-output-dir",
         "--id-gauges-out-path",
+        dest="id_gauges_out_path",
         required=False,
         default=None,
         help=(
             "Directory where idgauges.asc, idgauges.nc and gauge information files "
-            "(gauges_info.csv/.nc) are written. Default is --output-path."
+            "(gauges_info.csv/.nc) are written. Default is --output-dir."
         ),
     )
     optional_args.add_argument(
@@ -277,7 +284,7 @@ def run(args):  # noqa: PLR0912,PLR0915
     """
     from pathlib import Path
 
-    from mhm_tools.common.cli_utils import get_available_mem_in_unit
+    from mhm_tools.common.cli_utils import get_available_mem_in_unit, parse_lonlatbox
     from mhm_tools.common.logger import ErrorLogger
     from mhm_tools.common.resolution_handler import Resolution
 
@@ -387,7 +394,7 @@ def run(args):  # noqa: PLR0912,PLR0915
         else:
             logger.info(f"using gauge coordinates {gauge_coords}")
     if args.lonlatbox is not None:
-        lonmin, lonmax, latmin, latmax, resl0 = map(float, args.lonlatbox.split(","))
+        lonmin, lonmax, latmin, latmax, resl0 = parse_lonlatbox(args.lonlatbox)
         coordinate_slices = {"lat": slice(latmax, latmin), "lon": slice(lonmin, lonmax)}
         logger.info(
             f"using lonlatbox with extends: lat=({latmax}, {latmin}); lon=({lonmin}, {lonmax})"

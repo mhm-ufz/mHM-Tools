@@ -34,7 +34,9 @@ def add_args(parser: ArgumentParser) -> None:
     )
     optional.add_argument(
         "-o",
+        "--output-file",
         "--output",
+        dest="output",
         required=True,
         help="Output NetCDF file path.",
     )
@@ -53,12 +55,14 @@ def add_args(parser: ArgumentParser) -> None:
         action="store_true",
         help=(
             "Set the output variable name to the stem of the output file "
-            "path provided via --output."
+            "path provided via --output-file."
         ),
     )
     optional.add_argument(
         "-v",
+        "--output-var",
         "--varname",
+        dest="varname",
         default=None,
         help=(
             "Name of the variable to write in the NetCDF. "
@@ -84,7 +88,7 @@ def _resolve_var_name(
     Priority:
     1. --varname_eq_in_filename
     2. --varname_eq_out_filename
-    3. --varname (explicit name)
+    3. --output-var (explicit name)
     4. 'land_cover' (fallback)
     """
     if args.varname_eq_in_filename:

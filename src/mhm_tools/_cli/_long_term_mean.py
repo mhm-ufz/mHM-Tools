@@ -39,6 +39,7 @@ def add_args(parser):
     optional = parser.add_argument_group("optional arguments")
     optional.add_argument(
         "-f",
+        "--input-file-name",
         "--input-name",
         "--in-file",
         dest="in_file",
@@ -75,6 +76,7 @@ def add_args(parser):
         help="Keep intermediate temporal files generated during processing.",
     )
     optional.add_argument(
+        "--output-file-name",
         "--output-name",
         "--out-file",
         dest="out_file",

@@ -77,7 +77,11 @@ def add_args(parser):
     )
 
     optional.add_argument(
-        "--input-variable", help="Variable name in the input file.", required=False
+        "--input-var",
+        "--input-variable",
+        dest="input_variable",
+        help="Variable name in the input file.",
+        required=False,
     )
     optional.add_argument(
         "--input-name",
@@ -110,7 +114,9 @@ def add_args(parser):
         required=False,
     )
     optional.add_argument(
+        "--ref-var",
         "--ref-variable",
+        dest="ref_variable",
         help="Variable name in the first reference file.",
         default=None,
         required=False,
@@ -125,7 +131,9 @@ def add_args(parser):
         "--lonlatbox",
         required=False,
         default=None,
-        help=("""coordinates in the form of 'lon_min,lon_max,lat_min,lat_max'"""),
+        help=(
+            """coordinates in the form of 'lon_min,lon_max,lat_min,lat_max', a fifth L0 resolution value is ignored"""
+        ),
     )
     optional.add_argument(
         "--mask-file",
@@ -149,11 +157,13 @@ def add_args(parser):
         help=("Number of CPUs to use"),
     )
     optional.add_argument(
+        "--n-bootstrap-years",
         "--n-boostrap-years",
+        dest="n_boostrap_years",
         required=False,
         default=None,
         type=int,
-        help=("""Number of years to draw for each boostrap experiment"""),
+        help=("""Number of years to draw for each bootstrap experiment"""),
     )
     optional.add_argument(
         "--n-bootstrap-selections",
@@ -285,9 +295,14 @@ def add_args(parser):
     )
     optional.add_argument(
         "--metric",
+        "--metrics",
+        dest="metric",
         required=False,
         default="SPAEF",
-        help="Result metric written to results.csv. Accepted values: TSM, SPAEF, ESP, WASPAEF, MSPAEF, all.",
+        help=(
+            "Result metrics written to results CSV files: all, none, one of TSM, "
+            "SPAEF, ESP, WASPAEF, MSPAEF or a comma separated list of them."
+        ),
     )
     optional.add_argument(
         "--regions",

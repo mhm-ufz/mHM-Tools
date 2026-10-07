@@ -14,6 +14,7 @@ import logging
 
 from mhm_tools.common.cli_utils import (
     add_netcdf_compression_args,
+    get_available_mem_in_unit,
     get_netcdf_compression,
 )
 from mhm_tools.common.logger import ErrorLogger
@@ -104,12 +105,16 @@ def add_args(parser):
         help="Glob pattern for the recursive reference search.",
     )
     optional.add_argument(
+        "--input-var",
         "--input-variable",
+        dest="input_variable",
         default=None,
         help="Variable name in the input file. Detected when the file has one variable.",
     )
     optional.add_argument(
+        "--ref-var",
         "--ref-variable",
+        dest="ref_variable",
         default=None,
         help="Variable name in the reference file. Detected when the file has one variable.",
     )
@@ -142,7 +147,9 @@ def add_args(parser):
         help="Snow threshold for the reference only. Defaults to --snow-threshold.",
     )
     optional.add_argument(
+        "--resample-time-to",
         "--target-frequency",
+        dest="target_frequency",
         default=None,
         help=(
             "Force a target frequency (D, 8D, W, ME or daily, 8-daily, weekly, "
@@ -198,10 +205,14 @@ def add_args(parser):
         ),
     )
     optional.add_argument(
+        "--available-mem",
         "--max-memory-gib",
-        type=float,
-        default=8.0,
-        help="Size limit for loading the snow cover fields into memory.",
+        dest="max_memory_gib",
+        default="8",
+        help=(
+            "Size limit for loading the snow cover fields into memory, in Gb or "
+            "with a unit such as 500mb (default Gb)."
+        ),
     )
 
     flags.add_argument(
@@ -254,7 +265,7 @@ def run(args):
         write_gif=not args.no_gif,
         gif_fps=args.gif_fps,
         max_gif_frames=args.max_gif_frames,
-        max_memory_gib=args.max_memory_gib,
+        max_memory_gib=get_available_mem_in_unit(args.max_memory_gib),
         ncpus=args.ncpus,
         compression=get_netcdf_compression(args),
         write_region_stats=args.write_region_stats,

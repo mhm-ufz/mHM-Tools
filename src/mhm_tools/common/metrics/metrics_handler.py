@@ -35,17 +35,36 @@ ACCEPTED_RESULT_METRICS = (
 
 
 def normalize_results_metric(metric):
-    """Normalize and validate a result CSV metric name."""
+    """Normalize and validate the result CSV metric selection.
+
+    Args:
+        metric: None for TSM, "all", "none", one metric name, a comma separated
+            list of metric names or a sequence of them, case-insensitive.
+
+    Returns
+    -------
+        One metric name, or a tuple of metric names for "all", "none" (empty)
+        and a list of several metrics.
+    """
     if metric is None:
         return RESULT_METRIC_TSM
-    normalized = str(metric).strip().upper()
-    if normalized == "ALL":
+    names = metric if isinstance(metric, (list, tuple)) else str(metric).split(",")
+    normalized = [str(name).strip().upper() for name in names if str(name).strip()]
+    if normalized == ["ALL"]:
         return ACCEPTED_RESULT_METRICS
-    if normalized not in ACCEPTED_RESULT_METRICS:
+    if normalized == ["NONE"]:
+        return ()
+    unknown = [name for name in normalized if name not in ACCEPTED_RESULT_METRICS]
+    if unknown or not normalized:
         accepted = ", ".join(ACCEPTED_RESULT_METRICS)
-        msg = f"Unsupported result metric {metric!r}. Use one of: {accepted}."
+        msg = (
+            f"Unsupported result metric {metric!r}. Use all, none or one or more "
+            f"of: {accepted}."
+        )
         raise ValueError(msg)
-    return normalized
+    if len(normalized) == 1:
+        return normalized[0]
+    return tuple(dict.fromkeys(normalized))
 
 
 def calculate_metric_per_timestep_and_average(map1, map2, func, *args, **kwargs):
@@ -188,7 +207,8 @@ def create_results_csv(
         ds2_name: Name of the second dataset.
         out_dir: Directory the CSV files are written to.
         out_name: Prefix of the CSV file names.
-        metric: One of `ACCEPTED_RESULT_METRICS`, or "all".
+        metric: "all", "none", one of `ACCEPTED_RESULT_METRICS` or a comma
+            separated list of them.
         log_table: Log the results of every metric as a table.
 
     Returns
@@ -197,7 +217,7 @@ def create_results_csv(
     """
     norm_metric = normalize_results_metric(metric)
     if isinstance(norm_metric, tuple):
-        logger.info("Create csv for all metrics")
+        logger.info(f"Create csv for the metrics: {', '.join(norm_metric) or 'none'}")
         results = {}
         for nm in norm_metric:
             results.update(

@@ -175,16 +175,16 @@ def parse_coords(coords_str):
 
 
 def get_available_mem_in_unit(available_mem):
-    """Convert a memory string into a budget in GiB.
+    """Convert a memory string into a budget in Gb.
 
     Args:
         available_mem: Memory as a string carrying a `kb`, `mb` or `gb`
-            suffix, or a plain number that is already read as GiB. None
-            passes through.
+            suffix, or a plain number that is already read as Gb. None
+            passes through. The suffixes step by 1000, so 500mb is 0.5 Gb.
 
     Returns
     -------
-        The budget in GiB as a float, or None when nothing was given.
+        The budget in Gb as a float, or None when nothing was given.
     """
     if available_mem is None:
         return None
@@ -192,7 +192,7 @@ def get_available_mem_in_unit(available_mem):
     logger.info(f"mem_string {mem_str}")
     # every caller consumes this as `available_mem_gib`, so the value stays a
     # float: flooring it turned any budget below one GiB into zero
-    for suffix, per_gib in (("kb", 1024**2), ("mb", 1024), ("gb", 1)):
+    for suffix, per_gib in (("kb", 1000**2), ("mb", 1000), ("gb", 1)):
         if mem_str.endswith(suffix):
             value = float(mem_str[: -len(suffix)]) / per_gib
             break
@@ -267,6 +267,30 @@ def get_coords_from_mask(mask, mask_key=None, resolutions=None):
         )
 
 
+def parse_lonlatbox(lonlatbox):
+    """Parse a lonlatbox of four bounds and an optional L0 resolution.
+
+    Args:
+        lonlatbox (str): 'lon_min,lon_max,lat_min,lat_max', optionally followed
+            by ',resolution_l0'.
+
+    Returns
+    -------
+        Tuple of lon_min, lon_max, lat_min, lat_max and the L0 resolution,
+        which is None when only the four bounds are given.
+    """
+    values = [float(value) for value in str(lonlatbox).split(",")]
+    if len(values) not in (4, 5):
+        msg = (
+            "The lonlatbox takes 'lon_min,lon_max,lat_min,lat_max' and an optional "
+            f"',resolution_l0', but got {len(values)} values: {lonlatbox}"
+        )
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    resolution_l0 = values[4] if len(values) == 5 else None
+    return (*values[:4], resolution_l0)
+
+
 def get_coords(
     lonlatbox=None,
     mask_file=None,
@@ -283,7 +307,8 @@ def get_coords(
     Parameters
     ----------
     lonlatbox : str, optional
-        Comma-separated 'lon_min,lon_max,lat_min,lat_max'.
+        Comma-separated 'lon_min,lon_max,lat_min,lat_max', an optional fifth
+        L0 resolution is ignored.
     mask_file : str, optional
         Path to a mask NetCDF file.
     lon_min, lon_max, lat_min, lat_max : float, optional
@@ -298,9 +323,8 @@ def get_coords(
     """
     mask = None
     if lonlatbox is not None:
-        lonlat_split = lonlatbox.split(",")
-        lon_min_val, lon_max_val, lat_min_val, lat_max_val = map(
-            float, lonlat_split[:4]
+        lon_min_val, lon_max_val, lat_min_val, lat_max_val, _ = parse_lonlatbox(
+            lonlatbox
         )
         mask = None
     elif mask_file is not None:

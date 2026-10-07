@@ -52,35 +52,60 @@ def add_args(parser):
     )
     parser.epilog = (
         "Example:\n"
-        "  mhm-tools long_term_mean_relative_difference \\\n"
-        "    --ref_input_dir /path/to/ref \\\n"
-        "    --mod_input_dir /path/to/mod \\\n"
-        '    --reference_pattern "ref_*.nc" \\\n'
-        '    --model_pattern "mod_*.nc" \\\n'
-        "    --ref_var pre --mod_var pre --save_ncfile \\\n"
-        '    --colorbar_label "ΔP" \\\n'
+        "  mhm-tools relative-difference \\\n"
+        "    --ref-dir /path/to/ref \\\n"
+        "    --input-dir /path/to/mod \\\n"
+        '    --ref-file-name "ref_*.nc" \\\n'
+        '    --input-file-name "mod_*.nc" \\\n'
+        "    --ref-var pre --input-var pre --save-ncfile \\\n"
+        '    --colorbar-label "ΔP" \\\n'
         '    --title "Precip. Diff" \\\n'
-        "    --x_min -10 --x_max 30 --y_min 40 --y_max 70 \\\n"
+        "    --x-min -10 --x-max 30 --y-min 40 --y-max 70 \\\n"
         "    --cmap viridis --vmin -5 --vmax 5 \\\n"
-        "    -o /out/dir --output_file_png diff.png"
+        "    -o /out/dir --output-file-png diff.png"
     )
 
-    # required arguments
+    # required arguments, named like the evaluation tools with the former
+    # reference/model names as hidden aliases
     req = parser.add_argument_group("required arguments")
     req.add_argument(
-        "--ref-input-dir", required=True, help="Directory with reference NetCDF files"
+        "--ref-dir",
+        "--ref-input-dir",
+        dest="ref_input_dir",
+        required=True,
+        help="Directory with reference NetCDF files",
     )
     req.add_argument(
-        "--mod-input-dir", required=True, help="Directory with model NetCDF files"
+        "--input-dir",
+        "--mod-input-dir",
+        dest="mod_input_dir",
+        required=True,
+        help="Directory with model NetCDF files",
     )
     req.add_argument(
-        "--reference-pattern", required=True, help="Wildcard for reference file"
+        "--ref-file-name",
+        "--reference-pattern",
+        dest="reference_pattern",
+        required=True,
+        help="Wildcard for reference file",
     )
-    req.add_argument("--model-pattern", required=True, help="Wildcard for model file")
+    req.add_argument(
+        "--input-file-name",
+        "--model-pattern",
+        dest="model_pattern",
+        required=True,
+        help="Wildcard for model file",
+    )
     req.add_argument(
         "--ref-var", required=True, help="Variable name in reference dataset"
     )
-    req.add_argument("--mod-var", required=True, help="Variable name in model dataset")
+    req.add_argument(
+        "--input-var",
+        "--mod-var",
+        dest="mod_var",
+        required=True,
+        help="Variable name in model dataset",
+    )
     req.add_argument(
         "-o", "--output-dir", required=True, help="Directory to save the output PNG"
     )

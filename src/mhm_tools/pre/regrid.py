@@ -8,11 +8,11 @@ selected variable, and writes an aligned NetCDF output.
 
 USAGE:
   python regrid_to_L2.py --input in.nc --mask mask.nc --output out.nc \
-      --l2 0.05           --method nearest
+      --l2-resolution 0.05           --method nearest
   python regrid_to_L2.py --input in.nc --mask mask.nc --output out.nc \
-      --l2 0.10x0.10      --method bilinear
+      --l2-resolution 0.10x0.10      --method bilinear
   python regrid_to_L2.py --input in.nc --mask mask.nc --output out.nc \
-      --l2 0.02,0.02      --method linear --var temp
+      --l2-resolution 0.02,0.02      --method linear --var temp
 
 Methods
 -------

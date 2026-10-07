@@ -68,6 +68,7 @@ def add_args(parser):
         ),
     )
     optional.add_argument(
+        "--input-var",
         "--vn",
         "--varname",
         dest="vn",
@@ -75,9 +76,11 @@ def add_args(parser):
         help="Name of the --fdir-file variable, passed to create-catchment (default 'fdir').",
     )
     optional.add_argument(
+        "--input-type",
         "--var",
+        dest="var",
         default="fdir",
-        help="Input variable type passed to create-catchment: 'fdir' or 'dem' (default 'fdir').",
+        help="Type of the --fdir-file passed to create-catchment: 'fdir' or 'dem' (default 'fdir').",
     )
     optional.add_argument(
         "--ftype",
@@ -88,8 +91,9 @@ def add_args(parser):
         "--lonlatbox",
         default=None,
         help=(
-            "'lon_min,lon_max,lat_min,lat_max,resolution_l0', passed to create-catchment "
-            "when delineating global basins."
+            "'lon_min,lon_max,lat_min,lat_max', optionally followed by "
+            "',resolution_l0', passed to create-catchment when delineating global "
+            "basins."
         ),
     )
     optional.add_argument(
@@ -238,7 +242,7 @@ def run(args):
     args : argparse.Namespace
         parsed command line arguments
     """
-    from mhm_tools.common.cli_utils import get_available_mem_in_unit
+    from mhm_tools.common.cli_utils import get_available_mem_in_unit, parse_lonlatbox
     from mhm_tools.common.resolution_handler import Resolution
 
     from ..pre import create_wmo_region_masks
@@ -248,8 +252,8 @@ def run(args):
         coordinate_slices = None
         l0_resolution = args.l0_resolution
         if args.lonlatbox is not None:
-            lon_min, lon_max, lat_min, lat_max, resolution_l0 = map(
-                float, args.lonlatbox.split(",")
+            lon_min, lon_max, lat_min, lat_max, resolution_l0 = parse_lonlatbox(
+                args.lonlatbox
             )
             coordinate_slices = {
                 "lat": slice(lat_max, lat_min),

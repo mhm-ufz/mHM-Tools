@@ -35,6 +35,7 @@ def add_args(parser):
     )
     optional.add_argument(
         "-o",
+        "--output-file",
         "--output",
         dest="out_file",
         required=False,

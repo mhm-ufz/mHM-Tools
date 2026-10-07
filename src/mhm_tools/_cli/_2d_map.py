@@ -37,7 +37,7 @@ def add_args(parser: argparse.ArgumentParser):
         "Example:\n"
         "mhm-tools 2d_map \\\n"
         "--input-file /path/to/data.nc \\\n"
-        "--var temperature \\\n"
+        "--input-var temperature \\\n"
         "--colorbar-label 'Temp (°C)' \\\n"
         "--title 'Surface Temperature' \\\n"
         "--x-min -10 --x-max 30 --y-min 40 --y-max 70 \\\n"
@@ -51,7 +51,11 @@ def add_args(parser: argparse.ArgumentParser):
         "--input-file", required=True, help="Path to the input NetCDF file"
     )
     req.add_argument(
-        "--var", required=True, help="Variable name in the NetCDF dataset to plot"
+        "--input-var",
+        "--var",
+        dest="var",
+        required=True,
+        help="Variable name in the NetCDF dataset to plot",
     )
     req.add_argument(
         "-o",

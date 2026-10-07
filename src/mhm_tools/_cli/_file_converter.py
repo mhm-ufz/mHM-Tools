@@ -66,7 +66,9 @@ def add_args(parser):
     )
     optional.add_argument(
         "-v",
+        "--input-var",
         "--varname",
+        dest="varname",
         required=False,
         default=None,
         help="The name of the variable.",

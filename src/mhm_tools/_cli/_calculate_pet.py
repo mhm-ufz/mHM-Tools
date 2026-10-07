@@ -58,7 +58,9 @@ def add_args(parser):
     )
     optional.add_argument(
         "-f",
+        "--resample-time-to",
         "--freq",
+        dest="freq",
         required=False,
         default=None,
         help="Frequency of pet output, daily or hourly.",

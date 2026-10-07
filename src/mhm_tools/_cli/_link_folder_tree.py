@@ -43,7 +43,9 @@ def add_args(parser):
         help=("overwrite existing symlinks"),
     )
     optional.add_argument(
+        "--input-file-name",
         "--file-name",
+        dest="file_name",
         type=str,
         default="*.*",
         required=False,

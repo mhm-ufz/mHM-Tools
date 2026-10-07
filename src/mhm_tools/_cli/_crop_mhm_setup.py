@@ -53,6 +53,7 @@ def add_args(parser):
     flags = parser.add_argument_group("flags")
     optional.add_argument(
         "-f",
+        "--input-file-name",
         "--input-name",
         "--file-name",
         dest="file_name",
@@ -99,8 +100,8 @@ def add_args(parser):
         required=False,
         default=None,
         help=(
-            """coordinates in the form of 'lon_min,lon_max,lat_min,lat_max,resolution_l0'
-            required unless --mask_file is provided"""
+            """coordinates in the form of 'lon_min,lon_max,lat_min,lat_max', optionally
+            followed by ',resolution_l0', required unless --mask-file is provided"""
         ),
     )
     optional.add_argument(

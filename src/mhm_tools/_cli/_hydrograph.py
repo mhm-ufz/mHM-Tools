@@ -78,6 +78,7 @@ def add_args(parser):
         "all with out seasonality (advised for performance) = typc",
     )
     optional.add_argument(
+        "--precipitation-file",
         "--prec",
         dest="prec",
         required=False,
@@ -85,6 +86,8 @@ def add_args(parser):
         help="path of the precipiation file",
     )
     optional.add_argument(
+        "--input-name",
+        "--input-names",
         "--name",
         dest="sim_names",
         required=False,

@@ -70,7 +70,9 @@ def add_args(parser: ArgumentParser) -> None:
     )
     required.add_argument(
         "-o",
+        "--output-dir",
         "--output-path",
+        dest="output_path",
         required=True,
         help="Directory where the formatted output files are written.",
     )
@@ -91,7 +93,9 @@ def add_args(parser: ArgumentParser) -> None:
     )
     optional.add_argument(
         "-e",
+        "--output-extension",
         "--extension",
+        dest="extension",
         choices=("nc", "asc", "tif"),
         default="nc",
         help="Output raster extension. Default: nc.",
@@ -190,7 +194,7 @@ def run(args: Namespace) -> None:
         raise click.UsageError(msg)
     if gridded_lai:
         if args.extension != "nc":
-            msg = "Gridded LAI supports only --extension nc."
+            msg = "Gridded LAI supports only --output-extension nc."
             raise click.UsageError(msg)
         if args.resampling not in {None, "nearest", "bilinear"}:
             msg = "Gridded LAI supports only nearest or bilinear resampling."

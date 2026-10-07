@@ -275,7 +275,7 @@ def test_create_mhm_restart_from_setup_cli_loops_masks_and_parameters(
         crop_ncpus=1,
         file_name="*.*",
         available_mem="5",
-        create_header=True,
+        no_forced_header_creation=False,
         chunking=False,
         output_var=None,
         no_cropping=False,

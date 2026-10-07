@@ -21,7 +21,7 @@ def add_args(parser):
 
     Example:
       mhm-tools prepare_mhm_forcings \
-        -i in/data -f input_*.nc -o out/data -v 2t --out-file processed.nc \
+        -i in/data -f input_*.nc -o out/data -v 2t --output-file-name processed.nc \
         --crop --lon-min 0 --lon-max 10 --lat-min -5 --lat-max 5
     """
     # Description and epilog
@@ -45,6 +45,7 @@ def add_args(parser):
     )
     required.add_argument(
         "-f",
+        "--input-file-name",
         "--input-name",
         "--in-file",
         dest="in_file",
@@ -63,13 +64,16 @@ def add_args(parser):
     optional = parser.add_argument_group("optional arguments")
     optional.add_argument(
         "-v",
+        "--input-var",
         "--var",
+        dest="var",
         required=False,
         help="Variable name to convert: 2t (temperature), tp (total precipitation), tprate (precipitation rate)",
     )
 
     optional.add_argument(
         "-u",
+        "--output-file-name",
         "--output-name",
         "--out-file",
         dest="out_file",
@@ -80,7 +84,9 @@ def add_args(parser):
         ),
     )
     optional.add_argument(
+        "--output-var",
         "--out-var",
+        dest="out_var",
         default=None,
         help="Rename output variable to this name.",
     )
@@ -122,7 +128,9 @@ def add_args(parser):
         help="Use xarray.open_mfdataset for multi-file datasets",
     )
     optional.add_argument(
+        "--resample-time-to",
         "--target-frequency",
+        dest="target_frequency",
         type=str,
         default=None,
         help="Resample the dataset to this target frequency (hourly, daily).",

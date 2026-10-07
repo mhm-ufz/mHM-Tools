@@ -241,7 +241,7 @@ def _resolve_reference_name(reference_name, input_names, dfs_by_name):
     reference_name = reference_name or input_names[0]
     if reference_name not in dfs_by_name:
         msg = (
-            f"--reference-name {reference_name!r} not found among input names "
+            f"--ref-name {reference_name!r} not found among input names "
             f"{input_names}."
         )
         with ErrorLogger(logger):

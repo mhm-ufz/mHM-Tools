@@ -101,3 +101,30 @@ def test_run_passes_latlon_to_create_catchment(
     _create_catchment.run(arguments)
 
     assert received_arguments["latlon"] is expected_latlon
+
+
+@pytest.mark.parametrize(
+    ("lonlatbox", "expected_l0_resolution"),
+    [("5,15,45,55", None), ("5,15,45,55,0.0625", 0.0625)],
+)
+def test_run_crops_to_a_lonlatbox_of_four_or_five_values(
+    monkeypatch, tmp_path, lonlatbox, expected_l0_resolution
+):
+    """Crop to the bounds of either form, taking L0 only from a fifth value."""
+    received_arguments = {}
+
+    def record_create_catchment(**kwargs):
+        """Record the arguments create_catchment is called with."""
+        received_arguments.update(kwargs)
+
+    monkeypatch.setattr(mhm_tools.pre, "create_catchment", record_create_catchment)
+    arguments = create_parser().parse_args(
+        ["-i", "input.nc", "-o", str(tmp_path), "--lonlatbox", lonlatbox]
+    )
+    _create_catchment.run(arguments)
+
+    assert received_arguments["coordinate_slices"] == {
+        "lat": slice(55.0, 45.0),
+        "lon": slice(5.0, 15.0),
+    }
+    assert received_arguments["resolutions"].l0 == expected_l0_resolution

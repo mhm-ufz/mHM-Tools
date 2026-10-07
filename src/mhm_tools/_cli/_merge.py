@@ -32,7 +32,9 @@ def add_args(parser):
         help="The path to input files.",
     )
     optional.add_argument(
+        "--input-file-name",
         "--input-name",
+        dest="input_name",
         required=False,
         default="*.*",
         help="Input file name. E.g. '*.nc' to merge only nc files or 'pre*' to merge only precipitation files.",

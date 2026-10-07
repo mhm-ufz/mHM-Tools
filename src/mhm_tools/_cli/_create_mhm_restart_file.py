@@ -65,8 +65,8 @@ def add_args(parser):
         required=False,
         default=None,
         help=(
-            """coordinates in the form of 'lon_min,lon_max,lat_min,lat_max,resolution_l0'
-            required unless --mask_file is provided"""
+            """coordinates in the form of 'lon_min,lon_max,lat_min,lat_max', optionally
+            followed by ',resolution_l0', required unless --mask-file is provided"""
         ),
     )
     optional.add_argument(
@@ -216,7 +216,7 @@ def run(args):
     """
     from pathlib import Path
 
-    from mhm_tools.common.cli_utils import get_coords
+    from mhm_tools.common.cli_utils import get_coords, parse_lonlatbox
     from mhm_tools.common.logger import ErrorLogger
     from mhm_tools.pre.create_mhm_restart_file import Grid, LatLon, MPRRunner
 
@@ -224,12 +224,17 @@ def run(args):
 
     l1_resolution = float(args.l1_resolution)
 
-    if args.lonlatbox is not None:
-        l0_resolution = float(args.lonlatbox.split(",")[4])
-    elif args.l0_resolution is not None:
+    # a fifth lonlatbox value takes precedence over --l0-resolution
+    l0_resolution = (
+        parse_lonlatbox(args.lonlatbox)[4] if args.lonlatbox is not None else None
+    )
+    if l0_resolution is None and args.l0_resolution is not None:
         l0_resolution = float(args.l0_resolution)
-    else:
-        msg = "L0 resolution was not provided."
+    if l0_resolution is None:
+        msg = (
+            "L0 resolution was not provided, neither as fifth --lonlatbox value "
+            "nor with --l0-resolution."
+        )
         raise ValueError(msg)
 
     (

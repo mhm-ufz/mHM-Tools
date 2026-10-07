@@ -228,6 +228,57 @@ def test_create_results_csv_rejects_unknown_metric(tmp_path):
         )
 
 
+@pytest.mark.parametrize(
+    ("metric", "expected"),
+    [
+        ("all", metrics_handler.ACCEPTED_RESULT_METRICS),
+        ("none", ()),
+        ("spaef", "SPAEF"),
+        ("spaef, tsm", ("SPAEF", "TSM")),
+        (["ESP", "tsm"], ("ESP", "TSM")),
+        (None, "TSM"),
+    ],
+)
+def test_normalize_results_metric_accepts_every_selection(metric, expected):
+    """Resolve all, none, one metric and lists of metrics without failing."""
+    assert metrics_handler.normalize_results_metric(metric) == expected
+
+
+def test_normalize_results_metric_rejects_an_unknown_name():
+    """Refuse a list holding a metric the result CSV does not offer."""
+    with pytest.raises(ValueError, match="Unsupported result metric"):
+        metrics_handler.normalize_results_metric("spaef, kge")
+
+
+@pytest.mark.parametrize(
+    ("metric", "expected_files"),
+    [
+        ("all", {"tsm.csv", "spaef.csv", "esp.csv", "waspaef.csv", "mspaef.csv"}),
+        ("none", set()),
+        ("esp", {"esp.csv"}),
+        ("esp,tsm", {"esp.csv", "tsm.csv"}),
+    ],
+)
+def test_create_results_csv_writes_one_file_per_selected_metric(
+    tmp_path, metric, expected_files
+):
+    """Write exactly the CSV files of the selected metrics, none for none."""
+    m1 = np.random.RandomState(2).rand(3, 2, 2)
+    m2 = np.random.RandomState(3).rand(3, 2, 2)
+
+    results = metrics_handler.create_results_csv(
+        map1=m1,
+        map2=m2,
+        ds1_name="input",
+        ds2_name="ref",
+        out_dir=tmp_path,
+        metric=metric,
+    )
+
+    assert {path.name for path in tmp_path.glob("*.csv")} == expected_files
+    assert {f"{name.lower()}.csv" for name in results} == expected_files
+
+
 def _storage_record(values):
     """Wrap a (time, lat, lon) array in a daily DataArray on a 2x2 grid."""
     values = np.asarray(values, dtype=float)

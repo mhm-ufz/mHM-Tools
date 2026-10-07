@@ -21,30 +21,44 @@ def add_args(parser):
     )
     optional = parser.add_argument_group("optional arguments")
     flags = parser.add_argument_group("flags")
+    # the names follow the other evaluation tools, the former model/observed
+    # names stay as hidden aliases
     optional.add_argument(
+        "--ref-path",
         "--observed-data-path",
+        dest="ref_path",
         required=False,
         help=("Path to the observation data file."),
     )
     optional.add_argument(
+        "--input-path",
         "--model-data-path",
+        dest="input_path",
         required=False,
         help=("Path to the model data."),
     )
     optional.add_argument(
+        "--input-file-name",
         "--model-file-name",
+        dest="input_file_name",
         required=False,
         default="mrm_node_output.nc",
         help=("File name pattern for model data files."),
     )
     optional.add_argument(
+        "--ref-var",
+        "--ref-variable",
         "--observed-variable",
+        dest="ref_variable",
         required=False,
         default="runoff_mean",
         help=(""),
     )
     optional.add_argument(
+        "--input-var",
+        "--input-variable",
         "--model-variable",
+        dest="input_variable",
         required=False,
         default=None,
         help=("Variable name of the simulation data."),
@@ -58,10 +72,12 @@ def add_args(parser):
         help=("Path to flow-accumulation file used for gauge matching."),
     )
     optional.add_argument(
+        "--facc-var",
         "--facc-variable",
+        dest="facc_variable",
         required=False,
         default="L11_fAcc",
-        help=("Variable name in --facc_file containing flow accumulation."),
+        help=("Variable name in --facc-file containing flow accumulation."),
     )
     optional.add_argument(
         "--scc-gauges-file",
@@ -87,7 +103,9 @@ def add_args(parser):
         "--lonlatbox",
         required=False,
         default=None,
-        help=("""coordinates in the form of 'lon_min,lon_max,lat_min,lat_max'"""),
+        help=(
+            """coordinates in the form of 'lon_min,lon_max,lat_min,lat_max', a fifth L0 resolution value is ignored"""
+        ),
     )
     optional.add_argument(
         "--mask-file",
@@ -99,16 +117,20 @@ def add_args(parser):
         ),
     )
     optional.add_argument(
+        "--shape-dir",
         "--shape-folder",
+        dest="shape_folder",
         required=False,
         default=None,
-        help="Folder with catchment shapefiles matched by gauge ID.",
+        help="Directory with catchment shapefiles matched by gauge ID.",
     )
     optional.add_argument(
+        "--mask-dir",
         "--mask-folder",
+        dest="mask_folder",
         required=False,
         default=None,
-        help="Folder with catchment mask NetCDF files matched by gauge ID.",
+        help="Directory with catchment mask NetCDF files matched by gauge ID.",
     )
     optional.add_argument(
         "--mask-var",
@@ -132,11 +154,13 @@ def add_args(parser):
         help="Metric plot types to create. Violin plots are only made on request.",
     )
     optional.add_argument(
+        "--n-bootstrap-years",
         "--n-boostrap-years",
+        dest="n_boostrap_years",
         required=False,
         default=None,
         type=int,
-        help=("""Number of years to draw for each boostrap experiment"""),
+        help=("""Number of years to draw for each bootstrap experiment"""),
     )
     optional.add_argument(
         "--n-bootstrap-selections",
@@ -167,7 +191,9 @@ def add_args(parser):
         help=("Minimum number of overlapping years for evaluation."),
     )
     optional.add_argument(
+        "--gauge-optimization-method",
         "--gauge-location-method",
+        dest="gauge_location_method",
         required=False,
         default="basinex",
         choices=["basinex", "burek"],
@@ -246,17 +272,17 @@ def run(args):
         args.lonlatbox, args.mask_file, raise_exception=False
     )
     evaludate_discharge_data(
-        args.model_data_path,
-        args.observed_data_path,
-        model_file_name=args.model_file_name,
+        args.input_path,
+        args.ref_path,
+        model_file_name=args.input_file_name,
         facc_file=args.facc_file,
         facc_variable=args.facc_variable,
         scc_gauges_file=args.scc_gauges_file,
         output_path=args.output_dir,
         evaluation_gauges=args.evaluation_gauges,
         n_jobs=int(args.ncpus),
-        sim_variable=args.model_variable,
-        observed_variable=args.observed_variable,
+        sim_variable=args.input_variable,
+        observed_variable=args.ref_variable,
         lon_min=lon_min,
         lon_max=lon_max,
         lat_min=lat_min,

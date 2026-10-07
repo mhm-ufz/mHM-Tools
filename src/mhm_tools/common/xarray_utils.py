@@ -142,7 +142,7 @@ def materialize_if_within_budget(da, max_memory_gib, label):
     logger.warning(
         f"Keeping {label} lazy because {estimated_gib:.2f} GiB exceeds the budget "
         f"of {max_memory_gib} GiB. Every step that reads it rebuilds it, so this "
-        f"is markedly slower; raise --max-memory-gib if the memory is there."
+        f"is markedly slower; raise --available-mem if the memory is there."
     )
     return da
 
