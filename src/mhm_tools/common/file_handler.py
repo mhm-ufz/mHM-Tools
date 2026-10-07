@@ -881,7 +881,7 @@ def get_xarray_ds_from_file(  # noqa: PLR0912
     if lon_key is None and lat_key is None:
         logger.warning("Dataset does not have lon and lat key.")
     elif lon_key is None or lat_key is None:
-        logger.error("Dataset has only one of lon at lat keys.")
+        logger.error("Dataset has only one of lon and lat keys.")
 
     if chunking and available_mem_gib is not None:
         # several variables share one dtype and shape, so sizing the chunks on
@@ -1361,7 +1361,7 @@ def get_dataset_from_path(
         if lon_key is None and lat_key is None:
             logger.warning("Dataset does not have lon and lat key.")
         elif lon_key is None or lat_key is None:
-            logger.error("Dataset has only one of lon at lat keys.")
+            logger.error("Dataset has only one of lon and lat keys.")
 
         if chunking and available_mem_gib is not None:
             # several variables share one dtype and shape, so sizing the chunks
