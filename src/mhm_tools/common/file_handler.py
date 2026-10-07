@@ -779,11 +779,15 @@ def get_xarray_ds_from_file(  # noqa: PLR0912
     landcover_year_start=None,
     create_bounds=False,
     load_crs=False,
+    drop_auxiliary_coords=False,
 ):
     """Read file and return xarray dataset.
 
     Set ``load_crs`` to also decode the grid-mapping variable that carries the
-    CRS; it is left out by default because it is not payload data.
+    CRS; it is left out by default because it is not payload data. Set
+    ``drop_auxiliary_coords`` to drop multi-dimensional coordinates, such as the
+    2D lat/lon of a projected grid, which otherwise keep its 1D x/y axes from
+    being normalized to lat/lon.
     """
     file_path = Path(file_path)
     logger.debug(f"Reading {file_path} to xarray with chunking = {chunking}")
@@ -845,6 +849,12 @@ def get_xarray_ds_from_file(  # noqa: PLR0912
         )
         with ErrorLogger(logger):
             raise NotImplementedError(msg)
+    if drop_auxiliary_coords:
+        # the 2D lat/lon of a projected grid take the names its x/y axes are
+        # normalized to
+        ds_out = ds_out.drop_vars(
+            [name for name, coord in ds_out.coords.items() if coord.ndim > 1]
+        )
     lat_key = get_coord_key(ds_out, lat=True, raise_exception=False)
     lon_key = get_coord_key(ds_out, lon=True, raise_exception=False)
     # normalize before the axis order is read, because a coordinate that is not

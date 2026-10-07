@@ -952,7 +952,6 @@ class Catchment:
             self.out_var_name = f"{var_name}.nc"
         self.do_shift = do_shift
         self.latlon = latlon
-        self.latlon = latlon
         self.ds = ds
         logger.debug(f"self.ds: {self.ds}")
         self.transform = transform
@@ -1064,6 +1063,13 @@ class Catchment:
         """Create a cell area data array in km2."""
         logger.info("Create cell area data array.")
         lon, lat = self.get_current_coordinates()
+        if not self.latlon:
+            # projected coordinates are taken as metres, like max_distance_m,
+            # which makes every cell a plain rectangle of height times width
+            cell_heights_km = np.abs(np.gradient(lat)) / 1000
+            cell_widths_km = np.abs(np.gradient(lon)) / 1000
+            self.cell_area = np.outer(cell_heights_km, cell_widths_km)
+            return
         # calculate cellsize in kilometers
         R = EARTH_RADIUS_KM
         lat_rad = np.deg2rad(lat)
@@ -2211,7 +2217,9 @@ class Catchment:
                 catchment_mask=self.catchment_mask,
                 buffer=buffer,
             )
-        else:
+        elif self.latlon:
+            # the global mHM domain ends at 84 N and 56 S, a projected grid in
+            # metres has no such limits and is written in full
             lat_slice, lon_slice = slice(84, -56), slice(None)
 
         for var_name in (v for v in self.VARIABLES if v in selected_vars):
@@ -2816,6 +2824,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
         force_decending_y=True,
         available_mem_gib=available_mem,
         chunking=chunking,
+        drop_auxiliary_coords=True,
     ) as input_ds:
         coord_slices_default = False
         if coordinate_slices is None:
@@ -3138,28 +3147,34 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                         return None
                     gc = None
 
-                (
-                    outlet_idx,
-                    error,
-                    gauge_lat,
-                    gauge_lon,
-                    distance_error,
-                    score,
-                    shape_error,
-                    used_method,
-                ) = c.get_best_gauge_coordinate(
-                    upstream_area=upstream_area,
-                    gauge_coords=gc,
-                    ref_catchment_area=ref_area,
-                    max_distance_cells=max_distance_cells,
-                    max_distance_m=max_distance_m,
-                    max_error=max_error,
-                    use_max_error=use_max_error,
-                    method=gauge_opti_method,
-                    shape_folder=shape_folder,
-                    gauge_id=gauge_ids[i],
-                    raise_on_fallback=raise_on_fallback,
-                )
+                try:
+                    (
+                        outlet_idx,
+                        error,
+                        gauge_lat,
+                        gauge_lon,
+                        distance_error,
+                        score,
+                        shape_error,
+                        used_method,
+                    ) = c.get_best_gauge_coordinate(
+                        upstream_area=upstream_area,
+                        gauge_coords=gc,
+                        ref_catchment_area=ref_area,
+                        max_distance_cells=max_distance_cells,
+                        max_distance_m=max_distance_m,
+                        max_error=max_error,
+                        use_max_error=use_max_error,
+                        method=gauge_opti_method,
+                        shape_folder=shape_folder,
+                        gauge_id=gauge_ids[i],
+                        raise_on_fallback=raise_on_fallback,
+                    )
+                except ValueError as exc:
+                    # an unmatched gauge is dropped like one outside the domain,
+                    # so it does not abort the delineation of all other gauges
+                    logger.warning(f"Dropping gauge {gauge_ids[i]}: {exc}")
+                    return None
                 return {
                     "gauge_id": gauge_ids[i],
                     "gauge_lat": gauge_lat,

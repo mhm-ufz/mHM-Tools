@@ -29,6 +29,12 @@ Where privious versions focussed on the creation of local setups from existing g
   - Assigns each basin through a basin-adjacency graph seeded from anchor basins, which keeps regions contiguous and stops endorheic basins from forming islands of the wrong region.
   - Excludes Greenland, and writes one mask per region plus a four-panel overview plot.
 
+#### Changes to existing tools 
+- **`create-catchment`**: delineates catchments on projected grids such as EPSG:3035 (`--coords-are-not-latlon`).
+  - Cell and upstream areas come from the grid spacing in metres, and the 2D `lat`/`lon` that projected NetCDF files often carry next to `x`/`y` are ignored.
+  - Gauge coordinates and reference shapes have to be in the CRS of the grid. `examples/02_correct_gauges_on_projected_grid.py` projects both from lat/lon, corrects every gauge in its own run and writes a new scc gauges file with the corrected `x`/`y`.
+  - With several gauges, a gauge without a matching outlet is dropped with a warning instead of stopping the run.
+
 ### Evaluation
 #### New evaluation tools
 - **`twsa-evaluation`**: compares simulated total water storage anomalies (TWSA) against a gridded reference such as GRACE.

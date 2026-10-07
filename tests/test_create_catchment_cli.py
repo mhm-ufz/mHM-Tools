@@ -4,6 +4,7 @@ import argparse
 
 import pytest
 
+import mhm_tools.pre
 from mhm_tools._cli import _create_catchment
 
 
@@ -61,3 +62,42 @@ def test_distance_cli_arguments_are_mutually_exclusive():
                 "1000",
             ]
         )
+
+
+def test_coords_are_latlon_by_default():
+    """Treat the gauge coordinates as lat/lon unless the flag is given."""
+    arguments = create_parser().parse_args(["-i", "input.nc", "-o", "output"])
+
+    assert not arguments.coords_are_not_latlon
+
+
+def test_coords_are_not_latlon_flag_is_parsed():
+    """Mark the gauge coordinates as projected when the flag is given."""
+    arguments = create_parser().parse_args(
+        ["-i", "input.nc", "-o", "output", "--coords-are-not-latlon"]
+    )
+
+    assert arguments.coords_are_not_latlon
+
+
+@pytest.mark.parametrize(
+    ("flags", "expected_latlon"),
+    [([], True), (["--coords-are-not-latlon"], False)],
+)
+def test_run_passes_latlon_to_create_catchment(
+    monkeypatch, tmp_path, flags, expected_latlon
+):
+    """Hand create_catchment latlon=False only for projected coordinates."""
+    received_arguments = {}
+
+    def record_create_catchment(**kwargs):
+        """Record the arguments create_catchment is called with."""
+        received_arguments.update(kwargs)
+
+    monkeypatch.setattr(mhm_tools.pre, "create_catchment", record_create_catchment)
+    arguments = create_parser().parse_args(
+        ["-i", "input.nc", "-o", str(tmp_path), *flags]
+    )
+    _create_catchment.run(arguments)
+
+    assert received_arguments["latlon"] is expected_latlon

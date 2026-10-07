@@ -160,7 +160,9 @@ def normalize_longitude_range(ds, lon_key="lon"):
     between them, which every later crop would read as a near global extent.
     Such an axis is refused instead. An axis that already runs from -180 but
     crosses the antimeridian cannot be made ascending at all and is only warned
-    about, because a label based selection on it is unreliable.
+    about, because a label based selection on it is unreliable. An axis reaching
+    below -180 or above 360 holds no longitudes at all, such as the x axis of a
+    projected grid in metres, and is left unchanged.
 
     Args:
         ds: Dataset or DataArray with a longitude coordinate.
@@ -168,7 +170,8 @@ def normalize_longitude_range(ds, lon_key="lon"):
 
     Returns
     -------
-        The object on a -180 to 180 axis, unchanged when it already is.
+        The object on a -180 to 180 axis, unchanged when it already is or when
+        the axis holds no longitudes.
     """
     if lon_key not in getattr(ds, "coords", {}):
         return ds
@@ -176,6 +179,12 @@ def normalize_longitude_range(ds, lon_key="lon"):
     if longitudes.size < 2:
         return ds
     lowest, highest = float(np.nanmin(longitudes)), float(np.nanmax(longitudes))
+    if lowest < -180.0 or highest > 360.0:
+        logger.debug(
+            f"The axis {lon_key!r} runs {lowest:g}..{highest:g} and holds no "
+            f"longitudes, so it is left unchanged."
+        )
+        return ds
     if highest <= 180.0:
         if not np.all(np.diff(longitudes) > 0):
             logger.warning(

@@ -749,5 +749,81 @@ class TestCropAndCoords(unittest.TestCase, BaseDatasetMixin):
         np.testing.assert_allclose(lons, ds["lon"].values)
 
 
+class TestProjectedGridReading(unittest.TestCase):
+    @staticmethod
+    def write_projected_netcdf(nc_path):
+        """Write a NetCDF laid out like a projected fdir file with 2D lat/lon.
+
+        The 1D x/y axes are in metres and carry an axis attribute, the 2D lat/lon
+        are auxiliary coordinates and no grid mapping is written.
+
+        Args:
+            nc_path (Path): Path of the written file.
+
+        Returns:
+            Tuple of the x and the ascending y axis in metres.
+        """
+        x = 4_000_100.0 + 200.0 * np.arange(4)
+        y = 3_000_100.0 + 200.0 * np.arange(3)
+        lon, lat = np.meshgrid(
+            np.linspace(10.0, 10.03, x.size), np.linspace(50.0, 50.02, y.size)
+        )
+        ds = xr.Dataset(
+            {"fdir": (("y", "x"), np.ones((y.size, x.size), dtype=np.int16))},
+            coords={
+                "x": ("x", x, {"axis": "X", "units": "m"}),
+                "y": ("y", y, {"axis": "Y", "units": "m"}),
+                "lon": (("y", "x"), lon, {"units": "degrees_east"}),
+                "lat": (("y", "x"), lat, {"units": "degrees_north"}),
+            },
+        )
+        ds.to_netcdf(nc_path, encoding={"fdir": {"_FillValue": -9999}})
+        return x, y
+
+    def test_drop_auxiliary_coords_lets_projected_axes_become_lat_lon(self):
+        """Name the 1D x/y axes lat/lon once the 2D lat/lon are dropped."""
+        with tempfile.TemporaryDirectory() as td:
+            nc_path = Path(td) / "fdir.nc"
+            x, y = self.write_projected_netcdf(nc_path)
+            with fh.get_xarray_ds_from_file(
+                nc_path,
+                var_name="fdir",
+                normalize_latlon_coords=True,
+                force_decending_y=True,
+                drop_auxiliary_coords=True,
+            ) as out:
+                self.assertEqual(out["fdir"].dims, ("lat", "lon"))
+                self.assertIn("lat", out.indexes)
+                self.assertIn("lon", out.indexes)
+                np.testing.assert_array_equal(out["lon"].values, x)
+                np.testing.assert_array_equal(out["lat"].values, y[::-1])
+                self.assertTrue(all(coord.ndim <= 1 for coord in out.coords.values()))
+
+    def test_auxiliary_coords_are_kept_by_default(self):
+        """Keep the 2D lat/lon unless dropping them is requested."""
+        with tempfile.TemporaryDirectory() as td:
+            nc_path = Path(td) / "fdir.nc"
+            self.write_projected_netcdf(nc_path)
+            with fh.get_xarray_ds_from_file(nc_path, var_name="fdir") as out:
+                self.assertEqual(out["lat"].dims, ("y", "x"))
+                self.assertEqual(out["lon"].dims, ("y", "x"))
+
+    def test_projected_ascii_grid_keeps_its_x_axis(self):
+        """Keep the x cell centres of an ascii grid in metres when normalizing."""
+        with tempfile.TemporaryDirectory() as td:
+            asc_path = Path(td) / "fdir.asc"
+            asc_path.write_text(
+                "ncols 4\nnrows 3\nxllcorner 4000000.0\nyllcorner 3000000.0\n"
+                "cellsize 200.0\nnodata_value -9999\n"
+                "1 1 1 1\n1 1 1 1\n1 1 1 1\n"
+            )
+            with fh.get_xarray_ds_from_file(
+                asc_path, var_name="fdir", normalize_latlon_coords=True
+            ) as out:
+                np.testing.assert_array_equal(
+                    out["lon"].values, 4_000_100.0 + 200.0 * np.arange(4)
+                )
+
+
 if __name__ == "__main__":
     unittest.main()

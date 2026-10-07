@@ -138,8 +138,8 @@ def add_args(parser):
     )
     optional_args.add_argument(
         "--coords-are-not-latlon",
-        action="store_false",
-        default=True,
+        action="store_true",
+        default=False,
         help=("""Set this flag if the coordinates are in m not degree."""),
     )
     optional_args.add_argument(
@@ -456,7 +456,7 @@ def run(args):  # noqa: PLR0912,PLR0915
         resolutions=coarse_resolutions,
         frame=args.frame,
         upscale=args.upscale,
-        latlon=args.coords_are_not_latlon,
+        latlon=not args.coords_are_not_latlon,
         available_mem=available_mem,
         ref_catchment_area=ref_catchment_area,
         max_distance_cells=args.max_distance_cells,

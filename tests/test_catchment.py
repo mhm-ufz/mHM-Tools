@@ -3,8 +3,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import geopandas as gpd
 import numpy as np
+import pandas as pd
 import xarray as xr
+from shapely.geometry import box
 
 import mhm_tools.common.utils
 from mhm_tools import __version__
@@ -1526,3 +1529,247 @@ class TestCatchment(unittest.TestCase):
         self.assertIn("lon", message)
         self.assertIn("0.5", message)
         self.assertIn("0.1", message)
+
+
+class TestProjectedCatchment(unittest.TestCase):
+    """Delineation on projected grids in metres, laid out like an EPSG:3035 fdir."""
+
+    CELL_SIZE_M = 200.0
+    CELL_AREA_KM2 = (CELL_SIZE_M / 1000) ** 2
+    GAUGE_ID = 6335020
+
+    def setUp(self):
+        """Create a temporary output folder for every test."""
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmpdir.cleanup)
+        self.tmp_path = Path(self._tmpdir.name)
+
+    @staticmethod
+    def create_axes(
+        row_count, col_count, row_step_m=CELL_SIZE_M, col_step_m=CELL_SIZE_M
+    ):
+        """Create descending y and ascending x cell centres in metres.
+
+        Args:
+            row_count (int): Number of rows.
+            col_count (int): Number of columns.
+            row_step_m (float): Cell height in m.
+            col_step_m (float): Cell width in m.
+
+        Returns:
+            Tuple of the y and the x cell centres.
+        """
+        y = 3_000_000.0 + row_step_m * (np.arange(row_count)[::-1] + 0.5)
+        x = 4_000_000.0 + col_step_m * (np.arange(col_count) + 0.5)
+        return y, x
+
+    @staticmethod
+    def create_row_rivers(row_count, col_count):
+        """Create D8 flow directions in which every row drains east off the grid.
+
+        Args:
+            row_count (int): Number of rows.
+            col_count (int): Number of columns.
+
+        Returns:
+            Array of D8 codes, a cell in column c drains c + 1 cells.
+        """
+        return np.ones((row_count, col_count), dtype=np.int16)
+
+    @staticmethod
+    def create_river_tree(row_count, col_count):
+        """Create D8 flow directions draining the whole grid into its middle row.
+
+        The middle row flows east off the grid, the rows above it flow south and
+        the rows below it north, so a middle row cell in column c drains every
+        cell of the columns 0 to c.
+
+        Args:
+            row_count (int): Number of rows, odd so the middle row is centred.
+            col_count (int): Number of columns.
+
+        Returns:
+            Array of D8 codes.
+        """
+        middle_row = row_count // 2
+        fdir = np.full((row_count, col_count), 4, dtype=np.int16)
+        fdir[middle_row + 1 :] = 64
+        fdir[middle_row] = 1
+        return fdir
+
+    @staticmethod
+    def create_projected_catchment(fdir, y, x):
+        """Create a Catchment on a projected grid held in memory.
+
+        Args:
+            fdir (numpy.ndarray): D8 flow directions.
+            y (numpy.ndarray): Descending y cell centres in m.
+            x (numpy.ndarray): Ascending x cell centres in m.
+
+        Returns:
+            The Catchment, with latlon set to False.
+        """
+        ds = xr.Dataset({"fdir": (("lat", "lon"), fdir)}, coords={"lat": y, "lon": x})
+        return catchment.Catchment(
+            ds,
+            "fdir",
+            var="fdir",
+            ftype="d8",
+            transform=catchment.get_transformation_matrix_nc(ds, "fdir"),
+            out_var_name="basin_ids.nc",
+            latlon=False,
+        )
+
+    def write_projected_fdir_netcdf(self, fdir, y, x):
+        """Write flow directions like a projected fdir NetCDF with 2D lat/lon.
+
+        Args:
+            fdir (numpy.ndarray): D8 flow directions.
+            y (numpy.ndarray): Descending y cell centres in m.
+            x (numpy.ndarray): Ascending x cell centres in m.
+
+        Returns:
+            Path of the written file.
+        """
+        lon, lat = np.meshgrid(
+            np.linspace(10.0, 10.1, x.size), np.linspace(50.1, 50.0, y.size)
+        )
+        ds = xr.Dataset(
+            {"fdir": (("y", "x"), fdir)},
+            coords={
+                "x": ("x", x, {"axis": "X", "units": "m"}),
+                "y": ("y", y, {"axis": "Y", "units": "m"}),
+                "lon": (("y", "x"), lon, {"units": "degrees_east"}),
+                "lat": (("y", "x"), lat, {"units": "degrees_north"}),
+            },
+        )
+        fdir_file = self.tmp_path / "fdir.nc"
+        ds.to_netcdf(fdir_file, encoding={"fdir": {"_FillValue": -9999}})
+        return fdir_file
+
+    @staticmethod
+    def create_catchment_kwargs(fdir_file, output_dir):
+        """Create the create_catchment arguments shared by the projected runs.
+
+        Args:
+            fdir_file (Path): Flow direction file.
+            output_dir (Path): Output folder of the run.
+
+        Returns:
+            Dictionary of keyword arguments.
+        """
+        return {
+            "input_file": fdir_file,
+            "output_path": output_dir,
+            "var_name": "fdir",
+            "var": "fdir",
+            "ftype": "d8",
+            "latlon": False,
+            "max_distance_m": 300.0,
+            "max_error": 0.1,
+            "frame": 0,
+            "output_vars": ["basin"],
+            "raise_on_fallback": True,
+        }
+
+    def test_projected_cell_area_is_the_product_of_the_axis_steps(self):
+        """Give every projected cell the area of its axis steps, in grid order."""
+        y, x = self.create_axes(5, 8, row_step_m=100.0)
+        projected_catchment = self.create_projected_catchment(
+            self.create_row_rivers(5, 8), y, x
+        )
+        projected_catchment.compute_cell_area()
+        self.assertEqual(projected_catchment.cell_area.shape, (5, 8))
+        np.testing.assert_allclose(projected_catchment.cell_area, 0.1 * 0.2)
+
+    def test_projected_upstream_area_counts_cells_in_km2(self):
+        """Sum the projected cell areas in km2 along rows draining east."""
+        y, x = self.create_axes(5, 8)
+        projected_catchment = self.create_projected_catchment(
+            self.create_row_rivers(5, 8), y, x
+        )
+        upstream_area = projected_catchment.calc_upstream_area()
+        np.testing.assert_allclose(upstream_area[:, 0], self.CELL_AREA_KM2)
+        np.testing.assert_allclose(upstream_area[:, -1], 8 * self.CELL_AREA_KM2)
+
+    def test_write_keeps_the_full_extent_of_a_projected_grid(self):
+        """Write every row of a projected grid instead of cropping to 84 N to 56 S."""
+        y, x = self.create_axes(5, 8)
+        projected_catchment = self.create_projected_catchment(
+            self.create_row_rivers(5, 8), y, x
+        )
+        projected_catchment.get_basins()
+        projected_catchment.write(
+            self.tmp_path, single_file=True, frame=0, variables=["basin"]
+        )
+        with xr.open_dataset(self.tmp_path / "basin_ids.nc") as basin_ds:
+            np.testing.assert_array_equal(basin_ds["lat"].values, y)
+            np.testing.assert_array_equal(basin_ds["lon"].values, x)
+
+    def test_multi_gauge_run_drops_an_unmatched_gauge_with_a_warning(self):
+        """Drop a gauge without matching outlet and still delineate the other."""
+        y, x = self.create_axes(5, 8)
+        fdir_file = self.write_projected_fdir_netcdf(self.create_row_rivers(5, 8), y, x)
+        output_dir = self.tmp_path / "multi_gauge"
+        unmatched_gauge_id = self.GAUGE_ID + 10
+        with self.assertLogs("mhm_tools.pre.catchment", level="WARNING") as logs:
+            catchment.create_catchment(
+                gauge_coords=[(float(y[1]), float(x[5])), (float(y[3]), float(x[5]))],
+                gauge_ids=[self.GAUGE_ID, unmatched_gauge_id],
+                # the first gauge drains six cells, no cell near the second 100 km2
+                ref_catchment_area=[6 * self.CELL_AREA_KM2, 100.0],
+                **self.create_catchment_kwargs(fdir_file, output_dir),
+            )
+        self.assertTrue(
+            any(f"Dropping gauge {unmatched_gauge_id}" in line for line in logs.output)
+        )
+        gauges_info = pd.read_csv(output_dir / "gauges_info.csv")
+        self.assertEqual(gauges_info["id"].tolist(), [self.GAUGE_ID])
+        with xr.open_dataset(output_dir / "basin_ids.nc") as basin_ds:
+            self.assertEqual((basin_ds.sizes["lat"], basin_ds.sizes["lon"]), (5, 8))
+
+    def test_projected_netcdf_gauge_is_moved_onto_the_river_by_area(self):
+        """Move a gauge beside the river onto the river cell draining its area."""
+        y, x = self.create_axes(7, 9)
+        fdir_file = self.write_projected_fdir_netcdf(self.create_river_tree(7, 9), y, x)
+        output_dir = self.tmp_path / "by_area"
+        # the river cell in column 4 drains the columns 0 to 4 of all 7 rows
+        river_area_km2 = 5 * 7 * self.CELL_AREA_KM2
+        catchment.create_catchment(
+            gauge_coords=(float(y[2]), float(x[4])),
+            gauge_ids=self.GAUGE_ID,
+            ref_catchment_area=river_area_km2,
+            **self.create_catchment_kwargs(fdir_file, output_dir),
+        )
+        gauge_info = pd.read_csv(output_dir / "gauges_info.csv").iloc[0]
+        self.assertEqual((gauge_info["lat"], gauge_info["lon"]), (y[3], x[4]))
+        self.assertAlmostEqual(gauge_info["distance"], 0.2)
+        self.assertAlmostEqual(gauge_info["area"], river_area_km2)
+        self.assertEqual(gauge_info["method"], "area_basinex")
+        with xr.open_dataset(output_dir / "basin_ids.nc") as basin_ds:
+            np.testing.assert_array_equal(basin_ds["lon"].values, x[:5])
+            self.assertEqual(int((basin_ds["basin"] > 0).sum()), 5 * 7)
+
+    def test_projected_netcdf_gauge_is_moved_onto_the_river_by_shape(self):
+        """Move a gauge onto the river cell whose catchment is its reference shape."""
+        y, x = self.create_axes(7, 9)
+        fdir_file = self.write_projected_fdir_netcdf(self.create_river_tree(7, 9), y, x)
+        shape_dir = self.tmp_path / "reference_shapes"
+        shape_dir.mkdir()
+        # the catchment of the river cell in column 4, the columns 0 to 4
+        reference_shape = box(4_000_000.0, 3_000_000.0, 4_001_000.0, 3_001_400.0)
+        gpd.GeoDataFrame(geometry=[reference_shape], crs="EPSG:3035").to_file(
+            shape_dir / f"basin_{self.GAUGE_ID}.shp"
+        )
+        output_dir = self.tmp_path / "by_shape"
+        catchment.create_catchment(
+            gauge_coords=(float(y[2]), float(x[4])),
+            gauge_ids=self.GAUGE_ID,
+            shape_folder=shape_dir,
+            **self.create_catchment_kwargs(fdir_file, output_dir),
+        )
+        gauge_info = pd.read_csv(output_dir / "gauges_info.csv").iloc[0]
+        self.assertEqual((gauge_info["lat"], gauge_info["lon"]), (y[3], x[4]))
+        self.assertEqual(gauge_info["method"], "shape_iou")
+        self.assertAlmostEqual(gauge_info["shape_error"], 0.0)
+        self.assertAlmostEqual(gauge_info["distance"], 0.2)

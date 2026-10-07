@@ -16,6 +16,7 @@ from mhm_tools.common.xarray_utils import (
     get_single_data_var,
     induce_data_var_from_file_name,
     normalize_lat_lon,
+    normalize_longitude_range,
     regrid_mask,
     snap_to_target,
 )
@@ -615,6 +616,45 @@ def test_convert_water_storage_to_mm_rejects_unknown_units():
     """Refuse a storage whose units are no depth of water."""
     with pytest.raises(ValueError, match="unrecognized unit"):
         utils.convert_water_storage_to_mm(_storage("m3"))
+
+
+class TestNormalizeLongitudeRange(unittest.TestCase):
+    @staticmethod
+    def make_ds(lon):
+        """Create a two-row dataset whose values hold the index of their column.
+
+        Args:
+            lon (numpy.ndarray): Longitude axis.
+
+        Returns:
+            Dataset with one lat/lon data variable.
+        """
+        values = np.tile(np.arange(lon.size, dtype=float), (2, 1))
+        return xr.Dataset(
+            {"var": (("lat", "lon"), values)}, coords={"lat": [1.0, 0.0], "lon": lon}
+        )
+
+    def test_projected_x_axis_in_metres_is_left_unchanged(self):
+        """Keep values and order of an x axis in metres, which holds no degrees."""
+        ds = self.make_ds(4_000_100.0 + 200.0 * np.arange(50))
+        xr.testing.assert_identical(normalize_longitude_range(ds), ds)
+
+    def test_axis_reaching_below_minus_180_is_left_unchanged(self):
+        """Keep a projected axis around 0 m that reaches below -180."""
+        ds = self.make_ds(np.linspace(-500_000.0, 500_000.0, 11))
+        xr.testing.assert_identical(normalize_longitude_range(ds), ds)
+
+    def test_global_0_to_360_axis_is_still_rotated(self):
+        """Rotate a global 0 to 360 axis onto -180 to 180 with its values."""
+        ds = self.make_ds(np.arange(0.5, 360.0, 1.0))
+        rotated = normalize_longitude_range(ds)
+        np.testing.assert_array_equal(
+            rotated["lon"].values, np.arange(-179.5, 180.0, 1.0)
+        )
+        # the values move with their column, 180.5 E becomes -179.5
+        np.testing.assert_array_equal(
+            rotated["var"].sel(lon=-179.5).values, ds["var"].sel(lon=180.5).values
+        )
 
 
 if __name__ == "__main__":
