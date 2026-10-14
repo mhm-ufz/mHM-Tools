@@ -193,6 +193,13 @@ def add_args(parser):
         type=float,
         help="Maximum radial cell-center distance in meters for outlet candidates.",
     )
+    distance_args.add_argument(
+        "--max-distance-auto",
+        action="store_true",
+        help="Derive the maximum outlet distance per gauge as 0.15 x the perimeter "
+        "of its reference shape, or of 1.5 x 4 x sqrt(area) without a shape, "
+        "limited to 2-10 km.",
+    )
     optional_args.add_argument(
         "--no-max-error",
         "--no-area-delimiter",
@@ -469,6 +476,7 @@ def run(args):  # noqa: PLR0912,PLR0915
         ref_catchment_area=ref_catchment_area,
         max_distance_cells=args.max_distance_cells,
         max_distance_m=args.max_distance_m,
+        max_distance_auto=args.max_distance_auto,
         max_error=args.max_error,
         use_max_error=args.use_max_error,
         gauge_ids=gauge_ids,

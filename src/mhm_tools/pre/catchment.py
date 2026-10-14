@@ -84,6 +84,11 @@ SHAPE_BUFFER_EXTENT_FACTOR = 1.5
 # this many times the square root of the reference catchment area wide; 6 reaches
 # 3 sqrt(A) from the gauge, which covers basins down to an elongation ratio of ~0.4
 AREA_CROP_WIDTH_FACTOR = 6
+# the automatic outlet search distance is a fraction of the catchment
+# perimeter, approximated from the area as 1.5 times the perimeter of a square
+AUTO_MAX_DISTANCE_PERIMETER_FACTOR = 0.15
+AUTO_MAX_DISTANCE_LIMITS_M = (2000.0, 10000.0)
+AREA_PERIMETER_FACTOR = 1.5 * 4
 
 
 # every numeric gauge info column reports an unknown value as nan
@@ -639,6 +644,65 @@ def _get_gauge_crop_bounds(
         )
         bounds_list.append(area_bounds)
     return _combine_shape_bounds(bounds_list)
+
+
+def _calculate_shape_perimeter_m(reference_shape, latlon):
+    """Calculate the perimeter of a reference catchment shape in meters.
+
+    Args:
+        reference_shape (geopandas.GeoDataFrame): Reference catchment shape.
+        latlon (bool): Whether the shape coordinates are in degrees.
+
+    Returns
+    -------
+        The perimeter of the merged shape geometries in meters.
+    """
+    if latlon:
+        # degrees have no fixed length, so measure in the local UTM zone
+        reference_shape = reference_shape.to_crs(reference_shape.estimate_utm_crs())
+    return float(_geometry_union(reference_shape.geometry).length)
+
+
+def _calculate_auto_max_distance_m(gauge_id, shape_folder, ref_area, latlon):
+    """Derive the maximum outlet distance of a gauge from its catchment size.
+
+    The distance is a fraction of the perimeter of the reference shape, or of a
+    perimeter approximated from the reference area, clipped to fixed limits.
+
+    Args:
+        gauge_id: Gauge id used to find the reference shape, or None.
+        shape_folder: Folder holding the gauge shapefiles, or None.
+        ref_area (float): Reference catchment area in km2, or None.
+        latlon (bool): Whether the shape coordinates are in degrees.
+
+    Returns
+    -------
+        The maximum outlet distance in meters.
+    """
+    reference_shape, _ = _read_reference_shape(shape_folder, gauge_id, latlon)
+    if reference_shape is not None and not reference_shape.empty:
+        perimeter_m = _calculate_shape_perimeter_m(reference_shape, latlon)
+        source = "shape perimeter"
+    elif ref_area is not None and np.isfinite(ref_area):
+        perimeter_m = AREA_PERIMETER_FACTOR * np.sqrt(ref_area) * 1000.0
+        source = "perimeter approximated from the area"
+    else:
+        logger.warning(
+            f"Gauge {gauge_id} has neither a shapefile nor an area; using the "
+            f"upper limit of {AUTO_MAX_DISTANCE_LIMITS_M[1]:.0f} m as max distance."
+        )
+        return AUTO_MAX_DISTANCE_LIMITS_M[1]
+    max_distance_m = float(
+        np.clip(
+            AUTO_MAX_DISTANCE_PERIMETER_FACTOR * perimeter_m,
+            *AUTO_MAX_DISTANCE_LIMITS_M,
+        )
+    )
+    logger.info(
+        f"Derived max outlet distance {max_distance_m:.0f} m for gauge {gauge_id} "
+        f"from the {source} of {perimeter_m / 1000.0:.1f} km."
+    )
+    return max_distance_m
 
 
 def create_cell_area(ds, lat_name="lat", lon_name="lon"):
@@ -2908,6 +2972,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
     ref_catchment_area=None,
     max_distance_cells=None,
     max_distance_m=None,
+    max_distance_auto=False,
     max_error=0.1,
     use_max_error=True,
     gauge_ids=None,
@@ -2957,6 +3022,22 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
         msg = "max_distance_m must be non-negative."
         with ErrorLogger(logger):
             raise ValueError(msg)
+    if max_distance_auto and (
+        max_distance_cells is not None or max_distance_m is not None
+    ):
+        msg = "max_distance_auto cannot be combined with max_distance_cells or max_distance_m."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    auto_max_distances_m = None
+    if max_distance_auto and (gauge_coords is not None or gauge_ids is not None):
+        auto_max_distances_m = [
+            _calculate_auto_max_distance_m(gauge_id, shape_folder, area, latlon)
+            for gauge_id, _, area in zip(
+                *_get_gauge_lists(gauge_ids, gauge_coords, ref_catchment_area)
+            )
+        ]
+        # the crop has to fit the largest search distance of all gauges
+        max_distance_m = max(auto_max_distances_m)
     if max_distance_cells is None and max_distance_m is None:
         max_distance_cells = 5
     if var not in {"fdir", "dem"}:
@@ -3297,6 +3378,9 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                     if shape_folder is None:
                         return None
                     gc = None
+                gauge_max_distance_m = (
+                    auto_max_distances_m[i] if auto_max_distances_m else max_distance_m
+                )
 
                 try:
                     (
@@ -3313,7 +3397,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                         gauge_coords=gc,
                         ref_catchment_area=ref_area,
                         max_distance_cells=max_distance_cells,
-                        max_distance_m=max_distance_m,
+                        max_distance_m=gauge_max_distance_m,
                         max_error=max_error,
                         use_max_error=use_max_error,
                         method=gauge_opti_method,
@@ -3340,6 +3424,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                     "shape_error": shape_error,
                     "method": used_method,
                     "ref_area": ref_area,
+                    "max_distance_m": gauge_max_distance_m,
                 }
 
             gauge_infos = Parallel(n_jobs=ncpus, prefer="threads")(
@@ -3477,7 +3562,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                     l0_shape_gdf,
                     (gauge.lat, gauge.lon),
                     max_distance_cells=max_distance_cells,
-                    max_distance_m=max_distance_m,
+                    max_distance_m=gi["max_distance_m"],
                     max_error=max_error,
                     use_max_error=use_max_error,
                     ref_catchment_area=gi.get("ref_area"),
