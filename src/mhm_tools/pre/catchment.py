@@ -80,6 +80,10 @@ CANDIDATE_AREA_AGREEMENT_FACTOR = 0.1
 # a reference shape can disagree with the flow direction data, so the crop for
 # the delineation keeps room for a catchment reaching beyond the shape bounds
 SHAPE_BUFFER_EXTENT_FACTOR = 1.5
+# without a reference shape the crop around a gauge is a box centred on it,
+# this many times the square root of the reference catchment area wide; 6 reaches
+# 3 sqrt(A) from the gauge, which covers basins down to an elongation ratio of ~0.4
+AREA_CROP_WIDTH_FACTOR = 6
 
 
 # every numeric gauge info column reports an unknown value as nan
@@ -514,6 +518,127 @@ def _shape_bounds_from_folder(
     buffered_bounds = _buffer_bounds(combined_bounds, min_buffer)
     logger.info(f"Using buffered shapefile bounds for slicing: {buffered_bounds}")
     return buffered_bounds
+
+
+def _get_gauge_lists(gauge_ids, gauge_coords, ref_catchment_area):
+    """Expand single or listed gauge ids, coordinates and areas to equal-length lists.
+
+    Args:
+        gauge_ids: Gauge id, list of gauge ids or None.
+        gauge_coords: (lat, lon) tuple, list of tuples or None.
+        ref_catchment_area: Area in km2, list of areas or None.
+
+    Returns
+    -------
+        Tuple of the lists of gauge ids, coordinates and areas, one entry per gauge.
+    """
+    if isinstance(gauge_coords, list):
+        n_gauges = len(gauge_coords)
+    elif isinstance(gauge_ids, list):
+        n_gauges = len(gauge_ids)
+    else:
+        n_gauges = 1
+    return tuple(
+        value if isinstance(value, list) else [value] * n_gauges
+        for value in (gauge_ids, gauge_coords, ref_catchment_area)
+    )
+
+
+def _get_area_crop_bounds(
+    gauge_coords, ref_area, latlon, min_buffer=0.0, min_buffer_m=0.0
+):
+    """Create a crop box centred on a gauge and sized from its catchment area.
+
+    Args:
+        gauge_coords (tuple): Gauge coordinates as (lat, lon), or (y, x) on
+            projected grids.
+        ref_area (float): Reference catchment area in km2.
+        latlon (bool): Whether the grid is geographic.
+        min_buffer (float): Buffer added on every side, in the unit of the grid.
+        min_buffer_m (float): Buffer added on every side, in meters.
+
+    Returns
+    -------
+        The bounds as (min_x, min_y, max_x, max_y), or None without coordinates
+        or area.
+    """
+    if gauge_coords is None or ref_area is None or not np.isfinite(ref_area):
+        return None
+    lat, lon = gauge_coords
+    half_width_m = AREA_CROP_WIDTH_FACTOR * np.sqrt(ref_area) * 1000.0 / 2
+    half_width_m += min_buffer_m
+    if latlon:
+        half_height = convert_meters_to_degrees(half_width_m) + min_buffer
+        # a degree of longitude is shortest at the box edge furthest from the equator
+        half_width = (
+            convert_meters_to_degrees(half_width_m, abs(lat) + half_height) + min_buffer
+        )
+    else:
+        half_height = half_width = half_width_m + min_buffer
+    return lon - half_width, lat - half_height, lon + half_width, lat + half_height
+
+
+def _get_gauge_crop_bounds(
+    shape_folder,
+    gauge_ids,
+    gauge_coords,
+    ref_catchment_area,
+    latlon,
+    min_buffer=0.0,
+    min_buffer_m=0.0,
+):
+    """Compute the crop bounds covering all gauges.
+
+    Gauges with a shapefile use the buffered shape bounds, all others a box
+    around their coordinates sized from their reference catchment area.
+
+    Args:
+        shape_folder: Folder holding the gauge shapefiles, or None.
+        gauge_ids: Gauge id, list of gauge ids or None.
+        gauge_coords: (lat, lon) tuple, list of tuples or None.
+        ref_catchment_area: Area in km2, list of areas or None.
+        latlon (bool): Whether the grid is geographic.
+        min_buffer (float): Lower limit for the buffer, in the unit of the grid.
+        min_buffer_m (float): Lower limit for the buffer, in meters.
+
+    Returns
+    -------
+        The bounds as (min_x, min_y, max_x, max_y), or None if any gauge has
+        neither a shapefile nor coordinates and an area.
+    """
+    gauge_id_list, gauge_coord_list, area_list = _get_gauge_lists(
+        gauge_ids, gauge_coords, ref_catchment_area
+    )
+    shape_ids = [
+        gauge_id
+        for gauge_id in gauge_id_list
+        if _find_shape_file(shape_folder, gauge_id) is not None
+    ]
+    bounds_list = []
+    if shape_ids:
+        shape_bounds = _shape_bounds_from_folder(
+            shape_folder, shape_ids, min_buffer=min_buffer, min_buffer_m=min_buffer_m
+        )
+        if shape_bounds is not None:
+            bounds_list.append(shape_bounds)
+    for gauge_id, coords, area in zip(gauge_id_list, gauge_coord_list, area_list):
+        if gauge_id is not None and gauge_id in shape_ids:
+            continue
+        area_bounds = _get_area_crop_bounds(
+            coords, area, latlon, min_buffer=min_buffer, min_buffer_m=min_buffer_m
+        )
+        if area_bounds is None:
+            logger.warning(
+                f"Gauge {gauge_id} has neither a shapefile nor coordinates and an "
+                "area; not cropping the input, which may need a lot of memory."
+            )
+            return None
+        logger.info(
+            f"Using a box of {AREA_CROP_WIDTH_FACTOR} x sqrt(area) around gauge "
+            f"{gauge_id} for slicing: {area_bounds}"
+        )
+        bounds_list.append(area_bounds)
+    return _combine_shape_bounds(bounds_list)
 
 
 def create_cell_area(ds, lat_name="lat", lon_name="lon"):
@@ -2856,10 +2981,13 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
         search_buffer, search_buffer_m = _outlet_search_buffer(
             max_distance_m, max_distance_cells, resolutions.l0, latlon
         )
-        if coord_slices_default and shape_folder:
-            bounds = _shape_bounds_from_folder(
+        if coord_slices_default and (shape_folder or ref_catchment_area is not None):
+            bounds = _get_gauge_crop_bounds(
                 shape_folder,
                 gauge_ids,
+                gauge_coords,
+                ref_catchment_area,
+                latlon,
                 min_buffer=search_buffer,
                 min_buffer_m=search_buffer_m,
             )

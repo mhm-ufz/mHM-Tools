@@ -176,7 +176,8 @@ def add_args(parser):
         help=(
             "Reference catchment area in km^2 used to identify the outlet cell near the gauge coordinates. "
             "For multiple gauges, pass a comma-separated list."
-            "Shape-based matching takes precedence; area matching only runs if it finds no candidate."
+            "Shape-based matching takes precedence; area matching only runs if it finds no candidate. "
+            "Without a shapefile or --lonlatbox, the input is cropped to a box 6 x sqrt(area) wide around the gauge."
         ),
     )
     distance_args = optional_args.add_mutually_exclusive_group()
