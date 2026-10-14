@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Union
 
@@ -35,6 +36,8 @@ PathLike = Union[str, Path]
 _INPUT_SUFFIXES = {".asc", ".nc", ".tif", ".tiff"}
 _OUTPUT_SUFFIXES = {".asc", ".nc", ".tif"}
 _NODATA = np.int32(NO_DATA)
+_LOOKUP_INDEX_DTYPES = {1: np.uint8, 2: np.uint16}
+_LOOKUP_CHUNK_SIZE = 2**24
 
 
 def get_categorical_output_path(
@@ -79,6 +82,146 @@ def _format_categories(categories: np.ndarray, limit: int = 10) -> str:
     return ", ".join(values) + suffix
 
 
+def _warn_unmatched_categories(unmatched_count: int, categories: np.ndarray) -> None:
+    """Log the valid categories that the lookup table does not map.
+
+    Parameters
+    ----------
+    unmatched_count : int
+        Number of valid raster cells without a lookup entry.
+    categories : numpy.ndarray
+        Sorted category values of these cells.
+    """
+    logger.warning(
+        "%d valid raster cells in %d categor%s were not present in the "
+        "lookup table and were written as %d: %s",
+        unmatched_count,
+        categories.size,
+        "y" if categories.size == 1 else "ies",
+        int(_NODATA),
+        _format_categories(categories),
+    )
+
+
+@dataclass
+class CategoryLookup:
+    """Class of every value an 8- or 16-bit integer type can hold.
+
+    Signed categories are indexed by their unsigned bit pattern. ``counts``
+    accumulates over every call of :meth:`calculate_classes`, so a raster
+    classified block by block is checked once with :meth:`check_counts`.
+    """
+
+    dtype: np.dtype
+    classes: np.ndarray
+    mapped: np.ndarray
+    excluded: np.ndarray
+    counts: np.ndarray
+
+    @classmethod
+    def create(cls, dtype, mapping: dict, nodata_values=()) -> CategoryLookup | None:
+        """Build the lookup array for one category type.
+
+        Parameters
+        ----------
+        dtype : numpy.dtype or str
+            Type of the raster categories.
+        mapping : dict
+            Category values mapped to their int32 target classes.
+        nodata_values : iterable of float, optional
+            Category values that are written as nodata.
+
+        Returns
+        -------
+        CategoryLookup or None
+            The lookup, or None when ``dtype`` is not an 8- or 16-bit integer.
+        """
+        dtype = np.dtype(dtype)
+        if (
+            not np.issubdtype(dtype, np.integer)
+            or dtype.itemsize not in _LOOKUP_INDEX_DTYPES
+        ):
+            return None
+        size = np.iinfo(_LOOKUP_INDEX_DTYPES[dtype.itemsize]).max + 1
+        lookup = cls(
+            dtype=dtype,
+            classes=np.full(size, _NODATA, dtype=np.int32),
+            mapped=np.zeros(size, dtype=bool),
+            excluded=np.zeros(size, dtype=bool),
+            counts=np.zeros(size, dtype=np.int64),
+        )
+        for key, target in mapping.items():
+            index = lookup._index_of(key)
+            if index is not None:
+                lookup.classes[index] = target
+                lookup.mapped[index] = True
+        for nodata in nodata_values:
+            index = lookup._index_of(nodata)
+            if index is not None:
+                lookup.excluded[index] = True
+        lookup.classes[lookup.excluded] = _NODATA
+        lookup.mapped &= ~lookup.excluded
+        return lookup
+
+    @property
+    def index_dtype(self) -> np.dtype:
+        """Return the unsigned type whose values index the lookup arrays."""
+        return np.dtype(_LOOKUP_INDEX_DTYPES[self.dtype.itemsize])
+
+    def _index_of(self, value) -> int | None:
+        """Return the lookup index of a category value, or None if it cannot occur."""
+        value_range = np.iinfo(self.dtype)
+        if not float(value).is_integer() or not (
+            value_range.min <= value <= value_range.max
+        ):
+            return None
+        return int(np.array(value, dtype=self.dtype).view(self.index_dtype))
+
+    def calculate_classes(self, values: np.ndarray, masked=None) -> np.ndarray:
+        """Classify categories in one pass and add them to ``counts``.
+
+        Parameters
+        ----------
+        values : numpy.ndarray
+            Categories of type ``dtype``.
+        masked : numpy.ndarray, optional
+            Boolean array, true where cells are nodata; they are not counted.
+
+        Returns
+        -------
+        numpy.ndarray
+            int32 classes, with ``_NODATA`` for nodata and unmatched cells.
+        """
+        indices = values.view(self.index_dtype).reshape(-1)
+        masked = None if masked is None else np.asarray(masked).reshape(-1)
+        output = np.empty(indices.size, dtype=np.int32)
+        # Chunks keep the intp copies that indexing and bincount make small.
+        for start in range(0, indices.size, _LOOKUP_CHUNK_SIZE):
+            chunk = indices[start : start + _LOOKUP_CHUNK_SIZE]
+            chunk_classes = self.classes[chunk]
+            if masked is not None:
+                chunk_masked = masked[start : start + chunk.size]
+                chunk_classes[chunk_masked] = _NODATA
+                chunk = chunk[~chunk_masked]
+            output[start : start + chunk_classes.size] = chunk_classes
+            self.counts += np.bincount(chunk, minlength=self.counts.size)
+        return output.reshape(values.shape)
+
+    def check_counts(self) -> None:
+        """Raise when no mapped category occurred and warn about unlisted ones."""
+        if not np.any(self.counts[self.mapped]):
+            msg = "No valid raster category matched the selected lookup mapping field."
+            raise ValueError(msg)
+        unmatched = (self.counts > 0) & ~self.mapped & ~self.excluded
+        if np.any(unmatched):
+            categories = (
+                np.flatnonzero(unmatched).astype(self.index_dtype).view(self.dtype)
+            )
+            _warn_unmatched_categories(
+                int(self.counts[unmatched].sum()), np.sort(categories)
+            )
+
+
 def _reclassify(data: xr.DataArray, mapping: dict) -> np.ndarray:
     values = np.asarray(data.values)
     if not np.issubdtype(values.dtype, np.number) or np.iscomplexobj(values):
@@ -88,10 +231,17 @@ def _reclassify(data: xr.DataArray, mapping: dict) -> np.ndarray:
         )
         raise TypeError(msg)
 
+    nodata_values = list(_nodata_values(data))
+    lookup = CategoryLookup.create(values.dtype, mapping, nodata_values)
+    if lookup is not None:
+        classes = lookup.calculate_classes(values)
+        lookup.check_counts()
+        return classes
+
     valid = np.ones(values.shape, dtype=bool)
     if np.issubdtype(values.dtype, np.floating):
         valid &= np.isfinite(values)
-    for nodata in _nodata_values(data):
+    for nodata in nodata_values:
         valid &= values != nodata
 
     output = np.full(values.shape, _NODATA, dtype=np.int32)
@@ -107,15 +257,8 @@ def _reclassify(data: xr.DataArray, mapping: dict) -> np.ndarray:
 
     unmatched = valid & ~mapped
     if np.any(unmatched):
-        categories = np.unique(values[unmatched])
-        logger.warning(
-            "%d valid raster cells in %d categor%s were not present in the "
-            "lookup table and were written as %d: %s",
-            int(np.count_nonzero(unmatched)),
-            categories.size,
-            "y" if categories.size == 1 else "ies",
-            int(_NODATA),
-            _format_categories(categories),
+        _warn_unmatched_categories(
+            int(np.count_nonzero(unmatched)), np.unique(values[unmatched])
         )
     return output
 

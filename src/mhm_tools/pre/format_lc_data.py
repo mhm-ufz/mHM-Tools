@@ -41,6 +41,7 @@ from rasterio.windows import Window
 from mhm_tools.common.constants import NO_DATA
 from mhm_tools.common.file_handler import write_xarray_to_file
 from mhm_tools.common.format_data import (
+    CategoryLookup,
     fill_grid_nodata,
     format_categorical_data,
     get_categorical_output_path,
@@ -209,11 +210,20 @@ def _write_mapped_lc(source, source_crs, mapped_path, mapping):
         "blockysize": 256,
         "BIGTIFF": "IF_SAFER",
     }
+    # 8- and 16-bit categories take one lookup pass per block; the read mask
+    # already covers nodata, so no nodata values are passed.
+    lookup = CategoryLookup.create(source.dtypes[0], mapping)
     matched = False
     with rasterio.open(mapped_path, "w", **profile) as target:
         for _, window in source.block_windows(1):
             source_values = source.read(1, window=window, masked=True)
             values = np.ma.getdata(source_values)
+            if lookup is not None:
+                result = lookup.calculate_classes(
+                    values, masked=np.ma.getmaskarray(source_values)
+                )
+                target.write(result, 1, window=window)
+                continue
             valid = ~np.ma.getmaskarray(source_values) & np.isfinite(values)
             result = np.full(values.shape, int(NO_DATA), dtype=np.int32)
             for source_value, class_value in mapping.items():
@@ -222,7 +232,9 @@ def _write_mapped_lc(source, source_crs, mapped_path, mapping):
                     result[selected] = int(class_value)
                     matched = True
             target.write(result, 1, window=window)
-    if not matched:
+    if lookup is not None:
+        lookup.check_counts()
+    elif not matched:
         msg = "No valid raster category matched the selected lookup mapping field."
         raise ValueError(msg)
 
