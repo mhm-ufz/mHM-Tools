@@ -1,5 +1,27 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- `create-catchment` gains `--max-distance-auto`, mutually exclusive with `--max-distance-cells` and `--max-distance-m`, which derives the outlet search distance of every gauge from its catchment size: 0.15 times the perimeter of its reference shape, measured in the local UTM zone, or of `1.5 * 4 * sqrt(area)` without a shape, limited to 2-10 km. A gauge with neither gets the upper limit and a warning, and the crop buffer uses the largest distance of all gauges.
+
+### Changed
+
+- `create-catchment` crops the input around a gauge without a shapefile to a box centred on the gauge and `AREA_CROP_WIDTH_FACTOR` (6) times the square root of its reference area wide, instead of loading the whole input, so a missing or incomplete shapefile no longer loads a global 1/600 degree flow direction grid and gets the job killed for memory. The box reaches 3 sqrt(A) from the gauge, which covers basins down to an elongation ratio of about 0.4. With several gauges every gauge adds its buffered shape bounds or its box to the crop, so gauges without a shapefile are no longer left outside it; a gauge with neither a shapefile nor coordinates and an area turns the crop off with a warning. `--lonlatbox` still takes precedence.
+- `create-catchment` repeats the delineation with the automatic crop doubled in width and height, at most `CROP_RETRY_LIMIT` (2) times, when a basin reaches the edge of the crop and may be cut off, also when a cut off single basin fails the area sanity check. Gauges and shapes are only written after this check. A `--lonlatbox`, an uncropped input or a crop already covering the whole input is not enlarged and only warns that the basin may be cut off.
+- `create-catchment` names the lowest shape error of the rejected candidates, its upstream area and the reference area when the shape-based outlet correction fails and no area-based correction can follow, instead of only stating that it failed.
+- `format-data` reclassifies 8- and 16-bit integer categories in one pass through a lookup array indexed by the category, instead of one pass per mapped category, also block by block for land cover written through rasterio. Categories missing from the lookup table are counted over all blocks and reported once.
+
+### Fixed
+
+- `crop-mhm-setup` rounds the stop indices of files cropped through their `header.txt` like the start indices instead of truncating them. A cellsize carrying float32 imprecision put the stop index just below a whole cell and dropped the last column or row of the meteo data.
+- `align_bounds_to_l2` takes an L2 edge within half an L0 cell of the domain bound as matching it. Float32 L2 coordinates missed an edge coinciding with the bound and added an empty L2 cell on that side.
+
+### Tests
+
+- `format-data` reclassification: uint8 and signed int16 categories with nodata through the lookup array, unmatched categories logged with their cell count, a raster without any matching category refused, float categories with NaN on the per-category path, and the lookup array giving the same classes as the per-category loop.
+
 ## [v0.3]
 
 ### Added
