@@ -1396,8 +1396,13 @@ class Catchment:
         lon_values=None,
         use_max_error=True,
         started_from_shape=False,
+        rejected_candidate=None,
     ):
-        """Find best gauge location using shape similarity."""
+        """Find best gauge location using shape similarity.
+
+        If the best candidate is rejected for exceeding max_error, its shape
+        error and areas are written to the dict passed as rejected_candidate.
+        """
         if max_distance_cells is None and max_distance_m is None:
             max_distance_cells = 2
         if upstream_area is None:
@@ -1609,6 +1614,7 @@ class Catchment:
                 lon_values=lon_values,
                 use_max_error=use_max_error,
                 started_from_shape=True,
+                rejected_candidate=rejected_candidate,
             )
         # the delimiter decides whether a poor overlap disqualifies a candidate
         # or only ranks it, the same role the area error plays in the area based
@@ -1624,6 +1630,12 @@ class Catchment:
                 f"{_format_area(best_candidate_upstream_area)} against a reference "
                 f"of {_format_area(ref_catchment_area)}."
             )
+            if rejected_candidate is not None and best_candidate_index is not None:
+                rejected_candidate.update(
+                    shape_error=1 - best_candidate_shape_iou,
+                    upstream_area=best_candidate_upstream_area,
+                    ref_area=ref_catchment_area,
+                )
             return None
 
         area_error = (
@@ -1665,6 +1677,7 @@ class Catchment:
         score = np.nan
         shape_error = np.nan
         used_method = None
+        rejected_shape_candidate = {}
         if shape_folder and gauge_id is not None:
             try:
                 shape_result = self.find_best_gauge_location_shape(
@@ -1677,6 +1690,7 @@ class Catchment:
                     max_distance_m=max_distance_m,
                     max_error=max_error,
                     use_max_error=use_max_error,
+                    rejected_candidate=rejected_shape_candidate,
                 )
             except Exception as exc:
                 logger.warning(
@@ -1801,7 +1815,16 @@ class Catchment:
                 f"Moved outlet {distance_error/10:.2}km shifting latitude {float(gauge_coords[0])} to {new_lat} and longitude {float(gauge_coords[1])} to {new_lon}."
             )
         elif shape_result is None and shape_folder and gauge_id is not None:
-            error_msg = f"Shape-based correction failed for gauge_id {gauge_id}, and no area-based correction applied."
+            error_msg = f"Shape-based correction failed for gauge_id {gauge_id}"
+            if rejected_shape_candidate:
+                error_msg += (
+                    f": the lowest shape error "
+                    f"{rejected_shape_candidate['shape_error']:.3f} exceeds the max "
+                    f"error {max_error:.3f} (upstream area "
+                    f"{_format_area(rejected_shape_candidate['upstream_area'])}, "
+                    f"reference {_format_area(rejected_shape_candidate['ref_area'])})"
+                )
+            error_msg += ", and no area-based correction applied."
             with ErrorLogger(logger):
                 raise ValueError(error_msg)
         else:
