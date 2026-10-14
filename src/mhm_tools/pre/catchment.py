@@ -84,6 +84,10 @@ SHAPE_BUFFER_EXTENT_FACTOR = 1.5
 # this many times the square root of the reference catchment area wide; 6 reaches
 # 3 sqrt(A) from the gauge, which covers basins down to an elongation ratio of ~0.4
 AREA_CROP_WIDTH_FACTOR = 6
+# an automatic crop a basin reaches the edge of is enlarged by this factor in
+# width and height and the delineation is repeated, at most this many times
+CROP_GROWTH_FACTOR = 2
+CROP_RETRY_LIMIT = 2
 # the automatic outlet search distance is a fraction of the catchment
 # perimeter, approximated from the area as 1.5 times the perimeter of a square
 AUTO_MAX_DISTANCE_PERIMETER_FACTOR = 0.15
@@ -422,6 +426,42 @@ def _buffer_bounds(bounds, min_buffer=0.0, extent_factor=SHAPE_BUFFER_EXTENT_FAC
         max_x + buffer,
         max_y + buffer,
     )
+
+
+def _scale_bounds(bounds, factor):
+    """Scale bounds around their centre.
+
+    Args:
+        bounds (tuple): Bounding box as (min_x, min_y, max_x, max_y).
+        factor (float): Factor applied to width and height.
+
+    Returns
+    -------
+        The scaled bounds as (min_x, min_y, max_x, max_y).
+    """
+    min_x, min_y, max_x, max_y = bounds
+    centre_x, centre_y = (min_x + max_x) / 2, (min_y + max_y) / 2
+    half_width = (max_x - min_x) * factor / 2
+    half_height = (max_y - min_y) * factor / 2
+    return (
+        centre_x - half_width,
+        centre_y - half_height,
+        centre_x + half_width,
+        centre_y + half_height,
+    )
+
+
+def _get_domain_edge_values(grid):
+    """Get the unique values in the outermost rows and columns of a 2D grid.
+
+    Args:
+        grid (np.ndarray): 2D grid, e.g. a basin mask or basin ids.
+
+    Returns
+    -------
+        np.ndarray of the unique values along the grid edges.
+    """
+    return np.unique(np.concatenate([grid[0, :], grid[-1, :], grid[:, 0], grid[:, -1]]))
 
 
 def _outlet_search_buffer(max_distance_m, max_distance_cells, l0_resolution, latlon):
@@ -1094,6 +1134,7 @@ class Catchment:
         self.gauge_lons = []
         self.ftype = ftype
         self.catchment_mask = None
+        self.touches_domain_edge = False
         self.resolutions = resolutions if resolutions is not None else Resolution()
         if self.resolutions.l0 is None:
             self.resolutions.l0 = round(
@@ -2202,6 +2243,8 @@ class Catchment:
         logger.debug(
             f"mask statistics: min={basin.min()}, max={basin.max()}, all true? {np.all(catchment_mask)}"
         )
+        # set before the sanity check, so a failing cut off basin can be detected
+        self.touches_domain_edge = bool(np.any(_get_domain_edge_values(catchment_mask)))
 
         uparea_at_outlet = (
             upstream_area[outlet_idx] if upstream_area is not None else np.nan
@@ -2983,13 +3026,18 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
     gauge_info_file="gauges_info",
     id_gauges_out_path=None,
     raise_on_fallback=True,
+    crop_bounds=None,
+    crop_retries_left=CROP_RETRY_LIMIT,
 ):
     """Delineate global or local catchments from flow direction/DEM data.
 
     Supports full-domain basin mapping, single- or multi-gauge delineation from
     coordinates and area, and optional shape-based outlet matching. Writes
     basin IDs, gauge ID files, masks, and optional gauge metadata/shapes.
+    crop_bounds and crop_retries_left are set internally when a basin reaching
+    the edge of the automatic crop reruns the delineation with a larger crop.
     """
+    create_catchment_kwargs = dict(locals())
     logger.info(
         f"Creating catchment file for {var_name} using {var} and {ftype} from {input_file}"
     )
@@ -3062,7 +3110,10 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
         search_buffer, search_buffer_m = _outlet_search_buffer(
             max_distance_m, max_distance_cells, resolutions.l0, latlon
         )
-        if coord_slices_default and (shape_folder or ref_catchment_area is not None):
+        bounds = None
+        if coord_slices_default and crop_bounds is not None:
+            bounds = crop_bounds
+        elif coord_slices_default and (shape_folder or ref_catchment_area is not None):
             bounds = _get_gauge_crop_bounds(
                 shape_folder,
                 gauge_ids,
@@ -3072,10 +3123,10 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                 min_buffer=search_buffer,
                 min_buffer_m=search_buffer_m,
             )
-            if bounds is not None:
-                slices = _slices_from_bounds(bounds, input_ds.lat.data)
-                if slices is not None:
-                    coordinate_slices = slices
+        if bounds is not None:
+            slices = _slices_from_bounds(bounds, input_ds.lat.data)
+            if slices is not None:
+                coordinate_slices = slices
         # transform
         transform = get_transformation_matrix_nc(input_ds, var_name)
 
@@ -3221,7 +3272,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                     variables=output_vars,
                     id_gauges_out_path=id_gauges_out_path,
                 )
-            return
+            return None
         input_ds_sliced = input_ds.sel(
             lat=coordinate_slices["lat"], lon=coordinate_slices["lon"]
         )
@@ -3233,6 +3284,38 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
             f"        lon {input_ds_sliced.lon.data[0]}, {input_ds_sliced.lon.data[-1]}"
         )
         sliced_transform = get_transformation_matrix_nc(input_ds_sliced, var_name)
+        # only an automatic crop that does not cover the whole input yet is enlarged
+        can_enlarge_crop = (
+            bounds is not None
+            and crop_retries_left > 0
+            and dict(input_ds_sliced.sizes) != dict(input_ds.sizes)
+        )
+
+        def _rerun_with_larger_crop(gauge_ids_at_edge):
+            """Rerun create_catchment with the crop bounds scaled by CROP_GROWTH_FACTOR.
+
+            Args:
+                gauge_ids_at_edge (list): Ids of the gauges whose basin reaches
+                    the crop edge.
+
+            Returns
+            -------
+                The result of the rerun create_catchment call.
+            """
+            larger_bounds = _scale_bounds(bounds, CROP_GROWTH_FACTOR)
+            logger.warning(
+                f"Basin of gauge(s) {gauge_ids_at_edge} reaches the edge of the "
+                f"cropped domain and may be cut off; repeating the delineation "
+                f"with the crop bounds {larger_bounds}."
+            )
+            return create_catchment(
+                **{
+                    **create_catchment_kwargs,
+                    "crop_bounds": larger_bounds,
+                    "crop_retries_left": crop_retries_left - 1,
+                }
+            )
+
         single_shape_gauge = (
             gauge_coords is None
             and shape_folder is not None
@@ -3266,16 +3349,28 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                 lon=gauge_coords[1] if gauge_coords is not None else None,
                 area=single_ref_area,
             )
-            gauge = c.delineate_basin(
-                gauge,
-                max_distance_cells=max_distance_cells,
-                max_distance_m=max_distance_m,
-                max_error=max_error,
-                use_max_error=use_max_error,
-                gauge_opti_method=gauge_opti_method,
-                shape_folder=shape_folder,
-                raise_on_fallback=raise_on_fallback,
-            )
+            try:
+                gauge = c.delineate_basin(
+                    gauge,
+                    max_distance_cells=max_distance_cells,
+                    max_distance_m=max_distance_m,
+                    max_error=max_error,
+                    use_max_error=use_max_error,
+                    gauge_opti_method=gauge_opti_method,
+                    shape_folder=shape_folder,
+                    raise_on_fallback=raise_on_fallback,
+                )
+            except ValueError:
+                # a cut off basin can fail the area sanity check, so retry it larger
+                if not (c.touches_domain_edge and can_enlarge_crop):
+                    raise
+            if c.touches_domain_edge:
+                if can_enlarge_crop:
+                    return _rerun_with_larger_crop([gauge.gauge_id])
+                logger.warning(
+                    f"Basin of gauge {gauge.gauge_id} reaches the edge of the domain "
+                    "and may be cut off."
+                )
             l0_shape_gdf = None
             if upscale and c.catchment_mask is not None:
                 write_gauges_out(
@@ -3330,7 +3425,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                 variables=output_vars,
                 id_gauges_out_path=id_gauges_out_path,
             )
-            return
+            return None
         logger.info("Creating basin id file for region.")
 
         c = Catchment(
@@ -3467,6 +3562,19 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                     logger.exception(f"pyflwdir.basins(idxs=...) failed: {exc}")
                     with ErrorLogger(logger):
                         raise exc
+                edge_basin_ids = set(_get_domain_edge_values(basins).tolist()) - {0}
+                gauge_ids_at_edge = [
+                    gi["gauge_id"]
+                    for gi in gauge_infos
+                    if int(basins[gi["outlet_idx"]]) in edge_basin_ids
+                ]
+                if gauge_ids_at_edge:
+                    if can_enlarge_crop:
+                        return _rerun_with_larger_crop(gauge_ids_at_edge)
+                    logger.warning(
+                        f"Basins of gauges {gauge_ids_at_edge} reach the edge of the "
+                        "domain and may be cut off."
+                    )
                 logger.info("Performing sanity checks for all delineated basins.")
                 gauges = []
                 for gi in gauge_infos:
@@ -3586,3 +3694,4 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
             variables=output_vars,
             id_gauges_out_path=id_gauges_out_path,
         )
+    return None
