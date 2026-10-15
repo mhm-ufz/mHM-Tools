@@ -21,7 +21,13 @@ import xarray as xr
 from joblib import Parallel, delayed
 from scipy.ndimage import binary_dilation
 
-from mhm_tools.common.constants import EARTH_RADIUS_KM, NC_ENCODE_MASK
+from mhm_tools.common.constants import (
+    EARTH_RADIUS_KM,
+    FDIR_FILLVALUE,
+    FDIR_SINKVALUE,
+    NC_ENCODE_MASK,
+    NO_DATA,
+)
 from mhm_tools.common.file_handler import (
     get_coord_values,
     get_xarray_ds_from_file,
@@ -52,10 +58,10 @@ logger = logging.getLogger(__name__)
 
 
 # GLOBAL VARIABLES
-FDIR_FILLVALUE = {"d8": 247, "ldd": 255}
-FDIR_SINKVALUE = {"d8": 0, "ldd": 5}
+# accumulated values are at least one cell or above 0 km2 on valid cells, so 0
+# is their fill value, unlike the -9999 of the other outputs
 FACC_FILLVALUE = 0
-FILLVALUE = -9999
+FILLVALUE = int(NO_DATA)
 OUTPUT_VARIABLES = ("flwdir", "basin", "uparea_grid", "upgrid", "grdare", "elevtn")
 GAUGE_INFO_COLUMNS = (
     "id",

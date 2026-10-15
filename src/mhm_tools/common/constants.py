@@ -11,6 +11,9 @@ Constants
     ESRI_TYPES
     ESRI_REQ
     GREENLAND_COORDS
+    FDIR_FILLVALUE
+    FDIR_SINKVALUE
+    FDIR_CODES
 
 ----
 
@@ -27,11 +30,23 @@ Constants
 .. autodata:: ESRI_REQ
 
 .. autodata:: GREENLAND_COORDS
+
+.. autodata:: FDIR_FILLVALUE
+
+.. autodata:: FDIR_SINKVALUE
+
+.. autodata:: FDIR_CODES
 """
 
 import numpy as np
 
-__all__ = ["NC_ENCODE_DEFAULTS", "NO_DATA"]
+__all__ = [
+    "FDIR_CODES",
+    "FDIR_FILLVALUE",
+    "FDIR_SINKVALUE",
+    "NC_ENCODE_DEFAULTS",
+    "NO_DATA",
+]
 
 NO_DATA = -9999.0
 """Default no data value for mHM."""
@@ -63,6 +78,16 @@ ESRI_TYPES = {
 
 ESRI_REQ = {"ncols", "nrows", "xllcorner", "yllcorner", "cellsize"}
 """Required ESRI ASCII grid header information."""
+
+FDIR_FILLVALUE = {"d8": 247, "ldd": 255}
+"""Nodata value of a flow direction grid per pyflwdir flow direction type."""
+FDIR_SINKVALUE = {"d8": 0, "ldd": 5}
+"""Pit (sink) code of a flow direction grid per pyflwdir flow direction type."""
+FDIR_CODES = {
+    "d8": (0, 1, 2, 4, 8, 16, 32, 64, 128, 255),
+    "ldd": tuple(range(1, 10)),
+}
+"""Valid flow direction codes per type, pits included (255 is a d8 pit too)."""
 
 
 LOG_LEVELS = {
