@@ -1,7 +1,7 @@
 """Create DEM derivatives (filled DEM, slope, aspect, facc, fdir) from a DEM.
 
 The tool creates a filled DEM, slope, aspect, flow accumulation, and flow direction from a DEM.
-The output can be written to a single netCDF file or to multiple files in ASCII or GeoTIFF format.
+The output can be written to a single netCDF file, or to one file per derivative in netCDF, ASCII or GeoTIFF format.
 
 Authors
 -------
@@ -31,7 +31,7 @@ def add_args(parser):
         required=True,
         help=(
             "Output file for netcdf, or output directory for one file per "
-            "derivative."
+            "derivative (asc, tif or --one-file-per-variable)."
         ),
     )
     optional.add_argument(
@@ -42,6 +42,15 @@ def add_args(parser):
         help=(
             "nc writes one file holding every derivative plus grid and crs; "
             "asc and tif write one file per derivative. Default: nc."
+        ),
+    )
+    optional.add_argument(
+        "--one-file-per-variable",
+        action="store_true",
+        help=(
+            "With nc, write one file per derivative named after it (dem.nc, "
+            "dem_filled.nc, slope.nc, aspect.nc, facc.nc, fdir.nc) into the "
+            "--output-path directory, each with lat, lon and crs."
         ),
     )
     optional.add_argument(
@@ -74,6 +83,7 @@ def run(args):
         crs=args.crs,
         var_name=args.varname,
         compression=get_netcdf_compression(args),
+        one_file_per_variable=args.one_file_per_variable,
     )
     for path in written:
         logger.info(f"Wrote {path}")

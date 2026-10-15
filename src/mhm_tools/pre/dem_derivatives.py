@@ -48,12 +48,14 @@ def create_dem_derivatives(
     crs=None,
     var_name=None,
     compression=None,
+    one_file_per_variable=False,
 ):
     """Write the DEM derivatives for ``input_file`` into ``output_path``.
 
     ``nc`` writes one file holding every derivative plus the grid coordinates
-    and a ``crs`` variable; ``asc`` and ``tif`` write one file per derivative.
-    Returns the paths written.
+    and a ``crs`` variable, or with ``one_file_per_variable`` one such file per
+    derivative named after it; ``asc`` and ``tif`` always write one file per
+    derivative. Returns the paths written.
     """
     extension = _validate_extension(output_extension)
     dem = get_raster_data(input_file, var_name=var_name, crs=crs)
@@ -66,10 +68,13 @@ def create_dem_derivatives(
 
     output_path = Path(output_path)
     if extension == "nc":
-        return (
-            _write_netcdf(
-                derivatives, grid, resolved_crs, output_path, compression=compression
-            ),
+        return _write_netcdf(
+            derivatives,
+            grid,
+            resolved_crs,
+            output_path,
+            compression=compression,
+            one_file_per_variable=one_file_per_variable,
         )
     return _write_per_layer(derivatives, grid, resolved_crs, output_path, extension)
 
@@ -179,9 +184,24 @@ def _grid_coordinates(dem, crs):
     }
 
 
-def _write_netcdf(derivatives, grid, crs, output_path, compression=None):
-    """Write every derivative plus grid and CRS into one NetCDF file."""
-    output = _resolve_output(output_path, "dem_derivatives.nc")
+def _write_netcdf(
+    derivatives, grid, crs, output_path, compression=None, one_file_per_variable=False
+):
+    """Write every derivative plus grid and CRS into NetCDF.
+
+    Args:
+        derivatives (dict): Derivative arrays by variable name.
+        grid (dict): Grid coordinates from ``_grid_coordinates``.
+        crs (rasterio.crs.CRS): CRS of the DEM.
+        output_path (Path): Output file, or directory for one file per variable.
+        compression (NetcdfCompression): Compression settings, or None.
+        one_file_per_variable (bool): Write ``<variable>.nc`` per derivative
+            into the ``output_path`` directory instead of one combined file.
+
+    Returns
+    -------
+        Tuple of the written paths.
+    """
     coords = {"y": grid["y"], "x": grid["x"]}
     data_vars = {
         name: (("y", "x"), derivatives[name], dict(attrs))
@@ -218,8 +238,24 @@ def _write_netcdf(derivatives, grid, crs, output_path, compression=None):
         name: {"_FillValue": NO_DATA if dtype == "f8" else int(NO_DATA)}
         for name, (dtype, _attrs) in DERIVATIVE_ATTRS.items()
     }
-    write_xarray_to_netcdf(ds, output, encoding=encoding, compression=compression)
-    return output
+    if not one_file_per_variable:
+        output = _resolve_output(output_path, "dem_derivatives.nc")
+        write_xarray_to_netcdf(ds, output, encoding=encoding, compression=compression)
+        return (output,)
+    folder = Path(output_path)
+    folder.mkdir(parents=True, exist_ok=True)
+    written = []
+    for name in DERIVATIVE_ATTRS:
+        # every file keeps the grid and CRS, so each one is usable on its own
+        output = folder / f"{name}.nc"
+        write_xarray_to_netcdf(
+            ds[[name, "lat", "lon", "crs"]],
+            output,
+            encoding={name: encoding[name]},
+            compression=compression,
+        )
+        written.append(output)
+    return tuple(written)
 
 
 def _write_per_layer(derivatives, grid, crs, output_path, extension):
