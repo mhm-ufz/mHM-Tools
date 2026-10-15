@@ -1245,7 +1245,8 @@ class Catchment:
         """Init the FlwdirRaster class from dem."""
         # perform checks
         # self.input_ds = fill_nan_with_neighbors(self.input_ds)
-        self.elevtn = self.input_da.data
+        # pyflwdir needs numpy; .values also loads a dask array from chunked reading
+        self.elevtn = self.input_da.values
         if self._fdir is None:
             # Create a flow direction object
             logger.info("add_dem")
@@ -1259,8 +1260,8 @@ class Catchment:
 
     def add_fdir(self, latlon):
         """Init the FlwdirRaster class from fdir."""
-        # perform check
-        data = self.input_da.data
+        # pyflwdir needs numpy; .values also loads a dask array from chunked reading
+        data = self.input_da.values
         if self._fdir is None:
             data = data.astype(np.uint8)
             self._fdir = pyflwdir.from_array(
