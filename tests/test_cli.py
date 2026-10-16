@@ -595,7 +595,12 @@ def test_discharge_evaluation_run_passes_the_gauge_coordinate_file(monkeypatch):
         ["--gauge-coordinate-file", "gauges.nc", "--facc-file", "restart.nc"],
         ["--gauge-coordinate-file", "gauges.nc", "--scc-gauges-file", "scc.nc"],
         ["--facc-file", "restart.nc", "--gauge-optimization-method", "nearest"],
-        ["--gauge-coordinate-file", "gauges.nc", "--gauge-optimization-method", "burek"],
+        [
+            "--gauge-coordinate-file",
+            "gauges.nc",
+            "--gauge-optimization-method",
+            "burek",
+        ],
     ],
 )
 def test_discharge_evaluation_run_refuses_unfitting_gauge_sources(

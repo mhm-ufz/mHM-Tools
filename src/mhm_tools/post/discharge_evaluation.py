@@ -442,7 +442,7 @@ def _materialize_data(obj, num_workers=1):
     return obj.load()
 
 
-def _read_model_file_part(  # noqa: PLR0911
+def _read_model_file_part(  # noqa: PLR0911, PLR0913
     sim_file,
     sim_variable,
     date_slice,
@@ -1139,9 +1139,13 @@ def _resolve_gauge_location_method(
         with ErrorLogger(logger):
             raise ValueError(msg)
     if facc_file is not None:
-        return method or "basinex", 3 if max_distance_cells is None else max_distance_cells
+        return method or "basinex", (
+            3 if max_distance_cells is None else max_distance_cells
+        )
     if gauge_coordinate_file is not None:
-        return method or "nearest", 1 if max_distance_cells is None else max_distance_cells
+        return method or "nearest", (
+            1 if max_distance_cells is None else max_distance_cells
+        )
     return None, None
 
 
@@ -1658,7 +1662,9 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
             # node output is matched by station id, gridded output by coordinates
             extraction_mode = "node" if scc_gauges_file is not None else "grid"
             gauges_file = (
-                scc_gauges_file if scc_gauges_file is not None else gauge_coordinate_file
+                scc_gauges_file
+                if scc_gauges_file is not None
+                else gauge_coordinate_file
             )
             logger.info(
                 f"Getting gauge coordinates from {gauges_file} ({extraction_mode} mode)."
@@ -2478,6 +2484,33 @@ def evaludate_discharge_data(  # noqa: PLR0913
         logger.info(f"Wrote discharge metric overview PDF to {overview_file}.")
 
 
+def _create_map_projection(crs, x_values, y_values):
+    """Create the cartopy projection of a gauge map and the coordinates to draw.
+
+    Args:
+        crs: CRS of the coordinates; None or a geographic CRS for lon/lat.
+        x_values (np.ndarray): Gauge x coordinates.
+        y_values (np.ndarray): Gauge y coordinates.
+
+    Returns
+    -------
+        tuple: ``(projection, x_values, y_values)``. A projected CRS without EPSG
+        code is drawn in lon/lat, as cartopy needs the code for the projection.
+    """
+    import cartopy.crs as ccrs
+
+    if crs is None or CRS.from_user_input(crs).is_geographic:
+        return ccrs.PlateCarree(), x_values, y_values
+    crs = CRS.from_user_input(crs)
+    if crs.to_epsg() is not None:
+        return ccrs.epsg(crs.to_epsg()), x_values, y_values
+    from pyproj import Transformer
+
+    transformer = Transformer.from_crs(crs.to_wkt(), "EPSG:4326", always_xy=True)
+    lons, lats = transformer.transform(x_values, y_values)
+    return ccrs.PlateCarree(), np.asarray(lons), np.asarray(lats)
+
+
 @log_errors(raise_exceptions=True)
 def plot_map(
     results_df,
@@ -2502,7 +2535,6 @@ def plot_map(
     `CRS.from_user_input` accepts) is given; the map is then drawn in that CRS.
     """
     try:
-        import cartopy.crs as ccrs
         import cartopy.feature as cfeature
     except Exception as exc:
         logger.error("cartopy is required for plot_map but could not be imported.")
@@ -2545,19 +2577,9 @@ def plot_map(
         logger.warning("No numeric variables found for map plotting.")
         return []
 
-    lons = df[lon_col].astype(float).values
-    lats = df[lat_col].astype(float).values
-    map_crs = ccrs.PlateCarree()
-    if crs is not None and not CRS.from_user_input(crs).is_geographic:
-        crs = CRS.from_user_input(crs)
-        if crs.to_epsg() is not None:
-            map_crs = ccrs.epsg(crs.to_epsg())
-        else:
-            # cartopy needs an EPSG code for a projected map, so show lon/lat
-            from pyproj import Transformer
-
-            transformer = Transformer.from_crs(crs.to_wkt(), "EPSG:4326", always_xy=True)
-            lons, lats = transformer.transform(lons, lats)
+    map_crs, lons, lats = _create_map_projection(
+        crs, df[lon_col].astype(float).values, df[lat_col].astype(float).values
+    )
     min_lon, max_lon = np.nanmin(lons), np.nanmax(lons)
     min_lat, max_lat = np.nanmin(lats), np.nanmax(lats)
     lon_range = max_lon - min_lon

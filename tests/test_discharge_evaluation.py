@@ -319,8 +319,12 @@ def test_search_window_holds_the_cells_around_the_gauge_with_nan_beyond_the_grid
     np.testing.assert_array_equal(
         window, [nan, nan, nan, nan, 0.0, 1.0, nan, 10.0, 11.0]
     )
-    np.testing.assert_array_equal(sim_sel["candidate_dy"], [-1, -1, -1, 0, 0, 0, 1, 1, 1])
-    np.testing.assert_array_equal(sim_sel["candidate_dx"], [-1, 0, 1, -1, 0, 1, -1, 0, 1])
+    np.testing.assert_array_equal(
+        sim_sel["candidate_dy"], [-1, -1, -1, 0, 0, 0, 1, 1, 1]
+    )
+    np.testing.assert_array_equal(
+        sim_sel["candidate_dx"], [-1, 0, 1, -1, 0, 1, -1, 0, 1]
+    )
 
 
 def _candidate_series(series_by_offset, observed_values):
@@ -350,8 +354,14 @@ def _candidate_series(series_by_offset, observed_values):
             "id": [7],
             "candidate_dy": ("candidate", [dy for dy, _ in offsets]),
             "candidate_dx": ("candidate", [dx for _, dx in offsets]),
-            "candidate_x": (("id", "candidate"), [[1000.0 * (1 + dx) for _, dx in offsets]]),
-            "candidate_y": (("id", "candidate"), [[1000.0 * (1 - dy) for dy, _ in offsets]]),
+            "candidate_x": (
+                ("id", "candidate"),
+                [[1000.0 * (1 + dx) for _, dx in offsets]],
+            ),
+            "candidate_y": (
+                ("id", "candidate"),
+                [[1000.0 * (1 - dy) for dy, _ in offsets]],
+            ),
         },
         name="rdis",
     )
