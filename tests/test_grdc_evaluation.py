@@ -1,4 +1,5 @@
 # tests/test_grdc_eval_unittest.py
+import contextlib
 import tempfile
 import unittest
 from pathlib import Path
@@ -638,6 +639,147 @@ class TestGRDCValidation2Consistency(unittest.TestCase):
             assert_discharge_equal(obs_d, obs_g)
             assert_discharge_equal(sim_d, sim_s)
             assert_discharge_equal(sim_d, sim_g)
+
+
+class TestGaugeLocationSources(unittest.TestCase):
+    """Gauge location sources of Q_data_to_xarray: facc file, scc file or none."""
+
+    ids = [1, 2]
+    times = pd.date_range("2001-01-01", periods=4, freq="D")
+    sim_values = np.array([[10.0, 20.0], [10.5, 20.5], [11.0, 21.0], [11.5, 21.5]])
+
+    def setUp(self):
+        """Create the observed and simulated datasets of two gauges."""
+        self.observed = make_observed_data(
+            self.ids, self.times, [10.0, 10.1], [50.0, 49.9], [100.0, 200.0]
+        )
+        self.simulated = xr.Dataset(
+            {"Qrouted": (("time", "id"), self.sim_values)},
+            coords={"time": self.times, "id": np.array(self.ids, dtype=int)},
+        )
+
+    def create_sim_discharge(self, gauge_ids):
+        """Create the simulated discharge of the given gauges along id.
+
+        Args:
+            gauge_ids (array_like): Ids of gauges 1 and/or 2.
+
+        Returns
+        -------
+            xr.DataArray: Discharge with dims (time, id).
+        """
+        columns = [self.ids.index(int(gauge_id)) for gauge_id in gauge_ids]
+        return xr.DataArray(
+            self.sim_values[:, columns],
+            dims=("time", "id"),
+            coords={"time": self.times, "id": np.asarray(gauge_ids, dtype=int)},
+            name="discharge",
+        )
+
+    def run_q_data_to_xarray(self, datasets, patches, **kwargs):
+        """Run Q_data_to_xarray on mocked files with additional patches.
+
+        Args:
+            datasets (dict): Dataset served by load_ds per file name.
+            patches (dict): Further attribute name -> replacement on the module.
+            **kwargs: Gauge location arguments of Q_data_to_xarray.
+
+        Returns
+        -------
+            tuple: The observed and simulated datasets.
+        """
+
+        def load_ds_side_effect(path, file_name=None):
+            return cm_enter(datasets[Path(path).name])
+
+        with tempfile.TemporaryDirectory() as temp_dir, contextlib.ExitStack() as stack:
+            stack.enter_context(
+                patch.object(gv, "load_ds", side_effect=load_ds_side_effect)
+            )
+            stack.enter_context(
+                patch.object(
+                    gv,
+                    "resample_to_coarser_calendar",
+                    return_value=(self.simulated, self.observed),
+                )
+            )
+            stack.enter_context(patch.object(gv, "write_xarray_to_file"))
+            for name, replacement in patches.items():
+                stack.enter_context(patch.object(gv, name, replacement))
+            return gv.Q_data_to_xarray(
+                model_data_path="sim.nc",
+                observed_data_path="obs.nc",
+                sim_variable="Qrouted",
+                observed_variable="runoff_mean_mm",
+                model_keyword="mrm",
+                saving_path=Path(temp_dir),
+                model_file_name="mrm_output.nc",
+                date_slice=slice(None, None),
+                overwrite=True,
+                direct_comparison=False,
+                **kwargs,
+            )
+
+    def test_facc_file_relocates_gauges_with_basinex_within_three_cells(self):
+        """Relocate gauges by flow accumulation with basinex and 3 cells by default."""
+        gauge_coords = MagicMock(
+            side_effect=[(10.0, 50.0, 100.0), (10.1, 49.9, 200.0)]
+        )
+
+        def sim_for_gauge(id, index, sim_data, yarr, xarr, resolution, **kwargs):
+            return self.create_sim_discharge([id])
+
+        self.run_q_data_to_xarray(
+            {"obs.nc": self.observed, "sim.nc": self.simulated, "restart.nc": xr.Dataset()},
+            {
+                "get_gauge_coords": gauge_coords,
+                "get_sim_data_for_one_gauge": MagicMock(side_effect=sim_for_gauge),
+            },
+            facc_file="restart.nc",
+        )
+
+        self.assertEqual(gauge_coords.call_count, len(self.ids))
+        for call in gauge_coords.call_args_list:
+            self.assertEqual(call.kwargs["method"], "basinex")
+            self.assertEqual(call.kwargs["max_distance_cells"], 3)
+
+    def test_missing_gauge_location_source_is_refused(self):
+        """Refuse a run that has no way to locate the gauges."""
+        with self.assertRaisesRegex(ValueError, "Neither"):
+            self.run_q_data_to_xarray(
+                {"obs.nc": self.observed, "sim.nc": self.simulated}, {}
+            )
+
+    def test_scc_gauges_without_lon_lat_use_x_y_of_reference_ids(self):
+        """Take gauge x/y from an scc file without lon/lat, for reference ids only."""
+        # station 3 has no observations, x/y differ from the GRDC geo_x/geo_y
+        scc_gauges = xr.Dataset(
+            {
+                "station": (("station",), np.array([1, 2, 3])),
+                "x": (("station",), np.array([4000.0, 5000.0, 6000.0])),
+                "y": (("station",), np.array([3000.0, 3100.0, 3200.0])),
+            }
+        )
+        node_extraction = MagicMock(
+            side_effect=lambda **kwargs: (
+                self.create_sim_discharge(kwargs["gauge_ids"]),
+                kwargs["x_new"],
+                kwargs["y_new"],
+                kwargs["gauge_ids"],
+            )
+        )
+
+        self.run_q_data_to_xarray(
+            {"obs.nc": self.observed, "sim.nc": self.simulated, "scc.nc": scc_gauges},
+            {"get_sim_data_for_gauges_from_nodes": node_extraction},
+            scc_gauges_file="scc.nc",
+        )
+
+        call_kwargs = node_extraction.call_args.kwargs
+        np.testing.assert_array_equal(call_kwargs["gauge_ids"], [1, 2])
+        np.testing.assert_array_equal(call_kwargs["x_new"], [4000.0, 5000.0])
+        np.testing.assert_array_equal(call_kwargs["y_new"], [3000.0, 3100.0])
+
 
 
 if __name__ == "__main__":

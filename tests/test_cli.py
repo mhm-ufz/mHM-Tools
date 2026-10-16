@@ -502,6 +502,47 @@ def test_discharge_evaluation_run_passes_paths_and_variables(monkeypatch):
     assert keyword_args["observed_variable"] == "Qobs"
 
 
+def test_discharge_evaluation_run_passes_the_gauge_location_options(monkeypatch):
+    """Hand the facc file, location method and search distance to the evaluation."""
+    received_calls = []
+
+    def record_evaluation(*args, **kwargs):
+        """Record the arguments the evaluation is called with."""
+        received_calls.append((args, kwargs))
+
+    monkeypatch.setattr(
+        "mhm_tools.post.discharge_evaluation.evaludate_discharge_data",
+        record_evaluation,
+    )
+    parser = argparse.ArgumentParser()
+    _discharge_evaluation.add_args(parser)
+
+    _discharge_evaluation.run(
+        parser.parse_args(
+            [
+                "--output-dir",
+                "out",
+                "--input-path",
+                "sim.nc",
+                "--ref-path",
+                "obs.nc",
+                "--facc-file",
+                "restart.nc",
+                "--gauge-optimization-method",
+                "burek",
+                "--gauge-max-distance-cells",
+                "5",
+            ]
+        )
+    )
+
+    _positional_args, keyword_args = received_calls[0]
+    assert keyword_args["facc_file"] == "restart.nc"
+    assert keyword_args["gauge_location_method"] == "burek"
+    assert keyword_args["gauge_max_distance_cells"] == 5
+
+
+
 @pytest.mark.parametrize(
     ("memory_args", "expected_memory_gb"),
     [

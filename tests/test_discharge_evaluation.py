@@ -11,6 +11,7 @@ from mhm_tools.common.logger import configure_mhm_tools_logger
 from mhm_tools.post.discharge_evaluation import (
     convert_discharge_to_observed_units,
     get_sim_data_for_gauges_from_nodes,
+    plot_map,
 )
 
 
@@ -168,3 +169,54 @@ def test_gauges_are_matched_by_coordinates_without_node_station_ids():
     np.testing.assert_array_equal(sim_sel.sel(id=8).values, [0.0, 0.0, 0.0])
     # the coordinate matching reports the coordinates of the matched nodes
     np.testing.assert_array_equal(matched_x, [20.0, 0.0])
+
+
+@pytest.fixture
+def _offline_map_projections(monkeypatch):
+    """Record the projection of every saved map and skip the map features.
+
+    Coastlines and borders would be downloaded by cartopy; the tests only need
+    the gauges, so ``add_feature`` is a no-op.
+
+    Returns
+    -------
+    list
+        The cartopy projection of every figure saved by ``plot_map``.
+    """
+    pytest.importorskip("cartopy")
+    from cartopy.mpl.geoaxes import GeoAxes
+    from matplotlib.figure import Figure
+
+    projections = []
+    save_figure = Figure.savefig
+
+    def record_and_save(figure, *args, **kwargs):
+        """Record the map projection before saving the figure."""
+        projections.append(figure.axes[0].projection)
+        return save_figure(figure, *args, **kwargs)
+
+    monkeypatch.setattr(GeoAxes, "add_feature", lambda *args, **kwargs: None)
+    monkeypatch.setattr(Figure, "savefig", record_and_save)
+    return projections
+
+
+def test_plot_map_draws_gauges_in_degrees_on_a_plate_carree_map(
+    tmp_path, _offline_map_projections
+):
+    """Write one PlateCarree map per variable for gauges given in degrees."""
+    import cartopy.crs as ccrs
+
+    results = pd.DataFrame(
+        {
+            "id": [1, 2, 3],
+            "x": [10.0, 11.0, 12.0],
+            "y": [50.0, 51.0, 52.0],
+            "kge": [0.1, 0.5, 0.9],
+        }
+    )
+
+    written = plot_map(results, tmp_path, variables=["kge"])
+
+    assert written == [tmp_path / "map_kge.png"]
+    assert written[0].is_file()
+    assert isinstance(_offline_map_projections[0], ccrs.PlateCarree)
