@@ -20,6 +20,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from joblib import Parallel, delayed
+from rasterio.crs import CRS
 from scipy.spatial import cKDTree
 
 from mhm_tools.common.catchment_maps import (
@@ -31,10 +32,13 @@ from mhm_tools.common.catchment_maps import (
 from mhm_tools.common.constants import (
     DEFAULT_DISCHARGE_UNITS,
     KGE_CONSTANT_MEAN_BOUND,
+    LAT_KEYS,
+    LON_KEYS,
     NSE_CONSTANT_MEAN_BOUND,
     WMO_INDEX_TO_REGION,
     WMO_REGION_BOUNDS,
 )
+from mhm_tools.common.crs_handler import resolve_crs
 from mhm_tools.common.file_handler import (
     get_dataset_from_path,
     write_xarray_to_file,
@@ -58,6 +62,7 @@ from mhm_tools.common.plotter import (
     style_map_axes,
     write_metric_plot_overview_pdf,
 )
+from mhm_tools.common.resolution_handler import calculate_coordinate_resolution
 from mhm_tools.common.units import calculate_conversion_factor
 from mhm_tools.common.utils import (
     coord_to_index,
@@ -82,6 +87,10 @@ logger = logging.getLogger(__name__)
 # names of the variable holding the station id of every river node in mRM node
 # output; gauges are matched to nodes by these ids before any coordinates
 NODE_STATION_ID_NAMES = ("station", "station_id")
+# gauge location methods: relocation by flow accumulation with a facc file, and
+# reading gridded output at the gauges of a gauge coordinate file
+FACC_LOCATION_METHODS = ("basinex", "burek")
+GRID_LOCATION_METHODS = ("nearest", "mean-flow")
 
 
 def get_region_from_id(gauge_id):
@@ -449,6 +458,7 @@ def _read_model_file_part(  # noqa: PLR0911
     y_new=None,
     resolution=None,
     load_num_workers=1,
+    search_cells=0,
 ):
     """Read one model file and return either cropped data or extracted gauge series."""
     with load_ds(sim_file) as ds_sim:
@@ -497,6 +507,24 @@ def _read_model_file_part(  # noqa: PLR0911
             )
             # Important: file-wise extraction is loaded here to free backing file handles
             # before concatenation across many files.
+            sim_sel = _materialize_data(sim_sel, num_workers=load_num_workers)
+            return (
+                sim_var_local,
+                sim_sel,
+                np.asarray(matched_x),
+                np.asarray(matched_y),
+                np.asarray(ids_arr),
+            )
+        if extraction_mode == "grid":
+            if gauge_ids_with_values is None or x_new is None or y_new is None:
+                return None
+            sim_sel, matched_x, matched_y, ids_arr = get_sim_data_for_gauges_from_grid(
+                ds_sim[sim_var_local].sel(time=date_slice),
+                x_new,
+                y_new,
+                gauge_ids_with_values,
+                search_cells=search_cells,
+            )
             sim_sel = _materialize_data(sim_sel, num_workers=load_num_workers)
             return (
                 sim_var_local,
@@ -798,6 +826,325 @@ def get_sim_data_for_gauges_from_nodes(
     return sim_sel, matched_x, matched_y, ids_arr
 
 
+def _get_nearest_grid_indices(coordinate_values, gauge_values):
+    """Find the grid cell of every gauge along one axis of a regular grid.
+
+    Args:
+        coordinate_values (np.ndarray): Cell centres of the axis, in any order.
+        gauge_values (np.ndarray): Gauge coordinates along the axis.
+
+    Returns
+    -------
+        np.ndarray of int: Cell index per gauge, -1 for gauges more than half a
+        cell beyond the outermost cell centres.
+    """
+    cell_size = (
+        calculate_coordinate_resolution(coordinate_values)
+        if coordinate_values.size > 1
+        else 0.0
+    )
+    indices = np.abs(coordinate_values[None, :] - gauge_values[:, None]).argmin(axis=1)
+    outside = ~np.isfinite(gauge_values) | (
+        (gauge_values < coordinate_values.min() - cell_size / 2)
+        | (gauge_values > coordinate_values.max() + cell_size / 2)
+    )
+    indices[outside] = -1
+    return indices
+
+
+def get_sim_data_for_gauges_from_grid(
+    sim_da, x_values, y_values, gauge_ids, search_cells=0
+):
+    """Extract the discharge series of every gauge from gridded output.
+
+    Every gauge takes the grid cell its coordinates lie in, which must be given
+    in the CRS of the grid. With ``search_cells`` the cells of the surrounding
+    window are returned as candidates for ``select_cells_by_mean_flow``.
+
+    Parameters
+    ----------
+    sim_da : xr.DataArray
+        Gridded discharge with 1-D y/x (or lat/lon) dimensions.
+    x_values, y_values : array_like
+        Gauge coordinates.
+    gauge_ids : array_like
+        Gauge ids.
+    search_cells : int, optional
+        Cells around the gauge cell in every direction; 0 returns the gauge
+        cell only, 1 a 3 x 3 window.
+
+    Returns
+    -------
+    tuple
+        ``(sim_sel, gauge_x, gauge_y, ids)`` of the gauges on the grid. ``sim_sel``
+        holds ``(time, id)``, or ``(time, id, candidate)`` with the coordinates
+        ``candidate_dy``/``candidate_dx`` (cell offsets, rows first) and
+        ``candidate_x``/``candidate_y`` (cell centres); cells beyond the grid
+        are NaN.
+    """
+    # 2-D lon/lat coordinates of a projected grid are no grid dimensions
+    y_dim = next((key for key in LAT_KEYS if key in sim_da.dims), None)
+    x_dim = next((key for key in LON_KEYS if key in sim_da.dims), None)
+    if y_dim is None or x_dim is None or not {y_dim, x_dim} <= set(sim_da.coords):
+        msg = (
+            "--gauge-coordinate-file needs gridded model output with 1-D y/x "
+            f"(or lat/lon) dimensions, but the discharge has dims {sim_da.dims}."
+        )
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    y_coord = np.asarray(sim_da[y_dim].values, dtype=float)
+    x_coord = np.asarray(sim_da[x_dim].values, dtype=float)
+    gauge_x = np.asarray(x_values, dtype=float)
+    gauge_y = np.asarray(y_values, dtype=float)
+    ids = np.asarray(gauge_ids)
+    row_indices = _get_nearest_grid_indices(y_coord, gauge_y)
+    col_indices = _get_nearest_grid_indices(x_coord, gauge_x)
+
+    on_grid = (row_indices >= 0) & (col_indices >= 0)
+    if not on_grid.any():
+        msg = (
+            f"None of the {ids.size} gauges lies on the model grid ({x_dim} "
+            f"{x_coord.min()} to {x_coord.max()}, {y_dim} {y_coord.min()} to "
+            f"{y_coord.max()}); the gauge coordinates must be in the CRS of the grid."
+        )
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    if not on_grid.all():
+        logger.warning(
+            f"Dropping {int((~on_grid).sum())} gauge(s) outside the model grid, "
+            f"e.g. {ids[~on_grid][:5].tolist()}."
+        )
+    row_indices, col_indices = row_indices[on_grid], col_indices[on_grid]
+    gauge_x, gauge_y, ids = gauge_x[on_grid], gauge_y[on_grid], ids[on_grid]
+
+    if search_cells == 0:
+        sim_sel = sim_da.isel(
+            {
+                y_dim: xr.DataArray(row_indices, dims="id"),
+                x_dim: xr.DataArray(col_indices, dims="id"),
+            }
+        )
+    else:
+        offsets = np.arange(-search_cells, search_cells + 1)
+        row_offsets, col_offsets = (
+            grid.ravel() for grid in np.meshgrid(offsets, offsets, indexing="ij")
+        )
+        candidate_rows = row_indices[:, None] + row_offsets[None, :]
+        candidate_cols = col_indices[:, None] + col_offsets[None, :]
+        inside = (
+            (candidate_rows >= 0)
+            & (candidate_rows < y_coord.size)
+            & (candidate_cols >= 0)
+            & (candidate_cols < x_coord.size)
+        )
+        candidate_rows = np.clip(candidate_rows, 0, y_coord.size - 1)
+        candidate_cols = np.clip(candidate_cols, 0, x_coord.size - 1)
+        candidate_dims = ("id", "candidate")
+        sim_sel = sim_da.isel(
+            {
+                y_dim: xr.DataArray(candidate_rows, dims=candidate_dims),
+                x_dim: xr.DataArray(candidate_cols, dims=candidate_dims),
+            }
+        ).where(xr.DataArray(inside, dims=candidate_dims))
+        sim_sel = sim_sel.assign_coords(
+            candidate_dy=("candidate", row_offsets),
+            candidate_dx=("candidate", col_offsets),
+            candidate_x=(
+                candidate_dims,
+                np.where(inside, x_coord[candidate_cols], np.nan),
+            ),
+            candidate_y=(
+                candidate_dims,
+                np.where(inside, y_coord[candidate_rows], np.nan),
+            ),
+        )
+    sim_sel = sim_sel.assign_coords(id=ids)
+    # grid coordinates along id would clash with the gauge coordinates later
+    keep_coords = {"id", "candidate_x", "candidate_y"}
+    sim_sel = sim_sel.drop_vars(
+        [
+            name
+            for name, coord in sim_sel.coords.items()
+            if name not in keep_coords and "id" in coord.dims
+        ]
+    )
+    logger.info(f"Selected gridded discharge for {ids.size} gauges.")
+    return sim_sel, gauge_x, gauge_y, ids
+
+
+def select_cells_by_mean_flow(sim_candidates, observed):
+    """Select per gauge the candidate cell whose mean flow matches the observations.
+
+    The means of a candidate and the observations are taken over the days where
+    both hold values. The candidate with the smallest relative difference wins;
+    the gauge's own cell (offset 0, 0) wins ties.
+
+    Args:
+        sim_candidates (xr.DataArray): Discharge ``(time, id, candidate)`` from
+            ``get_sim_data_for_gauges_from_grid`` with ``search_cells``.
+        observed (xr.DataArray): Observed discharge ``(time, id)`` in the same
+            units.
+
+    Returns
+    -------
+        tuple: ``(sim_sel, cell_x, cell_y)``: the discharge ``(time, id)`` of
+        the selected cells and their cell centres.
+    """
+    ids = sim_candidates["id"].values
+    candidates_aligned, observed_aligned = xr.align(
+        sim_candidates, observed.sel(id=ids), join="inner"
+    )
+    both_valid = candidates_aligned.notnull() & observed_aligned.notnull()
+    candidate_means = candidates_aligned.where(both_valid).mean("time")
+    observed_means = observed_aligned.where(both_valid).mean("time")
+    relative_errors = abs(candidate_means - observed_means) / abs(
+        observed_means.where(observed_means != 0)
+    )
+    errors = relative_errors.fillna(np.inf).transpose("id", "candidate").values
+
+    gauge_index = np.arange(ids.size)
+    best = errors.argmin(axis=1)
+    centre = int(
+        np.flatnonzero(
+            (sim_candidates["candidate_dy"].values == 0)
+            & (sim_candidates["candidate_dx"].values == 0)
+        )[0]
+    )
+    centre_ties = np.isclose(errors[gauge_index, centre], errors[gauge_index, best])
+    best[centre_ties] = centre
+    chosen = xr.DataArray(best, dims="id")
+
+    sim_sel = sim_candidates.isel(candidate=chosen)
+    cell_x = sim_candidates["candidate_x"].isel(candidate=chosen).values
+    cell_y = sim_candidates["candidate_y"].isel(candidate=chosen).values
+    sim_sel = sim_sel.drop_vars(
+        [name for name in sim_sel.coords if str(name).startswith("candidate")]
+    )
+    moved = best != centre
+    logger.info(
+        f"mean-flow: {int(moved.sum())} of {ids.size} gauges read from a "
+        "neighbour cell whose mean flow matches the observations better."
+    )
+    for gauge_id, candidate in zip(ids[moved], best[moved]):
+        logger.debug(
+            f"Gauge {gauge_id}: cell offset "
+            f"({int(sim_candidates['candidate_dy'][candidate])}, "
+            f"{int(sim_candidates['candidate_dx'][candidate])})."
+        )
+    return sim_sel, cell_x, cell_y
+
+
+def read_gauge_coordinates(gauges_file, reference_ids):
+    """Read the coordinates of the gauges that have reference observations.
+
+    Args:
+        gauges_file (str or Path): NetCDF with station ids (``NODE_STATION_ID_NAMES``)
+            and ``lon``/``lat`` or ``x``/``y``; ``lon``/``lat`` are preferred.
+        reference_ids (array_like): Ids of the gauges with observations.
+
+    Returns
+    -------
+        tuple of np.ndarray: x, y and ids of the matching gauges, in file order.
+    """
+    with load_ds(gauges_file) as ds:
+        if "lon" in ds and "lat" in ds:
+            gauge_x = np.asarray(ds["lon"].values, dtype=float)
+            gauge_y = np.asarray(ds["lat"].values, dtype=float)
+        else:
+            gauge_x = np.asarray(ds["x"].values, dtype=float)
+            gauge_y = np.asarray(ds["y"].values, dtype=float)
+        id_name = next(
+            (name for name in NODE_STATION_ID_NAMES if name in ds.variables), "station"
+        )
+        gauge_ids = np.asarray(ds[id_name].values)
+    keep = np.isin(gauge_ids, np.asarray(reference_ids))
+    if not np.any(keep):
+        msg = f"No gauges with observed data found in {gauges_file}."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    return gauge_x[keep], gauge_y[keep], gauge_ids[keep]
+
+
+def read_gauge_crs(gauges_file):
+    """Read the CRS of projected gauge coordinates for the gauge maps.
+
+    Args:
+        gauges_file (str or Path): Gauges file, or None.
+
+    Returns
+    -------
+        The CRS of ``x``/``y`` from their grid mapping, or None for a file with
+        ``lon``/``lat``, without grid mapping or without file.
+    """
+    if gauges_file is None:
+        return None
+    with load_ds(gauges_file) as ds:
+        if ("lon" in ds and "lat" in ds) or "x" not in ds:
+            return None
+        grid_mapping = ds["x"].attrs.get("grid_mapping", "crs")
+        if grid_mapping not in ds.variables:
+            return None
+        return resolve_crs(ds[grid_mapping])
+
+
+def _resolve_gauge_location_method(
+    method,
+    max_distance_cells,
+    facc_file=None,
+    scc_gauges_file=None,
+    gauge_coordinate_file=None,
+):
+    """Resolve the gauge location method and search distance for the gauge source.
+
+    ``basinex``/``burek`` relocate gauges with a facc file (default basinex,
+    3 cells); ``nearest``/``mean-flow`` read gridded output at the gauges of a
+    gauge coordinate file (default nearest, 1 cell). Node output (scc gauges
+    file) uses neither.
+
+    Args:
+        method (str): Gauge location method, or None for the default.
+        max_distance_cells (int): Search distance in cells, or None for the default.
+        facc_file: Flow accumulation file, or None.
+        scc_gauges_file: scc gauges file for node output, or None.
+        gauge_coordinate_file: Gauge coordinates for gridded output, or None.
+
+    Returns
+    -------
+        tuple: ``(method, max_distance_cells)``, both None without facc file and
+        gauge coordinate file.
+    """
+    msg = None
+    if gauge_coordinate_file is not None and (
+        facc_file is not None or scc_gauges_file is not None
+    ):
+        msg = (
+            "--gauge-coordinate-file (gridded model output) cannot be combined "
+            "with --facc-file or --scc-gauges-file."
+        )
+    elif method is not None and method not in (
+        FACC_LOCATION_METHODS + GRID_LOCATION_METHODS
+    ):
+        msg = f"Unknown gauge location method '{method}'."
+    elif method in FACC_LOCATION_METHODS and facc_file is None:
+        msg = (
+            f"Gauge location method '{method}' relocates gauges by flow "
+            "accumulation and needs --facc-file."
+        )
+    elif method in GRID_LOCATION_METHODS and gauge_coordinate_file is None:
+        msg = (
+            f"Gauge location method '{method}' reads gridded output and needs "
+            "--gauge-coordinate-file."
+        )
+    if msg is not None:
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    if facc_file is not None:
+        return method or "basinex", 3 if max_distance_cells is None else max_distance_cells
+    if gauge_coordinate_file is not None:
+        return method or "nearest", 1 if max_distance_cells is None else max_distance_cells
+    return None, None
+
+
 def get_gauge_coords(  # noqa: PLR0912
     ds,
     ref_facc,
@@ -1032,10 +1379,11 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
     direct_comparison=False,
     write_input_data_cache=False,
     min_overlapping_years=1,
-    gauge_location_method="basinex",
-    gauge_max_distance_cells=3,
+    gauge_location_method=None,
+    gauge_max_distance_cells=None,
     gauge_max_error=0.1,
     compression=None,
+    gauge_coordinate_file=None,
 ):
     """Get observed and model Q data and save it as CSV files to be opened later.
 
@@ -1054,7 +1402,21 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
     - "id1": Gauge IDs
     - "new_x": X-coordinates of gauges
     - "new_y": Y-coordinates of gauges
+
+    The gauges are located by one of: `facc_file` (relocation by flow
+    accumulation), `scc_gauges_file` (river node output) or
+    `gauge_coordinate_file` (gridded output, see `GRID_LOCATION_METHODS`).
     """
+    gauge_location_method, gauge_max_distance_cells = _resolve_gauge_location_method(
+        gauge_location_method,
+        gauge_max_distance_cells,
+        facc_file=facc_file,
+        scc_gauges_file=scc_gauges_file,
+        gauge_coordinate_file=gauge_coordinate_file,
+    )
+    search_cells = (
+        gauge_max_distance_cells if gauge_location_method == "mean-flow" else 0
+    )
     if date_slice is None:
         date_slice = slice(None, None)
     sim_output_file = Path(f"{saving_path}/{model_keyword}_data.nc")
@@ -1292,26 +1654,18 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
         y_new_pre = None
         facc_new_pre = None
 
-        if scc_gauges_file is not None:
-            extraction_mode = "node"
-            with load_ds(scc_gauges_file) as ds:
-                logger.info("Getting gauge coordinates from scc gauges file.")
-                try:
-                    scc_x = np.asarray(ds.lon.values, dtype=float)
-                    scc_y = np.asarray(ds.lat.values, dtype=float)
-                except Exception:
-                    scc_x = np.asarray(ds.x.values, dtype=float)
-                    scc_y = np.asarray(ds.y.values, dtype=float)
-                scc_ids = np.asarray(ds.station.values)
-            valid_id_set = set(np.asarray(gauge_ids.values))
-            keep_mask = np.isin(scc_ids, list(valid_id_set))
-            if not np.any(keep_mask):
-                msg = "No gauges with observed data found in scc gauges file."
-                with ErrorLogger(logger):
-                    raise ValueError(msg)
-            x_new_pre = scc_x[keep_mask]
-            y_new_pre = scc_y[keep_mask]
-            gauge_ids_with_values_pre = scc_ids[keep_mask]
+        if scc_gauges_file is not None or gauge_coordinate_file is not None:
+            # node output is matched by station id, gridded output by coordinates
+            extraction_mode = "node" if scc_gauges_file is not None else "grid"
+            gauges_file = (
+                scc_gauges_file if scc_gauges_file is not None else gauge_coordinate_file
+            )
+            logger.info(
+                f"Getting gauge coordinates from {gauges_file} ({extraction_mode} mode)."
+            )
+            x_new_pre, y_new_pre, gauge_ids_with_values_pre = read_gauge_coordinates(
+                gauges_file, gauge_ids.values
+            )
             try:
                 facc_new_pre = facc.sel(id=gauge_ids_with_values_pre).values
             except Exception:
@@ -1391,6 +1745,7 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
                     y_new=y_new_pre,
                     resolution=resolution,
                     load_num_workers=n_jobs_eff,
+                    search_cells=search_cells,
                 )
                 for sim_file in model_files
             )
@@ -1416,6 +1771,7 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
                     y_new=y_new_pre,
                     resolution=resolution,
                     load_num_workers=n_jobs_eff,
+                    search_cells=search_cells,
                 )
                 for sim_file in model_files
             ]
@@ -1427,7 +1783,7 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
                 raise ValueError(msg)
 
         sim_variable = sim_results[0][0] if sim_variable is None else sim_variable
-        if extraction_mode == "node":
+        if extraction_mode in ("node", "grid"):
             filtered = [res for res in sim_results if res[0] == sim_variable]
             dropped_sim = len(sim_results) - len(filtered)
             if dropped_sim > 0:
@@ -1450,9 +1806,16 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
                 facc_new_pre = facc.sel(id=gauge_ids_with_values_pre).values
             except Exception:
                 facc_new_pre = np.full(len(gauge_ids_with_values_pre), np.nan)
-            sim_data_cropped = _concat_time_dataarrays(sim_parts).to_dataset(
-                name=sim_variable
-            )
+            sim_concat = _concat_time_dataarrays(sim_parts)
+            if gauge_location_method == "mean-flow":
+                # compare the means in the units of the observations
+                sim_concat, observed_matched = convert_discharge_to_observed_units(
+                    sim_concat, obs_discharge_data.sel(id=gauge_ids_with_values_pre)
+                )
+                sim_concat, x_new_pre, y_new_pre = select_cells_by_mean_flow(
+                    sim_concat, observed_matched
+                )
+            sim_data_cropped = sim_concat.to_dataset(name=sim_variable)
         elif extraction_mode == "coords":
             filtered = [res for res in sim_results if res[0] == sim_variable]
             dropped_sim = len(sim_results) - len(filtered)
@@ -1617,8 +1980,9 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
             if facc is not None
             else np.full(len(gauge_ids_with_values), np.nan)
         )
-    # Case 2: scc gauges file provided. Input is node based (mRM v6+)
-    elif scc_gauges_file is not None:
+    # Case 2: scc gauges file (node output, mRM v6+) or gauge coordinate file
+    # (gridded output); the gauge series were extracted file by file
+    elif scc_gauges_file is not None or gauge_coordinate_file is not None:
         if sim_variable is None:
             sim_variable = (
                 "discharge"
@@ -1630,7 +1994,7 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
             with ErrorLogger(logger):
                 raise ValueError(msg)
         logger.info(
-            f"Using pre-extracted node discharge variable '{sim_variable}' from file-wise processing."
+            f"Using pre-extracted gauge discharge variable '{sim_variable}' from file-wise processing."
         )
         sim = sim_data_cropped[sim_variable]
         gauge_ids_with_values = np.asarray(gauge_ids_with_values_pre)
@@ -1654,8 +2018,8 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
         facc_new = np.asarray(facc_new_pre)
     else:
         error_msg = (
-            "Neither facc_file or scc gauges file are provided. "
-            "Gauge location can not be determined"
+            "Neither facc_file, scc gauges file nor gauge coordinate file are "
+            "provided. Gauge location can not be determined"
         )
         with ErrorLogger(logger):
             raise ValueError(error_msg)
@@ -1912,8 +2276,8 @@ def evaludate_discharge_data(  # noqa: PLR0913
     save_hydrograph=False,
     min_overlapping_years=1,
     write_input_data_cache=False,
-    gauge_location_method="basinex",
-    gauge_max_distance_cells=3,
+    gauge_location_method=None,
+    gauge_max_distance_cells=None,
     gauge_max_error=0.1,
     hydrograph_plots=None,
     shape_folder=None,
@@ -1922,11 +2286,13 @@ def evaludate_discharge_data(  # noqa: PLR0913
     catchment_map_variables=None,
     metric_plot_types=None,
     compression=None,
+    gauge_coordinate_file=None,
 ):
     """Compare simulated with observed discharge directly or via bootstrapping.
 
     Loads/caches data, harmonizes temporal resolution, optionally bootstraps
-    across years, and writes per-gauge plots and a results table.
+    across years, and writes per-gauge plots and a results table. Gauge maps of
+    projected gauge coordinates are drawn in the CRS of the gauges file.
     """
     output_path = Path(output_path)
     stats_output_file = output_path / "results.csv"
@@ -1961,6 +2327,7 @@ def evaludate_discharge_data(  # noqa: PLR0913
             gauge_max_distance_cells=gauge_max_distance_cells,
             gauge_max_error=gauge_max_error,
             compression=compression,
+            gauge_coordinate_file=gauge_coordinate_file,
         )
         logger.info("Procured discharge data")
         model_da, observed_da = convert_discharge_to_observed_units(
@@ -2070,7 +2437,14 @@ def evaludate_discharge_data(  # noqa: PLR0913
         years = None
         if start_date is not None and end_date is not None:
             years = (pd.Timestamp(start_date).year, pd.Timestamp(end_date).year)
-        metric_plot_files.extend(plot_map(results_df, output_path, years=years) or [])
+        gauges_crs = read_gauge_crs(
+            gauge_coordinate_file
+            if gauge_coordinate_file is not None
+            else scc_gauges_file
+        )
+        metric_plot_files.extend(
+            plot_map(results_df, output_path, years=years, crs=gauges_crs) or []
+        )
     if "catchment-map" in metric_plot_types and (
         shape_folder is not None or mask_folder is not None
     ):
@@ -2117,12 +2491,15 @@ def plot_map(
     input_name="simulated",
     ref_name="observed discharge",
     years=None,
+    crs=None,
 ):
     """Plot gauge maps for each variable using color-coded points.
 
-    The map extent is expanded by 10% of the lon/lat range in each direction.
+    The map extent is expanded by 10% of the coordinate range in each direction.
     Colours and limits follow `get_metric_plot_style` unless `cmap` is given.
     `input_name`, `ref_name` and `years` (first and last year) form the title.
+    Coordinates are lon/lat unless a projected `crs` (any form rasterio's
+    `CRS.from_user_input` accepts) is given; the map is then drawn in that CRS.
     """
     try:
         import cartopy.crs as ccrs
@@ -2170,6 +2547,17 @@ def plot_map(
 
     lons = df[lon_col].astype(float).values
     lats = df[lat_col].astype(float).values
+    map_crs = ccrs.PlateCarree()
+    if crs is not None and not CRS.from_user_input(crs).is_geographic:
+        crs = CRS.from_user_input(crs)
+        if crs.to_epsg() is not None:
+            map_crs = ccrs.epsg(crs.to_epsg())
+        else:
+            # cartopy needs an EPSG code for a projected map, so show lon/lat
+            from pyproj import Transformer
+
+            transformer = Transformer.from_crs(crs.to_wkt(), "EPSG:4326", always_xy=True)
+            lons, lats = transformer.transform(lons, lats)
     min_lon, max_lon = np.nanmin(lons), np.nanmax(lons)
     min_lat, max_lat = np.nanmin(lats), np.nanmax(lats)
     lon_range = max_lon - min_lon
@@ -2213,9 +2601,9 @@ def plot_map(
 
         fig, ax = plt.subplots(
             figsize=calculate_map_figure_size(extent),
-            subplot_kw={"projection": ccrs.PlateCarree()},
+            subplot_kw={"projection": map_crs},
         )
-        ax.set_extent(extent, crs=ccrs.PlateCarree())
+        ax.set_extent(extent, crs=map_crs)
         ax.add_feature(cfeature.BORDERS, linewidth=0.3)
         ax.add_feature(cfeature.COASTLINE, linewidth=0.5)
         ax.add_feature(cfeature.LAND, facecolor="0.97")
@@ -2230,7 +2618,7 @@ def plot_map(
             alpha=0.85,
             edgecolor="white",
             linewidth=0.25,
-            transform=ccrs.PlateCarree(),
+            transform=map_crs,
         )
         add_map_colorbar(fig, ax, sc, bounds, extend, ticks, label)
         style_map_axes(ax)

@@ -69,7 +69,10 @@ def add_args(parser):
         dest="facc_file",
         required=False,
         default=None,
-        help=("Path to flow-accumulation file used for gauge matching."),
+        help=(
+            "Flow-accumulation file (mRM v5 style): gauges are relocated to the cell "
+            "best matching their reference catchment area (methods basinex, burek)."
+        ),
     )
     optional.add_argument(
         "--facc-var",
@@ -83,7 +86,22 @@ def add_args(parser):
         "--scc-gauges-file",
         required=False,
         default=None,
-        help=("Path to the scc gauges file."),
+        help=(
+            "scc gauges file for river node output (mRM v6+): gauges are matched to "
+            "the nodes by station id."
+        ),
+    )
+    optional.add_argument(
+        "--gauge-coordinate-file",
+        required=False,
+        default=None,
+        help=(
+            "Gauge coordinates for gridded model output: a NetCDF with 'station' ids "
+            "and x/y (or lon/lat) in the CRS of the model grid, e.g. a corrected scc "
+            "gauges file. Gauges are paired with the reference by id and read from "
+            "the nearest grid cell without relocation (methods nearest, mean-flow). "
+            "Alternative to --scc-gauges-file and --facc-file."
+        ),
     )
     optional.add_argument(
         "--evaluation-gauges",
@@ -195,16 +213,26 @@ def add_args(parser):
         "--gauge-location-method",
         dest="gauge_location_method",
         required=False,
-        default="basinex",
-        choices=["basinex", "burek"],
-        help=("Method used to optimize gauge location for mRM restart matching."),
+        default=None,
+        choices=["basinex", "burek", "nearest", "mean-flow"],
+        help=(
+            "Gauge location method. With --facc-file: basinex (default) or burek "
+            "relocate gauges by catchment area. With --gauge-coordinate-file: nearest "
+            "(default) reads the cell of the gauge, mean-flow the cell within "
+            "--gauge-max-distance-cells whose long-term mean discharge is closest to "
+            "the observed mean; mean-flow uses the observations to choose the cell, "
+            "so the bias (beta) looks better than it is."
+        ),
     )
     optional.add_argument(
         "--gauge-max-distance-cells",
         required=False,
-        default=3,
+        default=None,
         type=int,
-        help=("Maximum number of grid cells gauge location may be shifted."),
+        help=(
+            "Maximum number of grid cells gauge location may be shifted. "
+            "Default: 3 with --facc-file, 1 (3 x 3 cells) for mean-flow."
+        ),
     )
     optional.add_argument(
         "--gauge-max-error",
@@ -266,8 +294,19 @@ def run(args):
         get_netcdf_compression,
         normalize_cli_sequence,
     )
-    from mhm_tools.post.discharge_evaluation import evaludate_discharge_data
+    from mhm_tools.post.discharge_evaluation import (
+        _resolve_gauge_location_method,
+        evaludate_discharge_data,
+    )
 
+    # refuse competing gauge sources and methods without their source early
+    gauge_location_method, gauge_max_distance_cells = _resolve_gauge_location_method(
+        args.gauge_location_method,
+        args.gauge_max_distance_cells,
+        facc_file=args.facc_file,
+        scc_gauges_file=args.scc_gauges_file,
+        gauge_coordinate_file=args.gauge_coordinate_file,
+    )
     lon_min, lon_max, lat_min, lat_max, _mask = get_coords(
         args.lonlatbox, args.mask_file, raise_exception=False
     )
@@ -278,6 +317,7 @@ def run(args):
         facc_file=args.facc_file,
         facc_variable=args.facc_variable,
         scc_gauges_file=args.scc_gauges_file,
+        gauge_coordinate_file=args.gauge_coordinate_file,
         output_path=args.output_dir,
         evaluation_gauges=args.evaluation_gauges,
         n_jobs=int(args.ncpus),
@@ -298,8 +338,8 @@ def run(args):
         save_hydrograph=args.save_hydrograph,
         min_overlapping_years=args.min_overlapping_years,
         write_input_data_cache=not args.no_input_data_cache,
-        gauge_location_method=args.gauge_location_method,
-        gauge_max_distance_cells=args.gauge_max_distance_cells,
+        gauge_location_method=gauge_location_method,
+        gauge_max_distance_cells=gauge_max_distance_cells,
         gauge_max_error=args.gauge_max_error,
         hydrograph_plots=args.hydrograph_plots,
         shape_folder=args.shape_folder,
