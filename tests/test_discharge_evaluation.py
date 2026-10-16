@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 import xarray as xr
 
+import mhm_tools.post.discharge_evaluation as discharge_evaluation
 from mhm_tools.common.logger import configure_mhm_tools_logger
 from mhm_tools.post.discharge_evaluation import (
     convert_discharge_to_observed_units,
@@ -220,3 +221,285 @@ def test_plot_map_draws_gauges_in_degrees_on_a_plate_carree_map(
     assert written == [tmp_path / "map_kge.png"]
     assert written[0].is_file()
     assert isinstance(_offline_map_projections[0], ccrs.PlateCarree)
+
+
+def _gridded_output(step_count=3):
+    """Create gridded output of 3 x 4 cells of 1000 m, each holding 10 * row + column.
+
+    The grid carries 2-D lon/lat coordinates like CF output on a projected grid,
+    which are no grid dimensions.
+
+    Returns
+    -------
+    xr.DataArray
+        Discharge ``rdis(time, y, x)`` with y descending.
+    """
+    y = np.array([3500.0, 2500.0, 1500.0])
+    x = np.array([500.0, 1500.0, 2500.0, 3500.0])
+    cell_values = 10.0 * np.arange(y.size)[:, None] + np.arange(x.size)[None, :]
+    lon, lat = np.meshgrid(x / 1000.0, y / 1000.0)
+    return xr.DataArray(
+        np.broadcast_to(cell_values, (step_count, y.size, x.size)).copy(),
+        dims=("time", "y", "x"),
+        coords={
+            "time": pd.date_range("1990-01-01", periods=step_count, freq="D"),
+            "y": y,
+            "x": x,
+            "lon": (("y", "x"), lon),
+            "lat": (("y", "x"), lat),
+        },
+        name="rdis",
+        attrs={"units": "m3 s-1"},
+    )
+
+
+def test_gridded_gauges_take_the_nearest_cell_and_keep_their_coordinates():
+    """Read every gauge from the grid cell it lies in."""
+    sim_sel, gauge_x, gauge_y, ids = (
+        discharge_evaluation.get_sim_data_for_gauges_from_grid(
+            _gridded_output(),
+            x_values=[1400.0, 3600.0],
+            y_values=[3550.0, 1600.0],
+            gauge_ids=[7, 8],
+        )
+    )
+    assert set(sim_sel.dims) == {"time", "id"}
+    np.testing.assert_array_equal(ids, [7, 8])
+    # gauge 7 lies in row 0, column 1; gauge 8 in row 2, column 3
+    np.testing.assert_array_equal(sim_sel.sel(id=7).values, [1.0, 1.0, 1.0])
+    np.testing.assert_array_equal(sim_sel.sel(id=8).values, [23.0, 23.0, 23.0])
+    np.testing.assert_array_equal(gauge_x, [1400.0, 3600.0])
+    np.testing.assert_array_equal(gauge_y, [3550.0, 1600.0])
+
+
+def test_gridded_gauges_outside_the_grid_are_dropped_with_a_warning(caplog):
+    """Drop a gauge beyond the grid instead of reading the edge cell."""
+    sim_sel, _, _, ids = discharge_evaluation.get_sim_data_for_gauges_from_grid(
+        _gridded_output(),
+        x_values=[1500.0, 9000.0],
+        y_values=[2500.0, 2500.0],
+        gauge_ids=[7, 8],
+    )
+    np.testing.assert_array_equal(ids, [7])
+    np.testing.assert_array_equal(sim_sel.sel(id=7).values, [11.0, 11.0, 11.0])
+    assert "outside" in caplog.text
+
+
+def test_no_gauge_on_the_grid_points_to_the_crs():
+    """Refuse gauges that all lie beyond the grid, hinting at their CRS."""
+    with pytest.raises(ValueError, match="CRS"):
+        discharge_evaluation.get_sim_data_for_gauges_from_grid(
+            _gridded_output(), x_values=[1.0e6], y_values=[5.0e6], gauge_ids=[7]
+        )
+
+
+def test_node_output_is_refused_by_the_grid_matching():
+    """Refuse node output where gridded output is expected."""
+    with pytest.raises(ValueError, match="gridded"):
+        discharge_evaluation.get_sim_data_for_gauges_from_grid(
+            _node_output(station_ids=[1, 2, 3, 4])["discharge"],
+            x_values=[0.0],
+            y_values=[0.0],
+            gauge_ids=[1],
+        )
+
+
+def test_search_window_holds_the_cells_around_the_gauge_with_nan_beyond_the_grid():
+    """Return the 3 x 3 cells around a corner gauge, rows first, NaN off the grid."""
+    sim_sel, _, _, _ = discharge_evaluation.get_sim_data_for_gauges_from_grid(
+        _gridded_output(),
+        x_values=[500.0],
+        y_values=[3500.0],
+        gauge_ids=[7],
+        search_cells=1,
+    )
+    assert sim_sel.sizes["candidate"] == 9
+    window = sim_sel.sel(id=7).isel(time=0).transpose("candidate").values
+    nan = np.nan
+    np.testing.assert_array_equal(
+        window, [nan, nan, nan, nan, 0.0, 1.0, nan, 10.0, 11.0]
+    )
+    np.testing.assert_array_equal(sim_sel["candidate_dy"], [-1, -1, -1, 0, 0, 0, 1, 1, 1])
+    np.testing.assert_array_equal(sim_sel["candidate_dx"], [-1, 0, 1, -1, 0, 1, -1, 0, 1])
+
+
+def _candidate_series(series_by_offset, observed_values):
+    """Create the candidate series of gauge 7 and its observations.
+
+    Parameters
+    ----------
+    series_by_offset : dict
+        (dy, dx) cell offset -> discharge series of that cell.
+    observed_values : sequence
+        Observed discharge series of gauge 7.
+
+    Returns
+    -------
+    tuple
+        Candidates ``(time, id, candidate)`` with offsets and cell coordinates
+        (cells of 1000 m around x=1000, y=1000), and observations ``(time, id)``.
+    """
+    offsets = list(series_by_offset)
+    time = pd.date_range("1990-01-01", periods=len(observed_values), freq="D")
+    data = np.array([series_by_offset[offset] for offset in offsets], dtype=float)
+    candidates = xr.DataArray(
+        data.T[:, None, :],
+        dims=("time", "id", "candidate"),
+        coords={
+            "time": time,
+            "id": [7],
+            "candidate_dy": ("candidate", [dy for dy, _ in offsets]),
+            "candidate_dx": ("candidate", [dx for _, dx in offsets]),
+            "candidate_x": (("id", "candidate"), [[1000.0 * (1 + dx) for _, dx in offsets]]),
+            "candidate_y": (("id", "candidate"), [[1000.0 * (1 - dy) for dy, _ in offsets]]),
+        },
+        name="rdis",
+    )
+    observed = xr.DataArray(
+        np.asarray(observed_values, dtype=float)[:, None],
+        dims=("time", "id"),
+        coords={"time": time, "id": [7]},
+    )
+    return candidates, observed
+
+
+def test_mean_flow_picks_the_cell_matching_the_observed_mean_on_shared_days():
+    """Pick the neighbour whose mean equals the observations on observed days."""
+    # on all days the centre (mean 10) would be closer to 5 than the neighbour (36.7)
+    candidates, observed = _candidate_series(
+        {(0, 0): [10.0, 10.0, 10.0], (0, 1): [5.0, 5.0, 100.0]},
+        observed_values=[5.0, 5.0, np.nan],
+    )
+    sim_sel, cell_x, cell_y = discharge_evaluation.select_cells_by_mean_flow(
+        candidates, observed
+    )
+    np.testing.assert_array_equal(sim_sel.sel(id=7).values, [5.0, 5.0, 100.0])
+    np.testing.assert_array_equal(cell_x, [2000.0])
+    np.testing.assert_array_equal(cell_y, [1000.0])
+
+
+def test_mean_flow_keeps_the_centre_cell_on_a_tie():
+    """Keep the gauge's own cell when a neighbour matches equally well."""
+    candidates, observed = _candidate_series(
+        {(0, 1): [4.0, 4.0, 4.0], (0, 0): [6.0, 6.0, 6.0]},
+        observed_values=[5.0, 5.0, 5.0],
+    )
+    sim_sel, cell_x, _ = discharge_evaluation.select_cells_by_mean_flow(
+        candidates, observed
+    )
+    np.testing.assert_array_equal(sim_sel.sel(id=7).values, [6.0, 6.0, 6.0])
+    np.testing.assert_array_equal(cell_x, [1000.0])
+
+
+def test_read_gauge_coordinates_keeps_reference_ids_and_uses_x_y(tmp_path):
+    """Read x/y of the gauges that have observations, in file order."""
+    gauges_file = tmp_path / "gauges.nc"
+    xr.Dataset(
+        {
+            "station": ("station", [1.0, 2.0, 3.0]),
+            "x": ("station", [4000.0, 5000.0, 6000.0]),
+            "y": ("station", [3000.0, 3100.0, 3200.0]),
+        }
+    ).to_netcdf(gauges_file)
+
+    gauge_x, gauge_y, ids = discharge_evaluation.read_gauge_coordinates(
+        gauges_file, reference_ids=[2.0, 3.0, 9.0]
+    )
+    np.testing.assert_array_equal(ids, [2.0, 3.0])
+    np.testing.assert_array_equal(gauge_x, [5000.0, 6000.0])
+    np.testing.assert_array_equal(gauge_y, [3100.0, 3200.0])
+
+
+def test_read_gauge_coordinates_prefers_lon_lat(tmp_path):
+    """Use lon/lat when the gauges file holds them besides x/y."""
+    gauges_file = tmp_path / "gauges.nc"
+    xr.Dataset(
+        {
+            "station": ("station", [1.0, 2.0]),
+            "x": ("station", [4000.0, 5000.0]),
+            "y": ("station", [3000.0, 3100.0]),
+            "lon": ("station", [10.0, 11.0]),
+            "lat": ("station", [50.0, 51.0]),
+        }
+    ).to_netcdf(gauges_file)
+
+    gauge_x, gauge_y, _ = discharge_evaluation.read_gauge_coordinates(
+        gauges_file, reference_ids=[1.0, 2.0]
+    )
+    np.testing.assert_array_equal(gauge_x, [10.0, 11.0])
+    np.testing.assert_array_equal(gauge_y, [50.0, 51.0])
+
+
+def test_read_gauge_coordinates_refuses_gauges_without_observations(tmp_path):
+    """Refuse a gauges file sharing no id with the reference."""
+    gauges_file = tmp_path / "gauges.nc"
+    xr.Dataset(
+        {
+            "station": ("station", [1.0]),
+            "x": ("station", [4000.0]),
+            "y": ("station", [3000.0]),
+        }
+    ).to_netcdf(gauges_file)
+    with pytest.raises(ValueError, match="No gauges"):
+        discharge_evaluation.read_gauge_coordinates(gauges_file, reference_ids=[5.0])
+
+
+@pytest.mark.parametrize(
+    ("method", "max_distance_cells", "sources", "expected"),
+    [
+        (None, None, {"facc_file": "f.nc"}, ("basinex", 3)),
+        ("burek", 5, {"facc_file": "f.nc"}, ("burek", 5)),
+        (None, None, {"gauge_coordinate_file": "g.nc"}, ("nearest", 1)),
+        ("mean-flow", None, {"gauge_coordinate_file": "g.nc"}, ("mean-flow", 1)),
+        ("mean-flow", 2, {"gauge_coordinate_file": "g.nc"}, ("mean-flow", 2)),
+        (None, None, {"scc_gauges_file": "s.nc"}, (None, None)),
+    ],
+)
+def test_gauge_location_method_defaults_follow_the_gauge_source(
+    method, max_distance_cells, sources, expected
+):
+    """Default to basinex/3 with a facc file and nearest/1 with gauge coordinates."""
+    assert (
+        discharge_evaluation._resolve_gauge_location_method(
+            method, max_distance_cells, **sources
+        )
+        == expected
+    )
+
+
+@pytest.mark.parametrize(
+    ("method", "sources"),
+    [
+        ("burek", {"gauge_coordinate_file": "g.nc"}),
+        ("basinex", {"scc_gauges_file": "s.nc"}),
+        ("nearest", {"facc_file": "f.nc"}),
+        ("mean-flow", {}),
+        (None, {"facc_file": "f.nc", "gauge_coordinate_file": "g.nc"}),
+        (None, {"scc_gauges_file": "s.nc", "gauge_coordinate_file": "g.nc"}),
+    ],
+)
+def test_gauge_location_method_refuses_unfitting_combinations(method, sources):
+    """Refuse a method without its gauge source and two competing sources."""
+    with pytest.raises(ValueError):
+        discharge_evaluation._resolve_gauge_location_method(method, None, **sources)
+
+
+def test_plot_map_draws_projected_gauges_in_their_crs(
+    tmp_path, _offline_map_projections
+):
+    """Draw gauges given in EPSG:3035 metres on an EPSG:3035 map."""
+    from rasterio.crs import CRS
+
+    results = pd.DataFrame(
+        {
+            "id": [1, 2, 3],
+            "x": [4.0e6, 4.1e6, 4.2e6],
+            "y": [3.0e6, 3.1e6, 3.2e6],
+            "kge": [0.1, 0.5, 0.9],
+        }
+    )
+
+    written = plot_map(results, tmp_path, variables=["kge"], crs=CRS.from_epsg(3035))
+
+    assert written == [tmp_path / "map_kge.png"]
+    assert getattr(_offline_map_projections[0], "epsg_code", None) == 3035

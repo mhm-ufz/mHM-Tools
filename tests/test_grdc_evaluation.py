@@ -780,6 +780,58 @@ class TestGaugeLocationSources(unittest.TestCase):
         np.testing.assert_array_equal(call_kwargs["x_new"], [4000.0, 5000.0])
         np.testing.assert_array_equal(call_kwargs["y_new"], [3000.0, 3100.0])
 
+    def create_gridded_files(self):
+        """Create gridded output of 2 x 2 cells and gauge coordinates on it.
+
+        Cell (row 0, column 0) holds 100, (0, 1) 3, (1, 0) 50 and (1, 1) 4 on
+        every day. Gauge 1 lies in cell (0, 0), gauge 2 in cell (1, 1); their
+        observed means are 3 and 4.
+
+        Returns
+        -------
+            dict: Datasets served by load_ds per file name.
+        """
+        cell_values = np.array([[100.0, 3.0], [50.0, 4.0]])
+        gridded = xr.Dataset(
+            {
+                "Qrouted": (
+                    ("time", "y", "x"),
+                    np.broadcast_to(cell_values, (len(self.times), 2, 2)).copy(),
+                )
+            },
+            coords={
+                "time": self.times,
+                "y": np.array([3500.0, 2500.0]),
+                "x": np.array([500.0, 1500.0]),
+            },
+        )
+        gauges = xr.Dataset(
+            {
+                "station": (("station",), np.array([1, 2])),
+                "x": (("station",), np.array([500.0, 1500.0])),
+                "y": (("station",), np.array([3500.0, 2500.0])),
+            }
+        )
+        return {"obs.nc": self.observed, "sim.nc": gridded, "gauges.nc": gauges}
+
+    def test_gauge_coordinate_file_reads_the_nearest_cells_of_gridded_output(self):
+        """Read every gauge from the grid cell its coordinates lie in."""
+        _observed, simulated = self.run_q_data_to_xarray(
+            self.create_gridded_files(), {}, gauge_coordinate_file="gauges.nc"
+        )
+        np.testing.assert_array_equal(simulated["discharge"].sel(id=1).values, [100.0] * 4)
+        np.testing.assert_array_equal(simulated["discharge"].sel(id=2).values, [4.0] * 4)
+
+    def test_mean_flow_reads_the_neighbour_cell_matching_the_observed_mean(self):
+        """Move gauge 1 to the neighbour cell whose mean matches its observations."""
+        _observed, simulated = self.run_q_data_to_xarray(
+            self.create_gridded_files(),
+            {},
+            gauge_coordinate_file="gauges.nc",
+            gauge_location_method="mean-flow",
+        )
+        np.testing.assert_array_equal(simulated["discharge"].sel(id=1).values, [3.0] * 4)
+        np.testing.assert_array_equal(simulated["discharge"].sel(id=2).values, [4.0] * 4)
 
 
 if __name__ == "__main__":

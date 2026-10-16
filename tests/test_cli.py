@@ -542,6 +542,69 @@ def test_discharge_evaluation_run_passes_the_gauge_location_options(monkeypatch)
     assert keyword_args["gauge_max_distance_cells"] == 5
 
 
+def _run_discharge_evaluation(monkeypatch, gauge_args):
+    """Run the discharge-evaluation CLI with recorded evaluation arguments.
+
+    Args:
+        monkeypatch: pytest monkeypatch fixture.
+        gauge_args (list): Gauge location arguments added to the call.
+
+    Returns
+    -------
+        dict: Keyword arguments evaludate_discharge_data was called with.
+    """
+    received_calls = []
+
+    def record_evaluation(*args, **kwargs):
+        """Record the arguments the evaluation is called with."""
+        received_calls.append((args, kwargs))
+
+    monkeypatch.setattr(
+        "mhm_tools.post.discharge_evaluation.evaludate_discharge_data",
+        record_evaluation,
+    )
+    parser = argparse.ArgumentParser()
+    _discharge_evaluation.add_args(parser)
+    _discharge_evaluation.run(
+        parser.parse_args(
+            ["--output-dir", "out", "--input-path", "sim.nc", "--ref-path", "obs.nc"]
+            + gauge_args
+        )
+    )
+    return received_calls[0][1]
+
+
+def test_discharge_evaluation_run_passes_the_gauge_coordinate_file(monkeypatch):
+    """Hand a gauge coordinate file and the mean-flow method to the evaluation."""
+    keyword_args = _run_discharge_evaluation(
+        monkeypatch,
+        [
+            "--gauge-coordinate-file",
+            "gauges.nc",
+            "--gauge-optimization-method",
+            "mean-flow",
+        ],
+    )
+    assert keyword_args["gauge_coordinate_file"] == "gauges.nc"
+    assert keyword_args["gauge_location_method"] == "mean-flow"
+
+
+@pytest.mark.parametrize(
+    "gauge_args",
+    [
+        ["--gauge-coordinate-file", "gauges.nc", "--facc-file", "restart.nc"],
+        ["--gauge-coordinate-file", "gauges.nc", "--scc-gauges-file", "scc.nc"],
+        ["--facc-file", "restart.nc", "--gauge-optimization-method", "nearest"],
+        ["--gauge-coordinate-file", "gauges.nc", "--gauge-optimization-method", "burek"],
+    ],
+)
+def test_discharge_evaluation_run_refuses_unfitting_gauge_sources(
+    monkeypatch, gauge_args
+):
+    """Refuse competing gauge sources and methods without their gauge source."""
+    with pytest.raises(ValueError):
+        _run_discharge_evaluation(monkeypatch, gauge_args)
+
 
 @pytest.mark.parametrize(
     ("memory_args", "expected_memory_gb"),
