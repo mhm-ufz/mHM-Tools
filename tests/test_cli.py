@@ -658,3 +658,67 @@ def test_available_mem_reaches_the_evaluation_in_gb(
     )
 
     assert received_arguments["max_memory_gib"] == pytest.approx(expected_memory_gb)
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["evaluation", "discharge-evaluation", "-h"],
+        ["evaluation", "discharge_evaluation", "-h"],
+        ["discharge-evaluation", "-h"],
+        ["discharge_evaluation", "-h"],
+        ["data-processing", "converter-nc-ascii", "-h"],
+        ["converter-nc-ascii", "-h"],
+        ["--log_level", "INFO", "evaluation", "discharge-evaluation", "-h"],
+    ],
+)
+def test_cli_resolves_commands_by_group_alias_and_former_name(args):
+    """Reach a command by group, dash/underscore alias, top level or former name."""
+    from mhm_tools._cli._main import cli
+
+    result = CliRunner().invoke(cli, args)
+
+    assert result.exit_code == 0, result.output
+    assert "Usage:" in result.output
+
+
+def test_cli_help_lists_the_groups_and_hides_the_tui():
+    """List every command group in the main help, without the tui launcher."""
+    from mhm_tools._cli._main import _COMMAND_GROUPS, cli
+
+    result = CliRunner().invoke(cli, ["-h"])
+
+    assert result.exit_code == 0, result.output
+    for group_name, _help, _commands in _COMMAND_GROUPS:
+        assert group_name in result.output
+    assert not is_option_listed(result.output, "tui")
+
+
+def test_cli_group_help_lists_its_commands():
+    """List the commands of a group with their short help."""
+    from mhm_tools._cli._main import cli
+
+    result = CliRunner().invoke(cli, ["evaluation", "-h"])
+
+    assert result.exit_code == 0, result.output
+    assert "discharge-evaluation" in result.output
+    assert "twsa-evaluation" in result.output
+
+
+def test_cli_suggests_a_command_for_a_typo():
+    """Suggest the closest command name for a misspelt command."""
+    from mhm_tools._cli._main import cli
+
+    result = CliRunner().invoke(cli, ["evaluation", "discharge-evaluaton"])
+
+    assert result.exit_code != 0
+    assert "Did you mean: discharge-evaluation" in result.output
+
+
+def test_cli_keeps_the_tui_launcher_as_hidden_command():
+    """Keep the hidden tui command callable for its help."""
+    from mhm_tools._cli._main import cli
+
+    result = CliRunner().invoke(cli, ["tui", "--help"])
+
+    assert result.exit_code == 0, result.output
