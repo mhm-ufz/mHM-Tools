@@ -107,6 +107,7 @@ _COMMAND_GROUPS: List[Tuple[str, str, List[Tuple[str, object]]]] = [
             ("hydrograph", "mhm_tools._cli._hydrograph"),
             ("gridded-data-evaluation", "mhm_tools._cli._gridded_data_evaluation"),
             ("twsa-evaluation", "mhm_tools._cli._twsa_evaluation"),
+            ("snow-evaluation", "mhm_tools._cli._snow_evaluation"),
             ("run-overview", "mhm_tools._cli._mhm_run_overview"),
         ],
     ),
@@ -146,7 +147,6 @@ _COMMAND_GROUPS: List[Tuple[str, str, List[Tuple[str, object]]]] = [
                 "mhm_tools._cli._create_mhm_restart_from_setup",
             ),
             ("create-wmo-region-masks", "mhm_tools._cli._create_wmo_region_masks"),
-            ("snow-evaluation", "mhm_tools._cli._snow_evaluation"),
         ],
     ),
 ]
