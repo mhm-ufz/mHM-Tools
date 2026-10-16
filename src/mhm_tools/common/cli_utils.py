@@ -13,17 +13,15 @@ import argparse
 import logging
 import re
 
-from mhm_tools.common.file_handler import get_xarray_ds_from_file
-from mhm_tools.common.logger import ErrorLogger
-from mhm_tools.common.netcdf import (
+# every command module imports this one, so modules loading xarray are imported
+# inside the functions needing them and a command's --help stays fast
+from mhm_tools.common.constants import (
     DEFAULT_COMPLEVEL,
     MAX_COMPLEVEL,
     MIN_COMPLEVEL,
     QUANTIZE_MODES,
-    NetcdfCompression,
 )
-from mhm_tools.common.resolution_handler import calculate_coordinate_resolution
-from mhm_tools.common.xarray_utils import get_coord_key, get_ds_extend
+from mhm_tools.common.logger import ErrorLogger
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +112,8 @@ def get_netcdf_compression(args):
         Settings for the NetCDF writers, or None when no option was given, so
         an input file's own compression is kept.
     """
+    from mhm_tools.common.netcdf import NetcdfCompression
+
     complevel = getattr(args, "compression", None)
     significant_digits = getattr(args, "significant_digits", None)
     shuffle = not getattr(args, "no_shuffle", False)
@@ -218,6 +218,10 @@ def get_coords_from_mask(mask, mask_key=None, resolutions=None):
     tuple
         (lon_min, lon_max, lat_min, lat_max, mask_dataarray)
     """
+    from mhm_tools.common.file_handler import get_xarray_ds_from_file
+    from mhm_tools.common.resolution_handler import calculate_coordinate_resolution
+    from mhm_tools.common.xarray_utils import get_coord_key, get_ds_extend
+
     with get_xarray_ds_from_file(mask, normalize_latlon_coords=True) as mask_ds:
 
         if mask_key is None:

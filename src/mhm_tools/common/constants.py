@@ -89,6 +89,19 @@ FDIR_CODES = {
 }
 """Valid flow direction codes per type, pits included (255 is a d8 pit too)."""
 
+QUANTIZE_MODES = ("BitGroom", "GranularBitRound", "BitRound")
+"""Lossy mantissa quantization modes offered by netcdf-c."""
+MIN_COMPLEVEL = 0
+"""Lowest zlib level, which writes the data uncompressed."""
+MAX_COMPLEVEL = 9
+"""Highest zlib level netCDF4 accepts."""
+DEFAULT_COMPLEVEL = 1
+"""zlib level used when neither a caller nor the input file names one.
+
+Used for newly built variables; inherited and explicitly requested levels
+take precedence.
+"""
+
 
 LOG_LEVELS = {
     "info": 20,
