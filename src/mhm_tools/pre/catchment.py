@@ -1125,7 +1125,7 @@ class Catchment:
         resolutions: Resolution = None,
         upscale=False,
         latlon=True,
-        l0_precision: int = 9,
+        l0_precision: int = 12,
     ):
         self.flwdir = None
         self.basin = None
@@ -1143,6 +1143,8 @@ class Catchment:
         self.touches_domain_edge = False
         self.resolutions = resolutions if resolutions is not None else Resolution()
         if self.resolutions.l0 is None:
+            # 12 decimals: 9 left 1/600 off by 2e-7, which an upscaling factor of 60
+            # turned into a ratio of 59.99999; the value also names gauges_info files
             self.resolutions.l0 = round(
                 calculate_coordinate_resolution(ds.lon), l0_precision
             )

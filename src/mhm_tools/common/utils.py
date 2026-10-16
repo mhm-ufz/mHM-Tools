@@ -824,7 +824,9 @@ def get_upscaling_factor(
     )
     ratio = upscale_res / input_res
     ratio_round = int(ratio + 0.5)
-    if abs(ratio_round - ratio) < 1e-6:
+    # relative tolerance: an L0 estimated from float32 or rounded coordinates is
+    # off by ~1e-7 relative, which the factor multiplies into the ratio
+    if abs(ratio_round - ratio) <= 1e-5 * ratio_round:
         return ratio_round, upscale_res
     logger.debug(
         f"Computed upscaling ratio: {ratio:.8f}, rounded: {ratio_round} with difference {abs(ratio_round - ratio):.8f}"
