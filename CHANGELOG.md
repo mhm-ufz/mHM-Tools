@@ -13,6 +13,8 @@
 - `create-catchment` names the lowest shape error of the rejected candidates, its upstream area and the reference area when the shape-based outlet correction fails and no area-based correction can follow, instead of only stating that it failed.
 - `format-data` reclassifies 8- and 16-bit integer categories in one pass through a lookup array indexed by the category, instead of one pass per mapped category, also block by block for land cover written through rasterio. Categories missing from the lookup table are counted over all blocks and reported once.
 
+- The mhm-tools CLI starts in a fraction of the time: `mhm_tools`, its subpackages, every command module and the Textual TUI are imported on first use, so a call loads only its own command instead of xarray, dask, rasterio and all other commands. Locally `--help` of a command drops from 2 s to 0.06 s; on shared file systems such as GPFS, and in every joblib worker importing the package, the saving is larger. `mhm-tools <group> -h` still loads the commands of that group for their short help. The NetCDF compression constants live in `common.constants`, re-exported by `common.netcdf`.
+
 ### Fixed
 
 - `crop-mhm-setup` rounds the stop indices of files cropped through their `header.txt` like the start indices instead of truncating them. A cellsize carrying float32 imprecision put the stop index just below a whole cell and dropped the last column or row of the meteo data.
@@ -20,6 +22,7 @@
 
 ### Tests
 
+- CLI: commands reached by group, dash/underscore alias, top level, former name and root option alias, the group listings, the typo hint and the hidden tui; importing the package and the CLI and showing a command's help without any data library, and the former eager package exports reachable in any import order.
 - `format-data` reclassification: uint8 and signed int16 categories with nodata through the lookup array, unmatched categories logged with their cell count, a raster without any matching category refused, float categories with NaN on the per-category path, and the lookup array giving the same classes as the per-category loop.
 
 ## [v0.3]
