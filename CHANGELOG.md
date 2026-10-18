@@ -30,6 +30,7 @@
 - `crop-mhm-setup` rounds the stop indices of files cropped through their `header.txt` like the start indices instead of truncating them. A cellsize carrying float32 imprecision put the stop index just below a whole cell and dropped the last column or row of the meteo data.
 - `align_bounds_to_l2` takes an L2 edge within half an L0 cell of the domain bound as matching it. Float32 L2 coordinates missed an edge coinciding with the bound and added an empty L2 cell on that side.
 - Reading an ASCII grid, e.g. `idgauges.asc` or `facc.asc` in `converter_nc_ascii`, failed for some domains with a cellsize like 0.001666666667 because `lon` or `lat` got one value more than the grid has columns or rows: `np.arange` with a float step rounded the number of values up. `read_ascii_to_xarray` computes the cell centres from integer indices, so there are always exactly `ncols` and `nrows` of them; their values are unchanged.
+- `fill-nearest` failed on every call with "'SimpleNamespace' object has no attribute 'default_value'": the command passed `default_value` on to `fill_nearest` but never declared the option. It gains `--default-value`, the value written to the cells to fill when a variable holds no valid value, which defaults to `--fill-value` as before.
 
 ### Tests
 

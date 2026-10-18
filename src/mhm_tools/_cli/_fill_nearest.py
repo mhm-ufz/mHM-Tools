@@ -64,6 +64,15 @@ def add_args(parser):
         help="Fill value written to cells masked by --mask-file/--mask-var.",
     )
     optional.add_argument(
+        "--default-value",
+        default=None,
+        type=float,
+        help=(
+            "Value written to the cells to fill when a variable holds no valid "
+            "value to take the nearest neighbour from. Defaults to --fill-value."
+        ),
+    )
+    optional.add_argument(
         "--ncpus",
         "--n-cpus",
         dest="n_cpus",
