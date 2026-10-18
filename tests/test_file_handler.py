@@ -260,6 +260,29 @@ class TestAsciiReadWrite(unittest.TestCase, BaseDatasetMixin):
             self.assertIsNone(result)
             self.assertFalse(asc_path.exists())
 
+    def test_read_ascii_coordinate_length_matches_grid_with_inexact_cellsize(self):
+        # 1/600 degree is not exact in binary, with these corners a float step
+        # in np.arange returned one extra lon and lat value
+        header = (
+            "ncols 3\nnrows 2\nxllcorner 10.0\nyllcorner 47.5\n"
+            "cellsize 0.001666666667\nNODATA_value -9999\n"
+        )
+        cellsize = 0.001666666667
+        with tempfile.TemporaryDirectory() as td:
+            asc_path = Path(td) / "idgauges.asc"
+            asc_path.write_text(f"{header}1 2 3\n4 5 6\n")
+            ds = fh.read_ascii_to_xarray(asc_path, var_name="var")
+
+        self.assertEqual(ds["lon"].size, 3)
+        self.assertEqual(ds["lat"].size, 2)
+        self.assertEqual(ds["var"].shape, (2, 3))
+        np.testing.assert_allclose(
+            ds["lon"].values, 10.0 + (np.arange(3) + 0.5) * cellsize
+        )
+        np.testing.assert_allclose(
+            ds["lat"].values, 47.5 + np.array([1.5, 0.5]) * cellsize
+        )
+
 
 class TestWriteXarrayToFile(unittest.TestCase, BaseDatasetMixin):
     def test_write_xarray_to_file_nc(self):
