@@ -51,6 +51,31 @@ def add_args(parser):
         required=False,
         help=("File name pattern to link, default is '*.*'"),
     )
+    optional.add_argument(
+        "--exclude-pattern",
+        dest="exclude_patterns",
+        action="append",
+        default=None,
+        required=False,
+        help=(
+            "Pattern of file paths relative to the input directory that are not "
+            "linked, e.g. '*/domain_evaluation/*'. '*' also matches '/'. "
+            "Can be given multiple times."
+        ),
+    )
+    optional.add_argument(
+        "--include-pattern",
+        dest="include_patterns",
+        action="append",
+        default=None,
+        required=False,
+        help=(
+            "Pattern of file paths relative to the input directory to link; "
+            "files matching none of them are not linked, e.g. '*/mhm_setup/*'. "
+            "'*' also matches '/'. Can be given multiple times. "
+            "--exclude-pattern takes precedence."
+        ),
+    )
 
 
 def run(args):
@@ -70,4 +95,6 @@ def run(args):
         output_dir=output_dir,
         overwrite=args.overwrite,
         file_name=args.file_name,
+        exclude_patterns=args.exclude_patterns,
+        include_patterns=args.include_patterns,
     )
