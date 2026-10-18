@@ -10,6 +10,7 @@
 - `--gauge-optimization-method mean-flow` reads every gauge from the cell within `--gauge-max-distance-cells` (default 1, a 3 x 3 window) whose long-term mean discharge is closest to the observed mean on the days both hold values, keeping the gauge's own cell on a tie. As the observations choose the cell, the bias of these gauges looks better than it is.
 - The gauge maps of `discharge-evaluation` draw projected gauge coordinates in the CRS of the gauges file, read from the grid mapping of its `x`, instead of taking metres for degrees.
 - `create-catchment` gains `--max-distance-auto`, mutually exclusive with `--max-distance-cells` and `--max-distance-m`, which derives the outlet search distance of every gauge from its catchment size: 0.15 times the perimeter of its reference shape, measured in the local UTM zone, or of `1.5 * 4 * sqrt(area)` without a shape, limited to 2-10 km. A gauge with neither gets the upper limit and a warning, and the crop buffer uses the largest distance of all gauges.
+- `link-folder-tree` gains `--exclude-pattern` and `--include-pattern`, both matched against a file's path relative to `--input-dir` and both repeatable. A file matching an exclude pattern is skipped, e.g. `--exclude-pattern "*/domain_evaluation/*"`; with include patterns only files matching at least one of them are linked. Exclude takes precedence, and `*` also matches `/`. Outputs a later task writes again can be left unlinked, as writing to a link overwrites its target in the linked tree or fails when that tree belongs to another user.
 
 ### Changed
 
@@ -28,12 +29,15 @@
 - `create-catchment --l1-resolution 0.1` failed with "target/L0 = 60.0000" unless `--l0-resolution` was given: the L0 resolution derived from the coordinates was rounded to 9 decimals, which put 0.1 / L0 at 59.99999 and outside the absolute tolerance of 1e-6. L0 is rounded to 12 decimals and `get_upscaling_factor` accepts a relative deviation of 1e-5, which also covers grids with float32 coordinates. A derived L0 now names the gauges info files with 12 decimals, e.g. `gauges_info_0.001666666667`.
 - `crop-mhm-setup` rounds the stop indices of files cropped through their `header.txt` like the start indices instead of truncating them. A cellsize carrying float32 imprecision put the stop index just below a whole cell and dropped the last column or row of the meteo data.
 - `align_bounds_to_l2` takes an L2 edge within half an L0 cell of the domain bound as matching it. Float32 L2 coordinates missed an edge coinciding with the bound and added an empty L2 cell on that side.
+- Reading an ASCII grid, e.g. `idgauges.asc` or `facc.asc` in `converter_nc_ascii`, failed for some domains with a cellsize like 0.001666666667 because `lon` or `lat` got one value more than the grid has columns or rows: `np.arange` with a float step rounded the number of values up. `read_ascii_to_xarray` computes the cell centres from integer indices, so there are always exactly `ncols` and `nrows` of them; their values are unchanged.
 
 ### Tests
 
 - `discharge-evaluation`: the facc defaults, the refusal without any gauge source, scc gauges with only `x`/`y`, the PlateCarree gauge map, the nearest-cell and window selection on a projected grid with 2-D lon/lat coordinates, the mean-flow choice on shared days and on ties, reading gauge coordinates, the method defaults and refused combinations, the projected gauge map, and both grid methods through `Q_data_to_xarray`. The legacy GRDC evaluation tests moved into `test_discharge_evaluation.py`.
 - CLI: commands reached by group, dash/underscore alias, top level, former name and root option alias, the group listings, the typo hint and the hidden tui; importing the package and the CLI and showing a command's help without any data library, and the former eager package exports reachable in any import order.
 - `format-data` reclassification: uint8 and signed int16 categories with nodata through the lookup array, unmatched categories logged with their cell count, a raster without any matching category refused, float categories with NaN on the per-category path, and the lookup array giving the same classes as the per-category loop.
+- `link-folder-tree`: excluded files and folders left unlinked with several patterns, every file linked without exclude patterns, only included files linked, and an exclude pattern winning over an include pattern.
+- `read_ascii_to_xarray`: exactly `ncols` and `nrows` cell centres for a 1/600 degree cellsize whose corners made the float step return one value too many.
 
 ## [v0.3]
 
