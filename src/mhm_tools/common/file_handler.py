@@ -1234,13 +1234,10 @@ def read_ascii_to_xarray(
     if isinstance(nodata_value, int):
         data_values = data_values.astype(np.int32)
 
-    # Calculate latitude and longitude coordinates
-    lon = np.arange(
-        xllcorner + cellsize / 2, xllcorner + (ncols + 0.5) * cellsize, cellsize
-    )
-    lat = np.arange(
-        yllcorner + (nrows - 0.5) * cellsize, yllcorner - cellsize / 2, -cellsize
-    )
+    # Cell centres from integer indices, a float step in np.arange can
+    # return one value too many for cellsizes like 1/600 degree
+    lon = xllcorner + (np.arange(ncols) + 0.5) * cellsize
+    lat = yllcorner + (nrows - 0.5 - np.arange(nrows)) * cellsize
     logger.debug(lon)
     logger.debug(lat)
 
