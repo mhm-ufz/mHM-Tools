@@ -20,6 +20,31 @@ from mhm_tools.common.logger import ErrorLogger
 logger = logging.getLogger(__name__)
 
 
+def _matches_any_pattern(relative_path, patterns):
+    """Check whether a file matches any of the patterns.
+
+    A pattern containing ``/`` is matched against the path relative to the
+    input directory, any other pattern against the file name only.
+
+    Parameters
+    ----------
+    relative_path : str
+        File path relative to the input directory, with ``/`` separators.
+    patterns : list[str]
+        fnmatch patterns.
+
+    Returns
+    -------
+    bool
+        True if at least one pattern matches.
+    """
+    file_name = relative_path.rsplit("/", 1)[-1]
+    return any(
+        fnmatch(relative_path if "/" in pattern else file_name, pattern)
+        for pattern in patterns
+    )
+
+
 def link_folder_tree(
     input_dir: Path,
     output_dir: Path,
@@ -39,11 +64,12 @@ def link_folder_tree(
     overwrite : bool, optional
         Overwrite existing symlinks, by default False
     exclude_patterns : list[str], optional
-        Patterns matched against each file's path relative to ``input_dir``;
-        matching files are not linked, by default None
+        Patterns of files that are not linked, by default None. A pattern with
+        ``/`` is matched against the path relative to ``input_dir``, any other
+        pattern against the file name.
     include_patterns : list[str], optional
-        Patterns matched against each file's path relative to ``input_dir``;
-        only files matching at least one are linked, by default None (all)
+        Patterns of the only files that are linked, matched like
+        ``exclude_patterns``, by default None (all)
 
     """
     exclude_patterns = exclude_patterns or []
@@ -54,12 +80,12 @@ def link_folder_tree(
     logger.info(f"Linking files from {input_dir} to {output_dir}")
     for file in input_dir.rglob(file_name):
         relative_path = file.relative_to(input_dir).as_posix()
-        if include_patterns and not any(
-            fnmatch(relative_path, p) for p in include_patterns
+        if include_patterns and not _matches_any_pattern(
+            relative_path, include_patterns
         ):
             logger.debug(f"Not included {file}")
             continue
-        if any(fnmatch(relative_path, p) for p in exclude_patterns):
+        if _matches_any_pattern(relative_path, exclude_patterns):
             logger.debug(f"Excluding {file}")
             continue
         output_file = output_dir / relative_path
