@@ -68,12 +68,19 @@ class GridDefinition:
     dims: Tuple[str, ...]
 
 
-def get_raster_data(file_path, var_name=None, crs=None) -> xr.DataArray:
-    """Read one two-dimensional, georeferenced raster payload."""
+def get_raster_data(
+    file_path, var_name=None, crs=None, force_decending_y=False
+) -> xr.DataArray:
+    """Read one two-dimensional, georeferenced raster payload.
+
+    Set ``force_decending_y`` to return the rows north-up, e.g. for flow
+    directions whose codes assume that the first row is the northernmost.
+    """
     ds = get_xarray_ds_from_file(
         file_path,
         var_name=var_name,
         load_crs=Path(file_path).suffix.lower() == ".nc",
+        force_decending_y=force_decending_y,
     )
     try:
         name = var_name or get_single_data_var(ds)

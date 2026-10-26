@@ -9,6 +9,7 @@ from mhm_tools.pre.dem_derivatives import (
     DERIVATIVE_ATTRS,
     NO_DATA,
     create_dem_derivatives,
+    create_facc_from_fdir,
     horn_aspect,
 )
 
@@ -163,3 +164,64 @@ def test_horn_aspect_reports_nodata_on_flat_ground():
 
     aspect = horn_aspect(np.full((3, 3), 12.0), from_origin(0.0, 3.0, 1.0, 1.0))
     assert np.all(aspect == NO_DATA)
+
+
+def _write_fdir(path, codes, lat):
+    """Write a small geographic d8 flow direction NetCDF and return its path."""
+    data = xr.DataArray(
+        np.asarray(codes, dtype="uint8"),
+        dims=("lat", "lon"),
+        coords={"lat": lat, "lon": [10.5, 11.5, 12.5]},
+        name="fdir",
+    ).rio.write_crs("EPSG:4326")
+    data.to_dataset().to_netcdf(path)
+    return path
+
+
+def test_facc_from_fdir_ascending_lat_matches_descending(tmp_path):
+    """Route a south-up flow direction grid like the same grid stored north-up."""
+    # every cell drains south (d8 code 4) into a pit (0) in the southern row
+    north_up_codes = [[4, 4, 4], [4, 4, 4], [0, 0, 0]]
+    north_up = _write_fdir(tmp_path / "north.nc", north_up_codes, [2.5, 1.5, 0.5])
+    south_up = _write_fdir(tmp_path / "south.nc", north_up_codes[::-1], [0.5, 1.5, 2.5])
+
+    facc_files = [
+        create_facc_from_fdir(fdir_file, tmp_path / f"facc_{fdir_file.stem}.nc")[0]
+        for fdir_file in (north_up, south_up)
+    ]
+
+    expected = np.array([[1, 1, 1], [2, 2, 2], [3, 3, 3]])
+    for facc_file in facc_files:
+        with xr.open_dataset(facc_file) as ds:
+            facc = ds["facc"].sortby("y", ascending=False).values
+        np.testing.assert_array_equal(facc, expected)
+
+
+def _write_netcdf_dem(path, values, lat):
+    """Write a small geographic DEM NetCDF and return its path."""
+    data = xr.DataArray(
+        np.asarray(values, dtype="float64"),
+        dims=("lat", "lon"),
+        coords={"lat": lat, "lon": 10.005 + 0.01 * np.arange(5)},
+        name="dem",
+    ).rio.write_crs("EPSG:4326")
+    data.to_dataset().to_netcdf(path)
+    return path
+
+
+def test_dem_derivatives_ascending_lat_matches_descending(tmp_path):
+    """Derive the same fields from a south-up DEM as from the north-up one."""
+    lat = 50.045 - 0.01 * np.arange(5)
+    north_up = _write_netcdf_dem(tmp_path / "north.nc", _slope_dem(), lat)
+    south_up = _write_netcdf_dem(tmp_path / "south.nc", _slope_dem()[::-1], lat[::-1])
+
+    (north_file,) = create_dem_derivatives(north_up, tmp_path / "north_out.nc")
+    (south_file,) = create_dem_derivatives(south_up, tmp_path / "south_out.nc")
+
+    with xr.open_dataset(north_file) as north, xr.open_dataset(south_file) as south:
+        for name in DERIVATIVE_ATTRS:
+            np.testing.assert_allclose(
+                south[name].sortby("y", ascending=False).values,
+                north[name].sortby("y", ascending=False).values,
+                err_msg=name,
+            )

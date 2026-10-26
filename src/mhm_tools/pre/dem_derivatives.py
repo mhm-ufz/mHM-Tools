@@ -71,7 +71,10 @@ def create_dem_derivatives(
     """
     extension = _validate_extension(output_extension)
     variable_attrs = create_variable_attrs(facc_unit)
-    dem = get_raster_data(input_file, var_name=var_name, crs=crs)
+    # flow directions and aspect assume that the first row is the northernmost
+    dem = get_raster_data(
+        input_file, var_name=var_name, crs=crs, force_decending_y=True
+    )
     try:
         resolved_crs = resolve_crs(dem, crs, required=True)
         derivatives = compute_dem_derivatives(dem, resolved_crs, facc_unit=facc_unit)
@@ -124,7 +127,10 @@ def create_facc_from_fdir(
     """
     extension = _validate_extension(output_extension)
     variable_attrs = create_variable_attrs(facc_unit)
-    fdir = get_raster_data(input_file, var_name=var_name, crs=crs)
+    # the flow direction codes assume that the first row is the northernmost
+    fdir = get_raster_data(
+        input_file, var_name=var_name, crs=crs, force_decending_y=True
+    )
     try:
         resolved_crs = resolve_crs(fdir, crs, required=True)
         facc = compute_facc_from_fdir(
@@ -186,7 +192,8 @@ def compute_dem_derivatives(dem, crs, facc_unit="cell"):
         invalid |= np.isclose(elevation, float(nodata))
     elevation = np.where(invalid, NO_DATA, elevation)
 
-    transform = dem.rio.transform()
+    # recalculated, a transform cached in the file may describe the unflipped rows
+    transform = dem.rio.transform(recalc=True)
     transform_array = np.asarray(tuple(transform), dtype=np.float64)  # affine v3 fix
     latlon = bool(crs.is_geographic)
     filled, _ = pyflwdir.dem.fill_depressions(elevation, nodata=NO_DATA)
@@ -254,7 +261,7 @@ def compute_facc_from_fdir(fdir, crs, ftype="d8", facc_unit="cell"):
     flw = pyflwdir.from_array(
         codes,
         ftype=ftype,
-        transform=fdir.rio.transform(),
+        transform=fdir.rio.transform(recalc=True),
         latlon=bool(crs.is_geographic),
         check_ftype=False,
     )
