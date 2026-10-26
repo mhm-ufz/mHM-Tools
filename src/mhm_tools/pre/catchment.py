@@ -3393,7 +3393,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                     variables=output_vars,
                     id_gauges_out_path=id_gauges_out_path,
                 )
-            return None
+            return
         input_ds_sliced = input_ds.sel(
             lat=coordinate_slices["lat"], lon=coordinate_slices["lon"]
         )
@@ -3556,7 +3556,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                 variables=output_vars,
                 id_gauges_out_path=id_gauges_out_path,
             )
-            return None
+            return
         logger.info("Creating basin id file for region.")
 
         c = Catchment(
@@ -3843,4 +3843,4 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
             variables=output_vars,
             id_gauges_out_path=id_gauges_out_path,
         )
-    return None
+    return
