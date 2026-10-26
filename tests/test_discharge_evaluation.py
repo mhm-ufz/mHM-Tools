@@ -421,9 +421,7 @@ def test_mean_flow_warns_for_gauges_without_overlap(caplog):
         {(0, 0): [10.0, 10.0, 10.0], (0, 1): [5.0, 5.0, 5.0]},
         observed_values=[np.nan, np.nan, np.nan],
     )
-    _, cell_x, _ = discharge_evaluation.select_cells_by_mean_flow(
-        candidates, observed
-    )
+    _, cell_x, _ = discharge_evaluation.select_cells_by_mean_flow(candidates, observed)
     np.testing.assert_array_equal(cell_x, [1000.0])
     assert "no observed month" in caplog.text
     assert "[7]" in caplog.text

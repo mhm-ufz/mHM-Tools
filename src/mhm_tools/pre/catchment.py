@@ -3671,7 +3671,9 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
             )
 
             gauge_infos = [gi for gi in gauge_infos if gi is not None]
-            gauge_ids_cut = [gi["gauge_id"] for gi in gauge_infos if gi.get("cut_by_crop")]
+            gauge_ids_cut = [
+                gi["gauge_id"] for gi in gauge_infos if gi.get("cut_by_crop")
+            ]
             if gauge_ids_cut:
                 _raise_crop_too_small(gauge_ids_cut)
             if not gauge_infos:
@@ -3701,9 +3703,9 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                     logger.exception(f"pyflwdir.basins(idxs=...) failed: {exc}")
                     with ErrorLogger(logger):
                         raise exc
-                crop_edge_basin_ids = (
-                    set(_get_domain_edge_values(basins, crop_edge_sides).tolist()) - {0}
-                )
+                crop_edge_basin_ids = set(
+                    _get_domain_edge_values(basins, crop_edge_sides).tolist()
+                ) - {0}
                 gauge_ids_at_crop_edge = [
                     gi["gauge_id"]
                     for gi in gauge_infos

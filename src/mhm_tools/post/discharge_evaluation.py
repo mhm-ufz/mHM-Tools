@@ -1759,7 +1759,9 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
             )
             # gridded output takes the gauge coordinates in the CRS of its grid
             grid_dim_names = (
-                _get_model_grid_dim_names(model_data_path, model_file_name, sim_variable)
+                _get_model_grid_dim_names(
+                    model_data_path, model_file_name, sim_variable
+                )
                 if extraction_mode == "grid"
                 else None
             )
@@ -2543,9 +2545,11 @@ def evaludate_discharge_data(  # noqa: PLR0913
             else None
         )
         gauges_crs = read_gauge_crs(
-            gauge_coordinate_file
-            if gauge_coordinate_file is not None
-            else scc_gauges_file,
+            (
+                gauge_coordinate_file
+                if gauge_coordinate_file is not None
+                else scc_gauges_file
+            ),
             grid_dim_names=grid_dim_names,
         )
         metric_plot_files.extend(

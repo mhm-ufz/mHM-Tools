@@ -1856,7 +1856,9 @@ class TestProjectedCatchment(unittest.TestCase):
         # the 10 cell long gauge row lies inside the crop, the reference area
         # of 40 cells matches no cell near the gauge
         y, x = self.create_axes(61, 10)
-        fdir_file = self.write_projected_fdir_netcdf(self.create_row_rivers(61, 10), y, x)
+        fdir_file = self.write_projected_fdir_netcdf(
+            self.create_row_rivers(61, 10), y, x
+        )
         with patch.object(
             catchment,
             "get_xarray_ds_from_file",
@@ -1874,7 +1876,9 @@ class TestProjectedCatchment(unittest.TestCase):
         """Enlarge the crop for gauges whose basins it cuts off instead of dropping them."""
         # both 40 cell long gauge rows are longer than the first crop
         y, x = self.create_axes(7, 40)
-        fdir_file = self.write_projected_fdir_netcdf(self.create_row_rivers(7, 40), y, x)
+        fdir_file = self.write_projected_fdir_netcdf(
+            self.create_row_rivers(7, 40), y, x
+        )
         output_dir = self.tmp_path / "multi_gauge"
         attempt_count = self.run_counting_delineation_attempts(
             gauge_coords=[(float(y[1]), float(x[39])), (float(y[5]), float(x[39]))],
