@@ -1190,6 +1190,15 @@ def _resolve_gauge_location_method(
             f"Gauge location method '{method}' reads gridded output and needs "
             "--gauge-coordinate-file."
         )
+    elif (
+        method == "mean-flow"
+        and max_distance_cells is not None
+        and max_distance_cells < 1
+    ):
+        msg = (
+            "Gauge location method 'mean-flow' chooses among the neighbour cells "
+            f"and needs --gauge-max-distance-cells of at least 1, got {max_distance_cells}."
+        )
     if msg is not None:
         with ErrorLogger(logger):
             raise ValueError(msg)

@@ -525,6 +525,15 @@ def test_nearest_grid_indices_does_not_build_a_gauge_by_cell_matrix():
     assert peak_mib < 20
 
 
+@pytest.mark.parametrize("max_distance_cells", [0, -1])
+def test_mean_flow_with_zero_distance_is_refused(max_distance_cells):
+    """Refuse mean-flow without any neighbour cell to choose from."""
+    with pytest.raises(ValueError, match="--gauge-max-distance-cells"):
+        discharge_evaluation._resolve_gauge_location_method(
+            "mean-flow", max_distance_cells, gauge_coordinate_file="g.nc"
+        )
+
+
 @pytest.mark.parametrize(
     ("method", "max_distance_cells", "sources", "expected"),
     [
