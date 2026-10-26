@@ -30,13 +30,17 @@ def _extract_header(file):
         )
 
 
-def standardize_header(header):
+def standardize_header(header, require_all=False):
     """Standardize an ASCII grid header dictionary.
 
     Parameters
     ----------
     header : :class:`dict`
-        Raw header as dictionary.
+        Raw header as dictionary. Keys are case-insensitive.
+    require_all : bool, optional
+        If True, no defaults are set: ncols, nrows, cellsize, nodata_value and
+        either both corner or both center coordinates are required,
+        by default False
 
     Returns
     -------
@@ -49,7 +53,10 @@ def standardize_header(header):
         If the header is missing required information.
         See :any:`ESRI_REQ`
     """
+    header = {n.lower(): v for (n, v) in header.items()}
     header = {n: ESRI_TYPES[n](v) for (n, v) in header.items() if n in ESRI_TYPES}
+    if require_all:
+        _check_complete_header(header)
     # convert cell center to corner information
     # TODO: CHECK IF THIS IS ALREADY DONE IN CROP MHM SETUP
     if "xllcenter" in header:
@@ -70,6 +77,33 @@ def standardize_header(header):
         with ErrorLogger(logger):
             raise ValueError(msg)
     return header
+
+
+def _check_complete_header(header):
+    """Raise if a header lacks a required key or mixes corner and center.
+
+    Parameters
+    ----------
+    header : :class:`dict`
+        Header with lowercase keys.
+
+    Raises
+    ------
+    ValueError
+        If ncols, nrows, cellsize or nodata_value is missing, or the
+        coordinates are not exactly one corner pair or one center pair.
+    """
+    missing = {"ncols", "nrows", "cellsize", "nodata_value"} - set(header)
+    coord_keys = {"xllcorner", "yllcorner", "xllcenter", "yllcenter"} & set(header)
+    if coord_keys not in ({"xllcorner", "yllcorner"}, {"xllcenter", "yllcenter"}):
+        missing.add(
+            f"one x and one y coordinate as either xllcorner/yllcorner or "
+            f"xllcenter/yllcenter (found: {sorted(coord_keys)})"
+        )
+    if missing:
+        msg = f"standardize_header: missing header information {missing}"
+        with ErrorLogger(logger):
+            raise ValueError(msg)
 
 
 def read_header(file):

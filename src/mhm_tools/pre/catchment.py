@@ -21,7 +21,13 @@ import xarray as xr
 from joblib import Parallel, delayed
 from scipy.ndimage import binary_dilation
 
-from mhm_tools.common.constants import EARTH_RADIUS_KM, NC_ENCODE_MASK
+from mhm_tools.common.constants import (
+    EARTH_RADIUS_KM,
+    FDIR_FILLVALUE,
+    FDIR_SINKVALUE,
+    NC_ENCODE_MASK,
+    NO_DATA,
+)
 from mhm_tools.common.file_handler import (
     get_coord_values,
     get_xarray_ds_from_file,
@@ -52,10 +58,10 @@ logger = logging.getLogger(__name__)
 
 
 # GLOBAL VARIABLES
-FDIR_FILLVALUE = {"d8": 247, "ldd": 255}
-FDIR_SINKVALUE = {"d8": 0, "ldd": 5}
+# accumulated values are at least one cell or above 0 km2 on valid cells, so 0
+# is their fill value, unlike the -9999 of the other outputs
 FACC_FILLVALUE = 0
-FILLVALUE = -9999
+FILLVALUE = int(NO_DATA)
 OUTPUT_VARIABLES = ("flwdir", "basin", "uparea_grid", "upgrid", "grdare", "elevtn")
 GAUGE_INFO_COLUMNS = (
     "id",
@@ -80,6 +86,19 @@ CANDIDATE_AREA_AGREEMENT_FACTOR = 0.1
 # a reference shape can disagree with the flow direction data, so the crop for
 # the delineation keeps room for a catchment reaching beyond the shape bounds
 SHAPE_BUFFER_EXTENT_FACTOR = 1.5
+# without a reference shape the crop around a gauge is a box centred on it,
+# this many times the square root of the reference catchment area wide; 6 reaches
+# 3 sqrt(A) from the gauge, which covers basins down to an elongation ratio of ~0.4
+AREA_CROP_WIDTH_FACTOR = 6
+# an automatic crop a basin reaches the edge of is enlarged by this factor in
+# width and height and the delineation is repeated, at most this many times
+CROP_GROWTH_FACTOR = 2
+CROP_RETRY_LIMIT = 2
+# the automatic outlet search distance is a fraction of the catchment
+# perimeter, approximated from the area as 1.5 times the perimeter of a square
+AUTO_MAX_DISTANCE_PERIMETER_FACTOR = 0.15
+AUTO_MAX_DISTANCE_LIMITS_M = (2000.0, 10000.0)
+AREA_PERIMETER_FACTOR = 1.5 * 4
 
 
 # every numeric gauge info column reports an unknown value as nan
@@ -415,6 +434,42 @@ def _buffer_bounds(bounds, min_buffer=0.0, extent_factor=SHAPE_BUFFER_EXTENT_FAC
     )
 
 
+def _scale_bounds(bounds, factor):
+    """Scale bounds around their centre.
+
+    Args:
+        bounds (tuple): Bounding box as (min_x, min_y, max_x, max_y).
+        factor (float): Factor applied to width and height.
+
+    Returns
+    -------
+        The scaled bounds as (min_x, min_y, max_x, max_y).
+    """
+    min_x, min_y, max_x, max_y = bounds
+    centre_x, centre_y = (min_x + max_x) / 2, (min_y + max_y) / 2
+    half_width = (max_x - min_x) * factor / 2
+    half_height = (max_y - min_y) * factor / 2
+    return (
+        centre_x - half_width,
+        centre_y - half_height,
+        centre_x + half_width,
+        centre_y + half_height,
+    )
+
+
+def _get_domain_edge_values(grid):
+    """Get the unique values in the outermost rows and columns of a 2D grid.
+
+    Args:
+        grid (np.ndarray): 2D grid, e.g. a basin mask or basin ids.
+
+    Returns
+    -------
+        np.ndarray of the unique values along the grid edges.
+    """
+    return np.unique(np.concatenate([grid[0, :], grid[-1, :], grid[:, 0], grid[:, -1]]))
+
+
 def _outlet_search_buffer(max_distance_m, max_distance_cells, l0_resolution, latlon):
     """Split the outlet search distance into a grid-unit and a metric buffer.
 
@@ -514,6 +569,186 @@ def _shape_bounds_from_folder(
     buffered_bounds = _buffer_bounds(combined_bounds, min_buffer)
     logger.info(f"Using buffered shapefile bounds for slicing: {buffered_bounds}")
     return buffered_bounds
+
+
+def _get_gauge_lists(gauge_ids, gauge_coords, ref_catchment_area):
+    """Expand single or listed gauge ids, coordinates and areas to equal-length lists.
+
+    Args:
+        gauge_ids: Gauge id, list of gauge ids or None.
+        gauge_coords: (lat, lon) tuple, list of tuples or None.
+        ref_catchment_area: Area in km2, list of areas or None.
+
+    Returns
+    -------
+        Tuple of the lists of gauge ids, coordinates and areas, one entry per gauge.
+    """
+    if isinstance(gauge_coords, list):
+        n_gauges = len(gauge_coords)
+    elif isinstance(gauge_ids, list):
+        n_gauges = len(gauge_ids)
+    else:
+        n_gauges = 1
+    return tuple(
+        value if isinstance(value, list) else [value] * n_gauges
+        for value in (gauge_ids, gauge_coords, ref_catchment_area)
+    )
+
+
+def _get_area_crop_bounds(
+    gauge_coords, ref_area, latlon, min_buffer=0.0, min_buffer_m=0.0
+):
+    """Create a crop box centred on a gauge and sized from its catchment area.
+
+    Args:
+        gauge_coords (tuple): Gauge coordinates as (lat, lon), or (y, x) on
+            projected grids.
+        ref_area (float): Reference catchment area in km2.
+        latlon (bool): Whether the grid is geographic.
+        min_buffer (float): Buffer added on every side, in the unit of the grid.
+        min_buffer_m (float): Buffer added on every side, in meters.
+
+    Returns
+    -------
+        The bounds as (min_x, min_y, max_x, max_y), or None without coordinates
+        or area.
+    """
+    if gauge_coords is None or ref_area is None or not np.isfinite(ref_area):
+        return None
+    lat, lon = gauge_coords
+    half_width_m = AREA_CROP_WIDTH_FACTOR * np.sqrt(ref_area) * 1000.0 / 2
+    half_width_m += min_buffer_m
+    if latlon:
+        half_height = convert_meters_to_degrees(half_width_m) + min_buffer
+        # a degree of longitude is shortest at the box edge furthest from the equator
+        half_width = (
+            convert_meters_to_degrees(half_width_m, abs(lat) + half_height) + min_buffer
+        )
+    else:
+        half_height = half_width = half_width_m + min_buffer
+    return lon - half_width, lat - half_height, lon + half_width, lat + half_height
+
+
+def _get_gauge_crop_bounds(
+    shape_folder,
+    gauge_ids,
+    gauge_coords,
+    ref_catchment_area,
+    latlon,
+    min_buffer=0.0,
+    min_buffer_m=0.0,
+):
+    """Compute the crop bounds covering all gauges.
+
+    Gauges with a shapefile use the buffered shape bounds, all others a box
+    around their coordinates sized from their reference catchment area.
+
+    Args:
+        shape_folder: Folder holding the gauge shapefiles, or None.
+        gauge_ids: Gauge id, list of gauge ids or None.
+        gauge_coords: (lat, lon) tuple, list of tuples or None.
+        ref_catchment_area: Area in km2, list of areas or None.
+        latlon (bool): Whether the grid is geographic.
+        min_buffer (float): Lower limit for the buffer, in the unit of the grid.
+        min_buffer_m (float): Lower limit for the buffer, in meters.
+
+    Returns
+    -------
+        The bounds as (min_x, min_y, max_x, max_y), or None if any gauge has
+        neither a shapefile nor coordinates and an area.
+    """
+    gauge_id_list, gauge_coord_list, area_list = _get_gauge_lists(
+        gauge_ids, gauge_coords, ref_catchment_area
+    )
+    shape_ids = [
+        gauge_id
+        for gauge_id in gauge_id_list
+        if _find_shape_file(shape_folder, gauge_id) is not None
+    ]
+    bounds_list = []
+    if shape_ids:
+        shape_bounds = _shape_bounds_from_folder(
+            shape_folder, shape_ids, min_buffer=min_buffer, min_buffer_m=min_buffer_m
+        )
+        if shape_bounds is not None:
+            bounds_list.append(shape_bounds)
+    for gauge_id, coords, area in zip(gauge_id_list, gauge_coord_list, area_list):
+        if gauge_id is not None and gauge_id in shape_ids:
+            continue
+        area_bounds = _get_area_crop_bounds(
+            coords, area, latlon, min_buffer=min_buffer, min_buffer_m=min_buffer_m
+        )
+        if area_bounds is None:
+            logger.warning(
+                f"Gauge {gauge_id} has neither a shapefile nor coordinates and an "
+                "area; not cropping the input, which may need a lot of memory."
+            )
+            return None
+        logger.info(
+            f"Using a box of {AREA_CROP_WIDTH_FACTOR} x sqrt(area) around gauge "
+            f"{gauge_id} for slicing: {area_bounds}"
+        )
+        bounds_list.append(area_bounds)
+    return _combine_shape_bounds(bounds_list)
+
+
+def _calculate_shape_perimeter_m(reference_shape, latlon):
+    """Calculate the perimeter of a reference catchment shape in meters.
+
+    Args:
+        reference_shape (geopandas.GeoDataFrame): Reference catchment shape.
+        latlon (bool): Whether the shape coordinates are in degrees.
+
+    Returns
+    -------
+        The perimeter of the merged shape geometries in meters.
+    """
+    if latlon:
+        # degrees have no fixed length, so measure in the local UTM zone
+        reference_shape = reference_shape.to_crs(reference_shape.estimate_utm_crs())
+    return float(_geometry_union(reference_shape.geometry).length)
+
+
+def _calculate_auto_max_distance_m(gauge_id, shape_folder, ref_area, latlon):
+    """Derive the maximum outlet distance of a gauge from its catchment size.
+
+    The distance is a fraction of the perimeter of the reference shape, or of a
+    perimeter approximated from the reference area, clipped to fixed limits.
+
+    Args:
+        gauge_id: Gauge id used to find the reference shape, or None.
+        shape_folder: Folder holding the gauge shapefiles, or None.
+        ref_area (float): Reference catchment area in km2, or None.
+        latlon (bool): Whether the shape coordinates are in degrees.
+
+    Returns
+    -------
+        The maximum outlet distance in meters.
+    """
+    reference_shape, _ = _read_reference_shape(shape_folder, gauge_id, latlon)
+    if reference_shape is not None and not reference_shape.empty:
+        perimeter_m = _calculate_shape_perimeter_m(reference_shape, latlon)
+        source = "shape perimeter"
+    elif ref_area is not None and np.isfinite(ref_area):
+        perimeter_m = AREA_PERIMETER_FACTOR * np.sqrt(ref_area) * 1000.0
+        source = "perimeter approximated from the area"
+    else:
+        logger.warning(
+            f"Gauge {gauge_id} has neither a shapefile nor an area; using the "
+            f"upper limit of {AUTO_MAX_DISTANCE_LIMITS_M[1]:.0f} m as max distance."
+        )
+        return AUTO_MAX_DISTANCE_LIMITS_M[1]
+    max_distance_m = float(
+        np.clip(
+            AUTO_MAX_DISTANCE_PERIMETER_FACTOR * perimeter_m,
+            *AUTO_MAX_DISTANCE_LIMITS_M,
+        )
+    )
+    logger.info(
+        f"Derived max outlet distance {max_distance_m:.0f} m for gauge {gauge_id} "
+        f"from the {source} of {perimeter_m / 1000.0:.1f} km."
+    )
+    return max_distance_m
 
 
 def create_cell_area(ds, lat_name="lat", lon_name="lon"):
@@ -890,7 +1125,7 @@ class Catchment:
         resolutions: Resolution = None,
         upscale=False,
         latlon=True,
-        l0_precision: int = 9,
+        l0_precision: int = 12,
     ):
         self.flwdir = None
         self.basin = None
@@ -905,8 +1140,11 @@ class Catchment:
         self.gauge_lons = []
         self.ftype = ftype
         self.catchment_mask = None
+        self.touches_domain_edge = False
         self.resolutions = resolutions if resolutions is not None else Resolution()
         if self.resolutions.l0 is None:
+            # 12 decimals: 9 left 1/600 off by 2e-7, which an upscaling factor of 60
+            # turned into a ratio of 59.99999; the value also names gauges_info files
             self.resolutions.l0 = round(
                 calculate_coordinate_resolution(ds.lon), l0_precision
             )
@@ -1009,7 +1247,8 @@ class Catchment:
         """Init the FlwdirRaster class from dem."""
         # perform checks
         # self.input_ds = fill_nan_with_neighbors(self.input_ds)
-        self.elevtn = self.input_da.data
+        # pyflwdir needs numpy; .values also loads a dask array from chunked reading
+        self.elevtn = self.input_da.values
         if self._fdir is None:
             # Create a flow direction object
             logger.info("add_dem")
@@ -1023,8 +1262,8 @@ class Catchment:
 
     def add_fdir(self, latlon):
         """Init the FlwdirRaster class from fdir."""
-        # perform check
-        data = self.input_da.data
+        # pyflwdir needs numpy; .values also loads a dask array from chunked reading
+        data = self.input_da.values
         if self._fdir is None:
             data = data.astype(np.uint8)
             self._fdir = pyflwdir.from_array(
@@ -1396,8 +1635,13 @@ class Catchment:
         lon_values=None,
         use_max_error=True,
         started_from_shape=False,
+        rejected_candidate=None,
     ):
-        """Find best gauge location using shape similarity."""
+        """Find best gauge location using shape similarity.
+
+        If the best candidate is rejected for exceeding max_error, its shape
+        error and areas are written to the dict passed as rejected_candidate.
+        """
         if max_distance_cells is None and max_distance_m is None:
             max_distance_cells = 2
         if upstream_area is None:
@@ -1609,6 +1853,7 @@ class Catchment:
                 lon_values=lon_values,
                 use_max_error=use_max_error,
                 started_from_shape=True,
+                rejected_candidate=rejected_candidate,
             )
         # the delimiter decides whether a poor overlap disqualifies a candidate
         # or only ranks it, the same role the area error plays in the area based
@@ -1624,6 +1869,12 @@ class Catchment:
                 f"{_format_area(best_candidate_upstream_area)} against a reference "
                 f"of {_format_area(ref_catchment_area)}."
             )
+            if rejected_candidate is not None and best_candidate_index is not None:
+                rejected_candidate.update(
+                    shape_error=1 - best_candidate_shape_iou,
+                    upstream_area=best_candidate_upstream_area,
+                    ref_area=ref_catchment_area,
+                )
             return None
 
         area_error = (
@@ -1665,6 +1916,7 @@ class Catchment:
         score = np.nan
         shape_error = np.nan
         used_method = None
+        rejected_shape_candidate = {}
         if shape_folder and gauge_id is not None:
             try:
                 shape_result = self.find_best_gauge_location_shape(
@@ -1677,6 +1929,7 @@ class Catchment:
                     max_distance_m=max_distance_m,
                     max_error=max_error,
                     use_max_error=use_max_error,
+                    rejected_candidate=rejected_shape_candidate,
                 )
             except Exception as exc:
                 logger.warning(
@@ -1801,7 +2054,16 @@ class Catchment:
                 f"Moved outlet {distance_error/10:.2}km shifting latitude {float(gauge_coords[0])} to {new_lat} and longitude {float(gauge_coords[1])} to {new_lon}."
             )
         elif shape_result is None and shape_folder and gauge_id is not None:
-            error_msg = f"Shape-based correction failed for gauge_id {gauge_id}, and no area-based correction applied."
+            error_msg = f"Shape-based correction failed for gauge_id {gauge_id}"
+            if rejected_shape_candidate:
+                error_msg += (
+                    f": the lowest shape error "
+                    f"{rejected_shape_candidate['shape_error']:.3f} exceeds the max "
+                    f"error {max_error:.3f} (upstream area "
+                    f"{_format_area(rejected_shape_candidate['upstream_area'])}, "
+                    f"reference {_format_area(rejected_shape_candidate['ref_area'])})"
+                )
+            error_msg += ", and no area-based correction applied."
             with ErrorLogger(logger):
                 raise ValueError(error_msg)
         else:
@@ -1990,6 +2252,8 @@ class Catchment:
         logger.debug(
             f"mask statistics: min={basin.min()}, max={basin.max()}, all true? {np.all(catchment_mask)}"
         )
+        # set before the sanity check, so a failing cut off basin can be detected
+        self.touches_domain_edge = bool(np.any(_get_domain_edge_values(catchment_mask)))
 
         uparea_at_outlet = (
             upstream_area[outlet_idx] if upstream_area is not None else np.nan
@@ -2760,6 +3024,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
     ref_catchment_area=None,
     max_distance_cells=None,
     max_distance_m=None,
+    max_distance_auto=False,
     max_error=0.1,
     use_max_error=True,
     gauge_ids=None,
@@ -2770,13 +3035,18 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
     gauge_info_file="gauges_info",
     id_gauges_out_path=None,
     raise_on_fallback=True,
+    crop_bounds=None,
+    crop_retries_left=CROP_RETRY_LIMIT,
 ):
     """Delineate global or local catchments from flow direction/DEM data.
 
     Supports full-domain basin mapping, single- or multi-gauge delineation from
     coordinates and area, and optional shape-based outlet matching. Writes
     basin IDs, gauge ID files, masks, and optional gauge metadata/shapes.
+    crop_bounds and crop_retries_left are set internally when a basin reaching
+    the edge of the automatic crop reruns the delineation with a larger crop.
     """
+    create_catchment_kwargs = dict(locals())
     logger.info(
         f"Creating catchment file for {var_name} using {var} and {ftype} from {input_file}"
     )
@@ -2809,6 +3079,22 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
         msg = "max_distance_m must be non-negative."
         with ErrorLogger(logger):
             raise ValueError(msg)
+    if max_distance_auto and (
+        max_distance_cells is not None or max_distance_m is not None
+    ):
+        msg = "max_distance_auto cannot be combined with max_distance_cells or max_distance_m."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    auto_max_distances_m = None
+    if max_distance_auto and (gauge_coords is not None or gauge_ids is not None):
+        auto_max_distances_m = [
+            _calculate_auto_max_distance_m(gauge_id, shape_folder, area, latlon)
+            for gauge_id, _, area in zip(
+                *_get_gauge_lists(gauge_ids, gauge_coords, ref_catchment_area)
+            )
+        ]
+        # the crop has to fit the largest search distance of all gauges
+        max_distance_m = max(auto_max_distances_m)
     if max_distance_cells is None and max_distance_m is None:
         max_distance_cells = 5
     if var not in {"fdir", "dem"}:
@@ -2833,17 +3119,23 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
         search_buffer, search_buffer_m = _outlet_search_buffer(
             max_distance_m, max_distance_cells, resolutions.l0, latlon
         )
-        if coord_slices_default and shape_folder:
-            bounds = _shape_bounds_from_folder(
+        bounds = None
+        if coord_slices_default and crop_bounds is not None:
+            bounds = crop_bounds
+        elif coord_slices_default and (shape_folder or ref_catchment_area is not None):
+            bounds = _get_gauge_crop_bounds(
                 shape_folder,
                 gauge_ids,
+                gauge_coords,
+                ref_catchment_area,
+                latlon,
                 min_buffer=search_buffer,
                 min_buffer_m=search_buffer_m,
             )
-            if bounds is not None:
-                slices = _slices_from_bounds(bounds, input_ds.lat.data)
-                if slices is not None:
-                    coordinate_slices = slices
+        if bounds is not None:
+            slices = _slices_from_bounds(bounds, input_ds.lat.data)
+            if slices is not None:
+                coordinate_slices = slices
         # transform
         transform = get_transformation_matrix_nc(input_ds, var_name)
 
@@ -2989,7 +3281,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                     variables=output_vars,
                     id_gauges_out_path=id_gauges_out_path,
                 )
-            return
+            return None
         input_ds_sliced = input_ds.sel(
             lat=coordinate_slices["lat"], lon=coordinate_slices["lon"]
         )
@@ -3001,6 +3293,38 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
             f"        lon {input_ds_sliced.lon.data[0]}, {input_ds_sliced.lon.data[-1]}"
         )
         sliced_transform = get_transformation_matrix_nc(input_ds_sliced, var_name)
+        # only an automatic crop that does not cover the whole input yet is enlarged
+        can_enlarge_crop = (
+            bounds is not None
+            and crop_retries_left > 0
+            and dict(input_ds_sliced.sizes) != dict(input_ds.sizes)
+        )
+
+        def _rerun_with_larger_crop(gauge_ids_at_edge):
+            """Rerun create_catchment with the crop bounds scaled by CROP_GROWTH_FACTOR.
+
+            Args:
+                gauge_ids_at_edge (list): Ids of the gauges whose basin reaches
+                    the crop edge.
+
+            Returns
+            -------
+                The result of the rerun create_catchment call.
+            """
+            larger_bounds = _scale_bounds(bounds, CROP_GROWTH_FACTOR)
+            logger.warning(
+                f"Basin of gauge(s) {gauge_ids_at_edge} reaches the edge of the "
+                f"cropped domain and may be cut off; repeating the delineation "
+                f"with the crop bounds {larger_bounds}."
+            )
+            return create_catchment(
+                **{
+                    **create_catchment_kwargs,
+                    "crop_bounds": larger_bounds,
+                    "crop_retries_left": crop_retries_left - 1,
+                }
+            )
+
         single_shape_gauge = (
             gauge_coords is None
             and shape_folder is not None
@@ -3034,16 +3358,28 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                 lon=gauge_coords[1] if gauge_coords is not None else None,
                 area=single_ref_area,
             )
-            gauge = c.delineate_basin(
-                gauge,
-                max_distance_cells=max_distance_cells,
-                max_distance_m=max_distance_m,
-                max_error=max_error,
-                use_max_error=use_max_error,
-                gauge_opti_method=gauge_opti_method,
-                shape_folder=shape_folder,
-                raise_on_fallback=raise_on_fallback,
-            )
+            try:
+                gauge = c.delineate_basin(
+                    gauge,
+                    max_distance_cells=max_distance_cells,
+                    max_distance_m=max_distance_m,
+                    max_error=max_error,
+                    use_max_error=use_max_error,
+                    gauge_opti_method=gauge_opti_method,
+                    shape_folder=shape_folder,
+                    raise_on_fallback=raise_on_fallback,
+                )
+            except ValueError:
+                # a cut off basin can fail the area sanity check, so retry it larger
+                if not (c.touches_domain_edge and can_enlarge_crop):
+                    raise
+            if c.touches_domain_edge:
+                if can_enlarge_crop:
+                    return _rerun_with_larger_crop([gauge.gauge_id])
+                logger.warning(
+                    f"Basin of gauge {gauge.gauge_id} reaches the edge of the domain "
+                    "and may be cut off."
+                )
             l0_shape_gdf = None
             if upscale and c.catchment_mask is not None:
                 write_gauges_out(
@@ -3098,7 +3434,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                 variables=output_vars,
                 id_gauges_out_path=id_gauges_out_path,
             )
-            return
+            return None
         logger.info("Creating basin id file for region.")
 
         c = Catchment(
@@ -3146,6 +3482,9 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                     if shape_folder is None:
                         return None
                     gc = None
+                gauge_max_distance_m = (
+                    auto_max_distances_m[i] if auto_max_distances_m else max_distance_m
+                )
 
                 try:
                     (
@@ -3162,7 +3501,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                         gauge_coords=gc,
                         ref_catchment_area=ref_area,
                         max_distance_cells=max_distance_cells,
-                        max_distance_m=max_distance_m,
+                        max_distance_m=gauge_max_distance_m,
                         max_error=max_error,
                         use_max_error=use_max_error,
                         method=gauge_opti_method,
@@ -3189,6 +3528,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                     "shape_error": shape_error,
                     "method": used_method,
                     "ref_area": ref_area,
+                    "max_distance_m": gauge_max_distance_m,
                 }
 
             gauge_infos = Parallel(n_jobs=ncpus, prefer="threads")(
@@ -3231,6 +3571,19 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                     logger.exception(f"pyflwdir.basins(idxs=...) failed: {exc}")
                     with ErrorLogger(logger):
                         raise exc
+                edge_basin_ids = set(_get_domain_edge_values(basins).tolist()) - {0}
+                gauge_ids_at_edge = [
+                    gi["gauge_id"]
+                    for gi in gauge_infos
+                    if int(basins[gi["outlet_idx"]]) in edge_basin_ids
+                ]
+                if gauge_ids_at_edge:
+                    if can_enlarge_crop:
+                        return _rerun_with_larger_crop(gauge_ids_at_edge)
+                    logger.warning(
+                        f"Basins of gauges {gauge_ids_at_edge} reach the edge of the "
+                        "domain and may be cut off."
+                    )
                 logger.info("Performing sanity checks for all delineated basins.")
                 gauges = []
                 for gi in gauge_infos:
@@ -3326,7 +3679,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                     l0_shape_gdf,
                     (gauge.lat, gauge.lon),
                     max_distance_cells=max_distance_cells,
-                    max_distance_m=max_distance_m,
+                    max_distance_m=gi["max_distance_m"],
                     max_error=max_error,
                     use_max_error=use_max_error,
                     ref_catchment_area=gi.get("ref_area"),
@@ -3350,3 +3703,4 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
             variables=output_vars,
             id_gauges_out_path=id_gauges_out_path,
         )
+    return None

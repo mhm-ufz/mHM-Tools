@@ -20,7 +20,7 @@ import numpy as np
 import xarray as xr
 from scipy.interpolate import NearestNDInterpolator
 
-from mhm_tools.common.constants import GREENLAND_COORDS
+from mhm_tools.common.constants import GREENLAND_COORDS, NO_DATA
 from mhm_tools.common.file_handler import get_xarray_ds_from_file, write_xarray_to_file
 from mhm_tools.common.logger import ErrorLogger, log_arguments
 from mhm_tools.common.xarray_utils import create_mask_from_polygon
@@ -28,16 +28,16 @@ from mhm_tools.common.xarray_utils import create_mask_from_polygon
 logger = logging.getLogger(__name__)
 
 # GLOBAL VARIABLES
+FILL_VALUE = int(NO_DATA)
 REF_FILE_ENCODING = {
-    "elevtn": {"dtype": "float32", "_FillValue": -9999.0},
-    "basin": {"dtype": "int32", "_FillValue": -9999},
-    "flwdir": {"dtype": "int32", "_FillValue": -9999},
-    # "upgrid": {"dtype": "int32", "_FillValue": -9999},
-    "uparea_grid": {"dtype": "float32", "_FillValue": -9999.0},
-    "lat": {"dtype": "float32", "_FillValue": -9999.0},
-    "lon": {"dtype": "float32", "_FillValue": -9999.0},
+    "elevtn": {"dtype": "float32", "_FillValue": NO_DATA},
+    "basin": {"dtype": "int32", "_FillValue": FILL_VALUE},
+    "flwdir": {"dtype": "int32", "_FillValue": FILL_VALUE},
+    # "upgrid": {"dtype": "int32", "_FillValue": FILL_VALUE},
+    "uparea_grid": {"dtype": "float32", "_FillValue": NO_DATA},
+    "lat": {"dtype": "float32", "_FillValue": NO_DATA},
+    "lon": {"dtype": "float32", "_FillValue": NO_DATA},
 }
-FILL_VALUE = -9999
 
 # FUNCTIONS
 

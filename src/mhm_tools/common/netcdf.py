@@ -10,11 +10,16 @@ import xarray as xr
 
 from mhm_tools.common.logger import ErrorLogger
 
+# the compression settings live in constants, so the CLI reads them without xarray
 from .constants import (
+    DEFAULT_COMPLEVEL,
     LAT_KEYS,
     LON_KEYS,
+    MAX_COMPLEVEL,
+    MIN_COMPLEVEL,
     NC_ENCODE_DEFAULTS,
     NO_DATA,
+    QUANTIZE_MODES,
     TIME_KEYS,
     WILDCARDS,
 )
@@ -38,8 +43,6 @@ RESERVED_FOR_ENCODING = {
     "significant_digits",
     "quantize_mode",
 }
-QUANTIZE_MODES = ("BitGroom", "GranularBitRound", "BitRound")
-"""Lossy mantissa quantization modes offered by netcdf-c."""
 QUANTIZATION_ENCODING_KEYS = {"significant_digits", "quantize_mode"}
 COMPRESSION_ENCODING_KEYS = {"zlib", "complevel", "shuffle"}
 QUANTIZATION_ATTRS = (
@@ -53,16 +56,6 @@ Xarray reads them as ordinary attributes and writes them back verbatim, which
 is how an input file's quantization reaches an output. They have to be dropped
 whenever this write decides the quantization itself, or the file would end up
 stating two different ones.
-"""
-MIN_COMPLEVEL = 0
-"""Lowest zlib level, which writes the data uncompressed."""
-MAX_COMPLEVEL = 9
-"""Highest zlib level netCDF4 accepts."""
-DEFAULT_COMPLEVEL = 1
-"""zlib level used when neither a caller nor the input file names one.
-
-Used for newly built variables; inherited and explicitly requested levels
-take precedence.
 """
 NO_QUANTIZATION = 0
 """`significant_digits` value that turns quantization off.

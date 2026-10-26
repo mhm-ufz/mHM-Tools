@@ -37,7 +37,7 @@ def add_args(parser):
         "--fname",
         "--input-name",
         dest="fname",
-        default="precipitation_*.nc",
+        default="*.nc",
         help="Input filename pattern, for example 'precipitation_*.nc'.",
     )
     optional.add_argument(
@@ -62,6 +62,15 @@ def add_args(parser):
         default=-9999.0,
         type=float,
         help="Fill value written to cells masked by --mask-file/--mask-var.",
+    )
+    optional.add_argument(
+        "--default-value",
+        default=None,
+        type=float,
+        help=(
+            "Value written to the cells to fill when a variable holds no valid "
+            "value to take the nearest neighbour from. Defaults to --fill-value."
+        ),
     )
     optional.add_argument(
         "--ncpus",

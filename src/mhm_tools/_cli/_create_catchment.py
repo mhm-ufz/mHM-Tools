@@ -167,7 +167,7 @@ def add_args(parser):
             "Selection of the gauge optimization method. There are two methods implemented: "
             "1. basinex: with increaing error (steps of 0.1) it selects all cells in the allowed radius and chooses the one closest to original gauge location. If none is found the allowed error is inceased up to max_error"
             "2. burek: Based on Burek et. al. 2023 this calculates the metric as (distance_error + 2*facc_error) and chooses the minimum error"
-            "3. all: Uses both loggs comparison and then uses the one with over error value usually basinex"
+            "3. all: Uses both loggs comparison and then uses the one with lower error value usually basinex"
         ),
     )
     optional_args.add_argument(
@@ -176,7 +176,8 @@ def add_args(parser):
         help=(
             "Reference catchment area in km^2 used to identify the outlet cell near the gauge coordinates. "
             "For multiple gauges, pass a comma-separated list."
-            "Shape-based matching takes precedence; area matching only runs if it finds no candidate."
+            "Shape-based matching takes precedence; area matching only runs if it finds no candidate. "
+            "Without a shapefile or --lonlatbox, the input is cropped to a box 6 x sqrt(area) wide around the gauge, enlarged if the basin reaches its edge."
         ),
     )
     distance_args = optional_args.add_mutually_exclusive_group()
@@ -191,6 +192,13 @@ def add_args(parser):
         default=None,
         type=float,
         help="Maximum radial cell-center distance in meters for outlet candidates.",
+    )
+    distance_args.add_argument(
+        "--max-distance-auto",
+        action="store_true",
+        help="Derive the maximum outlet distance per gauge as 0.15 x the perimeter "
+        "of its reference shape, or of 1.5 x 4 x sqrt(area) without a shape, "
+        "limited to 2-10 km.",
     )
     optional_args.add_argument(
         "--no-max-error",
@@ -468,6 +476,7 @@ def run(args):  # noqa: PLR0912,PLR0915
         ref_catchment_area=ref_catchment_area,
         max_distance_cells=args.max_distance_cells,
         max_distance_m=args.max_distance_m,
+        max_distance_auto=args.max_distance_auto,
         max_error=args.max_error,
         use_max_error=args.use_max_error,
         gauge_ids=gauge_ids,

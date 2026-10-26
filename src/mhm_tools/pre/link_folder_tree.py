@@ -10,6 +10,7 @@ Authors
 """
 
 import logging
+from fnmatch import fnmatch
 from pathlib import Path
 
 from mhm_tools.common.logger import ErrorLogger
@@ -18,7 +19,12 @@ logger = logging.getLogger(__name__)
 
 
 def link_folder_tree(
-    input_dir: Path, output_dir: Path, overwrite: bool = False, file_name: str = "*.*"
+    input_dir: Path,
+    output_dir: Path,
+    overwrite: bool = False,
+    file_name: str = "*.*",
+    exclude_patterns: list[str] | None = None,
+    include_patterns: list[str] | None = None,
 ):
     """Link all files in a folder tree to another folder tree creating symlinks for each file.
 
@@ -30,15 +36,30 @@ def link_folder_tree(
         The name of the output directory.
     overwrite : bool, optional
         Overwrite existing symlinks, by default False
+    exclude_patterns : list[str], optional
+        Patterns matched against each file's path relative to ``input_dir``;
+        matching files are not linked, by default None
+    include_patterns : list[str], optional
+        Patterns matched against each file's path relative to ``input_dir``;
+        only files matching at least one are linked, by default None (all)
 
     """
+    exclude_patterns = exclude_patterns or []
     if not input_dir.exists():
         msg = f"Input directory does not exist: {input_dir}"
         with ErrorLogger(logger):
             raise FileNotFoundError(msg)
     logger.info(f"Linking files from {input_dir} to {output_dir}")
     for file in input_dir.rglob(file_name):
-        relative_path = file.relative_to(input_dir)
+        relative_path = file.relative_to(input_dir).as_posix()
+        if include_patterns and not any(
+            fnmatch(relative_path, p) for p in include_patterns
+        ):
+            logger.debug(f"Not included {file}")
+            continue
+        if any(fnmatch(relative_path, p) for p in exclude_patterns):
+            logger.debug(f"Excluding {file}")
+            continue
         output_file = output_dir / relative_path
         already_linked = output_file.exists() or output_file.is_symlink()
         if already_linked and not overwrite:

@@ -29,8 +29,8 @@ Files
 """
 
 import importlib
-
-from .format_lc_data import format_lc_data, format_lc_periods
+import sys
+import types
 
 _MODULE_EXPORTS = {
     "catchment": "catchment",
@@ -82,6 +82,8 @@ _ATTR_EXPORTS = {
         "write_soil_classdefinition",
     ),
     "rasterize_map_data": ("rasterize_map", "rasterize_map_data"),
+    "format_lc_data": ("format_lc_data", "format_lc_data"),
+    "format_lc_periods": ("format_lc_data", "format_lc_periods"),
 }
 
 __all__ = [
@@ -143,3 +145,27 @@ def __getattr__(name):
 
 def __dir__():
     return sorted(set(globals().keys()) | set(__all__))
+
+
+# formerly imported eagerly, so the package attribute was always the function
+_FUNCTION_EXPORTS_OVER_SUBMODULE = ("format_lc_data",)
+
+
+class _PrePackage(types.ModuleType):
+    """Package module keeping ``format_lc_data`` as function export."""
+
+    def __setattr__(self, name, value):
+        """Set an attribute unless it binds a submodule over a function export.
+
+        Importing a submodule binds it on the package; ``format_lc_data`` is
+        exported as the function of the module with the same name and keeps it.
+        """
+        if (
+            isinstance(value, types.ModuleType)
+            and name in _FUNCTION_EXPORTS_OVER_SUBMODULE
+        ):
+            return
+        super().__setattr__(name, value)
+
+
+sys.modules[__name__].__class__ = _PrePackage

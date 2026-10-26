@@ -124,7 +124,7 @@ class TestPetCalculatorMethods(unittest.TestCase):
     def test_oudin(self):
         tavg = np.array([[[10.0, 12.0], [8.0, -6.0]]])
         e_rad = e_rad_calculator(self.time, self.lat)
-        expected = (e_rad / (2.26 * 977.0)) * ((tavg + 5.0) / 100.0) * 1000.0
+        expected = (e_rad / (2.45 * 1000.0)) * ((tavg + 5.0) / 100.0) * 1000.0
         expected = np.where(tavg < -5.0, 0.0, expected)
         result = pet_calculator(
             tavg=tavg,
@@ -142,7 +142,7 @@ class TestPetCalculatorMethods(unittest.TestCase):
         e_rad = e_rad_calculator(self.time, self.lat)
         expected = (
             0.0023
-            * (e_rad / (2.26 * 977.0))
+            * (e_rad / (2.45 * 1000.0))
             * np.sqrt(np.maximum(tmax - tmin, 0.0))
             * (tavg + 17.8)
             * 1000.0

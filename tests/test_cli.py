@@ -502,6 +502,115 @@ def test_discharge_evaluation_run_passes_paths_and_variables(monkeypatch):
     assert keyword_args["observed_variable"] == "Qobs"
 
 
+def test_discharge_evaluation_run_passes_the_gauge_location_options(monkeypatch):
+    """Hand the facc file, location method and search distance to the evaluation."""
+    received_calls = []
+
+    def record_evaluation(*args, **kwargs):
+        """Record the arguments the evaluation is called with."""
+        received_calls.append((args, kwargs))
+
+    monkeypatch.setattr(
+        "mhm_tools.post.discharge_evaluation.evaludate_discharge_data",
+        record_evaluation,
+    )
+    parser = argparse.ArgumentParser()
+    _discharge_evaluation.add_args(parser)
+
+    _discharge_evaluation.run(
+        parser.parse_args(
+            [
+                "--output-dir",
+                "out",
+                "--input-path",
+                "sim.nc",
+                "--ref-path",
+                "obs.nc",
+                "--facc-file",
+                "restart.nc",
+                "--gauge-optimization-method",
+                "burek",
+                "--gauge-max-distance-cells",
+                "5",
+            ]
+        )
+    )
+
+    _positional_args, keyword_args = received_calls[0]
+    assert keyword_args["facc_file"] == "restart.nc"
+    assert keyword_args["gauge_location_method"] == "burek"
+    assert keyword_args["gauge_max_distance_cells"] == 5
+
+
+def _run_discharge_evaluation(monkeypatch, gauge_args):
+    """Run the discharge-evaluation CLI with recorded evaluation arguments.
+
+    Args:
+        monkeypatch: pytest monkeypatch fixture.
+        gauge_args (list): Gauge location arguments added to the call.
+
+    Returns
+    -------
+        dict: Keyword arguments evaludate_discharge_data was called with.
+    """
+    received_calls = []
+
+    def record_evaluation(*args, **kwargs):
+        """Record the arguments the evaluation is called with."""
+        received_calls.append((args, kwargs))
+
+    monkeypatch.setattr(
+        "mhm_tools.post.discharge_evaluation.evaludate_discharge_data",
+        record_evaluation,
+    )
+    parser = argparse.ArgumentParser()
+    _discharge_evaluation.add_args(parser)
+    _discharge_evaluation.run(
+        parser.parse_args(
+            ["--output-dir", "out", "--input-path", "sim.nc", "--ref-path", "obs.nc"]
+            + gauge_args
+        )
+    )
+    return received_calls[0][1]
+
+
+def test_discharge_evaluation_run_passes_the_gauge_coordinate_file(monkeypatch):
+    """Hand a gauge coordinate file and the mean-flow method to the evaluation."""
+    keyword_args = _run_discharge_evaluation(
+        monkeypatch,
+        [
+            "--gauge-coordinate-file",
+            "gauges.nc",
+            "--gauge-optimization-method",
+            "mean-flow",
+        ],
+    )
+    assert keyword_args["gauge_coordinate_file"] == "gauges.nc"
+    assert keyword_args["gauge_location_method"] == "mean-flow"
+
+
+@pytest.mark.parametrize(
+    "gauge_args",
+    [
+        ["--gauge-coordinate-file", "gauges.nc", "--facc-file", "restart.nc"],
+        ["--gauge-coordinate-file", "gauges.nc", "--scc-gauges-file", "scc.nc"],
+        ["--facc-file", "restart.nc", "--gauge-optimization-method", "nearest"],
+        [
+            "--gauge-coordinate-file",
+            "gauges.nc",
+            "--gauge-optimization-method",
+            "burek",
+        ],
+    ],
+)
+def test_discharge_evaluation_run_refuses_unfitting_gauge_sources(
+    monkeypatch, gauge_args
+):
+    """Refuse competing gauge sources and methods without their gauge source."""
+    with pytest.raises(ValueError):
+        _run_discharge_evaluation(monkeypatch, gauge_args)
+
+
 @pytest.mark.parametrize(
     ("memory_args", "expected_memory_gb"),
     [
@@ -549,3 +658,67 @@ def test_available_mem_reaches_the_evaluation_in_gb(
     )
 
     assert received_arguments["max_memory_gib"] == pytest.approx(expected_memory_gb)
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["evaluation", "discharge-evaluation", "-h"],
+        ["evaluation", "discharge_evaluation", "-h"],
+        ["discharge-evaluation", "-h"],
+        ["discharge_evaluation", "-h"],
+        ["data-processing", "converter-nc-ascii", "-h"],
+        ["converter-nc-ascii", "-h"],
+        ["--log_level", "INFO", "evaluation", "discharge-evaluation", "-h"],
+    ],
+)
+def test_cli_resolves_commands_by_group_alias_and_former_name(args):
+    """Reach a command by group, dash/underscore alias, top level or former name."""
+    from mhm_tools._cli._main import cli
+
+    result = CliRunner().invoke(cli, args)
+
+    assert result.exit_code == 0, result.output
+    assert "Usage:" in result.output
+
+
+def test_cli_help_lists_the_groups_and_hides_the_tui():
+    """List every command group in the main help, without the tui launcher."""
+    from mhm_tools._cli._main import _COMMAND_GROUPS, cli
+
+    result = CliRunner().invoke(cli, ["-h"])
+
+    assert result.exit_code == 0, result.output
+    for group_name, _help, _commands in _COMMAND_GROUPS:
+        assert group_name in result.output
+    assert not is_option_listed(result.output, "tui")
+
+
+def test_cli_group_help_lists_its_commands():
+    """List the commands of a group with their short help."""
+    from mhm_tools._cli._main import cli
+
+    result = CliRunner().invoke(cli, ["evaluation", "-h"])
+
+    assert result.exit_code == 0, result.output
+    assert "discharge-evaluation" in result.output
+    assert "twsa-evaluation" in result.output
+
+
+def test_cli_suggests_a_command_for_a_typo():
+    """Suggest the closest command name for a misspelt command."""
+    from mhm_tools._cli._main import cli
+
+    result = CliRunner().invoke(cli, ["evaluation", "discharge-evaluaton"])
+
+    assert result.exit_code != 0
+    assert "Did you mean: discharge-evaluation" in result.output
+
+
+def test_cli_keeps_the_tui_launcher_as_hidden_command():
+    """Keep the hidden tui command callable for its help."""
+    from mhm_tools._cli._main import cli
+
+    result = CliRunner().invoke(cli, ["tui", "--help"])
+
+    assert result.exit_code == 0, result.output

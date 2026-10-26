@@ -17,16 +17,9 @@ from mhm_tools.common.logger import configure_mhm_tools_logger
 
 from .. import __version__
 
-try:
-    from trogon import tui as trogon_tui
-except Exception:  # pragma: no cover - optional dependency
-    trogon_tui = None
-
 
 def _patch_trogon_command_tree_order() -> None:
     """Make Trogon's command tree respect Click insertion order."""
-    if trogon_tui is None:
-        return
     try:
         from rich.text import Text
         from trogon.widgets.command_tree import CommandTree
@@ -83,7 +76,6 @@ _COMMAND_GROUPS: List[Tuple[str, str, List[Tuple[str, object]]]] = [
             ("merge-files", "mhm_tools._cli._merge"),
             ("fill-nearest", "mhm_tools._cli._fill_nearest"),
             ("regrid-file", "mhm_tools._cli._regrid"),
-            ("fill-nearest", "mhm_tools._cli._fill_nearest"),
             ("long-term-mean", "mhm_tools._cli._long_term_mean"),
             ("difference", "mhm_tools._cli._difference"),
             ("relative-difference", "mhm_tools._cli._relative_difference"),
@@ -107,6 +99,7 @@ _COMMAND_GROUPS: List[Tuple[str, str, List[Tuple[str, object]]]] = [
             ("hydrograph", "mhm_tools._cli._hydrograph"),
             ("gridded-data-evaluation", "mhm_tools._cli._gridded_data_evaluation"),
             ("twsa-evaluation", "mhm_tools._cli._twsa_evaluation"),
+            ("snow-evaluation", "mhm_tools._cli._snow_evaluation"),
             ("run-overview", "mhm_tools._cli._mhm_run_overview"),
         ],
     ),
@@ -146,7 +139,6 @@ _COMMAND_GROUPS: List[Tuple[str, str, List[Tuple[str, object]]]] = [
                 "mhm_tools._cli._create_mhm_restart_from_setup",
             ),
             ("create-wmo-region-masks", "mhm_tools._cli._create_wmo_region_masks"),
-            ("snow-evaluation", "mhm_tools._cli._snow_evaluation"),
         ],
     ),
 ]
@@ -184,53 +176,93 @@ def _translate_option_aliases(args, option_aliases):
 
 
 class AliasGroup(click.Group):
-    """Click group that supports aliases and preserves command insertion order."""
+    """Click group with aliases, insertion order and commands built on first use.
+
+    A command registered with ``add_lazy_command`` imports its module only when
+    it is called or listed, so a call loads its own module and none of the others.
+    """
 
     def __init__(self, *args, **kwargs):
         self.command_section_name = kwargs.pop("command_section_name", "Commands")
+        self._command_order = []
+        self._lazy_commands = {}
         super().__init__(*args, **kwargs)
         self._aliases = {}
         self._path_aliases = {}
 
+    def add_command(self, cmd, name=None):
+        """Register a built command and keep its position in the command order."""
+        super().add_command(cmd, name)
+        name = name or cmd.name
+        if name not in self._command_order:
+            self._command_order.append(name)
+
+    def add_lazy_command(self, name: str, module, prog_path: str) -> None:
+        """Register a command whose module is imported when it is first needed.
+
+        Args:
+            name (str): Command name.
+            module: Import path of the parser-based command module, or the module.
+            prog_path (str): Program path shown in the command's usage line.
+        """
+        self._lazy_commands[name] = (module, prog_path)
+        if name not in self._command_order:
+            self._command_order.append(name)
+
+    def has_command(self, name: str) -> bool:
+        """Tell whether a command of this name is registered, built or not."""
+        return name in self.commands or name in self._lazy_commands
+
+    def load_all_commands(self) -> None:
+        """Build every registered command, also of the subgroups, e.g. for the TUI."""
+        for name in self._command_order:
+            command = self.get_command(None, name)
+            if isinstance(command, AliasGroup):
+                command.load_all_commands()
+
     def add_alias(self, alias: str, target: str) -> None:
         """Register an alias that resolves to an existing command."""
-        if alias in self.commands:
+        if self.has_command(alias):
             msg = f"Alias '{alias}' collides with an existing command."
             raise click.ClickException(msg)
-        if target not in self.commands:
+        if not self.has_command(target):
             msg = f"Cannot alias unknown command '{target}'."
             raise click.ClickException(msg)
         self._aliases[alias] = target
 
     def add_path_alias(self, alias: str, target_path: Tuple[str, ...]) -> None:
         """Register an alias that expands to a nested command path."""
-        if alias in self.commands:
+        if self.has_command(alias):
             msg = f"Alias '{alias}' collides with an existing command."
             raise click.ClickException(msg)
         if not target_path:
             msg = f"Cannot alias '{alias}' to an empty command path."
             raise click.ClickException(msg)
-        if target_path[0] not in self.commands:
+        if not self.has_command(target_path[0]):
             msg = f"Cannot alias '{alias}' to unknown command path '{target_path}'."
             raise click.ClickException(msg)
         self._path_aliases[alias] = target_path
 
     def list_commands(self, _ctx):
         """Return commands in their assigned insertion order."""
+        # a command not built yet is a parser-based command, which is never hidden
         return [
             name
-            for name, command in self.commands.items()
-            if not getattr(command, "hidden", False)
+            for name in self._command_order
+            if not getattr(self.commands.get(name), "hidden", False)
         ]
 
     def get_command(self, ctx, cmd_name):
-        command = super().get_command(ctx, cmd_name)
-        if command is not None:
-            return command
-        target = self._aliases.get(cmd_name)
-        if target is None:
-            return None
-        return super().get_command(ctx, target)
+        """Return a command or the target of an alias, building it on first use."""
+        cmd_name = self._aliases.get(cmd_name, cmd_name)
+        if cmd_name in self._lazy_commands and cmd_name not in self.commands:
+            module, prog_path = self._lazy_commands[cmd_name]
+            if isinstance(module, str):
+                module = importlib.import_module(module)
+            self.commands[cmd_name] = _build_click_command(
+                cmd_name, module, prog_path=prog_path
+            )
+        return super().get_command(ctx, cmd_name)
 
     def resolve_command(self, ctx, args):
         """Resolve command name and provide typo suggestions."""
@@ -243,7 +275,7 @@ class AliasGroup(click.Group):
                 raise
             unknown = args[0]
             candidates = sorted(
-                set(self.commands.keys())
+                set(self._command_order)
                 | set(self._aliases.keys())
                 | set(self._path_aliases.keys())
             )
@@ -595,7 +627,7 @@ def _add_dash_underscore_alias(group: AliasGroup, command_name: str) -> None:
     if "_" in command_name:
         aliases.append(command_name.replace("_", "-"))
     for alias in aliases:
-        if alias not in group.commands:
+        if not group.has_command(alias):
             group.add_alias(alias, command_name)
 
 
@@ -622,13 +654,6 @@ def _add_path_aliases(
         aliases.append(command_name.replace("_", "-"))
     for alias in aliases:
         group.add_path_alias(alias, target_path)
-
-
-def _hide_tui_launcher(group: click.Group) -> None:
-    """Hide the TUI launcher from command-group listings."""
-    tui_command = group.commands.get("tui")
-    if tui_command is not None:
-        tui_command.hidden = True
 
 
 @click.group(
@@ -698,21 +723,17 @@ for _group_name, _group_help, _group_commands in _COMMAND_GROUPS:
         context_settings={"help_option_names": ["-h", "--help"]},
     )
     for _command_name, _module in _group_commands:
-        # If the module is a string, import it lazily here.
-        if isinstance(_module, str):
-            _module_obj = importlib.import_module(_module)
-        else:
-            _module_obj = _module
-        _cmd = _build_click_command(
+        # the module is imported once the command is called or listed
+        _group.add_lazy_command(
             _command_name,
-            _module_obj,
+            _module,
             prog_path=f"mhm-tools {_group_name} {_command_name}",
         )
-        _add_command_with_aliases(_group, _cmd, _command_name)
+        _add_dash_underscore_alias(_group, _command_name)
         _LEGACY_COMMAND_PATHS.append((_command_name, (_group_name, _command_name)))
     # an old name answers within the group and, like every command, at the top
     for _old_name, _new_name in _RENAMED_COMMANDS.items():
-        if _new_name in _group.commands:
+        if _group.has_command(_new_name):
             for _alias in (_old_name, _old_name.replace("-", "_")):
                 _group.add_alias(_alias, _new_name)
             _LEGACY_COMMAND_PATHS.append((_old_name, (_group_name, _new_name)))
@@ -722,18 +743,19 @@ for _command_name, _target_path in _LEGACY_COMMAND_PATHS:
     _add_path_aliases(cli, _command_name, _target_path)
 
 
-if trogon_tui is not None:
-    _patch_trogon_command_tree_order()
-    cli = trogon_tui()(cli)
-    _hide_tui_launcher(cli)
-else:
-
-    @cli.command("tui", help="Open Textual TUI (requires 'trogon').")
-    def _missing_tui():
+@cli.command("tui", hidden=True, help="Open Textual TUI (requires 'trogon').")
+@click.pass_context
+def _tui(ctx):
+    """Open the Textual TUI of all commands; trogon is imported only here."""
+    try:
+        from trogon import Trogon
+    except Exception as exc:
         msg = "trogon is not installed. Install with: pip install trogon"
-        raise click.ClickException(msg)
-
-    _hide_tui_launcher(cli)
+        raise click.ClickException(msg) from exc
+    # Trogon reads the commands of every group, so the lazy ones are built first
+    cli.load_all_commands()
+    _patch_trogon_command_tree_order()
+    Trogon(cli, app_name=None, command_name="tui", click_context=ctx).run()
 
 
 def main(argv=None):

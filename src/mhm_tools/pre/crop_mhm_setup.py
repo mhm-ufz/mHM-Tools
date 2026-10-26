@@ -125,9 +125,12 @@ def crop_file_with_header(ds_in, file_path, output_path, lonslice, latslice):
         / header_information["cellsize"]
         + 0.5
     )
+    # round (not truncate) the stop indices like the start indices: an imprecise
+    # cellsize (e.g. from float32 coords) yields k - eps and would drop a cell
     index_x_max = int(
         (lonslice.stop + pres - header_information["xllcorner"])
         / header_information["cellsize"]
+        + 0.5
     )
     if latslice.start > latslice.stop:
         ymax = (
@@ -138,7 +141,7 @@ def crop_file_with_header(ds_in, file_path, output_path, lonslice, latslice):
             (ymax - latslice.start - pres) / header_information["cellsize"] + 0.5
         )
         index_y_max = int(
-            (ymax - latslice.stop + pres) / header_information["cellsize"]
+            (ymax - latslice.stop + pres) / header_information["cellsize"] + 0.5
         )
     else:
         index_y_min = int(
@@ -149,6 +152,7 @@ def crop_file_with_header(ds_in, file_path, output_path, lonslice, latslice):
         index_y_max = int(
             (latslice.stop + pres - header_information["yllcorner"])
             / header_information["cellsize"]
+            + 0.5
         )
     logger.debug(f"x: {index_x_min}, {index_x_max}")
     logger.debug(f"y: {index_y_min}, {index_y_max}")

@@ -1,7 +1,9 @@
 """Derive filled DEM, slope, aspect, flow accumulation and flow direction.
 
 The derivatives come from :mod:`pyflwdir`, except aspect, which pyflwdir does
-not provide and which is computed with the Horn gradient. Grid coordinates and
+not provide and which is computed with the Horn gradient. Flow accumulation can
+also be derived from an existing flow direction grid, so it follows the same
+network as the fdir of an mHM setup, also after upscaling. Grid coordinates and
 the CRS variable come from :mod:`mhm_tools.pre.latlon`, so the output carries
 the same lat/lon convention as the rest of an mHM setup.
 
@@ -15,6 +17,7 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 
+from mhm_tools.common.constants import FDIR_CODES, FDIR_FILLVALUE, NO_DATA
 from mhm_tools.common.crs_handler import resolve_crs
 from mhm_tools.common.file_handler import (
     get_nodata,
@@ -23,12 +26,19 @@ from mhm_tools.common.file_handler import (
     write_xarray_to_geotiff,
     write_xarray_to_netcdf,
 )
+from mhm_tools.common.format_data import _format_categories
 from mhm_tools.pre.latlon import xy_to_latlon
 
-__all__ = ["DERIVATIVE_ATTRS", "OUTPUT_EXTENSIONS", "create_dem_derivatives"]
+__all__ = [
+    "DERIVATIVE_ATTRS",
+    "FACC_UNITS",
+    "OUTPUT_EXTENSIONS",
+    "create_dem_derivatives",
+    "create_facc_from_fdir",
+]
 
-NO_DATA = -9999.0
 OUTPUT_EXTENSIONS = ("nc", "asc", "tif")
+FACC_UNITS = ("cell", "km2")
 
 #: Output variable -> (dtype, attributes). ``dem`` is the input as read.
 DERIVATIVE_ATTRS = {
@@ -48,34 +58,125 @@ def create_dem_derivatives(
     crs=None,
     var_name=None,
     compression=None,
+    one_file_per_variable=False,
+    facc_unit="cell",
 ):
     """Write the DEM derivatives for ``input_file`` into ``output_path``.
 
     ``nc`` writes one file holding every derivative plus the grid coordinates
-    and a ``crs`` variable; ``asc`` and ``tif`` write one file per derivative.
-    Returns the paths written.
+    and a ``crs`` variable, or with ``one_file_per_variable`` one such file per
+    derivative named after it; ``asc`` and ``tif`` always write one file per
+    derivative. ``facc_unit`` gives facc in upstream cells or km2. Returns the
+    paths written.
     """
     extension = _validate_extension(output_extension)
+    variable_attrs = create_variable_attrs(facc_unit)
     dem = get_raster_data(input_file, var_name=var_name, crs=crs)
     try:
         resolved_crs = resolve_crs(dem, crs, required=True)
-        derivatives = compute_dem_derivatives(dem, resolved_crs)
+        derivatives = compute_dem_derivatives(dem, resolved_crs, facc_unit=facc_unit)
         grid = _grid_coordinates(dem, resolved_crs)
     finally:
         dem.close()
 
     output_path = Path(output_path)
     if extension == "nc":
-        return (
-            _write_netcdf(
-                derivatives, grid, resolved_crs, output_path, compression=compression
-            ),
+        return _write_netcdf(
+            derivatives,
+            grid,
+            resolved_crs,
+            output_path,
+            variable_attrs,
+            compression=compression,
+            one_file_per_variable=one_file_per_variable,
         )
-    return _write_per_layer(derivatives, grid, resolved_crs, output_path, extension)
+    return _write_per_layer(
+        derivatives, grid, resolved_crs, output_path, extension, variable_attrs
+    )
 
 
-def compute_dem_derivatives(dem, crs):
-    """Return the six derivative arrays for one 2-D DEM."""
+def create_facc_from_fdir(
+    input_file,
+    output_path,
+    output_extension="nc",
+    crs=None,
+    var_name=None,
+    compression=None,
+    ftype="d8",
+    facc_unit="cell",
+):
+    """Write the flow accumulation of a flow direction grid into ``output_path``.
+
+    Args:
+        input_file (str or Path): Flow direction raster (.nc, .asc, .tif).
+        output_path (str or Path): Output file for ``nc``, or directory.
+        output_extension (str): One of ``OUTPUT_EXTENSIONS``.
+        crs (str): CRS to use when the input has none.
+        var_name (str): Flow direction variable, e.g. ``flwdir`` or ``fdir``.
+        compression (NetcdfCompression): NetCDF compression, or None.
+        ftype (str): Flow direction type, one of ``FDIR_CODES``.
+        facc_unit (str): ``cell`` for upstream cells or ``km2``.
+
+    Returns
+    -------
+        Tuple of the written paths: ``facc.nc`` (with grid and CRS), or
+        ``facc.asc``/``facc.tif``.
+    """
+    extension = _validate_extension(output_extension)
+    variable_attrs = create_variable_attrs(facc_unit)
+    fdir = get_raster_data(input_file, var_name=var_name, crs=crs)
+    try:
+        resolved_crs = resolve_crs(fdir, crs, required=True)
+        facc = compute_facc_from_fdir(
+            fdir, resolved_crs, ftype=ftype, facc_unit=facc_unit
+        )
+        grid = _grid_coordinates(fdir, resolved_crs)
+    finally:
+        fdir.close()
+
+    output_path = Path(output_path)
+    if extension == "nc":
+        return _write_netcdf(
+            {"facc": facc},
+            grid,
+            resolved_crs,
+            output_path,
+            variable_attrs,
+            compression=compression,
+            default_name="facc.nc",
+        )
+    return _write_per_layer(
+        {"facc": facc}, grid, resolved_crs, output_path, extension, variable_attrs
+    )
+
+
+def create_variable_attrs(facc_unit="cell"):
+    """Create the output dtype and attributes of every derivative for a facc unit.
+
+    Args:
+        facc_unit (str): ``cell`` for upstream cells or ``km2``.
+
+    Returns
+    -------
+        dict: Variable name -> (dtype, attributes), like ``DERIVATIVE_ATTRS``.
+    """
+    if facc_unit not in FACC_UNITS:
+        msg = (
+            f"Unsupported facc unit {facc_unit!r}. Choose one of: "
+            f"{', '.join(FACC_UNITS)}."
+        )
+        raise ValueError(msg)
+    variable_attrs = dict(DERIVATIVE_ATTRS)
+    if facc_unit == "km2":
+        variable_attrs["facc"] = (
+            "f8",
+            {"long_name": "flow accumulation", "units": "km2"},
+        )
+    return variable_attrs
+
+
+def compute_dem_derivatives(dem, crs, facc_unit="cell"):
+    """Return the six derivative arrays for one 2-D DEM, facc in ``facc_unit``."""
     import pyflwdir
 
     elevation = np.asarray(dem.values, dtype="float64")
@@ -107,9 +208,57 @@ def compute_dem_derivatives(dem, crs):
     )
     derivatives["dem_filled"] = _masked(filled, invalid, "f8")
     del filled
-    derivatives["facc"] = _masked(flw.upstream_area(unit="cell"), invalid, "i4")
+    facc_dtype = create_variable_attrs(facc_unit)["facc"][0]
+    derivatives["facc"] = _masked(
+        flw.upstream_area(unit=facc_unit), invalid, facc_dtype
+    )
     derivatives["fdir"] = _masked(flw.to_array(), invalid, "i4")
     return derivatives
+
+
+def compute_facc_from_fdir(fdir, crs, ftype="d8", facc_unit="cell"):
+    """Calculate the flow accumulation of a 2-D flow direction grid.
+
+    Args:
+        fdir (xarray.DataArray): Flow direction grid with a rio transform.
+        crs (rasterio.crs.CRS): CRS of the grid.
+        ftype (str): Flow direction type, one of ``FDIR_CODES``.
+        facc_unit (str): ``cell`` for upstream cells or ``km2``.
+
+    Returns
+    -------
+        numpy.ndarray: Flow accumulation, ``NO_DATA`` where fdir has no data.
+    """
+    import pyflwdir
+
+    if ftype not in FDIR_CODES:
+        msg = f"Unsupported ftype {ftype!r}. Choose one of: {', '.join(FDIR_CODES)}."
+        raise ValueError(msg)
+    facc_dtype = create_variable_attrs(facc_unit)["facc"][0]
+    values = np.asarray(fdir.values, dtype="float64")
+    # xarray turns a decoded integer _FillValue into NaN, other files keep it
+    invalid = ~np.isfinite(values) | (values == FDIR_FILLVALUE[ftype])
+    nodata = get_nodata(fdir)
+    if nodata is not None and np.isfinite(nodata):
+        invalid |= values == float(nodata)
+    unknown = ~invalid & ~np.isin(values, FDIR_CODES[ftype])
+    if np.any(unknown):
+        msg = (
+            f"The flow direction grid holds values that are no valid {ftype} codes "
+            f"nor its nodata value: {_format_categories(np.unique(values[unknown]))}. "
+            "Check --ftype and the declared nodata value of the input."
+        )
+        raise ValueError(msg)
+    codes = np.where(invalid, FDIR_FILLVALUE[ftype], values).astype(np.uint8)
+    del values
+    flw = pyflwdir.from_array(
+        codes,
+        ftype=ftype,
+        transform=fdir.rio.transform(),
+        latlon=bool(crs.is_geographic),
+        check_ftype=False,
+    )
+    return _masked(flw.upstream_area(unit=facc_unit), invalid, facc_dtype)
 
 
 def horn_aspect(elevation, transform, nodata=NO_DATA):
@@ -179,13 +328,38 @@ def _grid_coordinates(dem, crs):
     }
 
 
-def _write_netcdf(derivatives, grid, crs, output_path, compression=None):
-    """Write every derivative plus grid and CRS into one NetCDF file."""
-    output = _resolve_output(output_path, "dem_derivatives.nc")
+def _write_netcdf(
+    derivatives,
+    grid,
+    crs,
+    output_path,
+    variable_attrs,
+    compression=None,
+    one_file_per_variable=False,
+    default_name="dem_derivatives.nc",
+):
+    """Write the derivatives plus grid and CRS into NetCDF.
+
+    Args:
+        derivatives (dict): Derivative arrays by variable name.
+        grid (dict): Grid coordinates from ``_grid_coordinates``.
+        crs (rasterio.crs.CRS): CRS of the input grid.
+        output_path (Path): Output file, or directory for one file per variable.
+        variable_attrs (dict): Variable name -> (dtype, attributes).
+        compression (NetcdfCompression): Compression settings, or None.
+        one_file_per_variable (bool): Write ``<variable>.nc`` per derivative
+            into the ``output_path`` directory instead of one combined file.
+        default_name (str): File name used when ``output_path`` is a directory.
+
+    Returns
+    -------
+        Tuple of the written paths.
+    """
+    names = [name for name in variable_attrs if name in derivatives]
     coords = {"y": grid["y"], "x": grid["x"]}
     data_vars = {
-        name: (("y", "x"), derivatives[name], dict(attrs))
-        for name, (_dtype, attrs) in DERIVATIVE_ATTRS.items()
+        name: (("y", "x"), derivatives[name], dict(variable_attrs[name][1]))
+        for name in names
     }
     data_vars["lon"] = (
         ("y", "x"),
@@ -208,26 +382,59 @@ def _write_netcdf(derivatives, grid, crs, output_path, compression=None):
     ds = xr.Dataset(data_vars=data_vars, coords=coords)
     wkt = crs.to_wkt()
     ds["crs"] = xr.DataArray(0, attrs={"crs_wkt": wkt, "spatial_ref": wkt})
-    for name in DERIVATIVE_ATTRS:
+    for name in names:
         ds[name].attrs.update({"coordinates": "lat lon", "grid_mapping": "crs"})
     axis_units = "m" if grid["projected"] else "degrees"
     ds["x"].attrs.update({"axis": "X", "units": axis_units})
     ds["y"].attrs.update({"axis": "Y", "units": axis_units})
     ds.attrs.update({"Conventions": "CF-1.8", "source": "mhm-tools"})
     encoding = {
-        name: {"_FillValue": NO_DATA if dtype == "f8" else int(NO_DATA)}
-        for name, (dtype, _attrs) in DERIVATIVE_ATTRS.items()
+        name: {
+            "_FillValue": NO_DATA if variable_attrs[name][0] == "f8" else int(NO_DATA)
+        }
+        for name in names
     }
-    write_xarray_to_netcdf(ds, output, encoding=encoding, compression=compression)
-    return output
-
-
-def _write_per_layer(derivatives, grid, crs, output_path, extension):
-    """Write one file per derivative, as ASCII grids or GeoTIFFs."""
+    if not one_file_per_variable:
+        output = _resolve_output(output_path, default_name)
+        write_xarray_to_netcdf(ds, output, encoding=encoding, compression=compression)
+        return (output,)
     folder = Path(output_path)
     folder.mkdir(parents=True, exist_ok=True)
     written = []
-    for name, (_dtype, attrs) in DERIVATIVE_ATTRS.items():
+    for name in names:
+        # every file keeps the grid and CRS, so each one is usable on its own
+        output = folder / f"{name}.nc"
+        write_xarray_to_netcdf(
+            ds[[name, "lat", "lon", "crs"]],
+            output,
+            encoding={name: encoding[name]},
+            compression=compression,
+        )
+        written.append(output)
+    return tuple(written)
+
+
+def _write_per_layer(derivatives, grid, crs, output_path, extension, variable_attrs):
+    """Write one file per derivative, as ASCII grids or GeoTIFFs.
+
+    Args:
+        derivatives (dict): Derivative arrays by variable name.
+        grid (dict): Grid coordinates from ``_grid_coordinates``.
+        crs (rasterio.crs.CRS): CRS of the input grid.
+        output_path (Path): Output directory.
+        extension (str): ``asc`` or ``tif``.
+        variable_attrs (dict): Variable name -> (dtype, attributes).
+
+    Returns
+    -------
+        Tuple of the written paths.
+    """
+    folder = Path(output_path)
+    folder.mkdir(parents=True, exist_ok=True)
+    written = []
+    for name, (_dtype, attrs) in variable_attrs.items():
+        if name not in derivatives:
+            continue
         # The coordinates must travel with the array: without them the writers
         # invent a 0..n index grid and flip the row order.
         data = xr.DataArray(

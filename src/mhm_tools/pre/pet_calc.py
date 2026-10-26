@@ -208,8 +208,8 @@ def pet_calculator(
     time: datetime,
     stat_freq: str,
     method: str = "oudin",
-    l_heat: float = 2.26,  # latent heat of vaporization (MJ/kg) or compatible with e_rad units
-    w_density: float = 977.0,  # water density (kg/m3); used in your original scaling
+    l_heat: float = 2.45,  # latent heat of vaporization (MJ/kg) or compatible with e_rad units
+    w_density: float = 1000,  # water density (kg/m3); used in your original scaling
     **kwargs,
 ) -> np.ndarray:
     """

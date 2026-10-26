@@ -24,6 +24,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import NamedTuple, Union
 
+from mhm_tools.common.constants import NO_DATA
 from mhm_tools.common.file_handler import write_xarray_to_file
 from mhm_tools.common.format_data import (
     format_categorical_data,
@@ -50,7 +51,7 @@ PathLike = Union[str, Path]
 # Writer tuning and nodata conventions
 
 
-NODATA = -9999.0
+NODATA = NO_DATA
 # Cells the source cube does not reach are padded with a valid LAI instead of
 # nodata, so widening the grid to the model extent leaves no holes for mHM.
 PAD_VALUE = 0.0

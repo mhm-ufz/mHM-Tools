@@ -751,8 +751,10 @@ def align_bounds_to_l2(ds, resolutions, min_row, max_row, min_col, max_col):
         ).values
         lower_edges = np.minimum(bounds[:, 0], bounds[:, 1])
         upper_edges = np.maximum(bounds[:, 0], bounds[:, 1])
-        lower_vals = lower_edges[lower_edges <= lower]
-        upper_vals = upper_edges[upper_edges >= upper]
+        # compare with tolerance: L2 coords (often float32) may miss an edge that
+        # coincides with the L0 bound by float noise and add an empty L2 cell
+        lower_vals = lower_edges[lower_edges <= lower + tol]
+        upper_vals = upper_edges[upper_edges >= upper - tol]
         lower_target = lower_vals.max() if lower_vals.size else lower_edges.min()
         upper_target = upper_vals.min() if upper_vals.size else upper_edges.max()
         logger.debug(
@@ -822,7 +824,9 @@ def get_upscaling_factor(
     )
     ratio = upscale_res / input_res
     ratio_round = int(ratio + 0.5)
-    if abs(ratio_round - ratio) < 1e-6:
+    # relative tolerance: an L0 estimated from float32 or rounded coordinates is
+    # off by ~1e-7 relative, which the factor multiplies into the ratio
+    if abs(ratio_round - ratio) <= 1e-5 * ratio_round:
         return ratio_round, upscale_res
     logger.debug(
         f"Computed upscaling ratio: {ratio:.8f}, rounded: {ratio_round} with difference {abs(ratio_round - ratio):.8f}"
