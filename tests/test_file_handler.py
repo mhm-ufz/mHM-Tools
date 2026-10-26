@@ -804,6 +804,20 @@ class TestGetDatasetFromPath(unittest.TestCase, BaseDatasetMixin):
                 self.assertGreater(out["lat"].values[0], out["lat"].values[-1])
                 self.assertIn("var", out.data_vars)
 
+    def test_get_dataset_from_path_reads_upper_case_nc_suffix_files(self):
+        """Load several NetCDF files from a folder although their suffix is .NC."""
+        ds = self.make_simple_ds()
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            for name in ["a.NC", "b.NC"]:
+                (base / name).write_text("stub")
+
+            with patch.object(fh, "read_dataset", return_value=ds) as mocked:
+                out = fh.get_dataset_from_path(base)
+            self.assertIn("var", out.data_vars)
+            read_files = sorted(Path(p).name for p in mocked.call_args.args[0])
+            self.assertEqual(read_files, ["a.NC", "b.NC"])
+
     def test_get_dataset_from_path_directory_empty_raises(self):
         with tempfile.TemporaryDirectory() as td:
             base = Path(td)

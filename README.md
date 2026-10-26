@@ -18,6 +18,12 @@ As of version 0.3 it covers three main use cases:
 $ pip install mhm-tools
 ```
 
+To install from a source checkout into a clean conda environment, which nothing else in your shell interferes with (e.g. on an HPC system or to test a release), use the install script. It creates the environment if needed, ignores `PYTHONPATH`, the user site-packages and pip settings, and checks the result:
+```shell
+$ scripts/install_mhm_tools.sh /path/to/envs/mhm-tools [--editable] [--extras test,doc] [--python 3.11]
+$ conda activate /path/to/envs/mhm-tools
+```
+
 For a first overview how to run the model you can use the help function of the CLI: 
 ```shell
 $ mhm-tools -h

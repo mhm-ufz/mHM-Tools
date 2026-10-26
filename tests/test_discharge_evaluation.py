@@ -7,6 +7,7 @@ data workflow of ``Q_data_to_xarray`` and ``evaludate_discharge_data``.
 import contextlib
 import logging
 import tempfile
+import tracemalloc
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -382,19 +383,48 @@ def _candidate_series(series_by_offset, observed_values):
     return candidates, observed
 
 
-def test_mean_flow_picks_the_cell_matching_the_observed_mean_on_shared_days():
-    """Pick the neighbour whose mean equals the observations on observed days."""
-    # on all days the centre (mean 10) would be closer to 5 than the neighbour (36.7)
+def test_mean_flow_matches_seasonality_when_winters_are_unobserved():
+    """Pick the neighbour matching the observed summer months, whatever its winter."""
+    summer = pd.date_range("1990-01-01", "1990-12-31", freq="D").month.isin([6, 7, 8])
+    # over the whole year the centre (10) would be closer to 5 than the neighbour
     candidates, observed = _candidate_series(
-        {(0, 0): [10.0, 10.0, 10.0], (0, 1): [5.0, 5.0, 100.0]},
-        observed_values=[5.0, 5.0, np.nan],
+        {(0, 0): np.full(summer.size, 10.0), (0, 1): np.where(summer, 5.0, 100.0)},
+        observed_values=np.where(summer, 5.0, np.nan),
     )
-    sim_sel, cell_x, cell_y = discharge_evaluation.select_cells_by_mean_flow(
+    _, cell_x, cell_y = discharge_evaluation.select_cells_by_mean_flow(
         candidates, observed
     )
-    np.testing.assert_array_equal(sim_sel.sel(id=7).values, [5.0, 5.0, 100.0])
     np.testing.assert_array_equal(cell_x, [2000.0])
     np.testing.assert_array_equal(cell_y, [1000.0])
+
+
+def test_mean_flow_never_picks_a_cell_beyond_the_grid():
+    """Skip a candidate without values instead of scoring it as a perfect match."""
+    candidates, observed = _candidate_series(
+        {
+            (0, 0): [10.0, 10.0, 10.0],
+            (0, 1): [np.nan, np.nan, np.nan],
+            (1, 0): [7.0, 7.0, 7.0],
+        },
+        observed_values=[5.0, 5.0, 5.0],
+    )
+    _, cell_x, cell_y = discharge_evaluation.select_cells_by_mean_flow(
+        candidates, observed
+    )
+    np.testing.assert_array_equal(cell_x, [1000.0])
+    np.testing.assert_array_equal(cell_y, [0.0])
+
+
+def test_mean_flow_warns_for_gauges_without_overlap(caplog):
+    """Keep the own cell of a gauge without observations and name it."""
+    candidates, observed = _candidate_series(
+        {(0, 0): [10.0, 10.0, 10.0], (0, 1): [5.0, 5.0, 5.0]},
+        observed_values=[np.nan, np.nan, np.nan],
+    )
+    _, cell_x, _ = discharge_evaluation.select_cells_by_mean_flow(candidates, observed)
+    np.testing.assert_array_equal(cell_x, [1000.0])
+    assert "no observed month" in caplog.text
+    assert "[7]" in caplog.text
 
 
 def test_mean_flow_keeps_the_centre_cell_on_a_tie():
@@ -461,6 +491,90 @@ def test_read_gauge_coordinates_refuses_gauges_without_observations(tmp_path):
     ).to_netcdf(gauges_file)
     with pytest.raises(ValueError, match="No gauges"):
         discharge_evaluation.read_gauge_coordinates(gauges_file, reference_ids=[5.0])
+
+
+def test_mean_flow_selects_cell_when_timestamps_differ_in_time_of_day():
+    """Compare daily means although simulation and observations differ in hour."""
+    candidates, observed = _candidate_series(
+        {(0, 0): [10.0, 10.0, 10.0], (0, 1): [5.0, 5.0, 5.0]},
+        observed_values=[5.0, 5.0, 5.0],
+    )
+    # mHM output stamped at noon, observations at midnight of the same days
+    candidates = candidates.assign_coords(
+        time=candidates["time"] + pd.Timedelta(hours=12)
+    )
+    _, cell_x, _ = discharge_evaluation.select_cells_by_mean_flow(candidates, observed)
+    np.testing.assert_array_equal(cell_x, [2000.0])
+
+
+def _write_gauges_with_lonlat_and_xy(gauges_file):
+    """Write two gauges holding lon/lat in degrees and x/y in metres."""
+    xr.Dataset(
+        {
+            "station": ("station", [1.0, 2.0]),
+            "x": ("station", [4000.0, 5000.0]),
+            "y": ("station", [3000.0, 3100.0]),
+            "lon": ("station", [10.0, 11.0]),
+            "lat": ("station", [50.0, 51.0]),
+        }
+    ).to_netcdf(gauges_file)
+    return gauges_file
+
+
+def test_read_gauge_coordinates_uses_xy_on_projected_grid(tmp_path):
+    """Use x/y besides lon/lat when the model grid has x/y dimensions."""
+    gauges_file = _write_gauges_with_lonlat_and_xy(tmp_path / "gauges.nc")
+
+    gauge_x, gauge_y, _ = discharge_evaluation.read_gauge_coordinates(
+        gauges_file, reference_ids=[1.0, 2.0], grid_dim_names=("y", "x")
+    )
+    np.testing.assert_array_equal(gauge_x, [4000.0, 5000.0])
+    np.testing.assert_array_equal(gauge_y, [3000.0, 3100.0])
+
+
+def test_read_gauge_coordinates_uses_lonlat_on_geographic_grid(tmp_path):
+    """Use lon/lat besides x/y when the model grid has lat/lon dimensions."""
+    gauges_file = _write_gauges_with_lonlat_and_xy(tmp_path / "gauges.nc")
+
+    gauge_x, gauge_y, _ = discharge_evaluation.read_gauge_coordinates(
+        gauges_file, reference_ids=[1.0, 2.0], grid_dim_names=("lat", "lon")
+    )
+    np.testing.assert_array_equal(gauge_x, [10.0, 11.0])
+    np.testing.assert_array_equal(gauge_y, [50.0, 51.0])
+
+
+@pytest.mark.parametrize("ascending", [True, False])
+def test_nearest_grid_indices_finds_cells_and_marks_outside_gauges(ascending):
+    """Find the cell of every gauge on either axis order, -1 beyond the grid."""
+    axis = np.arange(10) + 0.5
+    gauges = np.array([0.2, 3.7, 9.9, 10.6, -0.6, np.nan])
+    expected = np.array([0, 3, 9, -1, -1, -1])
+    if not ascending:
+        axis = axis[::-1]
+        expected = np.where(expected >= 0, axis.size - 1 - expected, -1)
+    indices = discharge_evaluation._get_nearest_grid_indices(axis, gauges)
+    np.testing.assert_array_equal(indices, expected)
+
+
+def test_nearest_grid_indices_does_not_build_a_gauge_by_cell_matrix():
+    """Match many gauges on a long axis without a gauges x cells array."""
+    axis = np.arange(50_000) * 0.01
+    gauges = np.linspace(0.0, 499.0, 200)
+    tracemalloc.start()
+    discharge_evaluation._get_nearest_grid_indices(axis, gauges)
+    peak_mib = tracemalloc.get_traced_memory()[1] / 2**20
+    tracemalloc.stop()
+    # a 200 x 50,000 float64 matrix alone takes 76 MiB
+    assert peak_mib < 20
+
+
+@pytest.mark.parametrize("max_distance_cells", [0, -1])
+def test_mean_flow_with_zero_distance_is_refused(max_distance_cells):
+    """Refuse mean-flow without any neighbour cell to choose from."""
+    with pytest.raises(ValueError, match="--gauge-max-distance-cells"):
+        discharge_evaluation._resolve_gauge_location_method(
+            "mean-flow", max_distance_cells, gauge_coordinate_file="g.nc"
+        )
 
 
 @pytest.mark.parametrize(

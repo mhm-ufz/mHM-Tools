@@ -58,8 +58,10 @@ def add_args(parser):
         default=None,
         required=False,
         help=(
-            "Pattern of file paths relative to the input directory that are not "
-            "linked, e.g. '*/domain_evaluation/*'. '*' also matches '/'. "
+            "Pattern of files that are not linked. A pattern without '/' is "
+            "matched against the file name, e.g. 'mRM_Fluxes*', a pattern with '/' "
+            "against the path relative to the input directory, e.g. "
+            "'*/domain_evaluation/*', where '*' also matches '/'. "
             "Can be given multiple times."
         ),
     )
@@ -70,9 +72,8 @@ def add_args(parser):
         default=None,
         required=False,
         help=(
-            "Pattern of file paths relative to the input directory to link; "
-            "files matching none of them are not linked, e.g. '*/mhm_setup/*'. "
-            "'*' also matches '/'. Can be given multiple times. "
+            "Pattern of the only files to link, matched like --exclude-pattern, "
+            "e.g. '*.nml' or '*/mhm_setup/*'. Can be given multiple times. "
             "--exclude-pattern takes precedence."
         ),
     )

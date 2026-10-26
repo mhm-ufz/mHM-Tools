@@ -722,3 +722,47 @@ def test_cli_keeps_the_tui_launcher_as_hidden_command():
     result = CliRunner().invoke(cli, ["tui", "--help"])
 
     assert result.exit_code == 0, result.output
+
+
+def test_link_folder_tree_cli_without_patterns_links_all_files(tmp_path):
+    """Link every file when link-folder-tree gets no exclude or include pattern."""
+    input_dir = tmp_path / "input"
+    for relative_file in ("a/x.txt", "b/y.txt"):
+        (input_dir / relative_file).parent.mkdir(parents=True, exist_ok=True)
+        (input_dir / relative_file).write_text("data")
+    output_dir = tmp_path / "output"
+    command = _build_click_command("link-folder-tree", _link_folder_tree)
+
+    result = CliRunner().invoke(command, ["-i", str(input_dir), "-o", str(output_dir)])
+
+    assert result.exit_code == 0, result.output
+    assert (output_dir / "a" / "x.txt").is_symlink()
+    assert (output_dir / "b" / "y.txt").is_symlink()
+
+
+def test_link_folder_tree_cli_keeps_repeated_exclude_patterns(monkeypatch):
+    """Hand every repeated --exclude-pattern on as one whole pattern."""
+    received_calls = []
+    monkeypatch.setattr(
+        "mhm_tools.pre.link_folder_tree.link_folder_tree",
+        lambda **kwargs: received_calls.append(kwargs),
+    )
+    command = _build_click_command("link-folder-tree", _link_folder_tree)
+
+    result = CliRunner().invoke(
+        command,
+        [
+            "-i",
+            "input",
+            "-o",
+            "output",
+            "--exclude-pattern",
+            "*/a/*",
+            "--exclude-pattern",
+            "*/b/*",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert received_calls[0]["exclude_patterns"] == ["*/a/*", "*/b/*"]
+    assert not received_calls[0]["include_patterns"]

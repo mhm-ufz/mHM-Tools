@@ -14,6 +14,8 @@ Constants
     FDIR_FILLVALUE
     FDIR_SINKVALUE
     FDIR_CODES
+    DEM_DERIVATIVE_EXTENSIONS
+    FACC_UNITS
 
 ----
 
@@ -36,11 +38,17 @@ Constants
 .. autodata:: FDIR_SINKVALUE
 
 .. autodata:: FDIR_CODES
+
+.. autodata:: DEM_DERIVATIVE_EXTENSIONS
+
+.. autodata:: FACC_UNITS
 """
 
 import numpy as np
 
 __all__ = [
+    "DEM_DERIVATIVE_EXTENSIONS",
+    "FACC_UNITS",
     "FDIR_CODES",
     "FDIR_FILLVALUE",
     "FDIR_SINKVALUE",
@@ -88,6 +96,10 @@ FDIR_CODES = {
     "ldd": tuple(range(1, 10)),
 }
 """Valid flow direction codes per type, pits included (255 is a d8 pit too)."""
+DEM_DERIVATIVE_EXTENSIONS = ("nc", "asc", "tif")
+"""Output file extensions of create-dem-derivatives."""
+FACC_UNITS = ("cell", "km2")
+"""Flow accumulation units: upstream cells or upstream area in km2."""
 
 QUANTIZE_MODES = ("BitGroom", "GranularBitRound", "BitRound")
 """Lossy mantissa quantization modes offered by netcdf-c."""

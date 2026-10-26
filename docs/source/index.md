@@ -30,6 +30,23 @@ As of version 0.3 it covers three main use cases:
 $ pip install mhm-tools
 ```
 
+### Clean install into a conda environment
+
+To install mhm-tools from a source checkout into a conda environment that nothing else in your shell interferes with, e.g. on an HPC system or to test a release, use the install script:
+
+```shell
+$ git clone https://git.ufz.de/mhm/mhm-tools.git
+$ cd mhm-tools
+$ scripts/install_mhm_tools.sh /path/to/envs/mhm-tools
+$ conda activate /path/to/envs/mhm-tools
+```
+
+The script needs conda or mamba. It creates the environment if the path does not exist, with the compiled dependencies and the CDO program from conda-forge, or updates an existing one. It ignores `PYTHONPATH`, the user site-packages and the pip settings of your shell, replaces an older mhm-tools install, and checks afterwards that `mhm_tools` is imported from the environment.
+
+* `--editable`: install in editable mode, for development
+* `--extras test,doc`: also install optional dependencies
+* `--python 3.12`: Python version of a new environment (default 3.11)
+
 ## Documentation and source code
 
 * [Command line reference](cli): every `mhm-tools` command and its options

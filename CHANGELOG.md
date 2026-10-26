@@ -6,22 +6,23 @@
 
 - `create-dem-derivatives --one-file-per-variable` writes every derivative to its own NetCDF (`dem.nc`, `slope.nc`, `fdir.nc`, ...) with `lat`, `lon` and `crs`, as mHM expects them in a morph folder.
 - `create-dem-derivatives --input-type fdir` calculates only the flow accumulation from an existing d8 or ldd flow direction grid (`--ftype`), so facc follows the network of an mHM setup. Invalid flow direction codes are refused and listed. `--facc-unit cell|km2` sets the facc unit; `km2` writes float64 upstream area.
-- `discharge-evaluation --gauge-coordinate-file` reads gridded model output at the gauge coordinates of a NetCDF with `station` ids and `x`/`y` or `lon`/`lat` in the grid's CRS, e.g. a corrected scc gauges file. Gauges outside the grid are dropped with a warning.
-- `discharge-evaluation --gauge-optimization-method` gains `nearest` and `mean-flow`. `mean-flow` picks the cell within `--gauge-max-distance-cells` whose mean discharge is closest to the observed one; as the observations choose the cell, the bias of these gauges might look better than it is.
+- `discharge-evaluation --gauge-coordinate-file` reads gridded model output at the gauge coordinates of a NetCDF with `station` ids and `x`/`y` or `lon`/`lat` in the grid's CRS, e.g. a corrected scc gauges file; with both pairs in the file, the one matching the grid's dimensions is used. Gauges outside the grid are dropped with a warning.
+- `discharge-evaluation --gauge-optimization-method` gains `nearest` and `mean-flow`. `mean-flow` picks the cell within `--gauge-max-distance-cells` (at least 1) whose 12 monthly mean discharges are closest to the observed ones, taken over the months both records cover, so their time steps and stamps need not match. As the observations choose the cell, the bias of these gauges might look better than it is.
 - `create-catchment --max-distance-auto` derives the outlet search distance of every gauge from its catchment size (0.15 times the perimeter of its reference shape, or estimated from its area), limited to 2-10 km.
-- `link-folder-tree --exclude-pattern` and `--include-pattern` (repeatable, matched against the relative path, exclude wins) leave files unlinked, e.g. outputs a later task writes again.
+- `link-folder-tree --exclude-pattern` and `--include-pattern` (repeatable, exclude wins) leave files unlinked, e.g. outputs a later task writes again. A pattern without `/` is matched against the file name in any folder, e.g. `mRM_Fluxes*`; a pattern with `/` against the path relative to `--input-dir`, e.g. `*/domain_evaluation/*`, where `*` also matches `/`.
+- `scripts/install_mhm_tools.sh ENV_DIR` installs mhm-tools from a source checkout into a conda environment, which it creates if missing with the compiled dependencies and the CDO program from conda-forge. It ignores `PYTHONPATH`, the user site-packages and pip settings of the shell, replaces an older (editable) install and checks that `mhm_tools` is imported from the environment. `--editable`, `--extras` and `--python` adjust it; the documentation describes it under Installation.
 
 ### Changed
 
 - `create-catchment` crops the input around a gauge without a shapefile to a box 6 times the square root of its reference area wide instead of loading the whole input, which got jobs on global 1/600 degree grids killed for memory. With several gauges the crop covers every gauge.
-- `create-catchment` repeats the delineation with the crop doubled in size, at most twice, when a basin reaches the crop edge, and names the lowest rejected shape error, its upstream area and the reference area when the shape-based outlet correction fails.
+- `create-catchment` repeats the delineation with the crop doubled in size, at most twice, when a crop edge cuts off a basin, also when this makes the outlet search fail; a basin reaching the edge of the input itself only gets a warning. It also names the lowest rejected shape error, its upstream area and the reference area when the shape-based outlet correction fails.
 - `discharge-evaluation --gauge-optimization-method` and `--gauge-max-distance-cells` default to the gauge source: `basinex` and 3 cells with `--facc-file` as before, `nearest` and 1 cell with `--gauge-coordinate-file`. Invalid combinations are refused before the evaluation starts.
 - `format-data` reclassifies 8- and 16-bit integer categories in a single pass through a lookup array and reports unmatched categories once with their cell count.
 - `snow-evaluation` moved from `legacy-tools` to `evaluation`; `mhm-tools legacy-tools snow-evaluation` no longer works.
 - `fill-nearest --fname` defaults to `*.nc` instead of `precipitation_*.nc`.
 - The CLI starts much faster: subpackages, commands and the TUI are imported on first use, e.g. a command's `--help` drops from 2 s to 0.06 s.
 - `read_header` and `standardize_header` match ASCII header keys case-insensitively, so a declared `NODATA_value` other than -9999 is no longer replaced by -9999. `standardize_header(require_all=True)` requires all six header lines with either a corner or a center coordinate pair.
-- The flow direction conventions (`FDIR_FILLVALUE`, `FDIR_SINKVALUE`, `FDIR_CODES`) and the -9999 nodata value come from `common.constants`; the values are unchanged.
+- The flow direction conventions (`FDIR_FILLVALUE`, `FDIR_SINKVALUE`, `FDIR_CODES`), the -9999 nodata value and the `create-dem-derivatives` output extensions (`DEM_DERIVATIVE_EXTENSIONS`, still `OUTPUT_EXTENSIONS` in `pre.dem_derivatives`) come from `common.constants`; the values are unchanged.
 
 ### Fixed
 
@@ -32,6 +33,8 @@
 - `align_bounds_to_l2` added an empty L2 cell when float32 coordinates missed an L2 edge on the domain bound. An L2 edge within half an L0 cell of the bound now counts as matching it.
 - `discharge-evaluation` drew projected gauge coordinates on its gauge maps as degrees; they are drawn in the CRS of the gauges file.
 - `fill-nearest` failed on every call because `--default-value` was never declared; it now exists and defaults to `--fill-value`.
+- `create-dem-derivatives` derived wrong flow directions, facc and aspect from a DEM with ascending lat/y, because the codes assume that the first row is the northernmost. Its input is now read north-up.
+- Reading several NetCDF files from a folder refused files with an upper-case `.NC` suffix as "not NetCDF".
 - `read_ascii_to_xarray`:
   - returned one `lon` or `lat` value too many for cellsizes like 1/600 degree;
   - truncated float grids such as `dem.asc` to int32 when the header held an integer nodata (`1234.56` became `1234`). The data now decides the type and `nodata_value` follows it;
@@ -39,11 +42,14 @@
 
 ### Tests
 
-- `discharge-evaluation`: the facc defaults, the refusal without any gauge source, scc gauges with only `x`/`y`, the PlateCarree gauge map, the nearest-cell and window selection on a projected grid with 2-D lon/lat coordinates, the mean-flow choice on shared days and on ties, reading gauge coordinates, the method defaults and refused combinations, the projected gauge map, and both grid methods through `Q_data_to_xarray`. The legacy GRDC evaluation tests moved into `test_discharge_evaluation.py`.
-- CLI: commands reached by group, dash/underscore alias, top level, former name and root option alias, the group listings, the typo hint and the hidden tui; importing the package and the CLI and showing a command's help without any data library, and the former eager package exports reachable in any import order.
+- `discharge-evaluation`: the facc defaults, the refusal without any gauge source, scc gauges with only `x`/`y`, the PlateCarree gauge map, the nearest-cell and window selection on a projected grid with 2-D lon/lat coordinates, the mean-flow choice by seasonality with unobserved winters, at a different time of day, beyond the grid, without overlap and on ties, the refused mean-flow distance below one cell, the gauge coordinate pair matching the grid, the nearest-cell search without a gauges x cells array, reading gauge coordinates, the method defaults and refused combinations, the projected gauge map, and both grid methods through `Q_data_to_xarray`. The legacy GRDC evaluation tests moved into `test_discharge_evaluation.py`.
+- CLI: commands reached by group, dash/underscore alias, top level, former name and root option alias, the group listings, the typo hint and the hidden tui; importing the package and the CLI and showing a command's help, also that of `create-dem-derivatives`, without any data library, the `link-folder-tree` patterns given through the CLI, and the former eager package exports reachable in any import order.
 - `format-data` reclassification: uint8 and signed int16 categories with nodata through the lookup array, unmatched categories logged with their cell count, a raster without any matching category refused, float categories with NaN on the per-category path, and the lookup array giving the same classes as the per-category loop.
 - `link-folder-tree`: excluded files and folders left unlinked with several patterns, every file linked without exclude patterns, only included files linked, and an exclude pattern winning over an include pattern.
 - ASCII grids: exactly `ncols` and `nrows` cell centres for a 1/600 degree cellsize whose corners made the float step return one value too many; float data with an integer nodata staying float and integer data with a float nodata staying int, on reading and after writing; a header in scientific notation, with mixed-case keys and whitespace, and corner and center coordinates giving the same grid; and an error for every missing header line and for mixed corner/center coordinates.
+- `create-dem-derivatives`: the same derivatives and facc from a south-up DEM or flow direction grid as from the north-up one.
+- `create-catchment`: the perimeter of a geographic shape on a projected grid in metres; no larger crop for a basin at the input's own edge or for a wrong reference area; one rerun for a single basin cut by the crop, matching an uncropped run, and for several gauges instead of dropping them.
+- `get_dataset_from_path`: several NetCDF files with an upper-case `.NC` suffix.
 
 ## [v0.3]
 

@@ -92,14 +92,11 @@ def _warn_unmatched_categories(unmatched_count: int, categories: np.ndarray) -> 
     categories : numpy.ndarray
         Sorted category values of these cells.
     """
+    category_word = "category" if categories.size == 1 else "categories"
     logger.warning(
-        "%d valid raster cells in %d categor%s were not present in the "
-        "lookup table and were written as %d: %s",
-        unmatched_count,
-        categories.size,
-        "y" if categories.size == 1 else "ies",
-        int(_NODATA),
-        _format_categories(categories),
+        f"{unmatched_count} valid raster cells in {categories.size} {category_word} "
+        f"were not present in the lookup table and were written as {int(_NODATA)}: "
+        f"{_format_categories(categories)}"
     )
 
 

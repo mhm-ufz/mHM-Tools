@@ -77,3 +77,13 @@ def test_command_help_loads_only_its_own_command_module():
 def test_lazy_package_exports_stay_reachable(code):
     """Reach every former eager export of the packages, in any import order."""
     _get_modules_loaded_by(code)
+
+
+def test_create_dem_derivatives_help_loads_no_data_libraries():
+    """Show the create-dem-derivatives help without xarray, rasterio and co."""
+    modules = _get_modules_loaded_by(
+        "from mhm_tools._cli._main import main\n"
+        "main(['setup-creation', 'create-dem-derivatives', '-h'])"
+    )
+    assert "mhm_tools._cli._create_dem_derivatives" in modules
+    assert not DATA_LIBRARIES & modules

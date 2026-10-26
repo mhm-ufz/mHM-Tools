@@ -2,6 +2,7 @@ import csv
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import geopandas as gpd
 import numpy as np
@@ -1773,3 +1774,120 @@ class TestProjectedCatchment(unittest.TestCase):
         self.assertEqual(gauge_info["method"], "shape_iou")
         self.assertAlmostEqual(gauge_info["shape_error"], 0.0)
         self.assertAlmostEqual(gauge_info["distance"], 0.2)
+
+    def test_shape_perimeter_of_geographic_shape_on_projected_grid_is_in_metres(self):
+        """Measure a WGS84 reference shape in metres also on a projected grid."""
+        reference_shape = gpd.GeoDataFrame(
+            geometry=[box(10.0, 50.0, 11.0, 51.0)], crs="EPSG:4326"
+        )
+        perimeter_m = catchment._calculate_shape_perimeter_m(
+            reference_shape, latlon=False
+        )
+        # 2 x 111 km north-south plus 2 x about 70 km east-west
+        self.assertGreater(perimeter_m, 300_000.0)
+        self.assertLess(perimeter_m, 450_000.0)
+
+    def run_counting_delineation_attempts(self, **create_catchment_kwargs):
+        """Run create_catchment and count its attempts, the reruns included.
+
+        Every attempt opens the input once, so the opened inputs are counted.
+
+        Args:
+            **create_catchment_kwargs: Arguments of create_catchment.
+
+        Returns:
+            Number of delineation attempts.
+        """
+        with patch.object(
+            catchment,
+            "get_xarray_ds_from_file",
+            wraps=catchment.get_xarray_ds_from_file,
+        ) as open_input_spy:
+            catchment.create_catchment(**create_catchment_kwargs)
+        return open_input_spy.call_count
+
+    def test_basin_at_input_boundary_does_not_enlarge_crop(self):
+        """Keep the crop when the basin only reaches the edges of the input itself."""
+        # the gauge row drains all 10 columns east, so its basin spans the input
+        # from west to east, while the crop only holds the rows around it
+        y, x = self.create_axes(41, 10)
+        fdir_file = self.write_projected_fdir_netcdf(
+            self.create_row_rivers(41, 10), y, x
+        )
+        attempt_count = self.run_counting_delineation_attempts(
+            gauge_coords=(float(y[20]), float(x[9])),
+            gauge_ids=self.GAUGE_ID,
+            ref_catchment_area=10 * self.CELL_AREA_KM2,
+            **self.create_catchment_kwargs(fdir_file, self.tmp_path / "cropped"),
+        )
+        self.assertEqual(attempt_count, 1)
+
+    def test_basin_cut_by_crop_edge_reruns_once_and_matches_uncropped(self):
+        """Enlarge a crop cutting off the basin once and match an uncropped run."""
+        # the 40 cell long gauge row is longer than the first crop (about 21
+        # columns) and shorter than the crop enlarged once
+        y, x = self.create_axes(7, 40)
+        fdir_file = self.write_projected_fdir_netcdf(
+            self.create_row_rivers(7, 40), y, x
+        )
+        gauge_coords = (float(y[3]), float(x[39]))
+        attempt_count = self.run_counting_delineation_attempts(
+            gauge_coords=gauge_coords,
+            gauge_ids=self.GAUGE_ID,
+            ref_catchment_area=40 * self.CELL_AREA_KM2,
+            **self.create_catchment_kwargs(fdir_file, self.tmp_path / "cropped"),
+        )
+        # without a reference area the input is not cropped at all
+        catchment.create_catchment(
+            gauge_coords=gauge_coords,
+            gauge_ids=self.GAUGE_ID,
+            **self.create_catchment_kwargs(fdir_file, self.tmp_path / "uncropped"),
+        )
+        self.assertEqual(attempt_count, 2)
+        with xr.open_dataset(
+            self.tmp_path / "cropped" / "basin_ids.nc"
+        ) as cropped, xr.open_dataset(
+            self.tmp_path / "uncropped" / "basin_ids.nc"
+        ) as uncropped:
+            xr.testing.assert_equal(cropped["basin"], uncropped["basin"])
+
+    def test_wrong_reference_area_fails_without_enlarging_crop(self):
+        """Fail at once when no candidate matches although the crop cuts no basin."""
+        # the 10 cell long gauge row lies inside the crop, the reference area
+        # of 40 cells matches no cell near the gauge
+        y, x = self.create_axes(61, 10)
+        fdir_file = self.write_projected_fdir_netcdf(
+            self.create_row_rivers(61, 10), y, x
+        )
+        with patch.object(
+            catchment,
+            "get_xarray_ds_from_file",
+            wraps=catchment.get_xarray_ds_from_file,
+        ) as open_input_spy, self.assertRaises(ValueError):
+            catchment.create_catchment(
+                gauge_coords=(float(y[30]), float(x[9])),
+                gauge_ids=self.GAUGE_ID,
+                ref_catchment_area=40 * self.CELL_AREA_KM2,
+                **self.create_catchment_kwargs(fdir_file, self.tmp_path / "cropped"),
+            )
+        self.assertEqual(open_input_spy.call_count, 1)
+
+    def test_multi_gauge_basin_cut_by_crop_is_rerun_not_dropped(self):
+        """Enlarge the crop for gauges whose basins it cuts off instead of dropping them."""
+        # both 40 cell long gauge rows are longer than the first crop
+        y, x = self.create_axes(7, 40)
+        fdir_file = self.write_projected_fdir_netcdf(
+            self.create_row_rivers(7, 40), y, x
+        )
+        output_dir = self.tmp_path / "multi_gauge"
+        attempt_count = self.run_counting_delineation_attempts(
+            gauge_coords=[(float(y[1]), float(x[39])), (float(y[5]), float(x[39]))],
+            gauge_ids=[self.GAUGE_ID, self.GAUGE_ID + 10],
+            ref_catchment_area=[40 * self.CELL_AREA_KM2, 40 * self.CELL_AREA_KM2],
+            **self.create_catchment_kwargs(fdir_file, output_dir),
+        )
+        self.assertEqual(attempt_count, 2)
+        gauges_info = pd.read_csv(output_dir / "gauges_info.csv")
+        self.assertEqual(
+            sorted(gauges_info["id"].tolist()), [self.GAUGE_ID, self.GAUGE_ID + 10]
+        )
