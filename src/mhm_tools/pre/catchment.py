@@ -697,13 +697,18 @@ def _calculate_shape_perimeter_m(reference_shape, latlon):
 
     Args:
         reference_shape (geopandas.GeoDataFrame): Reference catchment shape.
-        latlon (bool): Whether the shape coordinates are in degrees.
+        latlon (bool): Whether the shape coordinates are in degrees, used only
+            when the shape has no CRS.
 
     Returns
     -------
         The perimeter of the merged shape geometries in meters.
     """
-    if latlon:
+    # on a projected grid the shape keeps its own CRS, which may be geographic
+    is_geographic = (
+        reference_shape.crs.is_geographic if reference_shape.crs is not None else latlon
+    )
+    if is_geographic:
         # degrees have no fixed length, so measure in the local UTM zone
         reference_shape = reference_shape.to_crs(reference_shape.estimate_utm_crs())
     return float(_geometry_union(reference_shape.geometry).length)

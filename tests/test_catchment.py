@@ -1773,3 +1773,15 @@ class TestProjectedCatchment(unittest.TestCase):
         self.assertEqual(gauge_info["method"], "shape_iou")
         self.assertAlmostEqual(gauge_info["shape_error"], 0.0)
         self.assertAlmostEqual(gauge_info["distance"], 0.2)
+
+    def test_shape_perimeter_of_geographic_shape_on_projected_grid_is_in_metres(self):
+        """Measure a WGS84 reference shape in metres also on a projected grid."""
+        reference_shape = gpd.GeoDataFrame(
+            geometry=[box(10.0, 50.0, 11.0, 51.0)], crs="EPSG:4326"
+        )
+        perimeter_m = catchment._calculate_shape_perimeter_m(
+            reference_shape, latlon=False
+        )
+        # 2 x 111 km north-south plus 2 x about 70 km east-west
+        self.assertGreater(perimeter_m, 300_000.0)
+        self.assertLess(perimeter_m, 450_000.0)
