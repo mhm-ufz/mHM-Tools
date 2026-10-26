@@ -10,6 +10,7 @@
 - `discharge-evaluation --gauge-optimization-method` gains `nearest` and `mean-flow`. `mean-flow` picks the cell within `--gauge-max-distance-cells` (at least 1) whose 12 monthly mean discharges are closest to the observed ones, taken over the months both records cover, so their time steps and stamps need not match. As the observations choose the cell, the bias of these gauges might look better than it is.
 - `create-catchment --max-distance-auto` derives the outlet search distance of every gauge from its catchment size (0.15 times the perimeter of its reference shape, or estimated from its area), limited to 2-10 km.
 - `link-folder-tree --exclude-pattern` and `--include-pattern` (repeatable, matched against the relative path, exclude wins) leave files unlinked, e.g. outputs a later task writes again.
+- `scripts/install_mhm_tools.sh ENV_DIR` installs mhm-tools from a source checkout into a conda environment, which it creates if missing with the compiled dependencies and the CDO program from conda-forge. It ignores `PYTHONPATH`, the user site-packages and pip settings of the shell, replaces an older (editable) install and checks that `mhm_tools` is imported from the environment. `--editable`, `--extras` and `--python` adjust it; the documentation describes it under Installation.
 
 ### Changed
 
