@@ -537,7 +537,8 @@ def _action_to_click_option(action: argparse.Action, option_group: str = "option
 
         kwargs["callback"] = flag_callback
     else:
-        if action.nargs in ("+", "*"):
+        # an append option is given once per value, like a repeated nargs option
+        if action.nargs in ("+", "*") or isinstance(action, argparse._AppendAction):
             kwargs["multiple"] = True
             # a repeatable option needs a sequence default, and click raises for
             # a bare one, so a single value is wrapped instead of passed through
