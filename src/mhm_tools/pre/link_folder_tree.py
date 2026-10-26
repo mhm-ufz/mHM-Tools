@@ -9,6 +9,8 @@ Authors
 - Simon Lüdke
 """
 
+from __future__ import annotations
+
 import logging
 from fnmatch import fnmatch
 from pathlib import Path
