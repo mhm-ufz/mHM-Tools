@@ -464,6 +464,42 @@ def test_read_gauge_coordinates_refuses_gauges_without_observations(tmp_path):
         discharge_evaluation.read_gauge_coordinates(gauges_file, reference_ids=[5.0])
 
 
+def _write_gauges_with_lonlat_and_xy(gauges_file):
+    """Write two gauges holding lon/lat in degrees and x/y in metres."""
+    xr.Dataset(
+        {
+            "station": ("station", [1.0, 2.0]),
+            "x": ("station", [4000.0, 5000.0]),
+            "y": ("station", [3000.0, 3100.0]),
+            "lon": ("station", [10.0, 11.0]),
+            "lat": ("station", [50.0, 51.0]),
+        }
+    ).to_netcdf(gauges_file)
+    return gauges_file
+
+
+def test_read_gauge_coordinates_uses_xy_on_projected_grid(tmp_path):
+    """Use x/y besides lon/lat when the model grid has x/y dimensions."""
+    gauges_file = _write_gauges_with_lonlat_and_xy(tmp_path / "gauges.nc")
+
+    gauge_x, gauge_y, _ = discharge_evaluation.read_gauge_coordinates(
+        gauges_file, reference_ids=[1.0, 2.0], grid_dim_names=("y", "x")
+    )
+    np.testing.assert_array_equal(gauge_x, [4000.0, 5000.0])
+    np.testing.assert_array_equal(gauge_y, [3000.0, 3100.0])
+
+
+def test_read_gauge_coordinates_uses_lonlat_on_geographic_grid(tmp_path):
+    """Use lon/lat besides x/y when the model grid has lat/lon dimensions."""
+    gauges_file = _write_gauges_with_lonlat_and_xy(tmp_path / "gauges.nc")
+
+    gauge_x, gauge_y, _ = discharge_evaluation.read_gauge_coordinates(
+        gauges_file, reference_ids=[1.0, 2.0], grid_dim_names=("lat", "lon")
+    )
+    np.testing.assert_array_equal(gauge_x, [10.0, 11.0])
+    np.testing.assert_array_equal(gauge_y, [50.0, 51.0])
+
+
 @pytest.mark.parametrize("ascending", [True, False])
 def test_nearest_grid_indices_finds_cells_and_marks_outside_gauges(ascending):
     """Find the cell of every gauge on either axis order, -1 beyond the grid."""

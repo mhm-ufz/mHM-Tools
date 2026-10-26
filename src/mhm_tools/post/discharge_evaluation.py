@@ -1043,25 +1043,69 @@ def select_cells_by_mean_flow(sim_candidates, observed):
     return sim_sel, cell_x, cell_y
 
 
-def read_gauge_coordinates(gauges_file, reference_ids):
+def _get_gauge_coordinate_names(ds, grid_dim_names=None):
+    """Get the gauge coordinate pair of a gauges file that fits the model grid.
+
+    Args:
+        ds (xr.Dataset): Gauges file with ``lon``/``lat`` and/or ``x``/``y``.
+        grid_dim_names (tuple of str): Dimension names of the model grid, or
+            None to prefer ``lon``/``lat``.
+
+    Returns
+    -------
+        tuple of str: ``("lon", "lat")`` or ``("x", "y")``.
+    """
+    has_lonlat = "lon" in ds and "lat" in ds
+    has_xy = "x" in ds and "y" in ds
+    grid_is_geographic = grid_dim_names is None or bool(
+        {"lat", "lon", "latitude", "longitude"} & set(grid_dim_names)
+    )
+    if has_lonlat and (grid_is_geographic or not has_xy):
+        return "lon", "lat"
+    return "x", "y"
+
+
+def _get_model_grid_dim_names(model_data_path, model_file_name, sim_variable):
+    """Get the dimension names of the simulated discharge in the first model file.
+
+    Args:
+        model_data_path: Model file, directory, list or glob.
+        model_file_name (str): File name pattern inside a directory, or None.
+        sim_variable (str): Discharge variable, or None for the single variable.
+
+    Returns
+    -------
+        tuple of str: The dimension names, or None without a readable variable.
+    """
+    model_files = _expand_input_files(model_data_path, file_name=model_file_name)
+    if not model_files:
+        return None
+    with load_ds(model_files[0]) as ds:
+        variable = get_single_data_var(ds) if sim_variable is None else sim_variable
+        if variable is None or variable not in ds:
+            return None
+        return tuple(ds[variable].dims)
+
+
+def read_gauge_coordinates(gauges_file, reference_ids, grid_dim_names=None):
     """Read the coordinates of the gauges that have reference observations.
 
     Args:
         gauges_file (str or Path): NetCDF with station ids (``NODE_STATION_ID_NAMES``)
-            and ``lon``/``lat`` or ``x``/``y``; ``lon``/``lat`` are preferred.
+            and ``lon``/``lat`` and/or ``x``/``y``.
         reference_ids (array_like): Ids of the gauges with observations.
+        grid_dim_names (tuple of str): Dimension names of the model grid; with
+            both pairs in the file, ``x``/``y`` are used for a grid without
+            lat/lon dimensions. None prefers ``lon``/``lat``.
 
     Returns
     -------
         tuple of np.ndarray: x, y and ids of the matching gauges, in file order.
     """
     with load_ds(gauges_file) as ds:
-        if "lon" in ds and "lat" in ds:
-            gauge_x = np.asarray(ds["lon"].values, dtype=float)
-            gauge_y = np.asarray(ds["lat"].values, dtype=float)
-        else:
-            gauge_x = np.asarray(ds["x"].values, dtype=float)
-            gauge_y = np.asarray(ds["y"].values, dtype=float)
+        x_name, y_name = _get_gauge_coordinate_names(ds, grid_dim_names)
+        gauge_x = np.asarray(ds[x_name].values, dtype=float)
+        gauge_y = np.asarray(ds[y_name].values, dtype=float)
         id_name = next(
             (name for name in NODE_STATION_ID_NAMES if name in ds.variables), "station"
         )
@@ -1074,21 +1118,23 @@ def read_gauge_coordinates(gauges_file, reference_ids):
     return gauge_x[keep], gauge_y[keep], gauge_ids[keep]
 
 
-def read_gauge_crs(gauges_file):
+def read_gauge_crs(gauges_file, grid_dim_names=None):
     """Read the CRS of projected gauge coordinates for the gauge maps.
 
     Args:
         gauges_file (str or Path): Gauges file, or None.
+        grid_dim_names (tuple of str): Dimension names of the model grid, which
+            choose the coordinate pair like in ``read_gauge_coordinates``.
 
     Returns
     -------
-        The CRS of ``x``/``y`` from their grid mapping, or None for a file with
-        ``lon``/``lat``, without grid mapping or without file.
+        The CRS of ``x``/``y`` from their grid mapping, or None when ``lon``/``lat``
+        are used, without grid mapping or without file.
     """
     if gauges_file is None:
         return None
     with load_ds(gauges_file) as ds:
-        if ("lon" in ds and "lat" in ds) or "x" not in ds:
+        if "x" not in ds or _get_gauge_coordinate_names(ds, grid_dim_names)[0] != "x":
             return None
         grid_mapping = ds["x"].attrs.get("grid_mapping", "crs")
         if grid_mapping not in ds.variables:
@@ -1678,8 +1724,14 @@ def Q_data_to_xarray(  # noqa: PLR0913, PLR0915, PLR0912
             logger.info(
                 f"Getting gauge coordinates from {gauges_file} ({extraction_mode} mode)."
             )
+            # gridded output takes the gauge coordinates in the CRS of its grid
+            grid_dim_names = (
+                _get_model_grid_dim_names(model_data_path, model_file_name, sim_variable)
+                if extraction_mode == "grid"
+                else None
+            )
             x_new_pre, y_new_pre, gauge_ids_with_values_pre = read_gauge_coordinates(
-                gauges_file, gauge_ids.values
+                gauges_file, gauge_ids.values, grid_dim_names=grid_dim_names
             )
             try:
                 facc_new_pre = facc.sel(id=gauge_ids_with_values_pre).values
@@ -2452,10 +2504,16 @@ def evaludate_discharge_data(  # noqa: PLR0913
         years = None
         if start_date is not None and end_date is not None:
             years = (pd.Timestamp(start_date).year, pd.Timestamp(end_date).year)
+        grid_dim_names = (
+            _get_model_grid_dim_names(model_data_path, model_file_name, sim_variable)
+            if gauge_coordinate_file is not None
+            else None
+        )
         gauges_crs = read_gauge_crs(
             gauge_coordinate_file
             if gauge_coordinate_file is not None
-            else scc_gauges_file
+            else scc_gauges_file,
+            grid_dim_names=grid_dim_names,
         )
         metric_plot_files.extend(
             plot_map(results_df, output_path, years=years, crs=gauges_crs) or []
