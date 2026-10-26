@@ -843,7 +843,16 @@ def _get_nearest_grid_indices(coordinate_values, gauge_values):
         if coordinate_values.size > 1
         else 0.0
     )
-    indices = np.abs(coordinate_values[None, :] - gauge_values[:, None]).argmin(axis=1)
+    # search the sorted axis and take the nearer of the two neighbouring centres,
+    # which needs no gauges x cells array
+    order = np.argsort(coordinate_values)
+    sorted_values = coordinate_values[order]
+    right = np.clip(np.searchsorted(sorted_values, gauge_values), 0, order.size - 1)
+    left = np.clip(right - 1, 0, order.size - 1)
+    take_left = np.abs(gauge_values - sorted_values[left]) <= np.abs(
+        sorted_values[right] - gauge_values
+    )
+    indices = order[np.where(take_left, left, right)]
     outside = ~np.isfinite(gauge_values) | (
         (gauge_values < coordinate_values.min() - cell_size / 2)
         | (gauge_values > coordinate_values.max() + cell_size / 2)

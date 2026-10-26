@@ -7,6 +7,7 @@ data workflow of ``Q_data_to_xarray`` and ``evaludate_discharge_data``.
 import contextlib
 import logging
 import tempfile
+import tracemalloc
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -461,6 +462,31 @@ def test_read_gauge_coordinates_refuses_gauges_without_observations(tmp_path):
     ).to_netcdf(gauges_file)
     with pytest.raises(ValueError, match="No gauges"):
         discharge_evaluation.read_gauge_coordinates(gauges_file, reference_ids=[5.0])
+
+
+@pytest.mark.parametrize("ascending", [True, False])
+def test_nearest_grid_indices_finds_cells_and_marks_outside_gauges(ascending):
+    """Find the cell of every gauge on either axis order, -1 beyond the grid."""
+    axis = np.arange(10) + 0.5
+    gauges = np.array([0.2, 3.7, 9.9, 10.6, -0.6, np.nan])
+    expected = np.array([0, 3, 9, -1, -1, -1])
+    if not ascending:
+        axis = axis[::-1]
+        expected = np.where(expected >= 0, axis.size - 1 - expected, -1)
+    indices = discharge_evaluation._get_nearest_grid_indices(axis, gauges)
+    np.testing.assert_array_equal(indices, expected)
+
+
+def test_nearest_grid_indices_does_not_build_a_gauge_by_cell_matrix():
+    """Match many gauges on a long axis without a gauges x cells array."""
+    axis = np.arange(50_000) * 0.01
+    gauges = np.linspace(0.0, 499.0, 200)
+    tracemalloc.start()
+    discharge_evaluation._get_nearest_grid_indices(axis, gauges)
+    peak_mib = tracemalloc.get_traced_memory()[1] / 2**20
+    tracemalloc.stop()
+    # a 200 x 50,000 float64 matrix alone takes 76 MiB
+    assert peak_mib < 20
 
 
 @pytest.mark.parametrize(
