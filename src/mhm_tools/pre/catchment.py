@@ -695,7 +695,7 @@ def _get_area_crop_bounds(
 
 
 def _get_gauge_crop_bounds(
-    shape_folder,
+    shape_dir,
     gauge_ids,
     gauge_coords,
     ref_catchment_area,
@@ -709,7 +709,7 @@ def _get_gauge_crop_bounds(
     around their coordinates sized from their reference catchment area.
 
     Args:
-        shape_folder: Folder holding the gauge shapefiles, or None.
+        shape_dir: Directory holding the gauge shapefiles, or None.
         gauge_ids: Gauge id, list of gauge ids or None.
         gauge_coords: (lat, lon) tuple, list of tuples or None.
         ref_catchment_area: Area in km2, list of areas or None.
@@ -728,12 +728,12 @@ def _get_gauge_crop_bounds(
     shape_ids = [
         gauge_id
         for gauge_id in gauge_id_list
-        if _find_shape_file(shape_folder, gauge_id) is not None
+        if _find_shape_file(shape_dir, gauge_id) is not None
     ]
     bounds_list = []
     if shape_ids:
         shape_bounds = _shape_bounds_from_folder(
-            shape_folder, shape_ids, min_buffer=min_buffer, min_buffer_m=min_buffer_m
+            shape_dir, shape_ids, min_buffer=min_buffer, min_buffer_m=min_buffer_m
         )
         if shape_bounds is not None:
             bounds_list.append(shape_bounds)
@@ -779,7 +779,7 @@ def _calculate_shape_perimeter_m(reference_shape, latlon):
     return float(_geometry_union(reference_shape.geometry).length)
 
 
-def _calculate_auto_max_distance_m(gauge_id, shape_folder, ref_area, latlon):
+def _calculate_auto_max_distance_m(gauge_id, shape_dir, ref_area, latlon):
     """Derive the maximum outlet distance of a gauge from its catchment size.
 
     The distance is a fraction of the perimeter of the reference shape, or of a
@@ -787,7 +787,7 @@ def _calculate_auto_max_distance_m(gauge_id, shape_folder, ref_area, latlon):
 
     Args:
         gauge_id: Gauge id used to find the reference shape, or None.
-        shape_folder: Folder holding the gauge shapefiles, or None.
+        shape_dir: Directory holding the gauge shapefiles, or None.
         ref_area (float): Reference catchment area in km2, or None.
         latlon (bool): Whether the shape coordinates are in degrees.
 
@@ -795,7 +795,7 @@ def _calculate_auto_max_distance_m(gauge_id, shape_folder, ref_area, latlon):
     -------
         The maximum outlet distance in meters.
     """
-    reference_shape, _ = _read_reference_shape(shape_folder, gauge_id, latlon)
+    reference_shape, _ = _read_reference_shape(shape_dir, gauge_id, latlon)
     if reference_shape is not None and not reference_shape.empty:
         perimeter_m = _calculate_shape_perimeter_m(reference_shape, latlon)
         source = "shape perimeter"

@@ -411,12 +411,12 @@ def _write_netcdf(
         output = _resolve_output(output_path, default_name)
         write_xarray_to_netcdf(ds, output, encoding=encoding, compression=compression)
         return (output,)
-    folder = Path(output_path)
-    folder.mkdir(parents=True, exist_ok=True)
+    output_dir = Path(output_path)
+    output_dir.mkdir(parents=True, exist_ok=True)
     written = []
     for name in names:
         # every file keeps the grid and CRS, so each one is usable on its own
-        output = folder / f"{name}.nc"
+        output = output_dir / f"{name}.nc"
         write_xarray_to_netcdf(
             ds[[name, "lat", "lon", "crs"]],
             output,
