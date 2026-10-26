@@ -284,6 +284,138 @@ class TestAsciiReadWrite(unittest.TestCase, BaseDatasetMixin):
         )
 
 
+class TestAsciiHeaderAndDtype(unittest.TestCase):
+    HEADER_LINES = {
+        "ncols": "ncols 3",
+        "nrows": "nrows 2",
+        "xllcorner": "xllcorner 10.0",
+        "yllcorner": "yllcorner 50.0",
+        "cellsize": "cellsize 0.5",
+        "nodata_value": "nodata_value -9999",
+    }
+
+    def _read_ascii_text(self, text):
+        """Write text to a temporary .asc file and read it back.
+
+        Args:
+            text (str): full content of the ASCII grid file.
+
+        Returns:
+            xr.Dataset: dataset read by read_ascii_to_xarray.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            asc_path = Path(td) / "grid.asc"
+            asc_path.write_text(text)
+            return fh.read_ascii_to_xarray(asc_path, var_name="var")
+
+    def _write_and_read_ascii(self, data, nodata_value):
+        """Write data with a nodata attr to ASCII and read it back.
+
+        Args:
+            data (np.ndarray): 2 x 3 grid to write.
+            nodata_value (int | float): value stored in the nodata_value attr.
+
+        Returns:
+            tuple[str, xr.Dataset]: written nodata header line and dataset read back.
+        """
+        ds = xr.Dataset(
+            {"var": (("lat", "lon"), data)},
+            coords={"lat": [51.0, 50.0], "lon": [10.0, 11.0, 12.0]},
+        )
+        ds["var"].attrs["nodata_value"] = nodata_value
+        with tempfile.TemporaryDirectory() as td:
+            asc_path = Path(td) / "grid.asc"
+            fh.write_xarray_to_ascii(ds, asc_path, data_var="var")
+            lines = asc_path.read_text().splitlines()
+            nodata_line = next(
+                line for line in lines if line.lower().startswith("nodata_value")
+            )
+            return nodata_line, fh.read_ascii_to_xarray(asc_path, var_name="var")
+
+    def test_read_float_data_with_int_nodata_stays_float(self):
+        header = "\n".join(self.HEADER_LINES.values())
+        ds = self._read_ascii_text(f"{header}\n1.5 2.25 -0.7\n4.0 5.5 -9999\n")
+        self.assertTrue(np.issubdtype(ds["var"].dtype, np.floating))
+        np.testing.assert_allclose(ds["var"].values[0], [1.5, 2.25, -0.7])
+        self.assertIsInstance(ds["var"].attrs["nodata_value"], float)
+
+    def test_read_int_data_with_float_nodata_stays_int(self):
+        lines = {**self.HEADER_LINES, "nodata_value": "nodata_value -9999.0"}
+        header = "\n".join(lines.values())
+        ds = self._read_ascii_text(f"{header}\n1 2 3\n4 5 -9999\n")
+        self.assertTrue(np.issubdtype(ds["var"].dtype, np.integer))
+        self.assertEqual(ds["var"].attrs["nodata_value"], -9999)
+        self.assertIsInstance(ds["var"].attrs["nodata_value"], int)
+
+    def test_write_float_data_with_int_nodata_attr_keeps_decimals(self):
+        data = np.array([[1.5, 2.25, -0.7], [4.0, 5.5, np.nan]])
+        nodata_line, ds = self._write_and_read_ascii(data, -9999)
+        self.assertEqual(float(nodata_line.split()[1]), -9999.0)
+        self.assertIn(".", nodata_line.split()[1])
+        self.assertTrue(np.issubdtype(ds["var"].dtype, np.floating))
+        np.testing.assert_allclose(ds["var"].values[0], data[0], rtol=1e-6)
+
+    def test_write_int_data_with_float_nodata_attr_writes_int_nodata(self):
+        data = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
+        nodata_line, ds = self._write_and_read_ascii(data, -9999.0)
+        self.assertEqual(nodata_line.split()[1], "-9999")
+        self.assertTrue(np.issubdtype(ds["var"].dtype, np.integer))
+        np.testing.assert_array_equal(ds["var"].values, data)
+
+    def test_read_header_in_scientific_notation(self):
+        header = (
+            "ncols 3\nnrows 2\nxllcorner 4.5E+05\nyllcorner 5.5e+06\n"
+            "cellsize 1e3\nnodata_value -9.999e3\n"
+        )
+        ds = self._read_ascii_text(f"{header}1.0 2.0 3.0\n4.0 5.0 6.0\n")
+        np.testing.assert_allclose(ds["lon"].values, [450500.0, 451500.0, 452500.0])
+        np.testing.assert_allclose(ds["lat"].values, [5501500.0, 5500500.0])
+
+    def test_read_corner_and_center_headers_give_same_grid(self):
+        data = "1 2 3\n4 5 6\n"
+        corner = "\n".join(self.HEADER_LINES.values())
+        center_lines = {
+            **self.HEADER_LINES,
+            "xllcorner": "xllcenter 10.25",
+            "yllcorner": "yllcenter 50.25",
+        }
+        center = "\n".join(center_lines.values())
+        ds_corner = self._read_ascii_text(f"{corner}\n{data}")
+        ds_center = self._read_ascii_text(f"{center}\n{data}")
+        for ds in (ds_corner, ds_center):
+            np.testing.assert_allclose(ds["lon"].values, [10.25, 10.75, 11.25])
+            np.testing.assert_allclose(ds["lat"].values, [50.75, 50.25])
+            self.assertEqual(ds.rio.transform(), ds_corner.rio.transform())
+
+    def test_read_mixed_case_keys_and_whitespace(self):
+        header = (
+            "NCOLS\t 3\n  nRows   2\nXLLCORNER 10.0\nYllCorner\t50.0\n"
+            "CELLSIZE 0.5\nNODATA_value   -9999\n"
+        )
+        ds = self._read_ascii_text(f"{header}1 2 3\n4 5 6\n")
+        self.assertEqual(ds["var"].shape, (2, 3))
+        np.testing.assert_allclose(ds["lon"].values, [10.25, 10.75, 11.25])
+
+    def test_read_missing_header_line_raises(self):
+        for missing_key in self.HEADER_LINES:
+            with self.subTest(missing_key=missing_key):
+                lines = [v for k, v in self.HEADER_LINES.items() if k != missing_key]
+                header = "\n".join(lines)
+                with self.assertRaisesRegex(ValueError, missing_key[:3]):
+                    self._read_ascii_text(f"{header}\n1 2 3\n4 5 6\n")
+
+    def test_read_mixed_corner_and_center_raises(self):
+        mixed_headers = {
+            "xllcenter_yllcorner": {"xllcorner": "xllcenter 10.25"},
+            "xllcorner_yllcenter": {"yllcorner": "yllcenter 50.25"},
+        }
+        for name, replacement in mixed_headers.items():
+            with self.subTest(name=name):
+                header = "\n".join({**self.HEADER_LINES, **replacement}.values())
+                with self.assertRaises(ValueError):
+                    self._read_ascii_text(f"{header}\n1 2 3\n4 5 6\n")
+
+
 class TestWriteXarrayToFile(unittest.TestCase, BaseDatasetMixin):
     def test_write_xarray_to_file_nc(self):
         ds = self.make_simple_ds()

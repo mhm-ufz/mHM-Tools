@@ -30,7 +30,7 @@ from mhm_tools.common.crs_handler import (
     set_spatial_dims,
     write_object_crs,
 )
-from mhm_tools.common.esri_grid import standardize_header, write_header
+from mhm_tools.common.esri_grid import _is_number, standardize_header, write_header
 from mhm_tools.common.logger import ErrorLogger, log_arguments
 from mhm_tools.common.netcdf import (
     QUANTIZATION_ATTRS,
@@ -1208,31 +1208,28 @@ def read_ascii_to_xarray(
     landcover_year_start=None,
 ):
     """Read an mHM readable asci file to an xarray dataset."""
-    # Read the header from the file
-    with filepath.open("r") as f:
-        header = {}
+    # Header lines are the leading lines whose first token is not a number
+    lines = [line.split() for line in filepath.read_text().splitlines() if line.strip()]
+    header_size = next(
+        (i for i, tokens in enumerate(lines) if _is_number(tokens[0])), len(lines)
+    )
+    raw_header = {tokens[0]: tokens[1] for tokens in lines[:header_size]}
+    logger.debug(f"File {filepath.name} header: {raw_header}")
+    header = standardize_header(raw_header, require_all=True)
+    ncols = header["ncols"]
+    nrows = header["nrows"]
+    xllcorner = header["xllcorner"]
+    yllcorner = header["yllcorner"]
+    cellsize = header["cellsize"]
 
-        for i, line in enumerate(f.readlines()):
-            line_striped = line.strip()
-            if not line_striped:
-                continue
-            logger.debug(f"File {filepath.name} {i}: {line_striped}")
-            key, value = line_striped.split()
-            header[key.lower()] = float(value) if "." in value else int(value)
-            if len(header) == 6:
-                break
-        # Extract header information
-        ncols = header["ncols"]
-        nrows = header["nrows"]
-        xllcorner = header["xllcorner"]
-        yllcorner = header["yllcorner"]
-        cellsize = header["cellsize"]
-        nodata_value = header["nodata_value"]
-
-    # Load the data values
-    data_values = np.asarray(np.loadtxt(filepath, skiprows=i + 1)).reshape(nrows, ncols)
-    if isinstance(nodata_value, int):
-        data_values = data_values.astype(np.int32)
+    # The data decides the type, nodata_value is cast to match it
+    data_tokens = [token for tokens in lines[header_size:] for token in tokens]
+    is_float = any(not token.lstrip("+-").isdigit() for token in data_tokens)
+    data_values = np.array(data_tokens, dtype=np.float64 if is_float else np.int32)
+    data_values = data_values.reshape(nrows, ncols)
+    nodata_value = (
+        float(header["nodata_value"]) if is_float else int(header["nodata_value"])
+    )
 
     # Cell centres from integer indices, a float step in np.arange can
     # return one value too many for cellsizes like 1/600 degree
