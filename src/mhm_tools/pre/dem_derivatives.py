@@ -17,7 +17,13 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 
-from mhm_tools.common.constants import FDIR_CODES, FDIR_FILLVALUE, NO_DATA
+from mhm_tools.common.constants import (
+    DEM_DERIVATIVE_EXTENSIONS,
+    FACC_UNITS,
+    FDIR_CODES,
+    FDIR_FILLVALUE,
+    NO_DATA,
+)
 from mhm_tools.common.crs_handler import resolve_crs
 from mhm_tools.common.file_handler import (
     get_nodata,
@@ -37,8 +43,8 @@ __all__ = [
     "create_facc_from_fdir",
 ]
 
-OUTPUT_EXTENSIONS = ("nc", "asc", "tif")
-FACC_UNITS = ("cell", "km2")
+# kept under its former name, the CLI reads it from common.constants
+OUTPUT_EXTENSIONS = DEM_DERIVATIVE_EXTENSIONS
 
 #: Output variable -> (dtype, attributes). ``dem`` is the input as read.
 DERIVATIVE_ATTRS = {

@@ -14,8 +14,11 @@ from mhm_tools.common.cli_utils import (
     add_netcdf_compression_args,
     get_netcdf_compression,
 )
-from mhm_tools.common.constants import FDIR_CODES
-from mhm_tools.pre.dem_derivatives import FACC_UNITS, OUTPUT_EXTENSIONS
+from mhm_tools.common.constants import (
+    DEM_DERIVATIVE_EXTENSIONS,
+    FACC_UNITS,
+    FDIR_CODES,
+)
 
 
 def add_args(parser):
@@ -42,7 +45,7 @@ def add_args(parser):
         "-e",
         "--output-extension",
         default="nc",
-        choices=list(OUTPUT_EXTENSIONS),
+        choices=list(DEM_DERIVATIVE_EXTENSIONS),
         help=(
             "nc writes one file holding every derivative plus grid and crs; "
             "asc and tif write one file per derivative. Default: nc."
