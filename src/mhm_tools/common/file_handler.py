@@ -11,6 +11,7 @@ Authors
 
 import contextlib
 import logging
+import re
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -1209,11 +1210,18 @@ def read_ascii_to_xarray(
 ):
     """Read an mHM readable asci file to an xarray dataset."""
     # Header lines are the leading lines whose first token is not a number
-    lines = [line.split() for line in filepath.read_text().splitlines() if line.strip()]
-    header_size = next(
-        (i for i, tokens in enumerate(lines) if _is_number(tokens[0])), len(lines)
-    )
-    raw_header = {tokens[0]: tokens[1] for tokens in lines[:header_size]}
+    raw_header = {}
+    raw_header_lines = 0
+    data_text = ""
+    with filepath.open() as f:
+        for line in f:
+            tokens = line.split()
+            if tokens and _is_number(tokens[0]):
+                data_text = line + f.read()
+                break
+            if tokens:
+                raw_header[tokens[0]] = tokens[1]
+            raw_header_lines += 1
     logger.debug(f"File {filepath.name} header: {raw_header}")
     header = standardize_header(raw_header, require_all=True)
     ncols = header["ncols"]
@@ -1222,11 +1230,16 @@ def read_ascii_to_xarray(
     yllcorner = header["yllcorner"]
     cellsize = header["cellsize"]
 
-    # The data decides the type, nodata_value is cast to match it
-    data_tokens = [token for tokens in lines[header_size:] for token in tokens]
-    is_float = any(not token.lstrip("+-").isdigit() for token in data_tokens)
-    data_values = np.array(data_tokens, dtype=np.float64 if is_float else np.int32)
-    data_values = data_values.reshape(nrows, ncols)
+    # The data decides the type: a decimal point, an exponent, nan or inf make
+    # it float. nodata_value is cast to match it
+    is_float = re.search(r"[.eEnN]", data_text) is not None
+    del data_text
+    data_values = np.loadtxt(
+        filepath,
+        skiprows=raw_header_lines,
+        dtype=np.float64 if is_float else np.int32,
+        ndmin=2,
+    ).reshape(nrows, ncols)
     nodata_value = (
         float(header["nodata_value"]) if is_float else int(header["nodata_value"])
     )
