@@ -982,11 +982,14 @@ def get_sim_data_for_gauges_from_grid(
 
 
 def select_cells_by_mean_flow(sim_candidates, observed):
-    """Select per gauge the candidate cell whose mean flow matches the observations.
+    """Select per gauge the candidate cell matching the observed mean seasonal cycle.
 
-    The means of a candidate and the observations are taken over the days where
-    both hold values. The candidate with the smallest relative difference wins;
-    the gauge's own cell (offset 0, 0) wins ties.
+    The 12 monthly means of a candidate and the observations are taken over the
+    months both records cover, so their time steps and stamps need not match.
+    The error is the summed absolute difference of the monthly means relative to
+    the summed observed monthly means, over the months with observations. The
+    candidate with the smallest error wins; the gauge's own cell (offset 0, 0)
+    wins ties and is kept for gauges without any observed month.
 
     Args:
         sim_candidates (xr.DataArray): Discharge ``(time, id, candidate)`` from
@@ -1000,16 +1003,37 @@ def select_cells_by_mean_flow(sim_candidates, observed):
         the selected cells and their cell centres.
     """
     ids = sim_candidates["id"].values
-    candidates_aligned, observed_aligned = xr.align(
-        sim_candidates, observed.sel(id=ids), join="inner"
-    )
-    both_valid = candidates_aligned.notnull() & observed_aligned.notnull()
-    candidate_means = candidates_aligned.where(both_valid).mean("time")
-    observed_means = observed_aligned.where(both_valid).mean("time")
-    relative_errors = abs(candidate_means - observed_means) / abs(
-        observed_means.where(observed_means != 0)
-    )
-    errors = relative_errors.fillna(np.inf).transpose("id", "candidate").values
+    observed = observed.sel(id=ids)
+    sim_times = pd.DatetimeIndex(sim_candidates["time"].values)
+    observed_times = pd.DatetimeIndex(observed["time"].values)
+    first_month = max(sim_times.min(), observed_times.min()).to_period("M")
+    last_month = min(sim_times.max(), observed_times.max()).to_period("M")
+    errors = np.full((ids.size, sim_candidates.sizes["candidate"]), np.inf)
+    if first_month <= last_month:
+        common_period = slice(first_month.start_time, last_month.end_time)
+        observed_seasonality = (
+            observed.sel(time=common_period).groupby("time.month").mean("time")
+        )
+        candidate_seasonality = (
+            sim_candidates.sel(time=common_period).groupby("time.month").mean("time")
+        )
+        observed_months = observed_seasonality.notnull()
+        # skipna=False: a candidate missing an observed month, e.g. a cell beyond
+        # the grid, gets no error and is never chosen
+        month_differences = abs(candidate_seasonality - observed_seasonality).where(
+            observed_months, 0
+        )
+        observed_sums = abs(observed_seasonality).where(observed_months, 0).sum("month")
+        relative_errors = month_differences.sum("month", skipna=False) / (
+            observed_sums.where(observed_sums != 0)
+        )
+        errors = relative_errors.fillna(np.inf).transpose("id", "candidate").values
+    unobserved = np.all(np.isinf(errors), axis=1)
+    if unobserved.any():
+        logger.warning(
+            f"mean-flow: no observed month to compare for {int(unobserved.sum())} "
+            f"gauge(s), which keep their own cell: {ids[unobserved][:10].tolist()}."
+        )
 
     gauge_index = np.arange(ids.size)
     best = errors.argmin(axis=1)
@@ -1032,7 +1056,7 @@ def select_cells_by_mean_flow(sim_candidates, observed):
     moved = best != centre
     logger.info(
         f"mean-flow: {int(moved.sum())} of {ids.size} gauges read from a "
-        "neighbour cell whose mean flow matches the observations better."
+        "neighbour cell whose mean seasonal cycle matches the observations better."
     )
     for gauge_id, candidate in zip(ids[moved], best[moved]):
         logger.debug(

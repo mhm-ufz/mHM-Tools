@@ -219,8 +219,8 @@ def add_args(parser):
             "Gauge location method. With --facc-file: basinex (default) or burek "
             "relocate gauges by catchment area. With --gauge-coordinate-file: nearest "
             "(default) reads the cell of the gauge, mean-flow the cell within "
-            "--gauge-max-distance-cells whose long-term mean discharge is closest to "
-            "the observed mean; mean-flow uses the observations to choose the cell, "
+            "--gauge-max-distance-cells whose 12 monthly mean discharges are closest "
+            "to the observed ones; mean-flow uses the observations to choose the cell, "
             "so the bias (beta) looks better than it is."
         ),
     )
