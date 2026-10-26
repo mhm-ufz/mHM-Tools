@@ -1412,7 +1412,7 @@ def get_dataset_from_path(
                 landcover_year_start=landcover_year_start,
                 create_bounds=create_bounds,
             )
-        non_nc = [p for p in file_list if Path(p).suffix != ".nc"]
+        non_nc = [p for p in file_list if Path(p).suffix.lower() != ".nc"]
         if non_nc:
             with ErrorLogger(logger):
                 msg = "Multi-file loading supports NetCDF files only."
