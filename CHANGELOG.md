@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- `link-folder-tree` links nothing when `--output-dir` is `--input-dir`, also when given by another path. With `--overwrite` it previously deleted every file and replaced it with a link to itself.
+
+
 ## [v0.3.1]
 
 ### Added
