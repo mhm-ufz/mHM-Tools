@@ -2,7 +2,7 @@
 Compute and plot the spatial relative difference between a model dataset and a reference dataset.
 
 This script reads CF-compliant NetCDF files for both model and reference datasets, computes
-the spatial relative difference in percent as: diff = 100 * (da_ref - da_mod) / da_ref
+the spatial relative difference in percent as: diff = 100 * (da_mod - da_ref) / da_ref
 for a specified variable,
 applies any provided geographic or data range limits, and generates a high-resolution PNG
 showing that difference with customizable title, colorbar label, and colormap.
@@ -46,7 +46,7 @@ def add_args(parser):
     """Add CLI arguments for the relative_difference subcommand."""
     parser.description = (
         "Compute and plot the spatial relative difference between a model dataset and a reference dataset "
-        "for a specified variable in percent: diff = 100 * (da_ref - da_mod) / da_ref. "
+        "for a specified variable in percent: diff = 100 * (da_mod - da_ref) / da_ref. "
         "Supports wildcard matching, custom variable names, colorbar labels, "
         "titles, output file naming, optional axis limits, custom colormap, and explicit colormap range."
     )
@@ -128,12 +128,12 @@ def add_args(parser):
     )
     optional.add_argument(
         "--colorbar-label",
-        default="Difference (model - reference)",
+        default="Relative difference (model - reference) [%]",
         help="Label for the plot colorbar",
     )
     optional.add_argument(
         "--title",
-        default="Mean Difference (model - reference)",
+        default="Mean relative difference (model - reference)",
         help="Title for the plot",
     )
     optional.add_argument(
@@ -178,7 +178,7 @@ def add_args(parser):
 
 def run(args):
     """
-    Compute and plot the spatial relative difference (ref - model) / ref.
+    Compute and plot the spatial relative difference (model - ref) / ref.
 
     Parameters
     ----------

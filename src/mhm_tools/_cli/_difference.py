@@ -39,7 +39,7 @@ def add_args(parser):
     """Add CLI arguments for the difference subcommand."""
     parser.description = (
         "Compute and plot the spatial difference between a reference dataset and model dataset "
-        "for a specified variable: diff = (da_ref - da_mod). "
+        "for a specified variable: diff = (da_mod - da_ref). "
         "Supports wildcard matching, custom variable names, colorbar labels, "
         "titles, output file naming, optional axis limits, custom colormap, and explicit colormap range."
     )
@@ -162,7 +162,7 @@ def add_args(parser):
 
 
 def run(args):
-    """Compute and plot the spatial difference (reference - model)."""
+    """Compute and plot the spatial difference (model - reference)."""
     from ..post.difference import OutputOptions, PlotOptions, calc_diff
 
     plot_opts = PlotOptions(
