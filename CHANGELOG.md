@@ -2,9 +2,20 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `difference` and `relative-difference` compute model − reference, so a positive value means the model is higher, as their plot labels already said. Before, they computed reference − model.
+- `discharge-evaluation` in bootstrap mode names the Spearman correlation of the monthly climatologies `spearman_clim` instead of `gamma`.
+- `--ncpus 0` and `--ncpus -1` use all cores in every command.
+
 ### Fixed
 
 - `link-folder-tree` links nothing when `--output-dir` is `--input-dir`, also when given by another path. With `--overwrite` it previously deleted every file and replaced it with a link to itself.
+- `discharge-evaluation` in bootstrap mode wrote the mean ratio as `alpha` and the standard deviation ratio as `beta`, the reverse of the KGE components and of direct mode. Its CDF plots no longer fail on the missing `kge` and `nse` columns.
+- `ratio` wrote `difference.nc` by default and labelled its plot as a difference. It now writes `ratio.nc`.
+- `mhm-tools -vv` crashed. Repeated `-v` or `-q` now stops at DEBUG or ERROR, and `--log-level CRITICAL` falls back to ERROR.
+- `--ncpus 0` raised an error in most commands.
+- `create-catchment --upscale` wrote the L0 and L1 gauge info to the same `gauges_info.csv_0.*` on degree grids, so the L1 file replaced the L0 file. The L0 position now goes to `gauges_info_l0.*` and the L1 position to `gauges_info.*`.
 
 
 ## [v0.3.1]
