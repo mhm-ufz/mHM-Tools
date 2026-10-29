@@ -3504,8 +3504,9 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                 )
             l0_shape_gdf = None
             if upscale and c.catchment_mask is not None:
+                # the plain name keeps the L1 gauges written after the upscaling
                 write_gauges_out(
-                    gauge, id_gauges_out_path / f"{gauge_info_file}_{resolutions.l0}"
+                    gauge, id_gauges_out_path / f"{Path(gauge_info_file).stem}_l0"
                 )
                 try:
                     l0_shape_gdf = _vectorize_mask_to_gdf(
@@ -3542,10 +3543,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                         new_coords[1],
                     )
                     gauge.update(lat=new_coords[0], lon=new_coords[1])
-                write_gauges_out(
-                    gauge,
-                    id_gauges_out_path / f"{gauge_info_file}_{c.upscaled_resolution}",
-                )
+                write_gauges_out(gauge, id_gauges_out_path / gauge_info_file)
             c.write(
                 output_path,
                 single_file=True,
@@ -3791,9 +3789,10 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                         basin_mask=catchment_mask,
                     )
                 if upscale:
+                    # the plain name keeps the L1 gauges written after the upscaling
                     write_gauges_out(
                         gauges,
-                        id_gauges_out_path / f"{gauge_info_file}_{resolutions.l0}",
+                        id_gauges_out_path / f"{Path(gauge_info_file).stem}_l0",
                     )
                 else:
                     write_gauges_out(gauges, id_gauges_out_path / gauge_info_file)
@@ -3831,10 +3830,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                         new_coords[1],
                     )
                     gauge.update(lat=new_coords[0], lon=new_coords[1])
-            write_gauges_out(
-                gauges,
-                id_gauges_out_path / f"{gauge_info_file}_{c.upscaled_resolution}",
-            )
+            write_gauges_out(gauges, id_gauges_out_path / gauge_info_file)
         c.write(
             output_path,
             single_file=True,
