@@ -2234,7 +2234,7 @@ def boostap_statistics(
         [observed_da.where(observed_da.time.dt.year == year) for year in years_sim],
         dim="time",
     )
-    alpha, beta, gamma = np.nan, np.nan, np.nan
+    alpha, beta, spearman_clim = np.nan, np.nan, np.nan
     if (
         (id in obs_da_sel.id and id in sim_da_sel.id)
         and not sim_da_sel.isnull().all()
@@ -2245,11 +2245,13 @@ def boostap_statistics(
             obs_id = obs_da_sel.sel(id=id)
             clim_sim = get_clim_from_ds(sim_id)
             clim_obs = get_clim_from_ds(obs_id)
-            alpha = sim_id.mean(skipna=True) / obs_id.mean(skipna=True)
-            beta = sim_id.std(skipna=True) / obs_id.std(skipna=True)
-            gamma = spearman_correlation(clim_sim, clim_obs)[0]
+            # alpha and beta follow the kge components, the correlation is taken
+            # between the climatologies and named after that
+            alpha = sim_id.std(skipna=True) / obs_id.std(skipna=True)
+            beta = sim_id.mean(skipna=True) / obs_id.mean(skipna=True)
+            spearman_clim = spearman_correlation(clim_sim, clim_obs)[0]
             logger.debug(
-                f"results for index {index} and gauge {id}: alpha={alpha:.3f}, beta={beta:.3f}, gamma={gamma:.3f}"
+                f"results for index {index} and gauge {id}: alpha={alpha:.3f}, beta={beta:.3f}, spearman_clim={spearman_clim:.3f}"
             )
             if np.isnan(alpha):
                 logger.debug("Alpha is none for:")
@@ -2266,7 +2268,7 @@ def boostap_statistics(
         "id": id,
         "alpha": float(alpha),
         "beta": float(beta),
-        "gamma": float(gamma),
+        "spearman_clim": float(spearman_clim),
     }
 
 
@@ -2507,17 +2509,18 @@ def evaludate_discharge_data(  # noqa: PLR0913
     logger.info(
         f"In total there are {len(results_df['id'].unique())} catchments of which "
     )
+    # bootstrap results hold spearman_clim instead of gamma
+    components = [
+        column
+        for column in ("alpha", "beta", "gamma", "spearman_clim")
+        if column in results_df.columns
+    ]
+    for column in components:
+        logger.info(
+            f"   {len(results_df.dropna(subset=[column])['id'].unique())} have {column} values"
+        )
     logger.info(
-        f"   {len(results_df.dropna(subset=['alpha'], how='any')['id'].unique())} have all alpha values"
-    )
-    logger.info(
-        f"   {len(results_df.dropna(subset=['beta'], how='any')['id'].unique())} have beta values "
-    )
-    logger.info(
-        f"   {len(results_df.dropna(subset=['gamma'], how='any')['id'].unique())} have all gamma values "
-    )
-    logger.info(
-        f"   {len(results_df.dropna(subset=['alpha', 'beta', 'gamma'], how='any')['id'].unique())} have all values "
+        f"   {len(results_df.dropna(subset=components)['id'].unique())} have all values"
     )
     log_discharge_region_medians(results_df)
     metric_plot_files = []
@@ -2877,7 +2880,7 @@ def get_discharge_metric_values_by_variable(df, variables=None):
         Metric values grouped by variable and realisation label.
     """
     if variables is None:
-        variables = ["alpha", "beta", "gamma", "kge", "nse"]
+        variables = ["alpha", "beta", "gamma", "spearman_clim", "kge", "nse"]
     values_by_variable = {}
     for variable in variables:
         if variable not in df.columns:
@@ -2980,7 +2983,7 @@ def plot_metric_violins(df, output_path, variables=None, dpi=PLOT_DPI):
         Written PNG files.
     """
     if variables is None:
-        variables = ["alpha", "beta", "gamma", "kge", "nse"]
+        variables = ["alpha", "beta", "gamma", "spearman_clim", "kge", "nse"]
     output_path = Path(output_path)
     output_files = []
     for variable in variables:
@@ -3013,7 +3016,16 @@ def log_discharge_region_medians(results_df):
     """
     metrics = [
         metric
-        for metric in ("kge", "nse", "alpha", "beta", "gamma", "diff", "rel_diff")
+        for metric in (
+            "kge",
+            "nse",
+            "alpha",
+            "beta",
+            "gamma",
+            "spearman_clim",
+            "diff",
+            "rel_diff",
+        )
         if metric in results_df.columns
     ]
     metric_df = results_df[["id", *metrics]].copy()
@@ -3065,6 +3077,7 @@ def log_discharge_results_preview(results_df, row_count=5):
             "alpha",
             "beta",
             "gamma",
+            "spearman_clim",
             "diff",
             "rel_diff",
         )
@@ -3095,7 +3108,7 @@ def log_discharge_results_preview(results_df, row_count=5):
 
 @log_errors(raise_exceptions=True)
 def plot_cdf(df, output_path, boostrap_iterations=None):
-    """Create CDF plots for alpha, beta, gamma, KGE, and NSE.
+    """Create CDF plots for the metric columns present in the results.
 
     The plots are generated for global values and with one CDF per WMO region.
     """
@@ -3103,7 +3116,12 @@ def plot_cdf(df, output_path, boostrap_iterations=None):
     # not remove a gauge from the kge and nse plots
     if logger.isEnabledFor(logging.DEBUG):
         log_discharge_results_preview(df)
-    variables = ["alpha", "beta", "gamma", "kge", "nse"]
+    # bootstrap results have no kge, nse and gamma but spearman_clim
+    variables = [
+        variable
+        for variable in ("alpha", "beta", "gamma", "spearman_clim", "kge", "nse")
+        if variable in df.columns
+    ]
     cb_colors = [
         "#000000",
         "#E69F00",

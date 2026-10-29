@@ -989,7 +989,7 @@ class TestEvaluateBootstrap(unittest.TestCase):
                     "id": 7,
                     "alpha": 2.0,
                     "beta": 0.0,
-                    "gamma": 0.7,
+                    "spearman_clim": 0.7,
                 },
             ), patch.object(
                 discharge_evaluation, "plot_cdf"
@@ -1013,7 +1013,8 @@ class TestEvaluateBootstrap(unittest.TestCase):
                 results_csv = outdir / "results.csv"
                 self.assertTrue(results_csv.is_file())
                 df = pd.read_csv(results_csv, index_col=0)
-                self.assertIn("gamma", df.columns)
+                self.assertIn("spearman_clim", df.columns)
+                self.assertNotIn("gamma", df.columns)
                 self.assertTrue((df["id"] == 7).all())
                 # plot_cdf not called for small sample sizes
                 mock_plot.assert_not_called()
@@ -1447,3 +1448,47 @@ class TestGaugeLocationSources(unittest.TestCase):
         np.testing.assert_array_equal(
             simulated["discharge"].sel(id=2).values, [4.0] * 4
         )
+
+
+def test_boostap_statistics_writes_std_ratio_as_alpha_and_mean_ratio_as_beta():
+    """Name the bootstrap components like the kge: alpha std ratio, beta mean ratio."""
+    time = pd.date_range("2010-01-01", "2011-12-31", freq="D")
+    observed = 10.0 + 5.0 * np.sin(2 * np.pi * time.dayofyear.values / 365.0)
+    observed_da = xr.DataArray(
+        observed[:, None], dims=("time", "id"), coords={"time": time, "id": [7]}
+    )
+    # the same variability shifted upwards, so only the means differ
+    model_da = observed_da + 10.0
+
+    result = discharge_evaluation.boostap_statistics(
+        index=0,
+        id=7,
+        model_da=model_da,
+        observed_da=observed_da,
+        total_years_sim=np.array([2010, 2011]),
+        total_years_obs=np.array([2010, 2011]),
+        n_bootstrap_years=2,
+    )
+
+    observed_mean = observed.mean()
+    assert result["alpha"] == pytest.approx(1.0)
+    assert result["beta"] == pytest.approx((observed_mean + 10.0) / observed_mean)
+    assert result["spearman_clim"] == pytest.approx(1.0)
+    assert "gamma" not in result
+
+
+def test_plot_cdf_skips_missing_metric_columns(tmp_path):
+    """Plot bootstrap results, which have no kge, nse and gamma columns."""
+    results_df = pd.DataFrame(
+        {
+            "id": [6335020, 6335021, 6335022, 6335023, 6335024, 6335025],
+            "alpha": [0.9, 1.0, 1.1, 0.8, 1.2, 1.0],
+            "beta": [1.0, 1.1, 0.9, 1.0, 1.2, 0.8],
+            "spearman_clim": [0.9, 0.8, 0.95, 0.7, 0.85, 0.9],
+        }
+    )
+
+    output_files = discharge_evaluation.plot_cdf(results_df, tmp_path)
+
+    assert output_files
+    assert not any("kge" in Path(file).name for file in output_files)
