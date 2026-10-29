@@ -101,6 +101,8 @@ def get_log_level(level=None, count_verbose=0, count_quiet=0):
     error_msg = None
     if level is None:
         level = LOG_LEVELS["INFO"] - 10 * count_verbose + 10 * count_quiet
+        # repeated -v or -q stop at the most and least verbose level
+        level = min(max(level, LOG_LEVELS["DEBUG"]), LOG_LEVELS["ERROR"])
     elif not isinstance(level, int):
         if not isinstance(level, str):
             error_msg = (

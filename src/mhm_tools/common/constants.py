@@ -121,11 +121,14 @@ LOG_LEVELS = {
     "warn": 30,
     "debug": 10,
     "error": 40,
+    # critical messages are not used, so the level falls back to error
+    "critical": 40,
     "INFO": 20,
     "WARNING": 30,
     "WARN": 30,
     "DEBUG": 10,
     "ERROR": 40,
+    "CRITICAL": 40,
 }
 
 LOG_LEVEL_STR = {
