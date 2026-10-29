@@ -766,3 +766,11 @@ def test_link_folder_tree_cli_keeps_repeated_exclude_patterns(monkeypatch):
     assert result.exit_code == 0, result.output
     assert received_calls[0]["exclude_patterns"] == ["*/a/*", "*/b/*"]
     assert not received_calls[0]["include_patterns"]
+
+
+def test_ratio_cli_defaults_to_ratio_nc():
+    """Write the ratio to ratio.nc unless another name is given."""
+    parser = argparse.ArgumentParser()
+    _ratio.add_args(parser)
+
+    assert parser.get_default("output_file_nc") == "ratio.nc"
