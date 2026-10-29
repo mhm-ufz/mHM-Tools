@@ -76,7 +76,7 @@ def add_args(parser):
         required=False,
         default=1,
         type=int,
-        help=("Number of cores used for parallelisation."),
+        help=("Number of cores used for parallelisation. 0 or -1 uses all cores."),
     )
     add_netcdf_compression_args(parser)
 
@@ -89,6 +89,7 @@ def run(args):
     args : argparse.Namespace
         parsed command line arguments
     """
+    from mhm_tools.common.parallel import resolve_ncpus
     from mhm_tools.pre.pet_calc import calculate_pet
 
     calculate_pet(
@@ -97,7 +98,7 @@ def run(args):
         tmin_file=args.tmin,
         stat_freq=args.freq,
         out_file=args.output_file,
-        max_workers=args.ncpus,
+        max_workers=resolve_ncpus(args.ncpus),
         method=args.method,
         compression=get_netcdf_compression(args),
     )

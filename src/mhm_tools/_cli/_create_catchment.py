@@ -277,7 +277,7 @@ def add_args(parser):
         default=1,
         type=int,
         help=(
-            "Number of cores used for parallelisation. Only needed if multiple gauges are created."
+            "Number of cores used for parallelisation. Only needed if multiple gauges are created. 0 or -1 uses all cores."
         ),
     )
 
@@ -294,6 +294,7 @@ def run(args):  # noqa: PLR0912,PLR0915
 
     from mhm_tools.common.cli_utils import get_available_mem_in_unit, parse_lonlatbox
     from mhm_tools.common.logger import ErrorLogger
+    from mhm_tools.common.parallel import resolve_ncpus
     from mhm_tools.common.resolution_handler import Resolution
 
     from ..pre import create_catchment
@@ -457,8 +458,9 @@ def run(args):  # noqa: PLR0912,PLR0915
         l2=args.l2_resolution,
         l2_file=args.meteo_file,
     )
-    if args.ncpus > 1:
-        logger.info(f"Using {args.ncpus} cpus for catchment creation.")
+    ncpus = resolve_ncpus(args.ncpus)
+    if ncpus > 1:
+        logger.info(f"Using {ncpus} cpus for catchment creation.")
     create_catchment(
         input_file=args.input_file,
         output_path=args.output_path,
@@ -480,7 +482,7 @@ def run(args):  # noqa: PLR0912,PLR0915
         max_error=args.max_error,
         use_max_error=args.use_max_error,
         gauge_ids=gauge_ids,
-        ncpus=args.ncpus,
+        ncpus=ncpus,
         output_vars=(
             None if str(args.output_vars).strip().lower() == "all" else args.output_vars
         ),

@@ -154,7 +154,7 @@ def add_args(parser):
         "--ncpus",
         default=1,
         type=int,
-        help=("Number of CPUs to use"),
+        help=("Number of CPUs to use. 0 or -1 uses all cores."),
     )
     optional.add_argument(
         "--n-bootstrap-years",
@@ -332,6 +332,7 @@ def run(args):
     """
     from mhm_tools.common.cli_utils import get_available_mem_in_unit, get_coords
     from mhm_tools.common.file_handler import get_xarray_ds_from_file
+    from mhm_tools.common.parallel import resolve_ncpus
     from mhm_tools.post.gridded_data_evaluation import (
         EvalDataset,
         gridded_data_evaluation,
@@ -402,7 +403,7 @@ def run(args):
         only_plot=args.only_plot,
         coordinate_slice=coordinate_slice,
         mask_da=mask_da,
-        n_cpus=args.ncpus,
+        n_cpus=resolve_ncpus(args.ncpus),
         n_bootstrap_years=args.n_boostrap_years,
         n_bootstrap_selections=args.n_bootstrap_selections,
         direct_comp=(

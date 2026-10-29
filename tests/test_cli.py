@@ -1,5 +1,6 @@
 import argparse
 import contextlib
+import os
 import re
 
 import click
@@ -774,3 +775,35 @@ def test_ratio_cli_defaults_to_ratio_nc():
     _ratio.add_args(parser)
 
     assert parser.get_default("output_file_nc") == "ratio.nc"
+
+
+@pytest.mark.parametrize("requested_cpus", ["0", "-1"])
+@pytest.mark.parametrize(
+    ("command_name", "module", "target", "arguments"),
+    [
+        (
+            "fill-nearest",
+            _fill_nearest,
+            "mhm_tools.pre.fill_nearest.fill_nearest",
+            ["-i", "input", "-o", "output"],
+        ),
+        (
+            "merge-files",
+            _merge,
+            "mhm_tools.pre.merge.merge_files",
+            ["-i", "input", "-o", "merged.nc"],
+        ),
+    ],
+)
+def test_ncpus_zero_and_minus_one_use_all_cores(
+    monkeypatch, command_name, module, target, arguments, requested_cpus
+):
+    """Hand 0 and -1 on as the number of cores the machine reports."""
+    received_calls = []
+    monkeypatch.setattr(target, lambda **kwargs: received_calls.append(kwargs))
+    command = _build_click_command(command_name, module)
+
+    result = CliRunner().invoke(command, [*arguments, f"--ncpus={requested_cpus}"])
+
+    assert result.exit_code == 0, result.output
+    assert received_calls[0]["n_cpus"] == (os.cpu_count() or 1)

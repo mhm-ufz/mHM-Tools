@@ -115,7 +115,8 @@ def add_args(parser):
         "--ncpus",
         required=False,
         default=1,
-        help=(""),
+        type=int,
+        help="Number of CPUs used to read the model files and evaluate the gauges. 0 or -1 uses all cores.",
     )
     optional.add_argument(
         "--lonlatbox",
@@ -294,6 +295,7 @@ def run(args):
         get_netcdf_compression,
         normalize_cli_sequence,
     )
+    from mhm_tools.common.parallel import resolve_ncpus
     from mhm_tools.post.discharge_evaluation import (
         _resolve_gauge_location_method,
         evaludate_discharge_data,
@@ -320,7 +322,7 @@ def run(args):
         gauge_coordinate_file=args.gauge_coordinate_file,
         output_path=args.output_dir,
         evaluation_gauges=args.evaluation_gauges,
-        n_jobs=int(args.ncpus),
+        n_jobs=resolve_ncpus(args.ncpus),
         sim_variable=args.input_variable,
         observed_variable=args.ref_variable,
         lon_min=lon_min,

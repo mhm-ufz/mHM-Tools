@@ -49,7 +49,13 @@ def add_args(parser):
         action="store_true",
         help="Preserve the top level folder structure. Recusive merge inside.",
     )
-    optional.add_argument("--ncpus", required=False, default=1, help="Number of CPUs.")
+    optional.add_argument(
+        "--ncpus",
+        required=False,
+        default=1,
+        type=int,
+        help="Number of CPUs. 0 or -1 uses all cores.",
+    )
 
 
 def run(args):
@@ -60,6 +66,7 @@ def run(args):
     args : argparse.Namespace
         parsed command line arguments
     """
+    from mhm_tools.common.parallel import resolve_ncpus
     from mhm_tools.pre.merge import merge_files
 
     input = Path(args.input_path)
@@ -68,6 +75,6 @@ def run(args):
         input_path=input,
         input_file_part=args.input_name,
         output=output,
-        n_cpus=int(args.ncpus),
+        n_cpus=resolve_ncpus(args.ncpus),
         preserve_folders=args.preserve_folders,
     )
