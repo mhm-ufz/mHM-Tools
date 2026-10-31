@@ -19,6 +19,7 @@ from mhm_tools.pre.create_mhm_restart_from_setup import (
     _move_restart_files,
     _restore_recreated_fill_files_from_original,
     _tile_has_active_mask_cell,
+    _tile_mask_section,
     _validate_prepared_tile_dirs,
     create_mhm_restart_from_setup,
     create_setup_tiles,
@@ -1396,6 +1397,81 @@ def test_tile_selection_ignores_non_positive_mask_values():
     )
 
     assert not _tile_has_active_mask_cell(tile, mask_da)
+
+
+DRIFT_TILE = MHMSetupTile(
+    name="slice_110_64",
+    output_path=Path("slice_110_64"),
+    lonslice=slice(40.0, 42.0),
+    latslice=slice(70.0, 68.0),
+    lon_min=40.05,
+    lon_max=41.95,
+    lat_min=68.05,
+    lat_max=69.95,
+)
+
+
+def _create_drifting_mask_da(drift, dtype=np.float64):
+    """Create an all-zero 0.1 degree mask around ``DRIFT_TILE``.
+
+    Parameters
+    ----------
+    drift : float
+        Offset added to every cell centre, so the edges of the west and south
+        neighbours reach this far into the tile.
+    dtype : numpy.dtype
+        Data type of the coordinates.
+
+    Returns
+    -------
+    xarray.DataArray
+        Mask with 24 x 24 cells, of which 20 x 20 lie inside the tile.
+    """
+    lon = (39.85 + 0.1 * np.arange(24) + drift).astype(dtype)
+    lat = (70.15 - 0.1 * np.arange(24) + drift).astype(dtype)
+    return xr.DataArray(
+        np.zeros((lat.size, lon.size)),
+        dims=("lat", "lon"),
+        coords={"lat": lat, "lon": lon},
+    )
+
+
+def test_tile_selection_ignores_a_neighbour_cell_with_a_drifting_edge():
+    """Select a tile by its own cells, not by a neighbour edge off by 1e-12."""
+    mask_da = _create_drifting_mask_da(drift=1e-12)
+    # active cells centred at 39.95 (west neighbour) and 67.95 (south neighbour)
+    mask_da[10, 1] = 1
+    mask_da[22, 10] = 1
+    assert (float(mask_da["lon"][1]) + float(mask_da["lon"][2])) / 2 > 40.0
+    assert (float(mask_da["lat"][21]) + float(mask_da["lat"][22])) / 2 > 68.0
+
+    assert not _tile_has_active_mask_cell(DRIFT_TILE, mask_da)
+
+    # an active cell centred at 40.05 lies inside the tile
+    mask_da[10, 2] = 1
+
+    assert _tile_has_active_mask_cell(DRIFT_TILE, mask_da)
+
+
+def test_tile_mask_section_leaves_out_the_neighbour_row_with_a_drifting_edge():
+    """Cut the tile mask to the 20 x 20 cells inside the tile."""
+    mask_da = _create_drifting_mask_da(drift=1e-12)
+
+    section = _tile_mask_section(DRIFT_TILE, mask_da)
+
+    assert section.shape == (20, 20)
+    assert np.allclose(section["lon"].values[[0, -1]], [40.05, 41.95])
+    assert np.allclose(section["lat"].values[[0, -1]], [69.95, 68.05])
+
+
+def test_tile_selection_ignores_a_neighbour_cell_with_float32_coordinates():
+    """Ignore a neighbour edge that float32 coordinates move into the tile."""
+    mask_da = _create_drifting_mask_da(drift=2e-6, dtype=np.float32)
+    # active cell centred at 39.95 (west neighbour)
+    mask_da[10, 1] = 1
+    assert (float(mask_da["lon"][1]) + float(mask_da["lon"][2])) / 2 > 40.0
+
+    assert not _tile_has_active_mask_cell(DRIFT_TILE, mask_da)
 
 
 def test_create_mhm_restart_from_setup_considers_all_positive_mask_tiles(

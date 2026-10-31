@@ -205,14 +205,41 @@ def _coord_bounds(values):
     return lower, upper
 
 
+def _calculate_tile_overlaps(tile, mask_da, lon_key, lat_key):
+    """Calculate which mask columns and rows overlap a setup tile.
+
+    Cell edges from drifting coordinates (e.g. 40.00000000000004 for 40) reach
+    into the neighbouring tile, so a cell only counts when more than a
+    thousandth of its width lies inside the tile.
+
+    Parameters
+    ----------
+    tile : MHMSetupTile
+        Setup tile whose slices hold its cell bounds.
+    mask_da : xarray.DataArray
+        Mask with 1-D longitude and latitude coordinates.
+    lon_key, lat_key : str
+        Names of the mask's longitude and latitude coordinates.
+
+    Returns
+    -------
+    tuple of numpy.ndarray
+        Boolean overlap of the longitude columns and of the latitude rows.
+    """
+    overlaps = []
+    for coord_key, tile_slice in ((lon_key, tile.lonslice), (lat_key, tile.latslice)):
+        tile_min = min(float(tile_slice.start), float(tile_slice.stop))
+        tile_max = max(float(tile_slice.start), float(tile_slice.stop))
+        lower, upper = _coord_bounds(mask_da[coord_key].values)
+        tolerance = 1e-3 * (upper - lower)
+        overlaps.append((lower < tile_max - tolerance) & (upper > tile_min + tolerance))
+    return tuple(overlaps)
+
+
 def _tile_has_active_mask_cell(tile, mask_da):
     """Return whether an L1 tile overlaps at least one active mask cell."""
     lon_key = get_coord_key(mask_da, lon=True)
     lat_key = get_coord_key(mask_da, lat=True)
-    lon_min = min(float(tile.lonslice.start), float(tile.lonslice.stop))
-    lon_max = max(float(tile.lonslice.start), float(tile.lonslice.stop))
-    lat_min = min(float(tile.latslice.start), float(tile.latslice.stop))
-    lat_max = max(float(tile.latslice.start), float(tile.latslice.stop))
 
     active = mask_da.transpose(..., lat_key, lon_key)
     extra_dims = [dim for dim in active.dims if dim not in (lat_key, lon_key)]
@@ -220,10 +247,9 @@ def _tile_has_active_mask_cell(tile, mask_da):
     if extra_dims:
         active_values = np.any(active_values, axis=tuple(range(len(extra_dims))))
 
-    lon_lower, lon_upper = _coord_bounds(mask_da[lon_key].values)
-    lat_lower, lat_upper = _coord_bounds(mask_da[lat_key].values)
-    lon_overlaps = (lon_lower < lon_max) & (lon_upper > lon_min)
-    lat_overlaps = (lat_lower < lat_max) & (lat_upper > lat_min)
+    lon_overlaps, lat_overlaps = _calculate_tile_overlaps(
+        tile, mask_da, lon_key, lat_key
+    )
     overlap = np.outer(lat_overlaps, lon_overlaps)
     return bool(np.any(active_values & overlap))
 
@@ -232,15 +258,9 @@ def _tile_mask_section(tile, mask_da):
     """Return the mask cells whose bounds overlap a setup tile."""
     lon_key = get_coord_key(mask_da, lon=True)
     lat_key = get_coord_key(mask_da, lat=True)
-    lon_min = min(float(tile.lonslice.start), float(tile.lonslice.stop))
-    lon_max = max(float(tile.lonslice.start), float(tile.lonslice.stop))
-    lat_min = min(float(tile.latslice.start), float(tile.latslice.stop))
-    lat_max = max(float(tile.latslice.start), float(tile.latslice.stop))
-
-    lon_lower, lon_upper = _coord_bounds(mask_da[lon_key].values)
-    lat_lower, lat_upper = _coord_bounds(mask_da[lat_key].values)
-    lon_overlaps = (lon_lower < lon_max) & (lon_upper > lon_min)
-    lat_overlaps = (lat_lower < lat_max) & (lat_upper > lat_min)
+    lon_overlaps, lat_overlaps = _calculate_tile_overlaps(
+        tile, mask_da, lon_key, lat_key
+    )
     return mask_da.isel({lon_key: lon_overlaps, lat_key: lat_overlaps})
 
 

@@ -20,11 +20,13 @@
 - `create-mhm-restart-from-setup` exited with code 1 and printed its result list after a successful run. Every command now exits with 0 when it finishes.
 - `crop-mhm-setup` and `create-mhm-restart-from-setup` copied read-only class-definition files and scripts as read-only files, so a later run could not overwrite them and kept the old copies. The copies are now writable.
 - Cropping without a mask, as `create-mhm-restart-from-setup` does for each tile, no longer logs "Failed to create header for mask file" for every header.
+- `create-mhm-restart-from-setup` created and ran tiles in which only an active mask cell of the neighbouring tile reached past the tile edge, by about 1e-13° of rounding error. It also wrote that neighbour's row or column into `mask_tile.nc`. A mask cell now counts only when more than a thousandth of its width lies inside the tile.
 
 ### Tests
 
 - CLI: exit code 0 when a command returns a result, and Click's exit codes for `-h`, `--version` and an unknown option.
 - `crop-mhm-setup`: a read-only source copied as a writable file that a second crop overwrites, and a header written without a mask warning when no mask is given.
+- `create-mhm-restart-from-setup`: tile selection and the tile mask leave out neighbouring cells whose edges reach into the tile by rounding error, with float64 and float32 coordinates.
 
 ## [v0.3.1]
 
