@@ -1,3 +1,5 @@
+import logging
+import os
 from pathlib import Path
 
 import numpy as np
@@ -256,3 +258,75 @@ def test_crop_file_crops_dimension_only_netcdf_using_header(tmp_path):
     assert output_header["xllcorner"] == 110.0
     assert output_header["yllcorner"] == 210.0
     assert output_header["cellsize"] == 10.0
+
+
+def test_crop_file_copies_a_read_only_file_as_writable(tmp_path, monkeypatch, caplog):
+    """Copy a read-only source as a writable file that a second crop overwrites."""
+    monkeypatch.setattr(logging.getLogger("mhm_tools"), "propagate", True)
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    input_dir.mkdir()
+    output_dir.mkdir()
+    input_file = input_dir / "soil_classdefinition.txt"
+    crop_kwargs = {
+        "input_file": input_file,
+        "mask_ds": None,
+        "latslice": None,
+        "lonslice": None,
+        "output_path": output_dir,
+        "input_path": input_dir,
+        "overwrite": True,
+        "available_mem_gib": 3,
+    }
+
+    input_file.write_text("v1", encoding="utf-8")
+    input_file.chmod(0o444)
+    crop_file(**crop_kwargs)
+    assert os.access(output_dir / input_file.name, os.W_OK)
+    input_file.chmod(0o644)
+    input_file.write_text("v2", encoding="utf-8")
+    input_file.chmod(0o444)
+    with caplog.at_level(logging.ERROR, logger="mhm_tools"):
+        crop_file(**crop_kwargs)
+
+    assert (output_dir / input_file.name).read_text(encoding="utf-8") == "v2"
+    assert "Can't copy" not in caplog.text
+
+
+def test_crop_file_without_mask_creates_header_without_warning(
+    tmp_path, monkeypatch, caplog
+):
+    """Write the header without a mask warning when no mask is given."""
+    monkeypatch.setattr(logging.getLogger("mhm_tools"), "propagate", True)
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    input_dir.mkdir()
+    output_dir.mkdir()
+    input_file = input_dir / "dem.nc"
+
+    lon = np.array([0.0, 1.0, 2.0, 3.0])
+    lat = np.array([3.0, 2.0, 1.0, 0.0])
+    dem = np.arange(16, dtype=float).reshape(len(lat), len(lon))
+    xr.Dataset(
+        {"dem": (("lat", "lon"), dem)},
+        coords={"lat": lat, "lon": lon},
+    ).to_netcdf(input_file)
+
+    with caplog.at_level(logging.WARNING, logger="mhm_tools"):
+        crop_file(
+            input_file=input_file,
+            mask_ds=None,
+            latslice=slice(3.0, 1.0),
+            lonslice=slice(1.0, 2.0),
+            output_path=output_dir,
+            input_path=input_dir,
+            overwrite=True,
+            available_mem_gib=3,
+            force_header_creation=True,
+            resolutions=Resolution(l0=1.0),
+        )
+
+    output_header = read_header(output_dir / "header.txt")
+    assert output_header["ncols"] == 2
+    assert output_header["nrows"] == 3
+    assert "Failed to create header for mask file" not in caplog.text

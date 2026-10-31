@@ -642,6 +642,74 @@ def _mask_dem_for_tile(setup_path, l0_mask_files):
     return masked_files
 
 
+def _find_l0_file_without_valid_cells(tile):
+    """Find the DEM or flow direction file of a tile that has no valid cell.
+
+    mHM masks L0 with these files and stops when no cell is left. A file that
+    can't be read is not counted, so mHM still runs and reports it.
+
+    Parameters
+    ----------
+    tile : SetupTile
+        Prepared setup tile.
+
+    Returns
+    -------
+    pathlib.Path or None
+        The first DEM or flow direction NetCDF file without a valid cell.
+    """
+    nc_files = sorted(Path(tile.output_path).rglob("*.nc"))
+    for name_part in ("dem", "fdir"):
+        l0_files = [path for path in nc_files if name_part in path.name.lower()]
+        if not l0_files:
+            continue
+        try:
+            has_valid_cell = bool(_active_l0_mask_from_file(l0_files[0])["mask"].any())
+        except (OSError, ValueError) as exc:
+            logger.warning(f"Could not check the valid cells of {l0_files[0]}: {exc}")
+            continue
+        if not has_valid_cell:
+            return l0_files[0]
+    return None
+
+
+def _split_tiles_without_valid_l0_cells(tiles, n_jobs=1):
+    """Split prepared tiles into tiles mHM can run and tiles without valid L0 cells.
+
+    Parameters
+    ----------
+    tiles : list of SetupTile
+        Prepared setup tiles.
+    n_jobs : int
+        Number of processes reading the tile files.
+
+    Returns
+    -------
+    tuple of list
+        Tiles to run, and ``{"tile", "message"}`` entries for the tiles left out.
+    """
+    if int(n_jobs) == 1:
+        empty_files = [_find_l0_file_without_valid_cells(tile) for tile in tiles]
+    else:
+        empty_files = Parallel(n_jobs=n_jobs, backend="loky")(
+            delayed(_find_l0_file_without_valid_cells)(tile) for tile in tiles
+        )
+    run_tiles = [
+        tile for tile, empty_file in zip(tiles, empty_files) if empty_file is None
+    ]
+    empty_tiles = [
+        {"tile": tile.name, "message": f"{empty_file} has no valid cell"}
+        for tile, empty_file in zip(tiles, empty_files)
+        if empty_file is not None
+    ]
+    if empty_tiles:
+        logger.info(
+            f"Leaving out {len(empty_tiles)} tiles whose DEM or flow direction "
+            "has no valid cell."
+        )
+    return run_tiles, empty_tiles
+
+
 def _ensure_mhm_tile_dirs(setup_path):
     """Create directories needed by mHM inside a tile setup."""
     setup_path = Path(setup_path)
@@ -1882,6 +1950,11 @@ def create_mhm_restart_from_setup(  # noqa: PLR0913
         l0_mask_files=l0_mask_files,
         update_tile_masks=update_tile_masks,
     )
+    # mHM can't run without a valid DEM or flow direction cell, so these tiles
+    # are listed separately instead of failing or being recreated
+    prepared_tiles, empty_tiles = _split_tiles_without_valid_l0_cells(
+        prepared_tiles, n_jobs=n_jobs
+    )
     if skip_mhm_run:
         logger.info(
             f"mHM runs disabled; collecting existing restart files for "
@@ -1943,6 +2016,12 @@ def create_mhm_restart_from_setup(  # noqa: PLR0913
         )
     else:
         failed_tiles_file = _summarize_failed_tiles(failed_tiles, output_path)
+    empty_tiles_file = _summarize_failed_tiles(
+        empty_tiles,
+        output_path,
+        filename="empty_tiles.txt",
+        title="Tiles without valid DEM or flow direction cells",
+    )
 
     restart_files = [
         restart_file
@@ -1987,6 +2066,10 @@ def create_mhm_restart_from_setup(  # noqa: PLR0913
 
     logger.info(f"Created tiled mHM restart files: {restart_files}")
     logger.info(f"{len(failed_tiles)} of {len(tiles)} were missing")
+    logger.info(
+        f"{len(empty_tiles)} of {len(tiles)} had no valid DEM or flow direction "
+        f"cell and were left out, see {empty_tiles_file}"
+    )
     return {
         "restart_files": restart_files,
         "merged_restart_file": merged_restart_path,
@@ -1994,6 +2077,8 @@ def create_mhm_restart_from_setup(  # noqa: PLR0913
         "tiles": tiles,
         "failed_tiles": failed_tiles,
         "failed_tiles_file": failed_tiles_file,
+        "empty_tiles": empty_tiles,
+        "empty_tiles_file": empty_tiles_file,
     }
 
 

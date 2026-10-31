@@ -7,6 +7,7 @@
 - `difference` and `relative-difference` compute model − reference, so a positive value means the model is higher, as their plot labels already said. Before, they computed reference − model.
 - `discharge-evaluation` in bootstrap mode names the Spearman correlation of the monthly climatologies `spearman_clim` instead of `gamma`.
 - `--ncpus 0` and `--ncpus -1` use all cores in every command.
+- `create-mhm-restart-from-setup` leaves out tiles whose DEM or flow direction has no valid cell, instead of running mHM on them and reporting them as failed. It lists them in `empty_tiles.txt` and prints them at the end of the run.
 
 ### Fixed
 
@@ -16,7 +17,14 @@
 - `mhm-tools -vv` crashed. Repeated `-v` or `-q` now stops at DEBUG or ERROR, and `--log-level CRITICAL` falls back to ERROR.
 - `--ncpus 0` raised an error in most commands.
 - `create-catchment --upscale` wrote the L0 and L1 gauge info to the same `gauges_info.csv_0.*` on degree grids, so the L1 file replaced the L0 file. The L0 position now goes to `gauges_info_l0.*` and the L1 position to `gauges_info.*`.
+- `create-mhm-restart-from-setup` exited with code 1 and printed its result list after a successful run. Every command now exits with 0 when it finishes.
+- `crop-mhm-setup` and `create-mhm-restart-from-setup` copied read-only class-definition files and scripts as read-only files, so a later run could not overwrite them and kept the old copies. The copies are now writable.
+- Cropping without a mask, as `create-mhm-restart-from-setup` does for each tile, no longer logs "Failed to create header for mask file" for every header.
 
+### Tests
+
+- CLI: exit code 0 when a command returns a result, and Click's exit codes for `-h`, `--version` and an unknown option.
+- `crop-mhm-setup`: a read-only source copied as a writable file that a second crop overwrites, and a header written without a mask warning when no mask is given.
 
 ## [v0.3.1]
 

@@ -605,7 +605,8 @@ def _build_click_command(command_name: str, module, prog_path: Optional[str] = N
 
     def _callback(**kwargs):
         args = SimpleNamespace(**kwargs)
-        return module.run(args)
+        # a command's Python result is no exit code, so a finished run exits with 0
+        module.run(args)
 
     return GroupedCommand(
         name=command_name,

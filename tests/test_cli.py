@@ -725,6 +725,51 @@ def test_cli_keeps_the_tui_launcher_as_hidden_command():
     assert result.exit_code == 0, result.output
 
 
+def test_main_exits_with_zero_when_a_command_returns_a_result(monkeypatch):
+    """Exit with 0 instead of printing the result when a command returns one."""
+    from mhm_tools._cli._main import main
+
+    calls = []
+
+    def fake_run(args):
+        calls.append(args)
+        return {"restart_files": []}
+
+    monkeypatch.setattr(_create_mhm_restart_from_setup, "run", fake_run)
+
+    result = main(
+        [
+            "create-mhm-restart-from-setup",
+            "-i",
+            "input",
+            "-o",
+            "output",
+            "-m",
+            "mask.nc",
+            "--l1-resolution",
+            "0.1",
+        ]
+    )
+
+    assert SystemExit(result).code in (None, 0)
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize(
+    ("args", "exit_code"),
+    [
+        (["-h"], 0),
+        (["--version"], 0),
+        (["crop-mhm-setup", "--no-such-option"], 2),
+    ],
+)
+def test_main_keeps_click_exit_codes(args, exit_code):
+    """Return Click's exit codes for help, version and usage errors."""
+    from mhm_tools._cli._main import main
+
+    assert main(args) == exit_code
+
+
 def test_link_folder_tree_cli_without_patterns_links_all_files(tmp_path):
     """Link every file when link-folder-tree gets no exclude or include pattern."""
     input_dir = tmp_path / "input"
