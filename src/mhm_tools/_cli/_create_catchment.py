@@ -157,7 +157,17 @@ def add_args(parser):
         default=0,
         type=int,
         help=(
-            "Creates a frame of nonflow cells around the domain to enable non global domains in ulysses mrm which connects the eastern and western boundaries."
+            "Width in cells of a frame of non-flow cells around the output grid "
+            "(default: 0, no frame). Ulysses mRM joins the eastern and western grid "
+            "edges; the frame stops a regional domain from routing across them. "
+            "Frame cells are pits in flwdir and no data in all other variables and "
+            "in the mask. Caution: the frame replaces the outermost cells, it does "
+            "not add cells. A single-gauge run pads the basin by the frame width "
+            "first, so only a basin closer than that to the input edge loses cells. "
+            "A region or multi-gauge run has no padding, so the frame overwrites "
+            "the outer cells of the requested extent, basin cells included. Global "
+            "runs that write basin ids ignore the frame; on other global runs it "
+            "cuts the east-west connection, so don't use it there."
         ),
     )
     optional_args.add_argument(

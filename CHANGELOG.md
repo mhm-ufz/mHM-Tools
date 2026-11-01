@@ -8,6 +8,8 @@
 - `discharge-evaluation` in bootstrap mode names the Spearman correlation of the monthly climatologies `spearman_clim` instead of `gamma`.
 - `--ncpus 0` and `--ncpus -1` use all cores in every command.
 - `create-mhm-restart-from-setup` leaves out tiles whose DEM or flow direction has no valid cell, instead of running mHM on them and reporting them as failed. It lists them in `empty_tiles.txt` and prints them at the end of the run.
+- `create_catchment()` and `Catchment.write()` default to `frame=0` like `--frame`, so Python callers only get a frame when they ask for one.
+- The `--frame` help of `create-catchment` says which cells the frame replaces and when it overwrites basin cells.
 
 ### Fixed
 
@@ -21,12 +23,15 @@
 - `crop-mhm-setup` and `create-mhm-restart-from-setup` copied read-only class-definition files and scripts as read-only files, so a later run could not overwrite them and kept the old copies. The copies are now writable.
 - Cropping without a mask, as `create-mhm-restart-from-setup` does for each tile, no longer logs "Failed to create header for mask file" for every header.
 - `create-mhm-restart-from-setup` created and ran tiles in which only an active mask cell of the neighbouring tile reached past the tile edge, by about 1e-13° of rounding error. It also wrote that neighbour's row or column into `mask_tile.nc`. A mask cell now counts only when more than a thousandth of its width lies inside the tile.
+- Global basin ids of `create-catchment` and `create-wmo-region-masks` left the first and last longitude column without a basin, so `create-wmo-region-masks` put their land cells in no region (89 cells of the 0.1° hydro model mask). The `--frame` of non-flow cells, default 1, cleared that border in both the unrolled and the rolled delineation before they were merged at the date line. Global basin ids are now written without a frame.
+- `create-catchment --frame` wrote the flow-direction pit value into every output variable. With `--ftype ldd` the frame got basin id 5 and showed up as active cells in `mask.nc`, and `elevtn` and `grdare` got 0 instead of -9999. Only `flwdir` gets pits now; every other variable and the mask are no data on the frame.
 
 ### Tests
 
 - CLI: exit code 0 when a command returns a result, and Click's exit codes for `-h`, `--version` and an unknown option.
 - `crop-mhm-setup`: a read-only source copied as a writable file that a second crop overwrites, and a header written without a mask warning when no mask is given.
 - `create-mhm-restart-from-setup`: tile selection and the tile mask leave out neighbouring cells whose edges reach into the tile by rounding error, with float64 and float32 coordinates.
+- `create-catchment`: global basin ids keep the first and last longitude column, and a basin flowing across the date line has one id on both sides; the frame holds pits only in flwdir and no data in the other variables and the mask, and `create_frame` writes one value per variable.
 
 ## [v0.3.1]
 
