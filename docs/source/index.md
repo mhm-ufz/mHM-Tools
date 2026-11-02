@@ -45,7 +45,7 @@ The script needs conda or mamba. It creates the environment if the path does not
 
 * `--editable`: install in editable mode, for development
 * `--extras test,doc`: also install optional dependencies
-* `--python 3.12`: Python version of a new environment (default 3.11)
+* `--python 3.12`: Python version of a new environment (default: chosen by conda to fit the dependencies)
 
 ## Documentation and source code
 

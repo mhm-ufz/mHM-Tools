@@ -5,7 +5,7 @@
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PYTHON_VERSION="3.11"
+PYTHON_VERSION=""
 EXTRAS=""
 EDITABLE=false
 ENV_DIR=""
@@ -13,7 +13,7 @@ ENV_DIR=""
 # remaining pure Python dependencies from pyproject.toml
 CONDA_PACKAGES=(
     "pip"
-    "numpy>=1.17.3,<2.4"
+    "numpy=2.52"
     "scipy"
     "pandas"
     "rasterio"
@@ -33,11 +33,11 @@ print_usage() {
 Usage: $(basename "$0") [--editable] [--extras EXTRAS] [--python VERSION] ENV_DIR
 
 Install mhm-tools from ${REPO_DIR} into the conda environment ENV_DIR.
-ENV_DIR is created with Python VERSION if it does not exist.
+ENV_DIR is created if it does not exist.
 
   --editable        install in editable mode instead of a built wheel
   --extras EXTRAS   comma separated extras, e.g. test,doc
-  --python VERSION  Python version of a new environment (default ${PYTHON_VERSION})
+  --python VERSION  Python version of a new environment (default: chosen by conda)
 EOF
 }
 
@@ -84,10 +84,11 @@ if [[ -d "$ENV_DIR/conda-meta" ]]; then
 elif [[ -e "$ENV_DIR" ]]; then
     fail "${ENV_DIR} exists but is no conda environment"
 else
-    echo "Creating the conda environment ${ENV_DIR} with Python ${PYTHON_VERSION}"
+    echo "Creating the conda environment ${ENV_DIR}${PYTHON_VERSION:+ with Python ${PYTHON_VERSION}}"
+    # without --python conda picks the Python version that fits all packages
     "$CONDA_COMMAND" create --yes --prefix "$ENV_DIR" \
         --channel conda-forge --override-channels \
-        "python=${PYTHON_VERSION}" "${CONDA_PACKAGES[@]}"
+        ${PYTHON_VERSION:+"python=${PYTHON_VERSION}"} "${CONDA_PACKAGES[@]}"
     ENV_DIR="$(cd "$ENV_DIR" && pwd)"
 fi
 PYTHON="${ENV_DIR}/bin/python"

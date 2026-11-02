@@ -10,6 +10,8 @@
 - `create-mhm-restart-from-setup` leaves out tiles whose DEM or flow direction has no valid cell, instead of running mHM on them and reporting them as failed. It lists them in `empty_tiles.txt` and prints them at the end of the run.
 - `create_catchment()` and `Catchment.write()` default to `frame=0` like `--frame`, so Python callers only get a frame when they ask for one.
 - The `--frame` help of `create-catchment` says which cells the frame replaces and when it overwrites basin cells.
+- mhm-tools accepts numpy up to 2.5; before, it required numpy below 2.4.
+- `scripts/install_mhm_tools.sh` installs numpy 2.5 from conda-forge. Without `--python`, conda picks the Python version of a new environment that fits the packages; before, it was always 3.11. An existing environment keeps its Python version, so one created with Python 3.11 has to be recreated, because numpy 2.5 needs Python 3.12 or newer.
 
 ### Fixed
 
@@ -32,6 +34,7 @@
 - `crop-mhm-setup`: a read-only source copied as a writable file that a second crop overwrites, and a header written without a mask warning when no mask is given.
 - `create-mhm-restart-from-setup`: tile selection and the tile mask leave out neighbouring cells whose edges reach into the tile by rounding error, with float64 and float32 coordinates.
 - `create-catchment`: global basin ids keep the first and last longitude column, and a basin flowing across the date line has one id on both sides; the frame holds pits only in flwdir and no data in the other variables and the mask, and `create_frame` writes one value per variable.
+- `snow-evaluation`: the classification accuracy tests read their one-cell results with `.item()`, because numpy 2.5 no longer converts arrays with size-1 dimensions to Python numbers.
 
 ## [v0.3.1]
 
