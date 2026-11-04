@@ -66,7 +66,8 @@ case ",${EXTRAS}," in
     # mHM 6 is not released yet; replace the fail with MHM_PACKAGE="mhm>=6,<7" once it is
     *,mhm6,*) fail "mHM 6 is not released yet, use --extras mhm or mhm5" ;;
     *,mhm5,*) MHM_PACKAGE="mhm>=5.13,<6" ;;
-    *,mhm,*) MHM_PACKAGE="mhm>=5.13" ;;
+    # the test extra needs mHM as well
+    *,mhm,*|*,test,*) MHM_PACKAGE="mhm>=5.13" ;;
 esac
 [[ -z "$MHM_PACKAGE" ]] || CONDA_PACKAGES+=("$MHM_PACKAGE")
 

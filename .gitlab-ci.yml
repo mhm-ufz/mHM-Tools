@@ -21,6 +21,8 @@ test:
   stage: test
   script:
     - pip3 install --editable .[test]
+    # the restart creation tests need mHM; stop here if it cannot be imported
+    - python -c "import importlib.metadata, mhm; print('mHM', importlib.metadata.version('mhm'))"
     - python -m pytest --cov mhm_tools --cov-report term-missing --cov-report html:cov --cov-report xml:cov.xml -v tests/
   coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
   artifacts:

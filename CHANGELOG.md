@@ -35,6 +35,7 @@
 
 ### Tests
 
+- The `test` extra installs mHM 5.13 or newer, and the GitLab test job stops before pytest if mHM cannot be imported, so the restart creation tests run the real mHM import check. `scripts/install_mhm_tools.sh --extras test` takes mHM from conda-forge.
 - CLI: exit code 0 when a command returns a result, and Click's exit codes for `-h`, `--version` and an unknown option.
 - `crop-mhm-setup`: a read-only source copied as a writable file that a second crop overwrites, and a header written without a mask warning when no mask is given.
 - `create-mhm-restart-from-setup`: tile selection and the tile mask leave out neighbouring cells whose edges reach into the tile by rounding error, with float64 and float32 coordinates.

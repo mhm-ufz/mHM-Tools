@@ -44,7 +44,7 @@ $ conda activate /path/to/envs/mhm-tools
 The script needs conda or mamba. It creates the environment if the path does not exist, with the compiled dependencies and the CDO program from conda-forge, or updates an existing one. It ignores `PYTHONPATH`, the user site-packages and the pip settings of your shell, replaces an older mhm-tools install, and checks afterwards that `mhm_tools` is imported from the environment.
 
 * `--editable`: install in editable mode, for development
-* `--extras test,doc`: also install optional dependencies, `mhm` or `mhm5` adds mHM from conda-forge
+* `--extras test,doc`: also install optional dependencies, `mhm` or `mhm5` adds mHM from conda-forge, and so does `test`, because the tests need mHM
 * `--python 3.12`: Python version of a new environment (default: chosen by conda to fit the dependencies)
 
 ### mHM for restart creation

@@ -78,7 +78,10 @@ doc = [
   "docutils>=0.18", # mdinclude with myst
   "sphinx-click", # Click CLI doc
 ]
-test = ["pytest-cov>=3"]
+test = [
+  "pytest-cov>=3",
+  "mhm>=5.13", # the restart creation tests need mHM
+]
 check = [
   "black>=24,<25",
   "isort[colors]",
