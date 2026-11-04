@@ -44,8 +44,28 @@ $ conda activate /path/to/envs/mhm-tools
 The script needs conda or mamba. It creates the environment if the path does not exist, with the compiled dependencies and the CDO program from conda-forge, or updates an existing one. It ignores `PYTHONPATH`, the user site-packages and the pip settings of your shell, replaces an older mhm-tools install, and checks afterwards that `mhm_tools` is imported from the environment.
 
 * `--editable`: install in editable mode, for development
-* `--extras test,doc`: also install optional dependencies
+* `--extras test,doc`: also install optional dependencies, `mhm` or `mhm5` adds mHM from conda-forge
 * `--python 3.12`: Python version of a new environment (default: chosen by conda to fit the dependencies)
+
+### mHM for restart creation
+
+Only `create-mhm-restart-from-setup` needs mHM itself. It runs mHM 5.13 or newer through its Python bindings and checks before it creates any tile that `import mhm` works. Install mHM along with mhm-tools by choosing the major version as an extra:
+
+```shell
+$ pip install "mhm-tools[mhm]"    # the newest mHM from 5.13 on
+$ pip install "mhm-tools[mhm5]"   # stay on mHM 5 (5.13 or newer)
+```
+
+mHM 6 is not available yet, so both currently install mHM 5. Once mHM 6 is released, `mhm` installs it, while `mhm5` keeps mHM 5; an `mhm6` extra will then select mHM 6 explicitly.
+
+With conda, install mHM from conda-forge, or let the install script do it with `--extras mhm` or `--extras mhm5`:
+
+```shell
+$ conda install -c conda-forge "mhm>=5.13"       # or "mhm>=5.13,<6" to stay on mHM 5
+$ scripts/install_mhm_tools.sh /path/to/envs/mhm-tools --extras mhm5
+```
+
+The mHM runs call `python` from `PATH`, so activate the environment that holds mHM before you start the command. On an HPC system, you can use an mHM module instead of installing mHM: `--mhm-packages "/path/to/modulefiles mhm/5.13"` runs `module use` for the paths and `module load` for the modules before each mHM run, which also selects the mHM version.
 
 ## Documentation and source code
 
