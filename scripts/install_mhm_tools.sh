@@ -36,7 +36,7 @@ Install mhm-tools from ${REPO_DIR} into the conda environment ENV_DIR.
 ENV_DIR is created if it does not exist.
 
   --editable        install in editable mode instead of a built wheel
-  --extras EXTRAS   comma separated extras, e.g. test,doc
+  --extras EXTRAS   comma separated extras, e.g. test,doc or mhm5 (mHM from conda-forge)
   --python VERSION  Python version of a new environment (default: chosen by conda)
 EOF
 }
@@ -58,6 +58,17 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 [[ -n "$ENV_DIR" ]] || { print_usage >&2; fail "ENV_DIR is missing"; }
+
+# mHM comes from conda-forge like the other compiled packages. pip only warns
+# about an unknown extra, so an unreleased mHM version has to fail here
+MHM_PACKAGE=""
+case ",${EXTRAS}," in
+    # mHM 6 is not released yet; replace the fail with MHM_PACKAGE="mhm>=6,<7" once it is
+    *,mhm6,*) fail "mHM 6 is not released yet, use --extras mhm or mhm5" ;;
+    *,mhm5,*) MHM_PACKAGE="mhm>=5.13,<6" ;;
+    *,mhm,*) MHM_PACKAGE="mhm>=5.13" ;;
+esac
+[[ -z "$MHM_PACKAGE" ]] || CONDA_PACKAGES+=("$MHM_PACKAGE")
 
 if command -v mamba >/dev/null 2>&1; then
     CONDA_COMMAND="mamba"
@@ -116,4 +127,6 @@ MODULE_FILE="$("$PYTHON" -I -c 'import mhm_tools; print(mhm_tools.__file__)')"
 [[ "$MODULE_FILE" == "$EXPECTED_DIR"/* ]] \
     || fail "mhm_tools is imported from ${MODULE_FILE}, expected below ${EXPECTED_DIR}"
 "${ENV_DIR}/bin/mhm-tools" --help >/dev/null
+[[ -z "$MHM_PACKAGE" ]] || "$PYTHON" -I -c 'import mhm' \
+    || fail "mHM was installed but cannot be imported"
 echo "Installed mhm-tools $("$PYTHON" -I -c 'import mhm_tools; print(mhm_tools.__version__)') from ${MODULE_FILE}"
