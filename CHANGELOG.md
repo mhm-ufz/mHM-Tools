@@ -1,6 +1,9 @@
 # Changelog
 
-## [Unreleased]
+## [Unreleased v0.3.2]
+
+### Added
+- The docs are also built on Read the Docs (https://mhm-tools.readthedocs.io) from the GitHub mirror and show the package version. GitLab Pages stays available during the migration.
 
 ### Changed
 
