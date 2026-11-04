@@ -13,8 +13,8 @@
 - `create-mhm-restart-from-setup` leaves out tiles whose DEM or flow direction has no valid cell, instead of running mHM on them and reporting them as failed. It lists them in `empty_tiles.txt` and prints them at the end of the run.
 - `create_catchment()` and `Catchment.write()` default to `frame=0` like `--frame`, so Python callers only get a frame when they ask for one.
 - The `--frame` help of `create-catchment` says which cells the frame replaces and when it overwrites basin cells.
-- mhm-tools accepts numpy up to 2.5; before, it required numpy below 2.4.
-- `scripts/install_mhm_tools.sh` installs numpy 2.5 from conda-forge. Without `--python`, conda picks the Python version of a new environment that fits the packages; before, it was always 3.11. An existing environment keeps its Python version, so one created with Python 3.11 has to be recreated, because numpy 2.5 needs Python 3.12 or newer.
+- mhm-tools accepts every numpy 2 release; before, it required numpy below 2.4. The code uses none of the functions and behaviours deprecated or removed up to numpy 2.5.
+- `scripts/install_mhm_tools.sh` installs numpy 2.5 or a newer numpy 2 release from conda-forge. Without `--python`, conda picks the Python version of a new environment that fits the packages; before, it was always 3.11. An existing environment keeps its Python version, so one created with Python 3.11 has to be recreated, because numpy 2.5 needs Python 3.12 or newer.
 
 ### Fixed
 
