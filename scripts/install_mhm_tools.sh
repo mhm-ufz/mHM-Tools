@@ -13,7 +13,7 @@ ENV_DIR=""
 # remaining pure Python dependencies from pyproject.toml
 CONDA_PACKAGES=(
     "pip"
-    "numpy=2.52"
+    "numpy>=2.5,<3"
     "scipy"
     "pandas"
     "rasterio"
