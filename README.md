@@ -1,6 +1,6 @@
 # mHM Tools
 
-<a href="https://mhm.pages.ufz.de/mhm-tools" title="mHM-Tools documentation" target="_blank">
+<a href="https://mhm-tools.readthedocs.io" title="mHM-Tools documentation" target="_blank">
   <img width="300" src="https://git.ufz.de/mhm/mhm-tools/-/raw/main/docs/source/_static/logo_large.png" />
 </a>
 
@@ -35,7 +35,9 @@ $ mhm-tools tui
 
 ## Documentation and source code
 
-* [Documentation](https://mhm.pages.ufz.de/mhm-tools), with the [command line reference](https://mhm.pages.ufz.de/mhm-tools/cli.html) and the [API reference](https://mhm.pages.ufz.de/mhm-tools/api.html)
+* [Documentation](https://mhm-tools.readthedocs.io), with the [command line reference](https://mhm-tools.readthedocs.io/en/latest/cli.html) and the [API reference](https://mhm-tools.readthedocs.io/en/latest/api.html)
+
+  We are currently migrating the documentation to Read the Docs. The previous version is still available on [GitLab Pages](https://mhm.pages.ufz.de/mhm-tools).
 * [Source code](https://git.ufz.de/mhm/mhm-tools) and [issue tracker](https://git.ufz.de/mhm/mhm-tools/-/issues)
 * [Release notes](https://git.ufz.de/mhm/mhm-tools/-/blob/main/RELEASE_NOTES.md) and the full [changelog](https://git.ufz.de/mhm/mhm-tools/-/blob/main/CHANGELOG.md)
 * mHM [homepage](https://mhm-ufz.org)

@@ -62,7 +62,8 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://mhm-ufz.org/"
-Documentation = "https://mhm.pages.ufz.de/mhm-tools"
+Documentation = "https://mhm-tools.readthedocs.io"
+"Documentation (GitLab Pages)" = "https://mhm.pages.ufz.de/mhm-tools"
 Source = "https://git.ufz.de/mhm/mhm-tools"
 Tracker = "https://git.ufz.de/mhm/mhm-tools/-/issues"
 Changelog = "https://git.ufz.de/mhm/mhm-tools/-/blob/main/CHANGELOG.md"
