@@ -90,6 +90,12 @@ plot = [
 tui = [
   "trogon>=0.6.0",
 ]
+# mHM Python bindings, needed by create-mhm-restart-from-setup.
+# mhm takes the newest mHM from 5.13 on, mhm5 stays on mHM 5.
+mhm = ["mhm>=5.13"]
+mhm5 = ["mhm>=5.13,<6"]
+# mHM 6 is not released yet; uncomment once it is on PyPI and conda-forge
+# mhm6 = ["mhm>=6,<7"]
 
 [project.scripts]
 mhm-tools = "mhm_tools._cli:main"
