@@ -12,6 +12,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -34,6 +35,13 @@ from mhm_tools.pre.crop_mhm_setup import crop_mhm_setup
 from mhm_tools.pre.fill_nearest import fill_nearest
 
 logger = logging.getLogger(__name__)
+
+# oldest mHM version (major, minor) whose Python bindings the runner supports
+_MIN_MHM_VERSION = (5, 13)
+_MHM_INSTALL_HINT = (
+    'pip install "mhm-tools[mhm]" (or [mhm5]) or '
+    'conda install -c conda-forge "mhm>=5.13,<6"'
+)
 
 
 def _snap_grid_bound(value, resolution=None):
@@ -432,6 +440,90 @@ class MHMRunner:
             with ErrorLogger(logger):
                 raise RuntimeError(msg)
         return process
+
+    def check_mhm_import(self):
+        """Check that the Python used for the mHM runs imports mHM 5.13 or newer.
+
+        The check runs the same module loads and ``python`` as the mHM runs.
+
+        Returns
+        -------
+        str
+            Version of the importable mHM, or "unknown" if it cannot be read.
+
+        Raises
+        ------
+        RuntimeError
+            If mHM cannot be imported or is older than 5.13.
+        """
+        probe = "\n".join(
+            [
+                "import importlib.metadata",
+                "import sys",
+                "import mhm",
+                "try:",
+                "    version = importlib.metadata.version('mhm')",
+                "except importlib.metadata.PackageNotFoundError:",
+                "    version = getattr(mhm, '__version__', 'unknown')",
+                "print(sys.executable)",
+                "print(version)",
+            ]
+        )
+        command = self._get_module_command() + "python -c " + shlex.quote(probe)
+        process = subprocess.run(command, shell=True, capture_output=True, check=False)
+        min_version = ".".join(str(part) for part in _MIN_MHM_VERSION)
+        if process.returncode != 0:
+            stderr_lines = process.stderr.decode(errors="replace").strip().splitlines()
+            reasons = [
+                f"mHM is not installed in the Python the runs use. Install it with \
+                {_MHM_INSTALL_HINT}, or load an mHM module with --mhm-packages."
+            ]
+            if self.mhm_packages is None:
+                reasons.append(
+                    "The environment holding mHM is not activated. The runs call "
+                    f"'python' from PATH ({shutil.which('python') or 'not found'}), "
+                    f"not the Python running mhm-tools ({sys.executable})."
+                )
+            else:
+                reasons.append(
+                    f"--mhm-packages '{self.mhm_packages}' did not provide mHM: the "
+                    "'module' command is missing, or the loaded modules lack the mHM "
+                    "Python bindings or a 'python' that can import them."
+                )
+            reasons.append(
+                "mHM is installed but fails to import, e.g. because of a missing "
+                "netCDF library or a numpy build mismatch (see the error output)."
+            )
+            reason_lines = "\n".join(f"  - {reason}" for reason in reasons)
+            error_output = "\n".join(stderr_lines[-5:])
+            msg = (
+                f"mHM could not be imported, so no restart files can be created.\n"
+                f"Command: {command}\n"
+                f"Error output:\n{error_output}\n"
+                f"Possible reasons:\n{reason_lines}\n"
+                "Use --skip-mhm-run to only collect existing restart files."
+            )
+            with ErrorLogger(logger):
+                raise RuntimeError(msg)
+
+        stdout_lines = process.stdout.decode(errors="replace").strip().splitlines()
+        python_executable, version = stdout_lines[-2:]
+        version_match = re.match(r"(\d+)\.(\d+)", version)
+        if version_match is None:
+            logger.warning(
+                f"Could not read the mHM version of {python_executable}; "
+                f"mHM {min_version} or newer is required."
+            )
+        elif tuple(int(part) for part in version_match.groups()) < _MIN_MHM_VERSION:
+            msg = (
+                f"mHM {version} from {python_executable} is too old, the restart "
+                f"creation needs mHM {min_version} or newer. Install it with "
+                f"{_MHM_INSTALL_HINT}, or load a newer module with --mhm-packages."
+            )
+            with ErrorLogger(logger):
+                raise RuntimeError(msg)
+        logger.info(f"Using mHM {version} from {python_executable}")
+        return version
 
 
 def _find_restart_files(setup_path, restart_pattern, min_mtime=None):
@@ -1930,6 +2022,9 @@ def create_mhm_restart_from_setup(  # noqa: PLR0913
     """
     output_path = Path(output_path)
     mhm_n_jobs = n_jobs if mhm_n_jobs is None else mhm_n_jobs
+    # without mHM every tile would fail on its own after the tiles are prepared
+    if not skip_mhm_run:
+        MHMRunner(mhm_packages=mhm_packages).check_mhm_import()
     mask_ds = (
         mask_da.to_dataset(name=mask_var)
         if isinstance(mask_da, xr.DataArray)
