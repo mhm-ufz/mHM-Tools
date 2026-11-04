@@ -44,6 +44,7 @@
 - `create-mhm-restart-from-setup`: tile selection and the tile mask leave out neighbouring cells whose edges reach into the tile by rounding error, with float64 and float32 coordinates.
 - `create-catchment`: global basin ids keep the first and last longitude column, and a basin flowing across the date line has one id on both sides; the frame holds pits only in flwdir and no data in the other variables and the mask, and `create_frame` writes one value per variable.
 - `snow-evaluation`: the classification accuracy tests read their one-cell results with `.item()`, because numpy 2.5 no longer converts arrays with size-1 dimensions to Python numbers.
+- `discharge-evaluation`: the region rows of the summary table, the beta limit with its left-out notes for direct and bootstrap results, the NaN/inf notes, and the notes passed on to the PDF table.
 
 ## [v0.3.1]
 

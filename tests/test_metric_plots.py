@@ -544,3 +544,108 @@ def test_discharge_plot_metric_violins_uses_repeated_rows(tmp_path, monkeypatch)
     ]
     assert calls[0]["values_by_label"]["all stations"].tolist() == [0.1, 0.3]
     assert calls[1]["values_by_label"]["all stations"].tolist() == [0.2, 0.6]
+
+
+def test_get_discharge_metric_values_by_variable_adds_wmo_regions():
+    """All stations come first, then every WMO region with finite values."""
+    df = pd.DataFrame({"id": [1001, 1002, 2001, 9001], "kge": [0.1, 0.3, 0.5, np.inf]})
+
+    values_by_variable = discharge_evaluation.get_discharge_metric_values_by_variable(
+        df, variables=["kge"]
+    )
+
+    assert list(values_by_variable["kge"]) == ["all stations", "Africa", "Asia"]
+    assert values_by_variable["kge"]["Africa"].tolist() == [0.1, 0.3]
+
+
+def test_get_discharge_metric_values_by_variable_skips_regions_without_values():
+    """A region with only NaN for one metric gets no label for that metric."""
+    df = pd.DataFrame({"id": [1001, 2001], "kge": [0.1, 0.5], "nse": [0.2, np.nan]})
+
+    values_by_variable = discharge_evaluation.get_discharge_metric_values_by_variable(
+        df, variables=["kge", "nse"]
+    )
+
+    assert "Asia" in values_by_variable["kge"]
+    assert "Asia" not in values_by_variable["nse"]
+
+
+def test_create_table_results_within_mean_factor_leaves_out_extreme_beta():
+    """Stations with beta beyond the factor are left out, the limits and NaN stay."""
+    results_df = pd.DataFrame(
+        {"id": [1, 2, 3, 4, 5, 6], "beta": [1.0, 31.0, 0.03, 30.0, 1 / 30, np.nan]}
+    )
+
+    table_df, notes = discharge_evaluation.create_table_results_within_mean_factor(
+        results_df, 30
+    )
+
+    assert table_df["id"].tolist() == [1, 4, 5, 6]
+    assert notes == ["beta > 30: 1 of 6 stations", "beta < 1/30: 1 of 6 stations"]
+
+
+def test_create_table_results_within_mean_factor_keeps_all_without_factor():
+    """None keeps every station, a factor below 1 is refused."""
+    results_df = pd.DataFrame({"id": [1, 2], "beta": [1.0, 100.0]})
+
+    table_df, notes = discharge_evaluation.create_table_results_within_mean_factor(
+        results_df, None
+    )
+
+    assert table_df["id"].tolist() == [1, 2]
+    assert notes == []
+    with pytest.raises(ValueError, match="at least 1"):
+        discharge_evaluation.create_table_results_within_mean_factor(results_df, 0.5)
+
+
+def test_create_table_results_within_mean_factor_counts_bootstrap_stations_once():
+    """Several left-out samples of one station count as one station."""
+    results_df = pd.DataFrame({"id": [1, 1, 1, 2], "beta": [40.0, 50.0, 1.0, 1.0]})
+
+    table_df, notes = discharge_evaluation.create_table_results_within_mean_factor(
+        results_df, 30
+    )
+
+    assert table_df["id"].tolist() == [1, 2]
+    assert notes == ["beta > 30: 1 of 2 stations"]
+
+
+def test_create_non_finite_metric_notes_counts_stations_per_metric():
+    """Only metrics with NaN or inf values get a note; missing columns are skipped."""
+    table_df = pd.DataFrame(
+        {"id": [1, 2, 3], "kge": [0.1, np.nan, np.inf], "nse": [0.1, 0.2, 0.3]}
+    )
+
+    notes = discharge_evaluation.create_non_finite_metric_notes(
+        table_df, ["kge", "nse", "gamma"]
+    )
+
+    assert notes == ["no finite kge (NaN/inf): 2 of 3 stations"]
+
+
+def test_write_metric_plot_overview_pdf_passes_notes_to_the_table(
+    tmp_path, monkeypatch
+):
+    """The notes reach the summary table pages; without notes they are None."""
+    table_calls = []
+    monkeypatch.setattr(
+        plotter,
+        "_write_metric_summary_table_pages",
+        lambda **kwargs: table_calls.append(kwargs),
+    )
+    summary_rows = [{"realisation": "all stations", "variable": "kge", "value": 0.5}]
+
+    plotter.write_metric_plot_overview_pdf(
+        output_file=tmp_path / "with_notes.pdf",
+        plot_files=[],
+        summary_rows=summary_rows,
+        notes=["beta > 30: 1 of 2 stations"],
+    )
+    plotter.write_metric_plot_overview_pdf(
+        output_file=tmp_path / "without_notes.pdf",
+        plot_files=[],
+        summary_rows=summary_rows,
+    )
+
+    assert table_calls[0]["notes"] == ["beta > 30: 1 of 2 stations"]
+    assert table_calls[1]["notes"] is None
