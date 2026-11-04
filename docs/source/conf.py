@@ -1,5 +1,7 @@
 import datetime
 
+from mhm_tools import __version__ as release
+
 # Configuration file for the Sphinx documentation builder.
 #
 # For the full list of built-in configuration values, see the documentation:
@@ -11,6 +13,7 @@ import datetime
 project = "mhm_tools"
 copyright = f"2021 - {datetime.datetime.now().year}, mHM-Tools Developers"
 author = "mHM-Tools Developers"
+version = release
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
