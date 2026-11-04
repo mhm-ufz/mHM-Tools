@@ -14,7 +14,7 @@ Authors
 
 import logging
 from pathlib import Path
-from typing import Mapping, Optional, Sequence
+from typing import Mapping, Optional, Sequence, Tuple
 
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
@@ -1132,6 +1132,9 @@ def write_metric_plot_overview_pdf(
     dpi: int = 150,
     notes: Optional[Sequence[str]] = None,
     highlight_best_values: bool = True,
+    tables_before_plot_files: Optional[
+        Mapping[Path, Tuple[str, Sequence[Mapping[str, object]]]]
+    ] = None,
 ) -> Path:
     """Write a PDF overview with summary table and plot pages.
 
@@ -1152,7 +1155,10 @@ def write_metric_plot_overview_pdf(
     notes : Sequence[str], optional
         Lines below the summary table, e.g. how many stations were left out.
     highlight_best_values : bool, optional
-        Colour the best value of every metric in the summary table.
+        Colour the best value of every metric in the summary tables.
+    tables_before_plot_files : Mapping[Path, tuple[str, Sequence[Mapping]]], optional
+        Title and summary rows of a further table, written right before the
+        page of the plot file it is keyed by, e.g. a region's table.
 
     Returns
     -------
@@ -1160,6 +1166,10 @@ def write_metric_plot_overview_pdf(
         Written PDF file.
     """
     output_file = Path(output_file)
+    tables_before_plot_files = {
+        Path(plot_file): table
+        for plot_file, table in (tables_before_plot_files or {}).items()
+    }
     existing_plot_files = [Path(plot_file) for plot_file in plot_files]
     existing_plot_files = [
         plot_file for plot_file in existing_plot_files if plot_file.is_file()
@@ -1179,6 +1189,14 @@ def write_metric_plot_overview_pdf(
                 highlight_best_values=highlight_best_values,
             )
         for plot_file in existing_plot_files:
+            if plot_file in tables_before_plot_files:
+                table_title, table_rows = tables_before_plot_files[plot_file]
+                _write_metric_summary_table_pages(
+                    pdf=pdf,
+                    summary_rows=table_rows,
+                    title=table_title,
+                    highlight_best_values=highlight_best_values,
+                )
             image = plt.imread(plot_file)
             fig, ax = plt.subplots(figsize=(11, 8.5))
             ax.imshow(image)
@@ -1270,7 +1288,7 @@ def _write_metric_summary_table_pages(
         columns.append("value")
     if any("n" in row for row in summary_rows):
         columns.extend(["n", "min", "max", "mean", "median"])
-    _log_metric_summary_table(summary_rows, columns)
+    _log_metric_summary_table(summary_rows, columns, title=title)
     # an empty row separates the metrics, like the blank line in the logged table
     table_rows = []
     for row in summary_rows:
@@ -1337,7 +1355,7 @@ def _write_metric_summary_table_pages(
         plt.close(fig)
 
 
-def _log_metric_summary_table(summary_rows, columns):
+def _log_metric_summary_table(summary_rows, columns, title=None):
     """Log the metric summary table as formatted text.
 
     Parameters
@@ -1346,6 +1364,8 @@ def _log_metric_summary_table(summary_rows, columns):
         Metric summary rows.
     columns : Sequence[str]
         Rendered table columns.
+    title : str, optional
+        Table title added to the log heading.
 
     Returns
     -------
@@ -1353,7 +1373,8 @@ def _log_metric_summary_table(summary_rows, columns):
     """
     table_text = create_table_text(summary_rows, columns)
     if table_text:
-        logger.info(f"Metric summary table:\n{table_text}")
+        title_text = f" ({title})" if title else ""
+        logger.info(f"Metric summary table{title_text}:\n{table_text}")
 
 
 def create_table_text(summary_rows, columns):

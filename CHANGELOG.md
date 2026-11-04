@@ -8,6 +8,7 @@
 - `create-mhm-restart-from-setup` checks before it creates any tile that the `python` of the mHM runs, after the `--mhm-packages` module loads, imports mHM 5.13 or newer. Otherwise it stops with the command, the error output and the possible reasons, instead of every tile failing on its own.
 - The summary table in the `discharge-evaluation` PDF lists every metric for all stations and again for each WMO region.
 - `discharge-evaluation --max-mean-factor` (default 30) leaves stations whose beta is above the factor or below its inverse out of the region table and the PDF summary table; the plots keep them. The log and the PDF state, one line per reason, how many stations were left out: beta too high, beta too low, or no finite value of a metric.
+- `discharge-eval-comparison` writes one summary table per WMO region, like its per-region CDF plots. The PDF shows each region's table right before that region's plots, and each table is also written to `metric_summary_region_<region>.csv`.
 
 ### Changed
 
@@ -19,7 +20,7 @@
 - The `--frame` help of `create-catchment` says which cells the frame replaces and when it overwrites basin cells.
 - mhm-tools accepts every numpy 2 release; before, it required numpy below 2.4. The code uses none of the functions and behaviours deprecated or removed up to numpy 2.5.
 - `scripts/install_mhm_tools.sh` installs numpy 2.5 or a newer numpy 2 release from conda-forge. Without `--python`, conda picks the Python version of a new environment that fits the packages; before, it was always 3.11. An existing environment keeps its Python version, so one created with Python 3.11 has to be recreated, because numpy 2.5 needs Python 3.12 or newer.
-- The summary tables in the PDFs of `discharge-evaluation`, `discharge-eval-comparison` and `metric-plots` separate the metrics with an empty row. The first row of a metric is grey, and the following rows alternate between white and light grey. The values have two decimals instead of four significant digits, also in the logged tables. `discharge-evaluation` logs its region table with two decimals and no longer colours the best value, as its rows are regions, not competing runs.
+- The summary tables in the PDFs of `discharge-evaluation`, `discharge-eval-comparison` and `metric-plots` separate the metrics with an empty row. The first row of a metric is grey, and the following rows alternate between white and light grey. The values have two decimals instead of four significant digits, also in the logged tables, whose headings now name the table. `discharge-evaluation` logs its region table with two decimals and no longer colours the best value, as its rows are regions, not competing runs.
 
 ### Fixed
 

@@ -630,6 +630,57 @@ def write_discharge_metric_diff_region_maps(
     return output_files
 
 
+def get_region_metric_values_by_input(
+    input_paths, variables, input_names, file_names="results.csv"
+):
+    """Get the finite metric values of every run per discharge-evaluation region.
+
+    Each gauge's region is derived from its id (see
+    `discharge_evaluation.get_region_from_id`).
+
+    Parameters
+    ----------
+    input_paths : Sequence[str]
+        `results.csv` files or directories containing them.
+    variables : Sequence[str]
+        Metric columns to collect.
+    input_names : Sequence[str]
+        Run labels matching input_paths.
+    file_names : str, optional
+        Glob pattern used when an input path is a directory.
+
+    Returns
+    -------
+    dict[str, dict[str, dict[str, np.ndarray]]]
+        Values by region, variable and run label, in `WMO_REGION_BOUNDS`
+        order; regions, variables and runs without finite values are left out.
+    """
+    from mhm_tools.post.discharge_evaluation import get_region_from_id
+
+    dfs_by_name = _read_dfs_by_name(input_paths, input_names, file_names)
+    for df in dfs_by_name.values():
+        df["region"] = df["id"].apply(get_region_from_id)
+    values_by_region = {}
+    for region in WMO_REGION_BOUNDS:
+        values_by_variable = {}
+        for variable in variables:
+            values_by_label = {}
+            for name, df in dfs_by_name.items():
+                if variable not in df.columns:
+                    continue
+                region_values = pd.to_numeric(
+                    df.loc[df["region"] == region, variable], errors="coerce"
+                )
+                region_values = region_values[np.isfinite(region_values)]
+                if not region_values.empty:
+                    values_by_label[name] = region_values.to_numpy(dtype=float)
+            if values_by_label:
+                values_by_variable[variable] = values_by_label
+        if values_by_variable:
+            values_by_region[region] = values_by_variable
+    return values_by_region
+
+
 def write_discharge_eval_comparison_region_plots(
     input_paths,
     output_dir,
@@ -677,7 +728,6 @@ def write_discharge_eval_comparison_region_plots(
         plot_metric_cdf_comparison,
         plot_metric_violin_comparison,
     )
-    from mhm_tools.post.discharge_evaluation import get_region_from_id
     from mhm_tools.post.metric_plots import (
         _create_metric_label_metadata,
         _get_metric_plot_colors_by_label,
@@ -688,9 +738,9 @@ def write_discharge_eval_comparison_region_plots(
         list(variables) if variables else list(DEFAULT_DISCHARGE_COMPARISON_VARIABLES)
     )
     input_names = get_metric_input_names(input_paths, input_names)
-    dfs_by_name = _read_dfs_by_name(input_paths, input_names, file_names)
-    for df in dfs_by_name.values():
-        df["region"] = df["id"].apply(get_region_from_id)
+    values_by_region = get_region_metric_values_by_input(
+        input_paths, variables, input_names, file_names
+    )
 
     label_metadata = _create_metric_label_metadata(input_names=input_names)
     colors_by_label = _get_metric_plot_colors_by_label(
@@ -700,21 +750,8 @@ def write_discharge_eval_comparison_region_plots(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     output_files = []
-    for region in WMO_REGION_BOUNDS:
-        for variable in variables:
-            values_by_label = {}
-            for name, df in dfs_by_name.items():
-                if variable not in df.columns:
-                    continue
-                region_values = pd.to_numeric(
-                    df.loc[df["region"] == region, variable], errors="coerce"
-                )
-                region_values = region_values[np.isfinite(region_values)]
-                if region_values.empty:
-                    continue
-                values_by_label[name] = region_values.to_numpy(dtype=float)
-            if not values_by_label:
-                continue
+    for region, values_by_variable in values_by_region.items():
+        for variable, values_by_label in values_by_variable.items():
             axis_limits = (axis_limits_by_variable or {}).get(variable)
             if "cdf" in plot_types:
                 output_file = (
@@ -913,6 +950,7 @@ def write_discharge_eval_comparison_plots(
         get_metric_input_names,
         get_metric_values_by_input,
         write_metric_plots,
+        write_metric_summary_csv,
     )
 
     output_dir = Path(output_dir)
@@ -939,6 +977,7 @@ def write_discharge_eval_comparison_plots(
     global_files = []
     region_files = []
     values_by_variable = {}
+    summary_rows_by_region = {}
     with tempfile.TemporaryDirectory(prefix="discharge_eval_comparison_") as tmp_dir:
         # Sanitize once, up front: a diverged/blown-up run's extreme outlier
         # values would otherwise dominate a KDE-based violin's shape or an
@@ -993,6 +1032,23 @@ def write_discharge_eval_comparison_plots(
                         axis_limits_by_variable=axis_limits_by_variable,
                     )
                 )
+                # one summary table per region, like the region cdf/violin plots
+                values_by_region = get_region_metric_values_by_input(
+                    sanitized_paths, variables, input_names
+                )
+                for region, region_values in values_by_region.items():
+                    summary_rows_by_region[region] = create_metric_summary_rows(
+                        region_values
+                    )
+                    summary_csv_file = write_metric_summary_csv(
+                        summary_rows_by_region[region],
+                        output_dir
+                        / f"metric_summary_region_{_sanitize_name(region)}.csv",
+                    )
+                    region_files.append(summary_csv_file)
+                    logger.info(
+                        f"Wrote regional metric summary CSV to {summary_csv_file}"
+                    )
             if "catchment-map" in shared_plot_types:
                 region_files.extend(
                     write_discharge_eval_comparison_region_catchment_maps(
@@ -1040,11 +1096,25 @@ def write_discharge_eval_comparison_plots(
     png_files = [f for f in output_files if Path(f).suffix.lower() == ".png"]
     if png_files:
         summary_rows = create_metric_summary_rows(values_by_variable)
+        # each region's table goes right before the first plot of that region
+        tables_before_plot_files = {}
+        for region, region_rows in summary_rows_by_region.items():
+            region_plot_files = [
+                plot_file
+                for plot_file in png_files
+                if f"_region_{_sanitize_name(region)}" in Path(plot_file).name
+            ]
+            if region_plot_files and region_rows:
+                tables_before_plot_files[region_plot_files[0]] = (
+                    f"Discharge evaluation comparison: {region}",
+                    region_rows,
+                )
         overview_file = write_metric_plot_overview_pdf(
             output_file=output_dir / "metric_plots_overview.pdf",
             plot_files=png_files,
             summary_rows=summary_rows,
             title="Discharge evaluation comparison overview",
+            tables_before_plot_files=tables_before_plot_files,
         )
         if overview_file not in output_files:
             output_files.append(overview_file)
