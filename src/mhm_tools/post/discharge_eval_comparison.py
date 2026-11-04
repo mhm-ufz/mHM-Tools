@@ -22,6 +22,7 @@ from mhm_tools.common.logger import ErrorLogger, log_errors
 from mhm_tools.common.plotter import (
     PLOT_DPI,
     add_map_colorbar,
+    calculate_colour_limits,
     calculate_map_figure_size,
     create_axis_label,
     create_comparison_title,
@@ -38,6 +39,8 @@ DEFAULT_DISCHARGE_COMPARISON_VARIABLES = ("kge", "nse", "alpha", "beta", "gamma"
 DISCHARGE_COMPARISON_PLOT_TYPES = ("cdf", "violin", "catchment-map", "map-diff")
 DEFAULT_VALUE_MIN = -100
 DEFAULT_VALUE_MAX = 100
+# largest colour half-range of a ΔKGE diff map; larger changes get colorbar arrows
+MAX_KGE_DIFF_HALF_RANGE = 0.5
 
 
 def _sanitize_name(value):
@@ -400,6 +403,11 @@ def plot_discharge_metric_diff_map(
 
     style = get_metric_plot_style("diff")
     style["cmap"] = cmap
+    if variable.lower() == "kge":
+        # the ΔKGE range follows the data, but never goes beyond +-0.5
+        _, data_vmax = calculate_colour_limits(diff, center=0.0)
+        half_range = min(data_vmax, MAX_KGE_DIFF_HALF_RANGE)
+        style.update(vmin=-half_range, vmax=half_range)
     cmap_obj, norm, bounds, extend, ticks = create_discrete_colour_norm(
         diff, bounds_type="data", **style
     )

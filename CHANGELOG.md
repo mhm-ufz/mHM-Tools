@@ -21,6 +21,7 @@
 - mhm-tools accepts every numpy 2 release; before, it required numpy below 2.4. The code uses none of the functions and behaviours deprecated or removed up to numpy 2.5.
 - `scripts/install_mhm_tools.sh` installs numpy 2.5 or a newer numpy 2 release from conda-forge. Without `--python`, conda picks the Python version of a new environment that fits the packages; before, it was always 3.11. An existing environment keeps its Python version, so one created with Python 3.11 has to be recreated, because numpy 2.5 needs Python 3.12 or newer.
 - The summary tables in the PDFs of `discharge-evaluation`, `discharge-eval-comparison` and `metric-plots` separate the metrics with an empty row. The first row of a metric is grey, and the following rows alternate between white and light grey. The values have two decimals instead of four significant digits, also in the logged tables, whose headings now name the table. `discharge-evaluation` logs its region table with two decimals and no longer colours the best value, as its rows are regions, not competing runs.
+- The ΔKGE maps of `discharge-eval-comparison` follow the data up to ±0.5; larger changes get the end colours and an arrow on the colorbar instead of stretching the scale.
 
 ### Fixed
 
