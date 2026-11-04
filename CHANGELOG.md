@@ -15,6 +15,7 @@
 
 ### Fixed
 
+- `format_lai_netcdf_file` warps projected x/y LAI from its CF grid mapping, or from the new `input_crs`, instead of reading every source as lon/lat. A curvilinear LAI with 2D latitude and longitude is warped straight onto the DEM through its geolocation arrays; this needs rasterio 1.4 or newer, other LAI grids work with any rasterio.
 - `link-folder-tree` links nothing when `--output-dir` is `--input-dir`, also when given by another path. With `--overwrite` it previously deleted every file and replaced it with a link to itself.
 - `discharge-evaluation` in bootstrap mode wrote the mean ratio as `alpha` and the standard deviation ratio as `beta`, the reverse of the KGE components and of direct mode. Its CDF plots no longer fail on the missing `kge` and `nse` columns.
 - `ratio` wrote `difference.nc` by default and labelled its plot as a difference. It now writes `ratio.nc`.
