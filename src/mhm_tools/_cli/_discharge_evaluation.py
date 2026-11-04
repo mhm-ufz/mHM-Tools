@@ -173,6 +173,17 @@ def add_args(parser):
         help="Metric plot types to create. Violin plots are only made on request.",
     )
     optional.add_argument(
+        "--max-mean-factor",
+        required=False,
+        default=30.0,
+        type=float,
+        help=(
+            "Leave stations whose beta (mean sim / mean obs) is above this factor or "
+            "below its inverse out of the region table and the PDF summary table; the "
+            "plots keep them. Use inf to keep all stations."
+        ),
+    )
+    optional.add_argument(
         "--n-bootstrap-years",
         "--n-boostrap-years",
         dest="n_boostrap_years",
@@ -349,5 +360,6 @@ def run(args):
         mask_var=args.mask_var,
         catchment_map_variables=normalize_cli_sequence(args.catchment_map_variables),
         metric_plot_types=args.metric_plot_types,
+        max_mean_factor=args.max_mean_factor,
         compression=get_netcdf_compression(args),
     )

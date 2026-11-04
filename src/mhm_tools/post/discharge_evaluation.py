@@ -91,6 +91,17 @@ NODE_STATION_ID_NAMES = ("station", "station_id")
 # reading gridded output at the gauges of a gauge coordinate file
 FACC_LOCATION_METHODS = ("basinex", "burek")
 GRID_LOCATION_METHODS = ("nearest", "mean-flow")
+# metrics of the region median table; left-out NaN/inf values are counted for these
+TABLE_METRICS = (
+    "kge",
+    "nse",
+    "alpha",
+    "beta",
+    "gamma",
+    "spearman_clim",
+    "diff",
+    "rel_diff",
+)
 
 
 def get_region_from_id(gauge_id):
@@ -2391,12 +2402,15 @@ def evaludate_discharge_data(  # noqa: PLR0913
     metric_plot_types=None,
     compression=None,
     gauge_coordinate_file=None,
+    max_mean_factor=30,
 ):
     """Compare simulated with observed discharge directly or via bootstrapping.
 
     Loads/caches data, harmonizes temporal resolution, optionally bootstraps
     across years, and writes per-gauge plots and a results table. Gauge maps of
     projected gauge coordinates are drawn in the CRS of the gauges file.
+    Stations with beta above `max_mean_factor` or below its inverse are left out
+    of the region table and the PDF summary table, not the plots; None keeps all.
     """
     output_path = Path(output_path)
     stats_output_file = output_path / "results.csv"
@@ -2522,7 +2536,14 @@ def evaludate_discharge_data(  # noqa: PLR0913
     logger.info(
         f"   {len(results_df.dropna(subset=components)['id'].unique())} have all values"
     )
-    log_discharge_region_medians(results_df)
+    # the tables leave out stations with an extreme bias, the plots keep them
+    table_df, left_out_notes = create_table_results_within_mean_factor(
+        results_df, max_mean_factor
+    )
+    left_out_notes.extend(create_non_finite_metric_notes(table_df, TABLE_METRICS))
+    for note in left_out_notes:
+        logger.info(f"Left out of the tables: {note}")
+    log_discharge_region_medians(table_df)
     metric_plot_files = []
     # only plot cdf if more than 5 results to avoid plots without enough data points
     if "cdf" in metric_plot_types and len(results_df) > 5:
@@ -2572,7 +2593,7 @@ def evaludate_discharge_data(  # noqa: PLR0913
             )
         )
     values_by_variable = get_discharge_metric_values_by_variable(
-        results_df,
+        table_df,
         variables=catchment_map_variables,
     )
     hydrograph_files = get_hydrograph_pdf_files(output_path)
@@ -2587,6 +2608,9 @@ def evaludate_discharge_data(  # noqa: PLR0913
             summary_rows=create_metric_summary_rows(values_by_variable),
             append_pdf_files=hydrograph_files,
             title="Discharge metric plots overview",
+            notes=left_out_notes,
+            # regions are no competing runs, so no best value is coloured
+            highlight_best_values=False,
         )
         logger.info(f"Wrote discharge metric overview PDF to {overview_file}.")
 
@@ -2877,10 +2901,12 @@ def get_discharge_metric_values_by_variable(df, variables=None):
     Returns
     -------
     dict[str, dict[str, np.ndarray]]
-        Metric values grouped by variable and realisation label.
+        Metric values grouped by variable and label: "all stations" first,
+        then every WMO region that has values.
     """
     if variables is None:
         variables = ["alpha", "beta", "gamma", "spearman_clim", "kge", "nse"]
+    gauge_regions = df["id"].apply(get_region_from_id)
     values_by_variable = {}
     for variable in variables:
         if variable not in df.columns:
@@ -2891,10 +2917,81 @@ def get_discharge_metric_values_by_variable(df, variables=None):
         if values.empty:
             logger.warning(f"No finite values for {variable}. Skipping summary.")
             continue
-        values_by_variable[variable] = {
-            "all stations": values.to_numpy(dtype=float),
-        }
+        values_by_label = {"all stations": values.to_numpy(dtype=float)}
+        # same region order as the logged region median table
+        value_regions = gauge_regions.loc[values.index]
+        for region_name in (*WMO_INDEX_TO_REGION.values(), "Unknown"):
+            region_values = values[value_regions == region_name]
+            if not region_values.empty:
+                values_by_label[region_name] = region_values.to_numpy(dtype=float)
+        values_by_variable[variable] = values_by_label
     return values_by_variable
+
+
+def create_table_results_within_mean_factor(results_df, max_mean_factor):
+    """Leave stations whose beta lies outside the mean factor out of the tables.
+
+    Args:
+        results_df: Discharge metric rows with ``id`` and ``beta`` columns.
+        max_mean_factor (float or None): Largest beta kept, its inverse is the
+            smallest beta kept; None keeps every station.
+
+    Returns
+    -------
+        tuple: The rows with beta within the limits or NaN, and one note per
+        reason naming how many stations were left out.
+    """
+    if max_mean_factor is None:
+        return results_df, []
+    if max_mean_factor < 1:
+        msg = f"max_mean_factor must be at least 1, got {max_mean_factor}."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    if "beta" not in results_df.columns:
+        logger.warning("No beta column, so max_mean_factor leaves no station out.")
+        return results_df, []
+    beta = pd.to_numeric(results_df["beta"], errors="coerce")
+    too_high = beta > max_mean_factor
+    too_low = beta < 1 / max_mean_factor
+    # bootstrap results hold several rows per station, so stations are unique ids
+    station_count = results_df["id"].nunique()
+    notes = []
+    for reason, left_out in (
+        (f"beta > {max_mean_factor:g}", too_high),
+        (f"beta < 1/{max_mean_factor:g}", too_low),
+    ):
+        left_out_count = results_df.loc[left_out, "id"].nunique()
+        if left_out_count > 0:
+            notes.append(f"{reason}: {left_out_count} of {station_count} stations")
+    # a NaN beta is kept here and counted by create_non_finite_metric_notes
+    return results_df[~(too_high | too_low)], notes
+
+
+def create_non_finite_metric_notes(table_df, metrics):
+    """Create one note per metric naming the stations without a finite value.
+
+    Args:
+        table_df: Discharge metric rows with an ``id`` column.
+        metrics (Sequence[str]): Metric columns to check; missing ones are skipped.
+
+    Returns
+    -------
+        list[str]: Notes such as "no finite kge (NaN/inf): 5 of 4760 stations".
+    """
+    station_count = table_df["id"].nunique()
+    notes = []
+    for metric in metrics:
+        if metric not in table_df.columns:
+            continue
+        values = pd.to_numeric(table_df[metric], errors="coerce")
+        non_finite = values.replace([np.inf, -np.inf], np.nan).isna()
+        left_out_count = table_df.loc[non_finite, "id"].nunique()
+        if left_out_count > 0:
+            notes.append(
+                f"no finite {metric} (NaN/inf): {left_out_count} of "
+                f"{station_count} stations"
+            )
+    return notes
 
 
 def _should_write_discharge_overview_pdf(variables, metric_plot_types, plot_files):
@@ -3014,20 +3111,7 @@ def log_discharge_region_medians(results_df):
         results_df: Discharge metric rows with an ``id`` column, whose leading
             digit is the WMO region.
     """
-    metrics = [
-        metric
-        for metric in (
-            "kge",
-            "nse",
-            "alpha",
-            "beta",
-            "gamma",
-            "spearman_clim",
-            "diff",
-            "rel_diff",
-        )
-        if metric in results_df.columns
-    ]
+    metrics = [metric for metric in TABLE_METRICS if metric in results_df.columns]
     metric_df = results_df[["id", *metrics]].copy()
     metric_df[metrics] = (
         metric_df[metrics]
@@ -3055,6 +3139,7 @@ def log_discharge_region_medians(results_df):
             "Median discharge metrics per WMO region (gauges = number of "
             "gauges, NaN and inf values are left out)"
         ),
+        float_format=".2f",
     )
 
 

@@ -1130,6 +1130,8 @@ def write_metric_plot_overview_pdf(
     append_pdf_files: Optional[Sequence[Path]] = None,
     title: Optional[str] = None,
     dpi: int = 150,
+    notes: Optional[Sequence[str]] = None,
+    highlight_best_values: bool = True,
 ) -> Path:
     """Write a PDF overview with summary table and plot pages.
 
@@ -1147,6 +1149,10 @@ def write_metric_plot_overview_pdf(
         Overview title.
     dpi : int, optional
         PDF image resolution.
+    notes : Sequence[str], optional
+        Lines below the summary table, e.g. how many stations were left out.
+    highlight_best_values : bool, optional
+        Colour the best value of every metric in the summary table.
 
     Returns
     -------
@@ -1169,6 +1175,8 @@ def write_metric_plot_overview_pdf(
                 pdf=pdf,
                 summary_rows=summary_rows,
                 title=title or "Metric plot overview",
+                notes=notes,
+                highlight_best_values=highlight_best_values,
             )
         for plot_file in existing_plot_files:
             image = plt.imread(plot_file)
@@ -1233,6 +1241,8 @@ def _write_metric_summary_table_pages(
     summary_rows: Sequence[Mapping[str, object]],
     title: str,
     rows_per_page: int = 24,
+    notes: Optional[Sequence[str]] = None,
+    highlight_best_values: bool = True,
 ) -> None:
     """Write paginated metric summary table pages to a PDF.
 
@@ -1246,6 +1256,10 @@ def _write_metric_summary_table_pages(
         Table page title.
     rows_per_page : int, optional
         Number of table rows per page.
+    notes : Sequence[str], optional
+        Lines written below the table on every page.
+    highlight_best_values : bool, optional
+        Colour the best value of every metric.
 
     Returns
     -------
@@ -1256,19 +1270,32 @@ def _write_metric_summary_table_pages(
         columns.append("value")
     if any("n" in row for row in summary_rows):
         columns.extend(["n", "min", "max", "mean", "median"])
-    best_cells = _get_metric_summary_best_cells(summary_rows, columns)
     _log_metric_summary_table(summary_rows, columns)
-    row_starts = range(0, len(summary_rows), rows_per_page)
+    # an empty row separates the metrics, like the blank line in the logged table
+    table_rows = []
+    for row in summary_rows:
+        if table_rows and row.get("variable") != table_rows[-1].get("variable"):
+            table_rows.append({})
+        table_rows.append(row)
+    best_cells = (
+        _get_metric_summary_best_cells(table_rows, columns)
+        if highlight_best_values
+        else set()
+    )
+    row_starts = range(0, len(table_rows), rows_per_page)
     for page_index, start_row in enumerate(row_starts):
-        page_rows = summary_rows[start_row : start_row + rows_per_page]
+        page_rows = table_rows[start_row : start_row + rows_per_page]
         table_data = [
-            [_format_metric_summary_value(row.get(column)) for column in columns]
+            [
+                _format_metric_summary_value(row.get(column)) if row else ""
+                for column in columns
+            ]
             for row in page_rows
         ]
         fig, ax = plt.subplots(figsize=(11, 8.5))
         ax.axis("off")
         page_title = title
-        if len(summary_rows) > rows_per_page:
+        if len(table_rows) > rows_per_page:
             page_title = f"{title} ({page_index + 1})"
         ax.set_title(page_title, fontsize=14, pad=16)
         table = ax.table(
@@ -1283,7 +1310,7 @@ def _write_metric_summary_table_pages(
         table.scale(1, 1.3)
         _style_metric_summary_table(
             table=table,
-            summary_rows=summary_rows,
+            summary_rows=table_rows,
             columns=columns,
             start_row=start_row,
             row_count=len(page_rows),
@@ -1295,7 +1322,17 @@ def _write_metric_summary_table_pages(
             start_row=start_row,
             row_count=len(page_rows),
         )
-        fig.tight_layout()
+        # keep a strip at the bottom free for one line per note and a heading
+        notes_height = 0.03 + 0.025 * (len(notes) + 1) if notes else 0
+        if notes:
+            fig.text(
+                0.05,
+                0.02,
+                "\n".join(["Left out of the table:", *notes]),
+                fontsize=9,
+                va="bottom",
+            )
+        fig.tight_layout(rect=(0, notes_height, 1, 1))
         pdf.savefig(fig)
         plt.close(fig)
 
@@ -1322,8 +1359,8 @@ def _log_metric_summary_table(summary_rows, columns):
 def create_table_text(summary_rows, columns):
     """Create an aligned text table, e.g. for log output.
 
-    Floats are shown with 4 significant digits. A blank line separates rows
-    whose ``variable`` entry differs.
+    Floats are shown with 2 decimals. A blank line separates rows whose
+    ``variable`` entry differs.
 
     Parameters
     ----------
@@ -1365,14 +1402,17 @@ def create_table_text(summary_rows, columns):
 
 
 def _style_metric_summary_table(table, summary_rows, columns, start_row, row_count):
-    """Style summary table header and variable separators.
+    """Style the summary table header, metric separators and row stripes.
+
+    The first row of a metric is grey, the following rows alternate between
+    white and light grey to ease reading along them.
 
     Parameters
     ----------
     table : matplotlib.table.Table
         Rendered table.
     summary_rows : Sequence[Mapping[str, object]]
-        All metric summary rows.
+        All table rows; empty rows separate the metrics.
     columns : Sequence[str]
         Rendered table columns.
     start_row : int
@@ -1390,18 +1430,28 @@ def _style_metric_summary_table(table, summary_rows, columns, start_row, row_cou
         header_cell.set_linewidth(1.2)
         header_cell.set_facecolor("#eeeeee")
 
-    for page_row in range(row_count):
-        global_row = start_row + page_row
-        if global_row == 0:
+    # rows are counted per metric from the table start, so a metric continued
+    # on the next page keeps its stripes
+    rows_in_metric = 0
+    for global_row, row in enumerate(summary_rows[: start_row + row_count]):
+        rows_in_metric = rows_in_metric + 1 if row else 0
+        if global_row < start_row:
             continue
-        variable = summary_rows[global_row].get("variable")
-        previous_variable = summary_rows[global_row - 1].get("variable")
-        if variable == previous_variable:
-            continue
-        for column_index, _ in enumerate(columns):
-            cell = table[(page_row + 1, column_index)]
-            cell.set_linewidth(1.4)
-            cell.set_facecolor("#f7f7f7")
+        cells = [
+            table[(global_row - start_row + 1, column_index)]
+            for column_index, _ in enumerate(columns)
+        ]
+        for cell in cells:
+            if not row:
+                # the separating row is drawn without edges, so it shows as a gap
+                cell.visible_edges = "open"
+                continue
+            if rows_in_metric == 1:
+                cell.set_facecolor("#e6e6e6")
+                if global_row > 0:
+                    cell.set_linewidth(1.4)
+            elif rows_in_metric % 2 == 1:
+                cell.set_facecolor("#f5f5f5")
 
 
 def _get_metric_summary_best_cells(summary_rows, columns):
@@ -1579,7 +1629,7 @@ def _format_metric_summary_value(value):
         Formatted table value.
     """
     if isinstance(value, float):
-        return f"{value:.4g}"
+        return f"{value:.2f}"
     return str(value)
 
 

@@ -128,12 +128,14 @@ def dict_to_multiline_string(d: dict, spacing: int = 12) -> str:
     return "\n".join(lines)
 
 
-def pretty_print_df(df: pd.DataFrame, max_col_width: int = 30, title="") -> None:
+def pretty_print_df(
+    df: pd.DataFrame, max_col_width: int = 30, title="", float_format=".4g"
+) -> None:
     """Pretty-print a DataFrame as an ASCII table with simple truncation.
 
     Numbers are right-aligned, other columns are left-aligned. Floats are shown
-    with 4 significant digits, integers in full. Cells longer than
-    max_col_width are truncated with an ellipsis.
+    with `float_format` (default 4 significant digits), integers in full. Cells
+    longer than max_col_width are truncated with an ellipsis.
     """
     if df.empty:
         logger.info("There are no results to display.")
@@ -145,7 +147,7 @@ def pretty_print_df(df: pd.DataFrame, max_col_width: int = 30, title="") -> None
         if isinstance(val, (int, np.integer)):
             return str(val)
         if isinstance(val, (float, np.floating)):
-            return "NaN" if np.isnan(val) else f"{val:.4g}"
+            return "NaN" if np.isnan(val) else f"{val:{float_format}}"
         if val is None or (not isinstance(val, str) and pd.isna(val)):
             return "NaN"
         return str(val)
@@ -194,19 +196,21 @@ def pretty_print_df(df: pd.DataFrame, max_col_width: int = 30, title="") -> None
     logger.info(out_string)
 
 
-def write_stats_table(stats_df, title, output_file=None):
+def write_stats_table(stats_df, title, output_file=None, float_format=".4g"):
     """Log a statistics table and write it to a CSV file if one is given.
 
     Args:
         stats_df: DataFrame with one row per region or dataset.
         title: Title logged above the table.
         output_file: CSV file path, or None to only log the table.
+        float_format (str): Format spec of the logged floats; the CSV keeps
+            the full values.
 
     Returns
     -------
         The written file path, or None.
     """
-    pretty_print_df(stats_df, title=title)
+    pretty_print_df(stats_df, title=title, float_format=float_format)
     if output_file is None:
         return None
     stats_df.to_csv(output_file, index=False)
