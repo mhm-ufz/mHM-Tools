@@ -1,4 +1,6 @@
 import argparse
+import logging
+import subprocess
 from pathlib import Path
 
 import numpy as np
@@ -578,7 +580,11 @@ def test_create_mhm_restart_from_setup_can_skip_mhm_run(tmp_path, monkeypatch):
     def fail_run_mhm(self, setup_path):  # noqa: ARG001
         raise AssertionError("mHM should not be run")
 
+    def fail_check_mhm_import(self):  # noqa: ARG001
+        raise AssertionError("mHM should not be checked without mHM runs")
+
     monkeypatch.setattr(MHMRunner, "run_mhm", fail_run_mhm)
+    monkeypatch.setattr(MHMRunner, "check_mhm_import", fail_check_mhm_import)
 
     result = create_mhm_restart_from_setup(
         input_path=tmp_path / "input_setup",
@@ -1606,6 +1612,154 @@ def test_mhm_runner_uses_module_paths_before_loading_modules():
     ) in command
     assert "python -c " in command
     assert 'namelist_mhm_param="FinalParam.nml"' in command
+
+
+def _patch_mhm_probe(monkeypatch, returncode=0, stdout="", stderr=""):
+    """Replace the mHM import probe with a fixed result.
+
+    Parameters
+    ----------
+    monkeypatch : pytest.MonkeyPatch
+        Fixture that undoes the replacement after the test.
+    returncode : int
+        Exit code of the probe.
+    stdout, stderr : str
+        Output of the probe.
+
+    Returns
+    -------
+    list[str]
+        Shell commands the probe was called with.
+    """
+    commands = []
+
+    def fake_run(command, **kwargs):  # noqa: ARG001
+        commands.append(command)
+        return subprocess.CompletedProcess(
+            command, returncode, stdout=stdout.encode(), stderr=stderr.encode()
+        )
+
+    monkeypatch.setattr(
+        "mhm_tools.pre.create_mhm_restart_from_setup.subprocess.run", fake_run
+    )
+    monkeypatch.setattr(
+        "mhm_tools.pre.create_mhm_restart_from_setup.shutil.which",
+        lambda name: "/fake/bin/python",  # noqa: ARG005
+    )
+    return commands
+
+
+def test_check_mhm_import_finds_the_installed_mhm():
+    """The test environment holds mHM 5.13 or newer, as the test extra requires."""
+    version = MHMRunner().check_mhm_import()
+
+    major, minor = (int(part) for part in version.split(".")[:2])
+    assert (major, minor) >= (5, 13)
+
+
+def test_check_mhm_import_lists_reasons_when_mhm_is_missing(monkeypatch):
+    """A missing mHM stops with the install hint, the PATH Python and the error."""
+    commands = _patch_mhm_probe(
+        monkeypatch,
+        returncode=1,
+        stderr="ModuleNotFoundError: No module named 'mhm'",
+    )
+
+    with pytest.raises(RuntimeError) as error:
+        MHMRunner().check_mhm_import()
+
+    message = str(error.value)
+    assert commands[0].startswith("python -c ")
+    assert 'pip install "mhm-tools[mhm]"' in message
+    assert "/fake/bin/python" in message
+    assert "No module named 'mhm'" in message
+    assert "--skip-mhm-run" in message
+
+
+def test_check_mhm_import_names_mhm_packages_when_the_modules_lack_mhm(monkeypatch):
+    """With modules, the probe loads them first and the error names them."""
+    commands = _patch_mhm_probe(
+        monkeypatch,
+        returncode=1,
+        stderr="ModuleNotFoundError: No module named 'mhm'",
+    )
+
+    with pytest.raises(RuntimeError) as error:
+        MHMRunner(mhm_packages="/apps/modulefiles mhm/5.13").check_mhm_import()
+
+    message = str(error.value)
+    assert commands[0].startswith(
+        "module use /apps/modulefiles\nmodule load mhm/5.13\npython -c "
+    )
+    assert "--mhm-packages '/apps/modulefiles mhm/5.13'" in message
+    assert "not activated" not in message
+
+
+@pytest.mark.parametrize("version", ["5.13.4", "6.0.0"])
+def test_check_mhm_import_returns_the_found_version(monkeypatch, caplog, version):
+    """mHM 5.13 and newer, mHM 6 included, pass and are logged."""
+    _patch_mhm_probe(monkeypatch, stdout=f"/env/bin/python\n{version}\n")
+
+    with caplog.at_level(logging.INFO, logger="mhm_tools"):
+        found_version = MHMRunner().check_mhm_import()
+
+    assert found_version == version
+    assert f"Using mHM {version} from /env/bin/python" in caplog.text
+
+
+def test_check_mhm_import_refuses_mhm_older_than_5_13(monkeypatch):
+    """An mHM older than 5.13 stops with the found and the required version."""
+    _patch_mhm_probe(monkeypatch, stdout="/env/bin/python\n5.12.1\n")
+
+    with pytest.raises(RuntimeError) as error:
+        MHMRunner().check_mhm_import()
+
+    message = str(error.value)
+    assert "5.12.1" in message
+    assert "5.13 or newer" in message
+
+
+def test_check_mhm_import_warns_without_a_readable_version(monkeypatch, caplog):
+    """An mHM without a readable version only causes a warning."""
+    _patch_mhm_probe(monkeypatch, stdout="/env/bin/python\nunknown\n")
+
+    with caplog.at_level(logging.WARNING, logger="mhm_tools"):
+        found_version = MHMRunner().check_mhm_import()
+
+    assert found_version == "unknown"
+    assert "Could not read the mHM version" in caplog.text
+
+
+def test_create_mhm_restart_from_setup_checks_mhm_before_creating_tiles(
+    tmp_path, monkeypatch
+):
+    """A failing mHM import check stops the run before any tile is prepared."""
+    crop_calls = []
+
+    def fail_check_mhm_import(self):  # noqa: ARG001
+        raise RuntimeError("mHM could not be imported")
+
+    monkeypatch.setattr(MHMRunner, "check_mhm_import", fail_check_mhm_import)
+    monkeypatch.setattr(
+        "mhm_tools.pre.create_mhm_restart_from_setup.crop_mhm_setup",
+        lambda **kwargs: crop_calls.append(kwargs),
+    )
+
+    with pytest.raises(RuntimeError, match="mHM could not be imported"):
+        create_mhm_restart_from_setup(
+            input_path=tmp_path / "input_setup",
+            output_path=tmp_path / "cropped_tiles",
+            mask_da=None,
+            lon_min=0.0,
+            lon_max=2.0,
+            lat_min=0.0,
+            lat_max=2.0,
+            l1_resolution=1.0,
+            l1_increment=1,
+            merge=False,
+        )
+
+    assert crop_calls == []
 
 
 def test_merge_restart_files_writes_cf_lat_lon_without_flipping_native_rows(
