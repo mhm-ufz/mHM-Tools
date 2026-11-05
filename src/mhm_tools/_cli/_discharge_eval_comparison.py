@@ -34,12 +34,25 @@ def add_args(parser):
         dest="input_paths",
         nargs="+",
         required=True,
-        help="discharge-evaluation results.csv files or directories containing them.",
+        help="discharge-evaluation results CSV files or directories containing them.",
     )
     required.add_argument(
         "--output-dir",
         required=True,
         help="Directory for output PNG/PDF/CSV files.",
+    )
+    output_names = parser.add_argument_group("output file names")
+    output_names.add_argument(
+        "--results-file-name",
+        default="discharge_eval_comparison_results.csv",
+        help="Name of the metric summary CSV inside --output-dir. "
+        "By default `discharge_eval_comparison_results.csv`.",
+    )
+    output_names.add_argument(
+        "--overview-pdf-name",
+        default="discharge_eval_comparison_overview.pdf",
+        help="Name of the overview PDF inside --output-dir. "
+        "By default `discharge_eval_comparison_overview.pdf`.",
     )
     optional.add_argument(
         "--input-name",
@@ -62,8 +75,9 @@ def add_args(parser):
         "--file-names",
         "--file-pattern",
         dest="file_names",
-        default="results.csv",
-        help="Glob pattern used when an input path is a directory.",
+        default="*results.csv",
+        help="Glob pattern used when an input path is a directory. By default "
+        "`*results.csv`, matching discharge_eval_results.csv and older results.csv.",
     )
     optional.add_argument(
         "--plot-type",
@@ -119,6 +133,17 @@ def add_args(parser):
         default=400,
         type=int,
         help="Output image resolution for map-diff plots.",
+    )
+    optional.add_argument(
+        "--max-mean-factor",
+        required=False,
+        default=30.0,
+        type=float,
+        help=(
+            "Leave stations whose beta (mean sim / mean obs) is above this factor or "
+            "below its inverse out of the summary tables (CSV and PDF), per run; the "
+            "plots keep them. Use inf to keep all stations."
+        ),
     )
 
 
@@ -183,4 +208,7 @@ def run(args):
         reference_name=args.reference_name,
         map_diff_cmap=args.map_diff_cmap,
         map_diff_dpi=args.map_diff_dpi,
+        max_mean_factor=args.max_mean_factor,
+        results_file_name=args.results_file_name,
+        overview_pdf_name=args.overview_pdf_name,
     )

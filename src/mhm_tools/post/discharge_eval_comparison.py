@@ -81,6 +81,8 @@ def _read_dfs_by_name(input_paths, input_names, file_names):
     dfs_by_name = {}
     for input_path, input_name in zip(input_paths, input_names):
         csv_files = get_metric_csv_files(input_path, file_names=file_names)
+        csv_file_list = ", ".join(str(csv_file) for csv_file in csv_files)
+        logger.info(f"Using {input_name!r} for {csv_file_list}")
         dfs_by_name[input_name] = pd.concat(
             [pd.read_csv(csv_file) for csv_file in csv_files], ignore_index=True
         )
@@ -95,6 +97,7 @@ def _write_sanitized_results_csvs(
     output_dir,
     value_min=DEFAULT_VALUE_MIN,
     value_max=DEFAULT_VALUE_MAX,
+    max_mean_factor=None,
 ):
     """Write one sanitized `results.csv` copy per input, for plotting.
 
@@ -125,6 +128,9 @@ def _write_sanitized_results_csvs(
         Lower bound of the kept value range.
     value_max : float, optional
         Upper bound of the kept value range.
+    max_mean_factor : float, optional
+        Leave out stations whose beta is above this factor or below its
+        inverse, per input. None keeps every station.
 
     Returns
     -------
@@ -136,10 +142,18 @@ def _write_sanitized_results_csvs(
     dfs_by_name = _read_dfs_by_name(input_paths, input_names, file_names)
 
     from mhm_tools.common.plotter import HIGHER_IS_BETTER_METRICS
+    from mhm_tools.post.discharge_evaluation import (
+        create_table_results_within_mean_factor,
+    )
 
     sanitized_paths = []
     for index, input_name in enumerate(input_names):
-        df = dfs_by_name[input_name]
+        df, left_out_notes = create_table_results_within_mean_factor(
+            dfs_by_name[input_name], max_mean_factor
+        )
+        df = df.copy()
+        for note in left_out_notes:
+            logger.info(f"Left out of the {input_name!r} tables: {note}")
         for variable in variables:
             if variable not in df.columns:
                 continue
@@ -893,12 +907,12 @@ def write_discharge_eval_comparison_region_catchment_maps(
     return output_files
 
 
-def write_discharge_eval_comparison_plots(
+def write_discharge_eval_comparison_plots(  # noqa: PLR0913
     input_paths,
     output_dir,
     variables=None,
     input_names=None,
-    file_names="results.csv",
+    file_names="*results.csv",
     plot_types=None,
     dpi=PLOT_DPI,
     shape_folder=None,
@@ -907,6 +921,9 @@ def write_discharge_eval_comparison_plots(
     reference_name=None,
     map_diff_cmap="coolwarm_r",
     map_diff_dpi=PLOT_DPI,
+    max_mean_factor=30,
+    results_file_name="discharge_eval_comparison_results.csv",
+    overview_pdf_name="discharge_eval_comparison_overview.pdf",
 ):
     """Write discharge-evaluation comparison plots from `results.csv` files.
 
@@ -941,6 +958,14 @@ def write_discharge_eval_comparison_plots(
         Diverging colormap name for diff maps.
     map_diff_dpi : int, optional
         Output image resolution for diff maps.
+    max_mean_factor : float, optional
+        Leave stations whose beta is above this factor or below its inverse
+        out of the summary tables (CSV and PDF), per run; the plots keep
+        them. None or inf keeps every station.
+    results_file_name : str, optional
+        Name of the metric summary CSV inside output_dir.
+    overview_pdf_name : str, optional
+        Name of the overview PDF inside output_dir.
 
     Returns
     -------
@@ -985,6 +1010,7 @@ def write_discharge_eval_comparison_plots(
     global_files = []
     region_files = []
     values_by_variable = {}
+    table_values_by_variable = {}
     summary_rows_by_region = {}
     with tempfile.TemporaryDirectory(prefix="discharge_eval_comparison_") as tmp_dir:
         # Sanitize once, up front: a diverged/blown-up run's extreme outlier
@@ -997,6 +1023,15 @@ def write_discharge_eval_comparison_plots(
             file_names=file_names,
             variables=variables,
             output_dir=tmp_dir,
+        )
+        # the tables leave out stations with an extreme bias, the plots keep them
+        table_paths = _write_sanitized_results_csvs(
+            input_paths=input_paths,
+            input_names=input_names,
+            file_names=file_names,
+            variables=variables,
+            output_dir=Path(tmp_dir) / "tables",
+            max_mean_factor=max_mean_factor,
         )
 
         if shared_plot_types:
@@ -1026,7 +1061,19 @@ def write_discharge_eval_comparison_plots(
                     mask_var=mask_var,
                     style_by=None,
                     axis_limits_by_variable=axis_limits_by_variable,
+                    summary_file_name=results_file_name,
+                    overview_pdf_name=overview_pdf_name,
                 )
+            )
+            # overwrite write_metric_plots' summary CSV with the filtered stations
+            table_values_by_variable = get_metric_values_by_input(
+                input_paths=table_paths,
+                variables=variables,
+                input_names=input_names,
+            )
+            write_metric_summary_csv(
+                create_metric_summary_rows(table_values_by_variable),
+                output_dir / results_file_name,
             )
             if distribution_plot_types:
                 region_files.extend(
@@ -1042,7 +1089,7 @@ def write_discharge_eval_comparison_plots(
                 )
                 # one summary table per region, like the region cdf/violin plots
                 values_by_region = get_region_metric_values_by_input(
-                    sanitized_paths, variables, input_names
+                    table_paths, variables, input_names
                 )
                 for region, region_values in values_by_region.items():
                     summary_rows_by_region[region] = create_metric_summary_rows(
@@ -1103,7 +1150,7 @@ def write_discharge_eval_comparison_plots(
     # this overwrites the same file rather than leaving a stale duplicate.
     png_files = [f for f in output_files if Path(f).suffix.lower() == ".png"]
     if png_files:
-        summary_rows = create_metric_summary_rows(values_by_variable)
+        summary_rows = create_metric_summary_rows(table_values_by_variable)
         # each region's table goes right before the first plot of that region
         tables_before_plot_files = {}
         for region, region_rows in summary_rows_by_region.items():
@@ -1118,7 +1165,7 @@ def write_discharge_eval_comparison_plots(
                     region_rows,
                 )
         overview_file = write_metric_plot_overview_pdf(
-            output_file=output_dir / "metric_plots_overview.pdf",
+            output_file=output_dir / overview_pdf_name,
             plot_files=png_files,
             summary_rows=summary_rows,
             title="Discharge evaluation comparison overview",

@@ -937,8 +937,8 @@ class TestEvaluateDirect(unittest.TestCase):
                     overwrite=True,
                 )
 
-                # results.csv exists and has expected content
-                results_csv = outdir / "results.csv"
+                # results CSV exists and has expected content
+                results_csv = outdir / "discharge_eval_results.csv"
                 self.assertTrue(results_csv.is_file())
                 df = pd.read_csv(results_csv, index_col=0)
                 self.assertIn("alpha", df.columns)
@@ -1009,8 +1009,8 @@ class TestEvaluateBootstrap(unittest.TestCase):
                     overwrite=True,
                 )
 
-                # results.csv exists and has bootstrap content (from boostap_statistics)
-                results_csv = outdir / "results.csv"
+                # results CSV exists and has bootstrap content (from boostap_statistics)
+                results_csv = outdir / "discharge_eval_results.csv"
                 self.assertTrue(results_csv.is_file())
                 df = pd.read_csv(results_csv, index_col=0)
                 self.assertIn("spearman_clim", df.columns)

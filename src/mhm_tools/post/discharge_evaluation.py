@@ -2403,6 +2403,8 @@ def evaludate_discharge_data(  # noqa: PLR0913
     compression=None,
     gauge_coordinate_file=None,
     max_mean_factor=30,
+    results_file_name="discharge_eval_results.csv",
+    overview_pdf_name="discharge_eval_overview.pdf",
 ):
     """Compare simulated with observed discharge directly or via bootstrapping.
 
@@ -2411,9 +2413,11 @@ def evaludate_discharge_data(  # noqa: PLR0913
     projected gauge coordinates are drawn in the CRS of the gauges file.
     Stations with beta above `max_mean_factor` or below its inverse are left out
     of the region table and the PDF summary table, not the plots; None keeps all.
+    The results table is written to `results_file_name` and the overview PDF to
+    `overview_pdf_name`, both inside `output_path`.
     """
     output_path = Path(output_path)
-    stats_output_file = output_path / "results.csv"
+    stats_output_file = output_path / results_file_name
     if metric_plot_types is None:
         metric_plot_types = ["cdf", "map", "catchment-map"]
     metric_plot_types = list(metric_plot_types)
@@ -2603,7 +2607,7 @@ def evaludate_discharge_data(  # noqa: PLR0913
         plot_files=metric_plot_files,
     ):
         overview_file = write_metric_plot_overview_pdf(
-            output_file=output_path / "metric_plots_overview.pdf",
+            output_file=output_path / overview_pdf_name,
             plot_files=metric_plot_files,
             summary_rows=create_metric_summary_rows(values_by_variable),
             append_pdf_files=hydrograph_files,

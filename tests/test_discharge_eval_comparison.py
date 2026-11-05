@@ -187,7 +187,7 @@ def test_write_discharge_eval_comparison_plots_writes_cdf_and_violin(
     assert "cdf_kge.png" in output_names
     assert "violin_kge.png" in output_names
     assert (tmp_path / "out" / "cdf_kge.png").is_file()
-    assert (tmp_path / "out" / "metric_summary.csv").is_file()
+    assert (tmp_path / "out" / "discharge_eval_comparison_results.csv").is_file()
 
 
 def test_write_discharge_eval_comparison_plots_defaults_to_catchment_map_with_shape_folder(

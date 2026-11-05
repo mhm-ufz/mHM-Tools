@@ -606,7 +606,10 @@ def get_metric_values_by_input(
     values_by_variable = {variable: {} for variable in variables}
     for input_path, input_name in zip(input_paths, names):
         csv_files = get_metric_csv_files(input_path, file_names=file_names)
-        logger.info(f"Reading {len(csv_files)} CSV files for {input_name}")
+        csv_file_names = ", ".join(Path(csv_file).name for csv_file in csv_files)
+        logger.info(
+            f"Reading {len(csv_files)} CSV files for {input_name}: {csv_file_names}"
+        )
         input_values = read_metric_values_from_csv_files(csv_files, variables)
         for variable, values in input_values.items():
             if values.size == 0:
@@ -662,6 +665,8 @@ def write_metric_plots(  # noqa: PLR0913
     color_by: Optional[str] = None,
     style_by: Optional[str] = None,
     axis_limits_by_variable: Optional[Mapping[str, Sequence[float]]] = None,
+    summary_file_name: str = "metric_summary.csv",
+    overview_pdf_name: str = "metric_plots_overview.pdf",
 ) -> List[Path]:
     """Write metric comparison plots from metric CSV files.
 
@@ -708,12 +713,16 @@ def write_metric_plots(  # noqa: PLR0913
     axis_limits_by_variable : Mapping[str, Sequence[float]], optional
         Explicit value-axis limits by variable (x-axis for CDF, y-axis for
         violin plots), overriding the shared plotter's own default.
+    summary_file_name : str, optional
+        Name of the summary CSV inside output_dir.
+    overview_pdf_name : str, optional
+        Name of the overview PDF inside output_dir.
 
     Returns
     -------
     list[Path]
-        Written files: per-plot PNGs, ``metric_plots_overview.pdf`` (whenever there is
-        anything to show), and ``metric_summary.csv``.
+        Written files: per-plot PNGs, the overview PDF (whenever there is
+        anything to show), and the summary CSV.
     """
     if plot_types is None:
         plot_types = ["cdf"]
@@ -752,7 +761,7 @@ def write_metric_plots(  # noqa: PLR0913
 
     summary_rows = create_metric_summary_rows(values_by_variable)
     summary_csv_file = write_metric_summary_csv(
-        summary_rows, output_dir / "metric_summary.csv"
+        summary_rows, output_dir / summary_file_name
     )
     logger.info(f"Wrote metric summary CSV to {summary_csv_file}")
 
@@ -818,7 +827,7 @@ def write_metric_plots(  # noqa: PLR0913
         )
     if output_files or summary_rows:
         overview_file = write_metric_plot_overview_pdf(
-            output_file=output_dir / "metric_plots_overview.pdf",
+            output_file=output_dir / overview_pdf_name,
             plot_files=output_files,
             summary_rows=summary_rows,
             title="Metric plots overview",

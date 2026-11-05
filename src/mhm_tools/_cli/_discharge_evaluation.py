@@ -19,6 +19,19 @@ def add_args(parser):
     required_args.add_argument(
         "--output-dir", help="Path for the output dir.", required=True
     )
+    output_names = parser.add_argument_group("output file names")
+    output_names.add_argument(
+        "--results-file-name",
+        default="discharge_eval_results.csv",
+        help="Name of the per-station results CSV inside --output-dir. "
+        "By default `discharge_eval_results.csv`.",
+    )
+    output_names.add_argument(
+        "--overview-pdf-name",
+        default="discharge_eval_overview.pdf",
+        help="Name of the overview PDF inside --output-dir. "
+        "By default `discharge_eval_overview.pdf`.",
+    )
     optional = parser.add_argument_group("optional arguments")
     flags = parser.add_argument_group("flags")
     # the names follow the other evaluation tools, the former model/observed
@@ -361,5 +374,7 @@ def run(args):
         catchment_map_variables=normalize_cli_sequence(args.catchment_map_variables),
         metric_plot_types=args.metric_plot_types,
         max_mean_factor=args.max_mean_factor,
+        results_file_name=args.results_file_name,
+        overview_pdf_name=args.overview_pdf_name,
         compression=get_netcdf_compression(args),
     )
