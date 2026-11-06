@@ -36,7 +36,8 @@ Install mhm-tools from ${REPO_DIR} into the conda environment ENV_DIR.
 ENV_DIR is created if it does not exist.
 
   --editable        install in editable mode instead of a built wheel
-  --extras EXTRAS   comma separated extras, e.g. test,doc or mhm5 (mHM from conda-forge)
+  --extras EXTRAS   comma separated extras, e.g. test,doc or mhm5 (mHM from conda-forge);
+                    lint installs ruff, black and isort in the versions of the GitLab CI
   --python VERSION  Python version of a new environment (default: chosen by conda)
 EOF
 }
@@ -108,7 +109,15 @@ PYTHON="${ENV_DIR}/bin/python"
 # an old (editable) mhm-tools would keep its stale files and version
 "$PYTHON" -I -m pip uninstall --yes mhm_tools >/dev/null 2>&1 || true
 
-EXTRAS_SUFFIX="${EXTRAS:+[${EXTRAS}]}"
+# lint stands for the check extra the GitLab CI installs, so ruff, black and
+# isort get the versions the CI checks with
+PIP_EXTRAS=",${EXTRAS},"
+while [[ "$PIP_EXTRAS" == *,lint,* ]]; do
+    PIP_EXTRAS="${PIP_EXTRAS/,lint,/,check,}"
+done
+PIP_EXTRAS="${PIP_EXTRAS#,}"
+PIP_EXTRAS="${PIP_EXTRAS%,}"
+EXTRAS_SUFFIX="${PIP_EXTRAS:+[${PIP_EXTRAS}]}"
 if [[ "$EDITABLE" == true ]]; then
     "$PYTHON" -I -m pip install --no-cache-dir --editable "${REPO_DIR}${EXTRAS_SUFFIX}"
     EXPECTED_DIR="${REPO_DIR}/src"
