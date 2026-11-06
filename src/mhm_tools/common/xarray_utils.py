@@ -93,6 +93,37 @@ def combine_region_grids(priority_grid, fallback_grid):
     return fallback_grid.where(~np.isfinite(priority_grid), priority_grid)
 
 
+def get_masked_values(data_array, chunk_side=None):
+    """Get the values of a 2-D grid with NaN in its missing cells.
+
+    Args:
+        data_array (xarray.DataArray): 2-D grid; NaN and its declared nodata
+            value mark missing cells.
+        chunk_side (int): Side length of square dask chunks, or None to load the
+            values into memory.
+
+    Returns
+    -------
+        xarray.DataArray: float64 values with dims ``("y", "x")`` and no
+        coordinates, dask backed when chunked.
+    """
+    # file_handler imports this module, so it is imported here
+    from mhm_tools.common.file_handler import get_nodata
+
+    if chunk_side is None:
+        values = data_array.values
+    else:
+        values = data_array.chunk(dict.fromkeys(data_array.dims, chunk_side)).data
+    values = xr.DataArray(values, dims=("y", "x")).astype("float64")
+    nodata = get_nodata(data_array)
+    if nodata is not None and np.isfinite(nodata):
+        is_nodata = xr.apply_ufunc(
+            np.isclose, values, float(nodata), dask="parallelized", output_dtypes=[bool]
+        )
+        values = values.where(~is_nodata)
+    return values
+
+
 def create_valid_data_mask(data_array, treat_zero_as_missing=True):
     """Return a boolean validity mask, treating NaN (and optionally 0) as missing.
 

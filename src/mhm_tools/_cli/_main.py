@@ -64,6 +64,7 @@ _COMMAND_GROUPS: List[Tuple[str, str, List[Tuple[str, object]]]] = [
                 "create-dem-derivatives",
                 "mhm_tools._cli._create_dem_derivatives",
             ),
+            ("topography-upscaling", "mhm_tools._cli._topography_upscaling"),
             ("calculate-pet", "mhm_tools._cli._calculate_pet"),
             ("prepare-mhm-forcings", "mhm_tools._cli._prepare_mhm_forcings"),
         ],

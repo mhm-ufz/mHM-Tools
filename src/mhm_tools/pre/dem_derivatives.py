@@ -1,7 +1,8 @@
 """Derive filled DEM, slope, aspect, flow accumulation and flow direction.
 
 The derivatives come from :mod:`pyflwdir`, except aspect, which pyflwdir does
-not provide and which is computed with the Horn gradient. Flow accumulation can
+not provide and which :mod:`mhm_tools.common.topography` computes with the Horn
+gradient, as it does the slope. Flow accumulation can
 also be derived from an existing flow direction grid, so it follows the same
 network as the fdir of an mHM setup, also after upscaling. Grid coordinates and
 the CRS variable come from :mod:`mhm_tools.pre.latlon`, so the output carries
@@ -33,6 +34,7 @@ from mhm_tools.common.file_handler import (
     write_xarray_to_netcdf,
 )
 from mhm_tools.common.format_data import _format_categories
+from mhm_tools.common.topography import calculate_aspect, calculate_slope
 from mhm_tools.pre.latlon import xy_to_latlon
 
 __all__ = [
@@ -66,14 +68,16 @@ def create_dem_derivatives(
     compression=None,
     one_file_per_variable=False,
     facc_unit="cell",
+    missing_aspect=90.0,
 ):
     """Write the DEM derivatives for ``input_file`` into ``output_path``.
 
     ``nc`` writes one file holding every derivative plus the grid coordinates
     and a ``crs`` variable, or with ``one_file_per_variable`` one such file per
     derivative named after it; ``asc`` and ``tif`` always write one file per
-    derivative. ``facc_unit`` gives facc in upstream cells or km2. Returns the
-    paths written.
+    derivative. ``facc_unit`` gives facc in upstream cells or km2, and
+    ``missing_aspect`` the aspect of flat cells (NaN or ``NO_DATA`` leaves them
+    missing). Returns the paths written.
     """
     extension = _validate_extension(output_extension)
     variable_attrs = create_variable_attrs(facc_unit)
@@ -83,7 +87,9 @@ def create_dem_derivatives(
     )
     try:
         resolved_crs = resolve_crs(dem, crs, required=True)
-        derivatives = compute_dem_derivatives(dem, resolved_crs, facc_unit=facc_unit)
+        derivatives = compute_dem_derivatives(
+            dem, resolved_crs, facc_unit=facc_unit, missing_aspect=missing_aspect
+        )
         grid = _grid_coordinates(dem, resolved_crs)
     finally:
         dem.close()
@@ -187,20 +193,16 @@ def create_variable_attrs(facc_unit="cell"):
     return variable_attrs
 
 
-def compute_dem_derivatives(dem, crs, facc_unit="cell"):
-    """Return the six derivative arrays for one 2-D DEM, facc in ``facc_unit``."""
+def compute_dem_derivatives(dem, crs, facc_unit="cell", missing_aspect=90.0):
+    """Return the six derivative arrays for one 2-D DEM.
+
+    facc is in ``facc_unit``, flat cells get the aspect ``missing_aspect``.
+    """
     import pyflwdir
 
-    elevation = np.asarray(dem.values, dtype="float64")
-    invalid = ~np.isfinite(elevation)
-    nodata = get_nodata(dem)
-    if nodata is not None and np.isfinite(nodata):
-        invalid |= np.isclose(elevation, float(nodata))
-    elevation = np.where(invalid, NO_DATA, elevation)
-
+    elevation, invalid = get_elevation_values(dem)
     # recalculated, a transform cached in the file may describe the unflipped rows
     transform = dem.rio.transform(recalc=True)
-    transform_array = np.asarray(tuple(transform), dtype=np.float64)  # affine v3 fix
     latlon = bool(crs.is_geographic)
     filled, _ = pyflwdir.dem.fill_depressions(elevation, nodata=NO_DATA)
     flw = pyflwdir.from_dem(
@@ -210,14 +212,13 @@ def compute_dem_derivatives(dem, crs, facc_unit="cell"):
     # of these arrays hundreds of megabytes.
     derivatives = {"dem": _masked(elevation, invalid, "f8")}
     del elevation
-    slope = pyflwdir.dem.slope(
-        filled, nodata=NO_DATA, latlon=latlon, transform=transform_array
+    derivatives["slope"] = _masked(
+        calculate_slope(filled, transform, latlon), invalid, "f8"
     )
-    slope *= 100.0
-    derivatives["slope"] = _masked(slope, invalid, "f8")
-    del slope
     derivatives["aspect"] = _masked(
-        horn_aspect(filled, transform, NO_DATA), invalid, "f8"
+        calculate_aspect(filled, transform, latlon, missing_aspect=missing_aspect),
+        invalid,
+        "f8",
     )
     derivatives["dem_filled"] = _masked(filled, invalid, "f8")
     del filled
@@ -248,10 +249,54 @@ def compute_facc_from_fdir(fdir, crs, ftype="d8", facc_unit="cell"):
         msg = f"Unsupported ftype {ftype!r}. Choose one of: {', '.join(FDIR_CODES)}."
         raise ValueError(msg)
     facc_dtype = create_variable_attrs(facc_unit)["facc"][0]
-    values = np.asarray(fdir.values, dtype="float64")
+    codes, invalid = create_fdir_codes(fdir.values, ftype, get_nodata(fdir))
+    flw = pyflwdir.from_array(
+        codes,
+        ftype=ftype,
+        transform=fdir.rio.transform(recalc=True),
+        latlon=bool(crs.is_geographic),
+        check_ftype=False,
+    )
+    return _masked(flw.upstream_area(unit=facc_unit), invalid, facc_dtype)
+
+
+def get_elevation_values(dem):
+    """Get the elevation of a DEM with ``NO_DATA`` in its missing cells.
+
+    Args:
+        dem (xarray.DataArray): 2-D DEM; NaN and its declared nodata value mark
+            missing cells.
+
+    Returns
+    -------
+        tuple: The elevation as a float64 numpy.ndarray and the boolean mask of
+        the missing cells.
+    """
+    elevation = np.asarray(dem.values, dtype="float64")
+    invalid = ~np.isfinite(elevation)
+    nodata = get_nodata(dem)
+    if nodata is not None and np.isfinite(nodata):
+        invalid |= np.isclose(elevation, float(nodata))
+    return np.where(invalid, NO_DATA, elevation), invalid
+
+
+def create_fdir_codes(values, ftype="d8", nodata=None):
+    """Create pyflwdir flow direction codes from the values of a flow direction grid.
+
+    Args:
+        values (numpy.ndarray): Flow direction values; NaN, the fill value of the
+            flow direction type and ``nodata`` mark missing cells.
+        ftype (str): Flow direction type, one of ``FDIR_CODES``.
+        nodata (float): Declared nodata value of the grid, or None.
+
+    Returns
+    -------
+        tuple: The codes as uint8 numpy.ndarray with ``FDIR_FILLVALUE[ftype]`` in
+        the missing cells, and the boolean mask of the missing cells.
+    """
+    values = np.asarray(values, dtype="float64")
     # xarray turns a decoded integer _FillValue into NaN, other files keep it
     invalid = ~np.isfinite(values) | (values == FDIR_FILLVALUE[ftype])
-    nodata = get_nodata(fdir)
     if nodata is not None and np.isfinite(nodata):
         invalid |= values == float(nodata)
     unknown = ~invalid & ~np.isin(values, FDIR_CODES[ftype])
@@ -263,43 +308,7 @@ def compute_facc_from_fdir(fdir, crs, ftype="d8", facc_unit="cell"):
         )
         raise ValueError(msg)
     codes = np.where(invalid, FDIR_FILLVALUE[ftype], values).astype(np.uint8)
-    del values
-    flw = pyflwdir.from_array(
-        codes,
-        ftype=ftype,
-        transform=fdir.rio.transform(recalc=True),
-        latlon=bool(crs.is_geographic),
-        check_ftype=False,
-    )
-    return _masked(flw.upstream_area(unit=facc_unit), invalid, facc_dtype)
-
-
-def horn_aspect(elevation, transform, nodata=NO_DATA):
-    """Return aspect in degrees clockwise from north, by Horn's method.
-
-    pyflwdir has no aspect, and Horn's 3x3 kernel is what GDAL uses, so the
-    result matches the convention the rest of an mHM setup expects.
-    """
-    values = np.where(np.isclose(elevation, nodata), np.nan, elevation)
-    padded = np.pad(values, 1, mode="edge")
-    del values
-    # Horn weights the four side neighbours twice as heavily as the corners.
-    dz_dx = (
-        (padded[:-2, 2:] + 2 * padded[1:-1, 2:] + padded[2:, 2:])
-        - (padded[:-2, :-2] + 2 * padded[1:-1, :-2] + padded[2:, :-2])
-    ) / (8.0 * abs(transform.a))
-    dz_dy = (
-        (padded[2:, :-2] + 2 * padded[2:, 1:-1] + padded[2:, 2:])
-        - (padded[:-2, :-2] + 2 * padded[:-2, 1:-1] + padded[:-2, 2:])
-    ) / (8.0 * abs(transform.e))
-    del padded
-    # A flat cell has no aspect; report nodata rather than an arbitrary bearing.
-    flat = (dz_dx == 0) & (dz_dy == 0)
-    # Compass bearing: 0 at north, increasing clockwise.
-    aspect = (90.0 - np.degrees(np.arctan2(dz_dy, -dz_dx))) % 360.0
-    del dz_dx, dz_dy
-    aspect[flat | ~np.isfinite(aspect)] = nodata
-    return aspect
+    return codes, invalid
 
 
 def _masked(values, invalid, dtype):

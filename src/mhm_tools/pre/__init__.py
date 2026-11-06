@@ -26,6 +26,7 @@ Files
    ~mhm_tools.pre.rasterize_map
    ~mhm_tools.pre.regrid
    ~mhm_tools.pre.subdomain_masks
+   ~mhm_tools.pre.topography_upscaling
 """
 
 import importlib

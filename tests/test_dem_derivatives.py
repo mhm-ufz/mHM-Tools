@@ -10,7 +10,6 @@ from mhm_tools.pre.dem_derivatives import (
     NO_DATA,
     create_dem_derivatives,
     create_facc_from_fdir,
-    horn_aspect,
 )
 
 
@@ -133,37 +132,6 @@ def test_dem_without_crs_is_rejected(tmp_path):
     )
     with pytest.raises(MissingCRSError):
         create_dem_derivatives(path, tmp_path / "out")
-
-
-@pytest.mark.parametrize(
-    ("gradient", "expected"),
-    [
-        ("east", 90.0),  # ground falls towards +x
-        ("south", 180.0),
-        ("west", 270.0),
-        ("north", 0.0),
-    ],
-)
-def test_horn_aspect_reports_the_downhill_compass_bearing(gradient, expected):
-    from rasterio.transform import from_origin
-
-    rows, cols = 5, 5
-    axis = np.arange(cols, dtype="float64")
-    surfaces = {
-        "east": -np.tile(axis, (rows, 1)),
-        "west": np.tile(axis, (rows, 1)),
-        "south": -np.tile(axis[:rows][:, None], (1, cols)),
-        "north": np.tile(axis[:rows][:, None], (1, cols)),
-    }
-    aspect = horn_aspect(surfaces[gradient], from_origin(0.0, 5.0, 1.0, 1.0))
-    assert aspect[2, 2] == pytest.approx(expected)
-
-
-def test_horn_aspect_reports_nodata_on_flat_ground():
-    from rasterio.transform import from_origin
-
-    aspect = horn_aspect(np.full((3, 3), 12.0), from_origin(0.0, 3.0, 1.0, 1.0))
-    assert np.all(aspect == NO_DATA)
 
 
 def _write_fdir(path, codes, lat):
