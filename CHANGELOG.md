@@ -37,6 +37,7 @@
 - `create-mhm-restart-from-setup` created and ran tiles in which only an active mask cell of the neighbouring tile reached past the tile edge, by about 1e-13° of rounding error. It also wrote that neighbour's row or column into `mask_tile.nc`. A mask cell now counts only when more than a thousandth of its width lies inside the tile.
 - Global basin ids of `create-catchment` and `create-wmo-region-masks` left the first and last longitude column without a basin, so `create-wmo-region-masks` put their land cells in no region (89 cells of the 0.1° hydro model mask). The `--frame` of non-flow cells, default 1, cleared that border in both the unrolled and the rolled delineation before they were merged at the date line. Global basin ids are now written without a frame.
 - `create-catchment --frame` wrote the flow-direction pit value into every output variable. With `--ftype ldd` the frame got basin id 5 and showed up as active cells in `mask.nc`, and `elevtn` and `grdare` got 0 instead of -9999. Only `flwdir` gets pits now; every other variable and the mask are no data on the frame.
+- `discharge-evaluation --gauge-coordinate-file` read each gauge row and column pair of a model file separately, so with thousands of gauges a monthly file on the EFAS grid took days and the run never finished. Every model file is now read once in its own chunks before the gauge cells are picked, e.g. 3000 gauges of such a file in under a second.
 
 ### Tests
 
@@ -46,7 +47,7 @@
 - `create-mhm-restart-from-setup`: tile selection and the tile mask leave out neighbouring cells whose edges reach into the tile by rounding error, with float64 and float32 coordinates.
 - `create-catchment`: global basin ids keep the first and last longitude column, and a basin flowing across the date line has one id on both sides; the frame holds pits only in flwdir and no data in the other variables and the mask, and `create_frame` writes one value per variable.
 - `snow-evaluation`: the classification accuracy tests read their one-cell results with `.item()`, because numpy 2.5 no longer converts arrays with size-1 dimensions to Python numbers.
-- `discharge-evaluation`: the region rows of the summary table, the beta limit with its left-out notes for direct and bootstrap results, the NaN/inf notes, and the notes passed on to the PDF table.
+- `discharge-evaluation`: the region rows of the summary table, the beta limit with its left-out notes for direct and bootstrap results, the NaN/inf notes, and the notes passed on to the PDF table; gauge cells read from a chunked gridded model file match those of the loaded grid, are read in the file's chunks, and 2500 gauges take less than a second.
 
 ## [v0.3.1]
 
