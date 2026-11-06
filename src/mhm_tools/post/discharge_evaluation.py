@@ -453,7 +453,7 @@ def _materialize_data(obj, num_workers=1):
     return obj.load()
 
 
-def _read_model_file_part(  # noqa: PLR0911, PLR0913
+def _read_model_file_part(  # noqa: PLR0911, PLR0912, PLR0913
     sim_file,
     sim_variable,
     date_slice,
@@ -529,8 +529,14 @@ def _read_model_file_part(  # noqa: PLR0911, PLR0913
         if extraction_mode == "grid":
             if gauge_ids_with_values is None or x_new is None or y_new is None:
                 return None
+            sim_da = ds_sim[sim_var_local].sel(time=date_slice)
+            # picking gauge cells from the file makes netCDF4 read every gauge
+            # row x column pair separately; dask chunks on the file's own chunks
+            # read each chunk once instead
+            if sim_da.chunks is None:
+                sim_da = sim_da.chunk(sim_da.encoding.get("preferred_chunks", {}))
             sim_sel, matched_x, matched_y, ids_arr = get_sim_data_for_gauges_from_grid(
-                ds_sim[sim_var_local].sel(time=date_slice),
+                sim_da,
                 x_new,
                 y_new,
                 gauge_ids_with_values,
