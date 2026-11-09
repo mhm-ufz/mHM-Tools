@@ -2828,12 +2828,20 @@ def gridded_data_evaluation(  # noqa: PLR0913
     compression=None,
     regions="all",
     write_region_stats=False,
+    remove_seasonal_cycle_from_std=True,
+    remove_seasonal_cycle_from_corr=True,
+    season_months=None,
 ):
     """Validate a spatial variable by comparing dataset climatologies.
 
     `regions` ("all", "none" or a comma separated list of WMO regions) selects
     the regions the statistics are tabled for next to the whole domain;
     `write_region_stats` also writes those tables to CSV.
+
+    `remove_seasonal_cycle_from_std`/`_corr` take the std and the Spearman
+    correlation from the anomalies of the monthly climatology. Bootstrapping
+    always correlates with the seasonal cycle. `season_months` restricts all
+    statistics and metrics to these calendar months.
     """
     output_path = Path(output_path)
     region_names = select_regions(regions)
@@ -2890,11 +2898,12 @@ def gridded_data_evaluation(  # noqa: PLR0913
             with ErrorLogger(logger):
                 raise ValueError(msg)
 
+    # the streamed metrics compare the common years like the direct comparison
     available_years = get_available_years(
         input_path,
         ref_path,
         year_slice,
-        direct_comp,
+        direct_comp or stream_metrics,
         input_file_name=input.file_name,
         ref_file_name=ref.file_name,
     )
@@ -2923,6 +2932,8 @@ def gridded_data_evaluation(  # noqa: PLR0913
                     output_path=output_path / output_name,
                     avaiable_years=available_years,  # keep parameter name as used elsewhere
                     compression=compression,
+                    remove_seasonal_cycle_from_std=remove_seasonal_cycle_from_std,
+                    season_months=season_months,
                 )
 
         elif (
@@ -2943,6 +2954,8 @@ def gridded_data_evaluation(  # noqa: PLR0913
                     available_years=available_years,
                     file_name=input.file_name,
                     compression=compression,
+                    remove_seasonal_cycle_from_std=remove_seasonal_cycle_from_std,
+                    season_months=season_months,
                 )
                 for bootstrap_index in range(n_bootstrap_selections)
             )
@@ -2958,6 +2971,8 @@ def gridded_data_evaluation(  # noqa: PLR0913
                 available_years=available_years,
                 file_name=input.file_name,
                 compression=compression,
+                remove_seasonal_cycle_from_std=remove_seasonal_cycle_from_std,
+                season_months=season_months,
             )
         else:
             with ErrorLogger(logger):
@@ -3005,6 +3020,10 @@ def gridded_data_evaluation(  # noqa: PLR0913
                     compression=compression,
                     region_names=region_names,
                     write_region_stats=write_region_stats,
+                    remove_seasonal_cycle_from_std=remove_seasonal_cycle_from_std,
+                    # bootstrapping correlates with the seasonal cycle on purpose
+                    remove_seasonal_cycle_from_corr=False,
+                    season_months=season_months,
                 )
                 for bootstrap_index in range(n_bootstrap_selections)
             )
@@ -3038,6 +3057,7 @@ def gridded_data_evaluation(  # noqa: PLR0913
                     output_path=output_path,
                     input_name=input.name,
                     ref_name=ref.name,
+                    season_months=season_months,
                 )
             elif global_climate:
                 rel_mean_diff = (
@@ -3058,6 +3078,7 @@ def gridded_data_evaluation(  # noqa: PLR0913
                     output_path=output_path,
                     input_name=input.name,
                     ref_name=ref.name,
+                    season_months=season_months,
                 )
                 plot_map_local_climate(
                     input_clim=results["input_clim"],
@@ -3065,6 +3086,7 @@ def gridded_data_evaluation(  # noqa: PLR0913
                     input_name=input.name,
                     ref_name=ref.name,
                     output_path=output_path,
+                    season_months=season_months,
                 )
             else:
                 plot_map_bias_only(
@@ -3074,6 +3096,7 @@ def gridded_data_evaluation(  # noqa: PLR0913
                     output_path=output_path,
                     input_name=input.name,
                     ref_name=ref.name,
+                    season_months=season_months,
                 )
         else:
             logger.error("There are no statfiles created from the evaluation.")
@@ -3110,4 +3133,7 @@ def gridded_data_evaluation(  # noqa: PLR0913
                 compression=compression,
                 region_names=region_names,
                 write_region_stats=write_region_stats,
+                remove_seasonal_cycle_from_std=remove_seasonal_cycle_from_std,
+                remove_seasonal_cycle_from_corr=remove_seasonal_cycle_from_corr,
+                season_months=season_months,
             )
