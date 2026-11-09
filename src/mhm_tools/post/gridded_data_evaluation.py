@@ -38,6 +38,7 @@ from mhm_tools.common.metrics.metrics_handler import (
 )
 from mhm_tools.common.netcdf import generate_bounds_for_all_coords
 from mhm_tools.common.plotter import (
+    create_comparison_title,
     get_percent_diff_bounds,
     plot_single_map,
     round_sensibly,
@@ -1057,22 +1058,24 @@ def plot_map(
     ref_name,
     output_path,
     overlapping_years=None,
+    season_months=None,
 ):
     """Create a 2x2 figure of relative mean, relative std, Spearman correlation, and seasonal means.
 
     Generates four subplots: (1) relative temporal mean, (2) relative temporal
-    standard deviation, (3) Spearman correlation of climatologies, and (4) monthly
-    seasonal means for both datasets.
+    standard deviation, (3) Spearman correlation, of the (by default
+    deseasonalised) time series or, without a direct comparison, of the
+    climatologies, and (4) monthly seasonal means for both datasets.
+    `season_months` names the compared season in the title.
     """
     rel_mean = np.where(rel_mean == np.inf, np.nan, rel_mean)
     rel_mean = np.where(rel_mean < 0, np.nan, rel_mean)
     rel_std = np.where(rel_std == np.inf, np.nan, rel_std)
     rel_std = np.where(rel_std < 0, np.nan, rel_std)
     fig, axes = plt.subplots(2, 2, figsize=(10.5, 4.68))
-    if input_name is not None and ref_name is not None:
-        title = f"Comparision {input_name} with {ref_name}"
-    if overlapping_years is not None and len(overlapping_years) > 1:
-        title += f" for years {overlapping_years[0]}-{overlapping_years[-1]}"
+    title = create_comparison_title(
+        input_name, ref_name, overlapping_years, season_months
+    )
     fig.suptitle(title, fontweight="normal", fontsize="x-large")
 
     # Set common colormap and normalization limits for mean_et and mean_aet
@@ -1198,8 +1201,12 @@ def plot_map_bias_only(
     output_path,
     overlapping_years=None,
     total_rel_mean=None,
+    season_months=None,
 ):
-    """Create a 3-panel plot with relative mean, mean difference, and climatology."""
+    """Create a 3-panel plot with relative mean, mean difference, and climatology.
+
+    `season_months` names the compared season in the title.
+    """
     rel_mean = np.where(rel_mean == np.inf, np.nan, rel_mean)
     ref_mean_map = np.asarray(np.nanmean(ref_clim, axis=0))
     input_mean_map = np.asarray(np.nanmean(input_clim, axis=0))
@@ -1212,10 +1219,9 @@ def plot_map_bias_only(
     ax_diff_mean = fig.add_subplot(gs[0, 2:4])
     ax_clim = fig.add_subplot(gs[1, 1:3])
 
-    if input_name is not None and ref_name is not None:
-        title = f"Comparision {input_name} with {ref_name}"
-    if overlapping_years is not None and len(overlapping_years) > 1:
-        title += f" for years {overlapping_years[0]}-{overlapping_years[-1]}"
+    title = create_comparison_title(
+        input_name, ref_name, overlapping_years, season_months
+    )
     fig.suptitle(title, fontweight="normal", fontsize="x-large")
 
     mean_diff_1 = max(np.abs(1 - np.nanmin(rel_mean)), np.abs(1 - np.nanmax(rel_mean)))
@@ -1349,15 +1355,18 @@ def plot_map_global_climate(
     ref_name,
     output_path,
     overlapping_years=None,
+    season_months=None,
 ):
-    """Create a plot showing relative mean, relative std and seasonality."""
+    """Create a plot showing relative mean, relative std and seasonality.
+
+    `season_months` names the compared season in the title.
+    """
     rel_mean = np.where(rel_mean == np.inf, np.nan, rel_mean)
     rel_std = np.where(rel_std == np.inf, np.nan, rel_std)
     fig, axes = plt.subplots(2, 1, figsize=(10.5, 6.2))
-    if input_name is not None and ref_name is not None:
-        title = f"Comparision {input_name} with {ref_name}"
-    if overlapping_years is not None and len(overlapping_years) > 1:
-        title += f" for years {overlapping_years[0]}-{overlapping_years[-1]}"
+    title = create_comparison_title(
+        input_name, ref_name, overlapping_years, season_months
+    )
     fig.suptitle(title, fontweight="normal", fontsize="x-large")
 
     mean_diff_1 = max(np.abs(1 - np.nanmin(rel_mean)), np.abs(1 - np.nanmax(rel_mean)))
@@ -1411,18 +1420,21 @@ def plot_map_global_climate2(
     output_path,
     overlapping_years=None,
     total_rel_mean=None,
+    season_months=None,
 ):
-    """Create a plot showing relative mean and monthly climatology difference."""
+    """Create a plot showing relative mean and monthly climatology difference.
+
+    `season_months` names the compared season in the title.
+    """
     rel_mean = np.where(rel_mean == np.inf, np.nan, rel_mean)
     diff_mean = np.asarray(np.where(diff_mean == np.inf, np.nan, diff_mean))
     fig = plt.figure(figsize=(10.5, 6.2))
     gs = fig.add_gridspec(2, 4, height_ratios=[1.0, 1.0])
     ax_rel_mean = fig.add_subplot(gs[1, 1:3])
     ax_diff = fig.add_subplot(gs[0, 1:3])
-    if input_name is not None and ref_name is not None:
-        title = f"Comparision {input_name} with {ref_name}"
-    if overlapping_years is not None and len(overlapping_years) > 1:
-        title += f" for years {overlapping_years[0]}-{overlapping_years[-1]}"
+    title = create_comparison_title(
+        input_name, ref_name, overlapping_years, season_months
+    )
     fig.suptitle(title, fontweight="normal", fontsize="x-large")
 
     im0, bounds0, extend0, ticks0 = plot_single_map(
@@ -1491,12 +1503,14 @@ def plot_map_local_climate(
     ref_name,
     output_path,
     overlapping_years=None,
+    season_months=None,
 ):
     """Create monthly local-climate maps for relative and absolute differences.
 
     Produces two figures with 12 small maps (one per month):
     - Relative climatology difference in percent
     - Absolute climatology difference in native units (e.g. mm/day)
+    `season_months` names the compared season in the title.
     """
     month_labels = (
         "Jan",
@@ -1565,11 +1579,11 @@ def plot_map_local_climate(
         )
         cax = fig.add_subplot(gs[:, 4])
         if input_name is not None and ref_name is not None:
-            title = f"Comparision {input_name} with {ref_name}"
+            title = create_comparison_title(
+                input_name, ref_name, overlapping_years, season_months
+            )
         else:
             title = "Local Climate Comparison"
-        if overlapping_years is not None and len(overlapping_years) > 1:
-            title += f" for years {overlapping_years[0]}-{overlapping_years[-1]}"
         fig.suptitle(f"{title}\n{panel_title}", fontsize="x-large", fontweight="normal")
 
         im = None
@@ -2410,6 +2424,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
                 ref_name=ref_name,
                 output_path=output_path,
                 overlapping_years=overlapping_years,
+                season_months=season_months,
             )
         elif global_climate:
             rel_mean_diff = (
@@ -2427,6 +2442,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
                 ref_name=ref_name,
                 output_path=output_path,
                 overlapping_years=overlapping_years,
+                season_months=season_months,
             )
             plot_map_local_climate(
                 input_clim=input_clim,
@@ -2434,6 +2450,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
                 input_name=input_name,
                 ref_name=ref_name,
                 output_path=output_path,
+                season_months=season_months,
             )
         else:
             plot_map_bias_only(
@@ -2445,6 +2462,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
                 output_path=output_path,
                 overlapping_years=overlapping_years,
                 total_rel_mean=np.nanmean(input_clim) / np.nanmean(ref_clim),
+                season_months=season_months,
             )
     return file_name
 
