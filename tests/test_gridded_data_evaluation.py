@@ -805,6 +805,7 @@ def test_get_stats_direct_comp_matches_eager_statistics(tmp_path):
         direct_comp=True,
         available_mem=1,
         file_name="*.nc",
+        remove_seasonal_cycle_from_std=True,
     )
 
     with xr.open_mfdataset(sorted(tmp_path.glob("*.nc"))) as ds:

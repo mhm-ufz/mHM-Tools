@@ -286,12 +286,15 @@ def add_args(parser):
     optional.add_argument(
         "--preserve-seasonality",
         required=False,
-        default=None,
+        default="std",
         help=(
-            """keep the seasonal cycle in 'corr' (Spearman correlation), 'std'
-            (temporal standard deviation) or 'corr,std'. By default both are
-            taken from the anomalies of the monthly climatology. Bootstrapping
-            and --no-direct-comparison always keep it in the correlation"""
+            """keep the seasonal cycle in 'std' (temporal standard deviation,
+            the default), 'corr' (Spearman correlation), 'corr,std' or 'none';
+            the others are taken from the anomalies of the monthly climatology.
+            With fewer than 5 years covered by both datasets (per bootstrap
+            selection: at most --n-bootstrap-years) it is kept in both.
+            Bootstrapping and --no-direct-comparison always keep it in the
+            correlation. The plot titles state which"""
         ),
     )
     optional.add_argument(
@@ -430,13 +433,13 @@ def run(args):
             raise ValueError(error_msg)
     preserved_seasonality = {
         name.strip().lower()
-        for name in str(args.preserve_seasonality or "").split(",")
+        for name in str(args.preserve_seasonality).split(",")
         if name.strip()
-    }
+    } - {"none"}
     if not preserved_seasonality <= {"corr", "std"}:
         error_msg = (
             f"Unknown --preserve-seasonality value {args.preserve_seasonality!r}. "
-            "Use 'corr', 'std' or 'corr,std'."
+            "Use 'none', 'corr', 'std' or 'corr,std'."
         )
         with ErrorLogger(logger):
             raise ValueError(error_msg)

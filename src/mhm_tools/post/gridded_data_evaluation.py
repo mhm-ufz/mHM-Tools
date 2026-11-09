@@ -247,7 +247,7 @@ def get_file_stats(
     avaiable_years=None,
     direct_comp=False,
     compression=None,
-    remove_seasonal_cycle_from_std=True,
+    remove_seasonal_cycle_from_std=False,
     season_months=None,
 ):
     """Get statistics for one file.
@@ -644,7 +644,7 @@ def get_stats_one_pass_subset(
     factor=1,
     coordinate_slice=None,
     with_period_series=False,
-    remove_seasonal_cycle_from_std=True,
+    remove_seasonal_cycle_from_std=False,
     available_years=None,
     season_months=None,
 ):
@@ -870,7 +870,7 @@ def get_stats_one_pass(
     file_name="*.*",
     with_period_series=False,
     compression=None,
-    remove_seasonal_cycle_from_std=True,
+    remove_seasonal_cycle_from_std=False,
     season_months=None,
 ):
     """Compute streaming statistics from monthly/yearly files.
@@ -1775,7 +1775,7 @@ def get_stats(  # noqa: PLR0913
     file_name="*.*",
     stream_metrics=False,
     compression=None,
-    remove_seasonal_cycle_from_std=True,
+    remove_seasonal_cycle_from_std=False,
     season_months=None,
 ):
     """Get statistics dataset from a path to a file or directory with files.
@@ -2035,7 +2035,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
     compression=None,
     region_names=(),
     write_region_stats=False,
-    remove_seasonal_cycle_from_std=True,
+    remove_seasonal_cycle_from_std=False,
     remove_seasonal_cycle_from_corr=True,
     season_months=None,
 ):
@@ -2887,7 +2887,7 @@ def gridded_data_evaluation(  # noqa: PLR0913
     compression=None,
     regions="all",
     write_region_stats=False,
-    remove_seasonal_cycle_from_std=True,
+    remove_seasonal_cycle_from_std=False,
     remove_seasonal_cycle_from_corr=True,
     season_months=None,
 ):
