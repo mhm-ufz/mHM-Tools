@@ -12,6 +12,7 @@ Authors
 import logging
 import random
 import re
+import warnings
 from pathlib import Path
 from typing import Iterable, Tuple
 
@@ -1980,6 +1981,9 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
     compression=None,
     region_names=(),
     write_region_stats=False,
+    remove_seasonal_cycle_from_std=True,
+    remove_seasonal_cycle_from_corr=True,
+    season_months=None,
 ):
     """Compare the two datasets.
 
@@ -1987,6 +1991,11 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
     the whole domain and per region in `region_names`, and written to CSV when
     `write_region_stats` is set. A bootstrap run logs only the spatial metrics;
     its relative statistics are tabled once all bootstrap runs are combined.
+
+    `remove_seasonal_cycle_from_std` takes the std from the anomalies of the
+    monthly climatology; `remove_seasonal_cycle_from_corr` correlates the
+    monthly anomalies of the time series instead of the series themselves.
+    Only the months in `season_months` are compared.
     """
     output_path = Path(output_path)
     if bootstrap_index is not None:
@@ -2013,6 +2022,8 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
         file_name=input_file_name,
         stream_metrics=stream_metrics,
         compression=compression,
+        remove_seasonal_cycle_from_std=remove_seasonal_cycle_from_std,
+        season_months=season_months,
     )
     logger.debug(f"input ds: {input}")
 
@@ -2033,6 +2044,8 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
         file_name=ref_file_name,
         stream_metrics=stream_metrics,
         compression=compression,
+        remove_seasonal_cycle_from_std=remove_seasonal_cycle_from_std,
+        season_months=season_months,
     )
     logger.debug(f"ref ds: {ref}")
     logger.debug(
@@ -2084,6 +2097,13 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
 
         input_ts, ref_ts, time_slice = crop_data_to_overlapping_time(input_ts, ref_ts)
         overlapping_years = [time_slice.start.year, time_slice.stop.year]
+        # resampling to the coarser calendar fills the months between two
+        # seasons with empty steps, so the season is selected again
+        if season_months is not None:
+            input_ts = select_time_steps_by_year_and_month(
+                input_ts, months=season_months
+            )
+            ref_ts = select_time_steps_by_year_and_month(ref_ts, months=season_months)
         if input_ts.shape != ref_ts.shape:
             msg = f"Input and ref time_series shapes differ after resampling/cropping: {input_ts.shape} vs {ref_ts.shape}"
             with ErrorLogger(logger):
@@ -2130,7 +2150,6 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
             ref_ts_np[paired_valid] = np.nan
             del paired_valid
             try:
-                spearman, spearman_pval = calculate_spearman_map(input_ts_np, ref_ts_np)
                 global_results = create_results_csv(
                     map1=input_ts_np,
                     map2=ref_ts_np,
@@ -2152,6 +2171,21 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
                     region_names,
                     output_stem=region_output_stem,
                 )
+                spearman_basis = "the time series"
+                if remove_seasonal_cycle_from_corr:
+                    # after the spatial metrics, which need the raw maps: each
+                    # series loses its own monthly means in place, one month at
+                    # a time, so the correlation follows the anomalies
+                    months = input_time.dt.month.values
+                    with warnings.catch_warnings():
+                        # cells without any paired step warn as empty slices
+                        warnings.simplefilter("ignore", category=RuntimeWarning)
+                        for month in np.unique(months):
+                            in_month = months == month
+                            for stack in (input_ts_np, ref_ts_np):
+                                stack[in_month] -= np.nanmean(stack[in_month], axis=0)
+                    spearman_basis = "the monthly anomalies of the time series"
+                spearman, spearman_pval = calculate_spearman_map(input_ts_np, ref_ts_np)
             except ValueError as ve:
                 logger.error("Input and ref do not have the same temporal extent.")
                 logger.info(input_time)
@@ -2162,6 +2196,12 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
         logger.info("Calculating spearman correlation from seasonalities.")
         input_clim_np = np.asarray(input["clim"].values)
         ref_clim_np = np.asarray(ref["clim"].values)
+        if season_months is not None:
+            # the climatologies keep all 12 months, those outside the season empty
+            season_index = np.asarray(season_months) - 1
+            input_clim_np = input_clim_np[season_index]
+            ref_clim_np = ref_clim_np[season_index]
+        spearman_basis = "the monthly climatologies"
         if not np.any(np.isfinite(input_clim_np) & np.isfinite(ref_clim_np)):
             msg = (
                 "Input and reference climatologies have no paired finite values "
@@ -2304,14 +2344,21 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
     if full_metrics:
         spearman.attrs = {
             "units": "1",
-            "long_name": "Spearman rank correlation (input vs reference)",
+            "long_name": (
+                f"Spearman rank correlation of {spearman_basis} (input vs reference)"
+            ),
         }
         spearman_pval.attrs = {
             "units": "1",
-            "long_name": "p-value of Spearman rank correlation (input vs reference)",
+            "long_name": (
+                f"p-value of Spearman rank correlation of {spearman_basis} "
+                "(input vs reference)"
+            ),
         }
         output["spearman"] = spearman
         output["spearman_pval"] = spearman_pval
+    if season_months is not None:
+        output.attrs["season_months"] = np.asarray(season_months, dtype=np.int32)
     file_name = "relative_stats"
     if input_name is not None:
         file_name += f"_{input_name}"
