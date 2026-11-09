@@ -196,7 +196,11 @@ def add_args(parser):
         "--available-mem",
         required=False,
         default=None,
-        help=("""Available memory per cpu in Gb or Mb (default Gb)"""),
+        help=(
+            """Available memory per cpu in Gb or Mb (default Gb). Sizes the
+            chunks the direct comparison reads the records in; without it the
+            chunks follow the input files."""
+        ),
     )
     optional.add_argument(
         "--input-file-name",

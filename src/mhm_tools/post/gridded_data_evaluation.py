@@ -1692,11 +1692,16 @@ def get_stats(
                 file_list = get_files(
                     path, available_years=available_years, file_name=file_name
                 )
+                # open_mfdataset keeps the record lazy, while the default opens
+                # every file eagerly. The files split the record in time, so
+                # chunks in space only would need a piece of every file at once.
                 with get_dataset_from_path(
                     file_list,
                     var_name=var,
                     available_mem=available_mem,
                     file_name=file_name,
+                    use_mfdataset=True,
+                    chunk_type=ChunkType.TIME,
                 ) as ds_in:
                     stats_ds = get_file_stats(
                         ds_in,
