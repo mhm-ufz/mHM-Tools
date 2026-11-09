@@ -828,3 +828,206 @@ def test_get_stats_direct_comp_matches_eager_statistics(tmp_path):
         record.values,
         rtol=1e-5,
     )
+
+
+@pytest.mark.parametrize("remove_seasonal_cycle_from_std", [True, False])
+@pytest.mark.parametrize("ncpus", [1, 2])
+def test_get_stats_one_pass_matches_direct_statistics(
+    tmp_path, ncpus, remove_seasonal_cycle_from_std
+):
+    """The streamed statistics equal the direct ones, also where steps are NaN.
+
+    One cell is NaN every second day. Streaming skips those steps per cell like
+    the direct path, instead of losing the whole cell.
+    """
+    _write_random_daily_record(tmp_path)
+    years = [2000, 2001, 2002]
+
+    streamed = get_stats_one_pass(
+        path=tmp_path,
+        var="v",
+        factor=2,
+        ncpus=ncpus,
+        available_years=years,
+        file_name="*.nc",
+        remove_seasonal_cycle_from_std=remove_seasonal_cycle_from_std,
+    )
+    direct = get_stats(
+        path=tmp_path,
+        var="v",
+        factor=2,
+        coordinate_slice=None,
+        n_bootstrap_years=None,
+        ncpus=1,
+        output_file=None,
+        available_years=years,
+        direct_comp=True,
+        file_name="*.nc",
+        remove_seasonal_cycle_from_std=remove_seasonal_cycle_from_std,
+    )
+
+    for stat_name in ("mean", "std", "clim"):
+        np.testing.assert_allclose(
+            streamed[stat_name].values,
+            direct[stat_name].transpose(*streamed[stat_name].dims).values,
+            rtol=1e-5,
+        )
+    assert np.isfinite(streamed["std"].values[1, 2])
+    assert streamed["std"].attrs["long_name"] == direct["std"].attrs["long_name"]
+
+
+def test_get_stats_one_pass_keeps_selected_years_and_season(tmp_path):
+    """Only steps of the selected years and season are read, without year folders."""
+    _write_random_daily_record(tmp_path)
+    season = list(range(4, 10))
+
+    output = get_stats_one_pass(
+        path=tmp_path,
+        var="v",
+        available_years=[2001],
+        file_name="*.nc",
+        with_period_series=True,
+        season_months=season,
+    )
+
+    with xr.open_mfdataset(sorted(tmp_path.glob("*.nc"))) as ds:
+        record = ds["v"].load()
+    in_period = record.sel(
+        time=(record.time.dt.year == 2001) & record.time.dt.month.isin(season)
+    )
+    series_time = output["time_series"]["time"]
+    assert series_time.size == 6
+    assert bool((series_time.dt.year == 2001).all())
+    assert bool(series_time.dt.month.isin(season).all())
+    np.testing.assert_allclose(
+        output["mean"].values, in_period.mean("time", skipna=True).values, rtol=1e-5
+    )
+    assert np.isnan(output["clim"].sel(month=[1, 2, 3, 10, 11, 12]).values).all()
+
+
+def test_get_file_stats_keeps_only_season_months(tmp_path):
+    """The direct statistics use only the season, also across the new year."""
+    _write_random_daily_record(tmp_path)
+    season = [10, 11, 12, 1, 2, 3]
+    with xr.open_mfdataset(sorted(tmp_path.glob("*.nc"))) as ds:
+        record = ds.load()
+
+    output = get_file_stats(record, "v", direct_comp=True, season_months=season)
+
+    in_season = record["v"].sel(time=record.time.dt.month.isin(season))
+    np.testing.assert_allclose(
+        output["mean"].values, in_season.mean("time", skipna=True).values, rtol=1e-5
+    )
+    assert np.isnan(output["clim"].sel(month=list(range(4, 10))).values).all()
+    assert bool(output["time_series"]["time"].dt.month.isin(season).all())
+
+
+def _compare_monthly_series(monkeypatch, tmp_path, **compare_kwargs):
+    """Run `compare_input_with_ref` on 4 years of monthly series on a 2x2 grid.
+
+    Cell (0, 0): the reference has the opposite seasonal cycle but the same
+    anomalies. Cell (0, 1): the same cycle but mirrored anomalies. Row 1
+    repeats row 0.
+
+    Args:
+        monkeypatch: pytest fixture used to fake the reading and writing.
+        tmp_path (Path): Output directory.
+        **compare_kwargs: Passed on to `compare_input_with_ref`.
+
+    Returns
+    -------
+        Tuple of the written relative statistics and the maps the result
+        metrics received.
+    """
+    lat, lon = np.array([51.0, 50.0]), np.array([10.0, 11.0])
+    time = pd.date_range("2000-01-01", periods=48, freq="MS")
+    seasonal_cycle = 10 * np.sin(2 * np.pi * (time.month.values - 1) / 12)
+    anomalies = np.random.default_rng(0).normal(size=time.size)
+    input_cells = [seasonal_cycle + anomalies, seasonal_cycle + anomalies]
+    ref_cells = [-seasonal_cycle + anomalies, seasonal_cycle - anomalies]
+
+    def create_stats(cells):
+        """Build a statistics dataset with the given series in both rows."""
+        series = np.stack([np.stack(cells, axis=-1)] * 2, axis=1) + 20
+        return xr.Dataset(
+            {
+                "mean": (("lat", "lon"), np.ones((2, 2))),
+                "std": (("lat", "lon"), np.ones((2, 2))),
+                "clim": (("month", "lat", "lon"), np.ones((12, 2, 2))),
+                "time_series": (("time", "lat", "lon"), series),
+            },
+            coords={"month": np.arange(1, 13), "time": time, "lat": lat, "lon": lon},
+        )
+
+    stats = [create_stats(input_cells), create_stats(ref_cells)]
+    captured = {}
+
+    def fake_create_results_csv(map1, **_kwargs):
+        """Record the maps the result metrics receive."""
+        captured["metric_maps"] = map1.copy()
+        return {}
+
+    def fake_write_xarray_to_file(ds, **_kwargs):
+        """Record the written relative statistics."""
+        captured["ds"] = ds.copy(deep=True)
+
+    module = "mhm_tools.post.gridded_data_evaluation"
+    monkeypatch.setattr(f"{module}.get_stats", lambda **_kwargs: stats.pop(0))
+    monkeypatch.setattr(
+        f"{module}.regridd_to_higher_spatial_resolution",
+        lambda ds_input, ds_ref: (ds_input, ds_ref),
+    )
+    monkeypatch.setattr(f"{module}.create_results_csv", fake_create_results_csv)
+    monkeypatch.setattr(f"{module}.write_xarray_to_file", fake_write_xarray_to_file)
+
+    compare_input_with_ref(
+        input_path=tmp_path / "input",
+        input_var="v",
+        output_path=tmp_path,
+        ref_path=tmp_path / "ref",
+        ref_var="v",
+        input_name="in",
+        ref_name="ref",
+        direct_comp=True,
+        plot=False,
+        **compare_kwargs,
+    )
+    return captured["ds"], captured["metric_maps"]
+
+
+@pytest.mark.parametrize("remove_seasonal_cycle_from_corr", [True, False])
+def test_compare_input_with_ref_correlates_monthly_anomalies(
+    monkeypatch, tmp_path, remove_seasonal_cycle_from_corr
+):
+    """Without the seasonal cycle the correlation follows the anomalies.
+
+    The opposite cycle with the same anomalies correlates perfectly, the same
+    cycle with mirrored anomalies perfectly negatively. With the cycle kept,
+    the signs flip, because the cycle dominates.
+    """
+    output, _ = _compare_monthly_series(
+        monkeypatch,
+        tmp_path,
+        remove_seasonal_cycle_from_corr=remove_seasonal_cycle_from_corr,
+    )
+
+    rho_opposite_cycle, rho_mirrored_anomalies = output["spearman"].values[0]
+    long_name = output["spearman"].attrs["long_name"]
+    if remove_seasonal_cycle_from_corr:
+        assert rho_opposite_cycle == pytest.approx(1.0)
+        assert rho_mirrored_anomalies == pytest.approx(-1.0)
+        assert "monthly anomalies" in long_name
+    else:
+        assert rho_opposite_cycle < 0
+        assert rho_mirrored_anomalies > 0
+        assert "monthly anomalies" not in long_name
+
+
+def test_compare_input_with_ref_uses_only_season_months(monkeypatch, tmp_path):
+    """The result metrics only receive the steps of the season."""
+    output, metric_maps = _compare_monthly_series(
+        monkeypatch, tmp_path, season_months=list(range(4, 10))
+    )
+
+    assert metric_maps.shape[0] == 6 * 4
+    np.testing.assert_array_equal(output.attrs["season_months"], np.arange(4, 10))
