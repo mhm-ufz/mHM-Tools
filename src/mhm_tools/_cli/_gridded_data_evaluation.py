@@ -176,7 +176,10 @@ def add_args(parser):
         "--no-direct-comparison",
         action="store_true",
         required=False,
-        help=("Use statistics and do not compare timeseries directly. Needs ref_path."),
+        help=(
+            "Use statistics and do not compare timeseries directly. Needs "
+            "ref_path. The correlation is then that of the monthly climatologies."
+        ),
     )
     optional.add_argument(
         "--start-year",
@@ -275,7 +278,31 @@ def add_args(parser):
         required=False,
         help=(
             """calculate the result metrics from monthly means accumulated while
-            streaming the files, so neither record is ever held in memory"""
+            streaming the files, so neither record is ever held in memory. The
+            statistics match the direct comparison: NaNs are skipped per cell
+            and only the years both datasets cover are used"""
+        ),
+    )
+    optional.add_argument(
+        "--preserve-seasonality",
+        required=False,
+        default=None,
+        help=(
+            """keep the seasonal cycle in 'corr' (Spearman correlation), 'std'
+            (temporal standard deviation) or 'corr,std'. By default both are
+            taken from the anomalies of the monthly climatology. Bootstrapping
+            and --no-direct-comparison always keep it in the correlation"""
+        ),
+    )
+    optional.add_argument(
+        "--season",
+        required=False,
+        default=None,
+        help=(
+            """first and last month of the compared season, e.g. '4,9' for April
+            to September or '10,3' for October to March. All statistics and
+            metrics use only these months. The output file names don't carry the
+            season, so runs for different seasons need different --output-dir"""
         ),
     )
     flags.add_argument(
@@ -337,6 +364,7 @@ def run(args):
     from mhm_tools.common.cli_utils import get_available_mem_in_unit, get_coords
     from mhm_tools.common.file_handler import get_xarray_ds_from_file
     from mhm_tools.common.parallel import resolve_ncpus
+    from mhm_tools.common.time_utils import create_season_months
     from mhm_tools.post.gridded_data_evaluation import (
         EvalDataset,
         gridded_data_evaluation,
@@ -400,6 +428,18 @@ def run(args):
         error_msg = "Options --bias_only and --global_climate are mutually exclusive."
         with ErrorLogger(logger):
             raise ValueError(error_msg)
+    preserved_seasonality = {
+        name.strip().lower()
+        for name in str(args.preserve_seasonality or "").split(",")
+        if name.strip()
+    }
+    if not preserved_seasonality <= {"corr", "std"}:
+        error_msg = (
+            f"Unknown --preserve-seasonality value {args.preserve_seasonality!r}. "
+            "Use 'corr', 'std' or 'corr,std'."
+        )
+        with ErrorLogger(logger):
+            raise ValueError(error_msg)
     gridded_data_evaluation(
         input=input,
         ref=ref,
@@ -428,4 +468,9 @@ def run(args):
         compression=get_netcdf_compression(args),
         regions=args.regions,
         write_region_stats=args.write_region_stats,
+        remove_seasonal_cycle_from_std="std" not in preserved_seasonality,
+        remove_seasonal_cycle_from_corr="corr" not in preserved_seasonality,
+        season_months=(
+            create_season_months(args.season) if args.season is not None else None
+        ),
     )
