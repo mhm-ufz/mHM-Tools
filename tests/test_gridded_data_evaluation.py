@@ -732,3 +732,90 @@ def test_get_stats_one_pass_period_series_matches_monthly_mean(tmp_path, ncpus):
     np.testing.assert_allclose(
         series.values, expected.values.astype(np.float32), rtol=1e-6
     )
+
+
+def _write_random_daily_record(path):
+    """Write three years of random daily values on a 4x5 grid, one cell holed.
+
+    Args:
+        path (Path): Directory the yearly files are written to.
+    """
+    lat, lon = np.array([3.0, 2.0, 1.0, 0.0]), np.arange(5.0)
+    rng = np.random.default_rng(0)
+    for year in (2000, 2001, 2002):
+        n_days = pd.date_range(f"{year}-01-01", f"{year}-12-31", freq="D").size
+        values = rng.random((n_days, lat.size, lon.size))
+        _write_daily_year(path, year, "v", lat, lon, values, nan_cell=(1, 2))
+
+
+@pytest.mark.parametrize("available_mem", [None, 1])
+def test_get_stats_direct_comp_keeps_time_series_lazy(tmp_path, available_mem):
+    """The direct comparison reads a directory lazily and computes its stats once.
+
+    The record stays in dask chunks, sized by `available_mem` when given and
+    by the files otherwise, while the statistics are already in memory.
+    """
+    _write_random_daily_record(tmp_path)
+
+    output = get_stats(
+        path=tmp_path,
+        var="v",
+        factor=2,
+        coordinate_slice=None,
+        n_bootstrap_years=None,
+        ncpus=1,
+        output_file=None,
+        available_years=[2000, 2001, 2002],
+        direct_comp=True,
+        available_mem=available_mem,
+        file_name="*.nc",
+    )
+
+    assert output["time_series"].chunks is not None
+    for stat_name in ("clim", "std", "mean"):
+        assert output[stat_name].chunks is None
+
+
+def test_get_stats_direct_comp_matches_eager_statistics(tmp_path):
+    """Lazily computed stats and series equal those of the record in memory.
+
+    The series is computed after `get_stats` returned, i.e. after it closed
+    the files, so this also checks that the lazy record can still be read.
+    """
+    _write_random_daily_record(tmp_path)
+
+    output = get_stats(
+        path=tmp_path,
+        var="v",
+        factor=2,
+        coordinate_slice=None,
+        n_bootstrap_years=None,
+        ncpus=1,
+        output_file=None,
+        available_years=[2000, 2001, 2002],
+        direct_comp=True,
+        available_mem=1,
+        file_name="*.nc",
+    )
+
+    with xr.open_mfdataset(sorted(tmp_path.glob("*.nc"))) as ds:
+        record = ds["v"].load() * 2
+    expected_clim = record.groupby("time.month").mean("time", skipna=True)
+    expected_std = (record.groupby("time.month") - expected_clim).std(
+        "time", skipna=True
+    )
+
+    np.testing.assert_allclose(
+        output["mean"].values, record.mean("time", skipna=True).values, rtol=1e-5
+    )
+    np.testing.assert_allclose(
+        output["clim"].transpose("month", "lat", "lon").values,
+        expected_clim.values,
+        rtol=1e-5,
+    )
+    np.testing.assert_allclose(output["std"].values, expected_std.values, rtol=1e-5)
+    np.testing.assert_allclose(
+        output["time_series"].transpose("time", "lat", "lon").values,
+        record.values,
+        rtol=1e-5,
+    )
