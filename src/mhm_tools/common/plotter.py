@@ -12,6 +12,7 @@ Authors
 - Simon Lüdke
 """
 
+import calendar
 import logging
 from pathlib import Path
 from typing import Mapping, Optional, Sequence, Tuple
@@ -192,13 +193,14 @@ def add_map_colorbar(fig, ax, mappable, bounds, extend, ticks, label):
     return colorbar
 
 
-def create_comparison_title(input_name, ref_name, years=None):
+def create_comparison_title(input_name, ref_name, years=None, months=None):
     """Create the figure title of an input/reference comparison.
 
     Args:
         input_name: Label of the input dataset.
         ref_name: Label of the reference dataset.
         years: Sequence of the covered years, None to leave the period out.
+        months: Months of the compared season in order, None for the whole year.
 
     Returns
     -------
@@ -211,6 +213,11 @@ def create_comparison_title(input_name, ref_name, years=None):
             title += f" for year {first_year}"
         else:
             title += f" for years {first_year}-{last_year}"
+    if months is not None and len(months) < 12:
+        first_month = calendar.month_abbr[months[0]]
+        last_month = calendar.month_abbr[months[-1]]
+        season = first_month if len(months) == 1 else f"{first_month}-{last_month}"
+        title += f" ({season})"
     return title
 
 
