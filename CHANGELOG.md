@@ -9,6 +9,8 @@
 - The summary table in the `discharge-evaluation` PDF lists every metric for all stations and again for each WMO region.
 - `discharge-evaluation --max-mean-factor` (default 30) leaves stations whose beta is above the factor or below its inverse out of the region table and the PDF summary table; the plots keep them. The log and the PDF state, one line per reason, how many stations were left out: beta too high, beta too low, or no finite value of a metric.
 - `discharge-eval-comparison` writes one summary table per WMO region, like its per-region CDF plots. The PDF shows each region's table right before that region's plots, and each table is also written to `metric_summary_region_<region>.csv`.
+- `gridded-data-evaluation --season first,last` compares only these months, e.g. `4,9` for April to September or `10,3` for October to March. The statistics, the time series, SPAEF and the other metrics use no other month, the relative statistics carry the months as `season_months` attribute, and the plot titles name the season, e.g. "(Apr-Sep)".
+- `gridded-data-evaluation --preserve-seasonality` chooses where the seasonal cycle stays: `std` (temporal standard deviation, the default), `corr` (Spearman correlation), `corr,std` or `none` (see Changed).
 
 ### Changed
 
@@ -22,6 +24,9 @@
 - `scripts/install_mhm_tools.sh` installs numpy 2.5 or a newer numpy 2 release from conda-forge. Without `--python`, conda picks the Python version of a new environment that fits the packages; before, it was always 3.11. An existing environment keeps its Python version, so one created with Python 3.11 has to be recreated, because numpy 2.5 needs Python 3.12 or newer.
 - The summary tables in the PDFs of `discharge-evaluation`, `discharge-eval-comparison` and `metric-plots` separate the metrics with an empty row. The first row of a metric is grey, and the following rows alternate between white and light grey. The values have two decimals instead of four significant digits, also in the logged tables, whose headings now name the table. `discharge-evaluation` logs its region table with two decimals and no longer colours the best value, as its rows are regions, not competing runs.
 - The ΔKGE maps of `discharge-eval-comparison` follow the data up to ±0.5; larger changes get the end colours and an arrow on the colorbar instead of stretching the scale.
+- `gridded-data-evaluation` takes the Spearman correlation of the time series from the anomalies of the monthly climatology by default, so it shows the agreement left after the mean seasonal cycle that both datasets share. The temporal standard deviation keeps the seasonal cycle by default in every mode; before, the direct comparison took it from the anomalies and the streamed statistics did not. `--preserve-seasonality none` takes both from the anomalies, `corr,std` keeps the cycle in both. With fewer than 5 years covered by both datasets (per bootstrap selection: at most `--n-bootstrap-years`) the climatology of at least one of them rests on too few values per month, so the seasonal cycle is kept and a warning says so. The titles of the std and Spearman panels end in "deseasonalised", "with seasonal cycle" or, for the correlation of the climatologies, "seasonal cycle only", and `rel_std` and `spearman` carry this as `seasonality` attribute, which `--only-plot` reads back. The Spearman maps, and the standard deviation maps of the direct comparison, are not comparable to earlier runs. The raw standard deviation of the streamed statistics now divides by N instead of N−1, as the direct one does. Bootstrapping still correlates with the seasonal cycle, and `--no-direct-comparison` still correlates the climatologies. The `long_name` of `std` and `spearman` says which definition was used.
+- `gridded-data-evaluation --stream-metrics` gives the same statistics as the direct comparison: the same definition of the standard deviation, NaN steps skipped per cell, and only the years both datasets cover instead of the union of their years.
+- The direct comparison of `gridded-data-evaluation` opens a directory of files lazily, so `--available-mem` sets the size of the chunks the record is read in and `--ncpus` the number of threads reading them. Before, all files were loaded at once, which ran out of memory on long daily global records such as 40 years of daily ET. The record is now read two to three times; `--stream-metrics` reads it once.
 
 ### Fixed
 
@@ -38,6 +43,11 @@
 - Global basin ids of `create-catchment` and `create-wmo-region-masks` left the first and last longitude column without a basin, so `create-wmo-region-masks` put their land cells in no region (89 cells of the 0.1° hydro model mask). The `--frame` of non-flow cells, default 1, cleared that border in both the unrolled and the rolled delineation before they were merged at the date line. Global basin ids are now written without a frame.
 - `create-catchment --frame` wrote the flow-direction pit value into every output variable. With `--ftype ldd` the frame got basin id 5 and showed up as active cells in `mask.nc`, and `elevtn` and `grdare` got 0 instead of -9999. Only `flwdir` gets pits now; every other variable and the mask are no data on the frame.
 - `discharge-evaluation --gauge-coordinate-file` read each gauge row and column pair of a model file separately, so with thousands of gauges a monthly file on the EFAS grid took days and the run never finished. Every model file is now read once in its own chunks before the gauge cells are picked, e.g. 3000 gauges of such a file in under a second.
+- The streamed statistics of `gridded-data-evaluation` (`--stream-metrics`, `--no-direct-comparison`, `--global-climate`, bootstrapping) gave a cell NaN as mean and standard deviation as soon as one of its time steps was NaN. NaN steps are now skipped per cell.
+- `gridded-data-evaluation --start-year`/`--end-year` limited the streamed statistics only for directories with year folders; directories without them and files holding several years were read in full.
+- `gridded-data-evaluation --stream-metrics` failed with `KeyError: 'time_series'` when the input or the reference was a single file.
+- `gridded-data-evaluation` without `--ref-path` crashed while determining the years, so the statistics of a single dataset could not be written.
+- The plot titles of `gridded-data-evaluation` read "Comparision".
 
 ### Tests
 
@@ -48,6 +58,8 @@
 - `create-catchment`: global basin ids keep the first and last longitude column, and a basin flowing across the date line has one id on both sides; the frame holds pits only in flwdir and no data in the other variables and the mask, and `create_frame` writes one value per variable.
 - `snow-evaluation`: the classification accuracy tests read their one-cell results with `.item()`, because numpy 2.5 no longer converts arrays with size-1 dimensions to Python numbers.
 - `discharge-evaluation`: the region rows of the summary table, the beta limit with its left-out notes for direct and bootstrap results, the NaN/inf notes, and the notes passed on to the PDF table; gauge cells read from a chunked gridded model file match those of the loaded grid, are read in the file's chunks, and 2500 gauges take less than a second.
+- `gridded-data-evaluation`: the direct comparison keeps the record lazy and matches statistics computed in memory; the streamed statistics equal the direct ones with and without the seasonal cycle, also for a cell with NaN steps, on one and two cores; years and season are selected in both paths; the Spearman map correlates the monthly anomalies, and only the season's months reach the metrics; the square sums are kept per month only when the seasonal cycle is removed.
+- `create_season_months`: seasons within and across the new year, a single month, and invalid input.
 
 ## [v0.3.1]
 
