@@ -1704,7 +1704,7 @@ def create_map_from_output(
         )
 
 
-def get_stats(
+def get_stats(  # noqa: PLR0913
     path,
     var,
     factor,
@@ -1720,11 +1720,19 @@ def get_stats(
     file_name="*.*",
     stream_metrics=False,
     compression=None,
+    remove_seasonal_cycle_from_std=True,
+    season_months=None,
 ):
-    """Get statistics dataset from a path to a file or directory with files."""
+    """Get statistics dataset from a path to a file or directory with files.
+
+    `remove_seasonal_cycle_from_std` and `season_months` are passed on to
+    `get_stats_one_pass` or `get_file_stats`, see there.
+    """
     logger.info(f"Get stats for {path}")
     if var is not None:
-        if path.is_dir() and not direct_comp:
+        # a single file is streamed too when the monthly series is needed,
+        # since only the one-pass statistics build it outside the direct mode
+        if (path.is_dir() or stream_metrics) and not direct_comp:
             stats_ds = get_stats_one_pass(
                 path,
                 var,
@@ -1737,6 +1745,8 @@ def get_stats(
                 file_name=file_name,
                 with_period_series=stream_metrics,
                 compression=compression,
+                remove_seasonal_cycle_from_std=remove_seasonal_cycle_from_std,
+                season_months=season_months,
             )
         elif path.is_dir() or path.is_file():
             if path.is_file() and path.suffix == ".nc":
@@ -1758,6 +1768,8 @@ def get_stats(
                     avaiable_years=available_years,
                     direct_comp=direct_comp,
                     compression=compression,
+                    remove_seasonal_cycle_from_std=remove_seasonal_cycle_from_std,
+                    season_months=season_months,
                 )
             if path.is_dir():
                 file_list = get_files(
@@ -1783,6 +1795,8 @@ def get_stats(
                         avaiable_years=available_years,
                         direct_comp=direct_comp,
                         compression=compression,
+                        remove_seasonal_cycle_from_std=remove_seasonal_cycle_from_std,
+                        season_months=season_months,
                     )
         else:
             msg = f"Path {path} is neither dir nor file."
