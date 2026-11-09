@@ -15,6 +15,7 @@ import re
 from pathlib import Path
 from typing import Iterable, Tuple
 
+import dask
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -269,17 +270,22 @@ def get_file_stats(
         )
     if avaiable_years is not None:
         ds_croped = ds_croped.sel(time=ds_croped.time.dt.year.isin(avaiable_years))
-    logger.debug(
-        f"After cropping/year selection {input_var} is all nan: "
-        f"{bool(ds_croped[input_var].isnull().all().compute().item())}; "
-        f"shape={ds_croped[input_var].shape}"
-    )
+    # the f-string is built even at INFO level, which is a full extra read of a
+    # lazily opened record
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(
+            f"After cropping/year selection {input_var} is all nan: "
+            f"{bool(ds_croped[input_var].isnull().all().compute().item())}; "
+            f"shape={ds_croped[input_var].shape}"
+        )
 
-    # Calculate climatology and standard deviation along the time dimension
+    # Two passes over a lazy record: the anomalies of the std need the finished
+    # climatology, and one graph for both would hold every chunk until then.
+    # Computing here also keeps later reads of the stats from re-reading it.
     clim = get_clim_from_ds(ds_croped, input_var, factor)
-    std = get_std_from_ds(ds_croped, input_var, clim, factor)
-
     mean = ds_croped[input_var].mean(dim="time", skipna=True) * factor
+    clim, mean = dask.compute(clim, mean)
+    std = get_std_from_ds(ds_croped, input_var, clim, factor).compute()
     logger.debug(
         f"After stats calculation {input_var} is all nan: "
         f"clim={bool(clim.isnull().all().compute().item())}, "
