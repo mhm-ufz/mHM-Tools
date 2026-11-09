@@ -74,6 +74,9 @@ logger = logging.getLogger(__name__)
 # Working set of one spearman block. Small on purpose: the runtime is flat
 # down to a few MiB, so a bigger block would only raise the peak.
 SPEARMAN_BLOCK_BUDGET_MIB = 32
+# Anomalies from a monthly climatology need several values per calendar month;
+# with fewer years the seasonal cycle is kept in the std and the correlation.
+MIN_YEARS_TO_REMOVE_SEASONAL_CYCLE = 5
 
 
 class EvalDataset:
@@ -2850,8 +2853,10 @@ def gridded_data_evaluation(  # noqa: PLR0913
     `write_region_stats` also writes those tables to CSV.
 
     `remove_seasonal_cycle_from_std`/`_corr` take the std and the Spearman
-    correlation from the anomalies of the monthly climatology. Bootstrapping
-    always correlates with the seasonal cycle. `season_months` restricts all
+    correlation from the anomalies of the monthly climatology. With fewer than
+    `MIN_YEARS_TO_REMOVE_SEASONAL_CYCLE` years covered by both datasets (per
+    bootstrap selection) the seasonal cycle is kept in both. Bootstrapping always
+    correlates with the seasonal cycle. `season_months` restricts all
     statistics and metrics to these calendar months.
     """
     output_path = Path(output_path)
@@ -2909,19 +2914,39 @@ def gridded_data_evaluation(  # noqa: PLR0913
             with ErrorLogger(logger):
                 raise ValueError(msg)
 
+    logger.info("Determining available years.")
+    years_in = get_years_from_path(input_path, file_name=input.file_name)
+    years_ref = (
+        get_years_from_path(ref_path, raise_exception=False, file_name=ref.file_name)
+        if ref_path is not None
+        else []
+    )
     # the streamed metrics compare the common years like the direct comparison
-    available_years = get_available_years(
-        input_path,
-        ref_path,
-        year_slice,
-        direct_comp or stream_metrics,
-        input_file_name=input.file_name,
-        ref_file_name=ref.file_name,
+    available_years = select_available_years(
+        years_in, years_ref, year_slice, direct_comp or stream_metrics
     )
     logger.info(f"Years {available_years} are available for comparison.")
     if not available_years:
         logger.error("Since no data is available the program is stoped.")
         return
+    # both anomalies need enough years, so only the years both datasets cover
+    # count, and a bootstrap selection holds at most n_bootstrap_years of them
+    n_common_years = len(select_available_years(years_in, years_ref, year_slice))
+    n_common_years = (
+        min(n_common_years, n_bootstrap_years)
+        if bootstrap_requested
+        else n_common_years
+    )
+    if n_common_years < MIN_YEARS_TO_REMOVE_SEASONAL_CYCLE and (
+        remove_seasonal_cycle_from_std or remove_seasonal_cycle_from_corr
+    ):
+        logger.warning(
+            f"Input and reference share only {n_common_years} years, fewer than "
+            f"{MIN_YEARS_TO_REMOVE_SEASONAL_CYCLE}, so the seasonal cycle is kept "
+            "in the standard deviation and the Spearman correlation."
+        )
+        remove_seasonal_cycle_from_std = False
+        remove_seasonal_cycle_from_corr = False
 
     if ref_path is None:
         # Only create statistics; do not compare
