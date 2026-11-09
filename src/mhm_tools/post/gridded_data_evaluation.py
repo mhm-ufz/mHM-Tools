@@ -240,8 +240,15 @@ def get_file_stats(
     avaiable_years=None,
     direct_comp=False,
     compression=None,
+    remove_seasonal_cycle_from_std=True,
+    season_months=None,
 ):
-    """Get statistics for one file."""
+    """Get statistics for one file.
+
+    With `remove_seasonal_cycle_from_std` the std is that of the anomalies from
+    the monthly climatology, otherwise that of the raw values (both ddof=0).
+    Only steps in `avaiable_years` and `season_months` are used.
+    """
     # logger.debug(f"Get file stats {file}")
     lat_key = get_coord_key(ds_in, lat=True)
     lon_key = get_coord_key(ds_in, lon=True)
@@ -269,8 +276,9 @@ def get_file_stats(
         ds_croped = ds_croped.sel(
             {"lat": coordinate_slice["lat"], "lon": coordinate_slice["lon"]}
         )
-    if avaiable_years is not None:
-        ds_croped = ds_croped.sel(time=ds_croped.time.dt.year.isin(avaiable_years))
+    ds_croped = select_time_steps_by_year_and_month(
+        ds_croped, avaiable_years, season_months
+    )
     # the f-string is built even at INFO level, which is a full extra read of a
     # lazily opened record
     if logger.isEnabledFor(logging.DEBUG):
@@ -286,7 +294,9 @@ def get_file_stats(
     clim = get_clim_from_ds(ds_croped, input_var, factor)
     mean = ds_croped[input_var].mean(dim="time", skipna=True) * factor
     clim, mean = dask.compute(clim, mean)
-    std = get_std_from_ds(ds_croped, input_var, clim, factor).compute()
+    std = get_std_from_ds(
+        ds_croped, input_var, clim if remove_seasonal_cycle_from_std else None, factor
+    ).compute()
     logger.debug(
         f"After stats calculation {input_var} is all nan: "
         f"clim={bool(clim.isnull().all().compute().item())}, "
@@ -298,7 +308,9 @@ def get_file_stats(
     # describing the statistic, copying units from the source variable when known.
     source_units = ds_croped[input_var].attrs.get("units")
     clim.attrs = {"long_name": f"Monthly climatology of {input_var}"}
-    std.attrs = {"long_name": f"Temporal standard deviation of {input_var}"}
+    std.attrs = {
+        "long_name": create_std_long_name(input_var, remove_seasonal_cycle_from_std)
+    }
     mean.attrs = {"long_name": f"Temporal mean of {input_var}"}
     if source_units is not None:
         clim.attrs["units"] = source_units
