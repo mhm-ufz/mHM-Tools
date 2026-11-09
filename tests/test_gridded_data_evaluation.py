@@ -576,9 +576,8 @@ def test_resample_to_target_freq_ignores_other_dims_during_align():
 def _period_subset(period_sums, period_counts, shape=(2, 2)):
     """Build one `get_stats_one_pass_subset` result around given buckets."""
     return (
-        np.zeros(shape),
-        np.zeros(shape),
         1,
+        np.zeros((12, *shape)),
         np.zeros((12, *shape)),
         np.zeros((12, *shape), dtype=np.uint32),
         period_sums,
@@ -659,7 +658,7 @@ def test_combine_results_consumes_subset_results():
         )
         for month in (1, 2)
     ]
-    kept_sums, kept_counts = subsets[0][5], subsets[0][6]
+    kept_sums, kept_counts = subsets[0][4], subsets[0][5]
 
     combine_results(subsets)
 
@@ -679,30 +678,40 @@ def test_create_period_mean_series_empties_its_input_buckets():
     assert period_counts == {}
 
 
-def test_period_buckets_use_compact_dtypes(tmp_path):
+@pytest.mark.parametrize(
+    ("remove_seasonal_cycle_from_std", "n_square_sums"), [(True, 12), (False, 1)]
+)
+def test_period_buckets_use_compact_dtypes(
+    tmp_path, remove_seasonal_cycle_from_std, n_square_sums
+):
     """The streamed accumulators stay compact, which bounds the peak memory.
 
     `monthly_counts` spans the whole record, so it needs uint32: uint16 would
     wrap at 65535, which 15-minute input over 44 years exceeds. A period bucket
-    only ever holds one month, so uint16 is safe there.
+    only ever holds one month, so uint16 is safe there. The square sums are
+    only kept per month when the std drops the seasonal cycle.
     """
     lat, lon = np.array([1.0, 0.0]), np.array([0.0, 1.0])
     _write_daily_year(tmp_path, 2000, "v", lat, lon, 2.0)
 
     (
         _,
-        _,
-        _,
         monthly_sums,
+        square_sums,
         monthly_counts,
         period_sums,
         period_counts,
     ) = get_stats_one_pass_subset(
-        sorted(tmp_path.glob("*.nc")), "v", with_period_series=True
+        sorted(tmp_path.glob("*.nc")),
+        "v",
+        with_period_series=True,
+        remove_seasonal_cycle_from_std=remove_seasonal_cycle_from_std,
     )
 
     assert monthly_counts.dtype == np.uint32
     assert monthly_sums.dtype == np.float64
+    assert square_sums.dtype == np.float64
+    assert square_sums.shape == (n_square_sums, lat.size, lon.size)
     assert all(values.dtype == np.float32 for values in period_sums.values())
     assert all(values.dtype == np.uint16 for values in period_counts.values())
     assert np.iinfo(np.uint16).max < 44 * 12 * 31 * 96 // 12

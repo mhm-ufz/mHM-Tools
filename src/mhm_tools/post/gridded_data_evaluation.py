@@ -65,6 +65,7 @@ from mhm_tools.common.xarray_utils import (
     normalize_lat_lon,
     regrid_mask,
     regrid_to_coarser_grid,
+    select_time_steps_by_year_and_month,
 )
 
 logger = logging.getLogger(__name__)
@@ -579,30 +580,27 @@ def combine_results(results):
 
     Returns
     -------
-        Tuple of combined mean, M2, count, monthly sums and counts, and the
-        merged period sums and counts.
+        Tuple of the total step count, the summed monthly sums, square sums
+        and monthly counts, and the merged period sums and counts.
     """
-    total_count = sum(count for _, _, count, _, _, _, _ in results)
-    if total_count == 0:
-        msg = "Total count of number of results is 0"
+    step_count = sum(count for count, _, _, _, _, _ in results)
+    if step_count == 0:
+        msg = (
+            "No time step was read for the one-pass statistics. Check the "
+            "selected years and season."
+        )
         with ErrorLogger(logger):
             raise ValueError(msg)
-    total_mean = (
-        sum(mean * count for mean, _, count, _, _, _, _ in results) / total_count
-    )
-    total_M2 = sum(M2 for _, M2, _, _, _, _, _ in results)
-    total_M2 += sum(
-        count * (mean - total_mean) ** 2 for mean, _, count, _, _, _, _ in results
-    )
-    monthly_sums = sum(ms for _, _, _, ms, _, _, _ in results)
-    monthly_counts = sum(mc for _, _, _, _, mc, _, _ in results)
+    monthly_sums = sum(sums for _, sums, _, _, _, _ in results)
+    square_sums = sum(squares for _, _, squares, _, _, _ in results)
+    monthly_counts = sum(counts for _, _, _, counts, _, _ in results)
     # each subset streams its own files, so a calendar month can be split
     # across subsets and its sums have to be added up per key. Both the subset
     # and its buckets are popped as they are merged, so a subset's copy of the
     # record is released here instead of outliving the merge.
     period_sums, period_counts = {}, {}
     while results:
-        _, _, _, _, _, subset_sums, subset_counts = results.pop(0)
+        _, _, _, _, subset_sums, subset_counts = results.pop(0)
         for key in list(subset_sums):
             values, counts = subset_sums.pop(key), subset_counts.pop(key)
             if key in period_sums:
@@ -612,10 +610,9 @@ def combine_results(results):
                 period_sums[key] = values
                 period_counts[key] = counts
     return (
-        total_mean,
-        total_M2,
-        total_count,
+        step_count,
         monthly_sums,
+        square_sums,
         monthly_counts,
         period_sums,
         period_counts,
@@ -623,13 +620,20 @@ def combine_results(results):
 
 
 def get_stats_one_pass_subset(
-    files, input_var, factor=1, coordinate_slice=None, with_period_series=False
+    files,
+    input_var,
+    factor=1,
+    coordinate_slice=None,
+    with_period_series=False,
+    remove_seasonal_cycle_from_std=True,
+    available_years=None,
+    season_months=None,
 ):
-    """Compute running statistics from a list of monthly files.
+    """Accumulate per-month sums, square sums and counts from a list of files.
 
-    Iterates through NetCDF files (each containing one month's data for
-    `input_var`), optionally applies a spatial slice, multiplies by `factor`,
-    and updates running aggregates.
+    Iterates through the NetCDF files one time step at a time, optionally
+    applies a spatial slice, multiplies by `factor` and adds every step to the
+    sums of its calendar month. NaN steps are skipped per cell.
 
     Parameters
     ----------
@@ -644,17 +648,22 @@ def get_stats_one_pass_subset(
     with_period_series : bool
         Also accumulate one field per calendar year and month, which gives the
         monthly means the spatial metrics need without ever holding the record.
+    remove_seasonal_cycle_from_std : bool
+        Keep the square sums per calendar month, which the std of the
+        anomalies from the monthly climatology needs. Otherwise one total.
+    available_years : list of int, optional
+        Years to read; steps of other years are skipped.
+    season_months : list of int, optional
+        Calendar months to read; steps of other months are skipped.
 
     Returns
     -------
-    mean : ndarray
-        Running mean over all time steps.
-    sum_square_diff : ndarray
-        Sum of squared deviations (for variance via Welford's algorithm).
-    count : int
-        Number of time steps processed.
+    step_count : int
+        Number of time steps read.
     monthly_sums : ndarray
         Sum per calendar month, shape (12, ...).
+    square_sums : ndarray
+        Sum of squares, float64, per calendar month (12, ...) or in total (1, ...).
     monthly_counts : ndarray
         Valid-count per calendar month, shape (12, ...).
     period_sums : dict
@@ -684,18 +693,21 @@ def get_stats_one_pass_subset(
             )[input_var]
         else:
             da = ds[input_var]
-    count = 0  # xr.DataArray(np.ones(mean.shape, dtype=int).copy(), coords=mean.coords, dims=mean.dims).expand_dims(dim='time', axis=0)
-    mean = np.zeros(da.shape[1:])
-    sum_square_diff = np.zeros(da.shape[1:])
-    monthly_sums = np.zeros((12, *da.shape[1:]))
-    monthly_counts = np.zeros((12, *da.shape[1:]), dtype=np.uint32)
+    step_count = 0
+    grid_shape = da.shape[1:]
+    monthly_sums = np.zeros((12, *grid_shape))
+    # only the std without the seasonal cycle needs the squares per month
+    square_sums = np.zeros((12 if remove_seasonal_cycle_from_std else 1, *grid_shape))
+    monthly_counts = np.zeros((12, *grid_shape), dtype=np.uint32)
     period_sums = {}
     period_counts = {}
     for f, file in enumerate(files):
         with get_xarray_ds_from_file(
             file, var_name=input_var, engine="netcdf4", force_decending_y=True
         ) as ds:
-            logger.info(f"timestep {count} in file {f+1} / {len(files)} from {file}")
+            logger.info(
+                f"timestep {step_count} in file {f + 1} / {len(files)} from {file}"
+            )
             if coordinate_slice is not None:
                 lat_key = get_coord_key(ds, lat=True)
                 lon_key = get_coord_key(ds, lon=True)
@@ -704,21 +716,22 @@ def get_stats_one_pass_subset(
                 )[input_var]
             else:
                 da = ds[input_var]
+            # selected per step, so the years also apply to directories without
+            # year folders and to files holding several years
+            da = select_time_steps_by_year_and_month(da, available_years, season_months)
+            if da.sizes["time"] == 0:
+                continue
             for _time_value, sub in da.groupby("time", squeeze=False):
                 data_slice = sub.isel(time=0)
                 try:
-                    data_values = data_slice.values * factor
-                    # logger.debug(f"{count} - {np.shape(data_values)}")
-                    count += 1
-                    delta = data_values - mean
-                    mean += delta / count
-                    delta2 = data_values - mean
-                    sum_square_diff += delta * delta2
-                    # climatology
+                    step_count += 1
                     month = int(data_slice.time.dt.month.item()) - 1
-                    filled = data_slice.fillna(0).values * factor
-                    is_valid = ~np.isnan(data_slice.values)
+                    values = data_slice.values * factor
+                    is_valid = ~np.isnan(values)
+                    filled = np.where(is_valid, values, 0)
                     monthly_sums[month] += filled
+                    square_index = month if remove_seasonal_cycle_from_std else 0
+                    square_sums[square_index] += np.square(filled, dtype=np.float64)
                     monthly_counts[month] += is_valid
                     if with_period_series:
                         # one bucket per calendar month of the record, so the
@@ -728,26 +741,19 @@ def get_stats_one_pass_subset(
                             # a bucket only ever holds one month, so float32
                             # sums and uint16 counts carry the record at a
                             # quarter of the float64 footprint
-                            period_sums[key] = np.zeros(
-                                data_values.shape, dtype=np.float32
-                            )
-                            period_counts[key] = np.zeros(
-                                data_values.shape, dtype=np.uint16
-                            )
+                            period_sums[key] = np.zeros(values.shape, dtype=np.float32)
+                            period_counts[key] = np.zeros(values.shape, dtype=np.uint16)
                         period_sums[key] += filled
                         period_counts[key] += is_valid
                 except Exception as e:
                     logger.error(data_slice)
                     with ErrorLogger(logger):
                         raise e
-    logger.debug(
-        f"{np.nanmean(mean)}, {np.nanmean(sum_square_diff)}, {count}, {np.nanmean(monthly_sums)}, {np.nanmean(monthly_counts)}"
-    )
+    logger.debug(f"Read {step_count} time steps from {len(files)} files.")
     return (
-        mean,
-        sum_square_diff,
-        count,
+        step_count,
         monthly_sums,
+        square_sums,
         monthly_counts,
         period_sums,
         period_counts,
@@ -794,6 +800,26 @@ def create_period_mean_series(period_sums, period_counts, lat, lon, var, units=N
     return series.to_dataset()
 
 
+def create_std_long_name(var, remove_seasonal_cycle_from_std):
+    """Create the long name of a temporal standard deviation.
+
+    Args:
+        var (str): Name of the source variable.
+        remove_seasonal_cycle_from_std (bool): Whether the std was taken from
+            the anomalies of the monthly climatology.
+
+    Returns
+    -------
+        The long name, stating whether the seasonal cycle is included.
+    """
+    if remove_seasonal_cycle_from_std:
+        return (
+            f"Temporal standard deviation of {var} anomalies "
+            "from the monthly climatology"
+        )
+    return f"Temporal standard deviation of {var} incl. the seasonal cycle"
+
+
 def get_stats_one_pass(
     path,
     var,
@@ -807,13 +833,20 @@ def get_stats_one_pass(
     file_name="*.*",
     with_period_series=False,
     compression=None,
+    remove_seasonal_cycle_from_std=True,
+    season_months=None,
 ):
     """Compute streaming statistics from monthly/yearly files.
 
-    Reads one file at a time and updates running aggregates to produce mean,
-    standard deviation, and monthly climatology. Optionally slices coordinates,
-    applies a multiplicative factor, supports bootstrapping over years, and can
-    write the result to disk.
+    Reads one file at a time and accumulates per-month sums, square sums and
+    counts, from which the mean, standard deviation and monthly climatology
+    follow. NaN steps are skipped per cell, as in `get_file_stats`. Optionally
+    slices coordinates, applies a multiplicative factor, supports bootstrapping
+    over years, and can write the result to disk.
+
+    With `remove_seasonal_cycle_from_std` the std is that of the anomalies from
+    the monthly climatology (ddof=0), otherwise that of the raw values (ddof=0).
+    Only steps in `available_years` and `season_months` are used.
 
     With `with_period_series` the same pass also returns a monthly
     `time_series`, so the spatial metrics can be calculated without the record
@@ -841,29 +874,55 @@ def get_stats_one_pass(
     logger.info("creating statistics one pass...")
     subset_results = Parallel(n_jobs=ncpus, backend="loky")(
         delayed(get_stats_one_pass_subset)(
-            file_subset, var, factor, coordinate_slice, with_period_series
+            file_subset,
+            var,
+            factor,
+            coordinate_slice,
+            with_period_series,
+            remove_seasonal_cycle_from_std,
+            available_years,
+            season_months,
         )
         for file_subset in file_subsets
     )
     logger.info("combining results...")
     (
-        mean,
-        sum_square_diff,
-        count,
+        step_count,
         monthly_sums,
+        square_sums,
         monthly_counts,
         period_sums,
         period_counts,
     ) = combine_results(subset_results)
-    logger.debug(
-        f"{mean.mean()}, {sum_square_diff.mean()}, {count}, {monthly_sums.mean()}, {monthly_counts.mean()}"
+    logger.debug(f"Combined {step_count} time steps.")
+    valid_counts = monthly_counts.sum(axis=0)
+    total_sums = monthly_sums.sum(axis=0)
+    mean = np.divide(
+        total_sums,
+        valid_counts,
+        out=np.full(total_sums.shape, np.nan),
+        where=valid_counts > 0,
     )
-    variance = sum_square_diff / (count - 1)
+    climatology = np.divide(
+        monthly_sums,
+        monthly_counts,
+        out=np.full(monthly_sums.shape, np.nan),
+        where=monthly_counts > 0,
+    )
+    if remove_seasonal_cycle_from_std:
+        # squared anomalies of a month: S2 - 2*clim*S1 + n*clim^2 = S2 - S1*clim,
+        # and the anomalies add up to zero, so their mean needs no subtraction
+        squared_deviations = np.nansum(square_sums - monthly_sums * climatology, axis=0)
+    else:
+        squared_deviations = square_sums.sum(axis=0) - total_sums * mean
+    # clipped, because rounding can push a variance of zero just below it
+    variance = np.divide(
+        np.maximum(squared_deviations, 0),
+        valid_counts,
+        out=np.full(total_sums.shape, np.nan),
+        where=valid_counts > 0,
+    )
     std_dev = np.sqrt(variance)
-    monthly_sums = np.where(monthly_counts > 0, monthly_sums, np.nan)
-    monthly_counts = np.where(monthly_counts > 0, monthly_counts, np.nan)
-    climatology = monthly_sums / monthly_counts
-    climatology = np.where(monthly_counts > 0, climatology, np.nan)
     with get_dataset_from_path(
         files[0],
         var_name=var,
@@ -899,7 +958,7 @@ def get_stats_one_pass(
     )
     mean = xr.DataArray(mean, coords={"lat": lat, "lon": lon}, dims=["lat", "lon"])
     clim.attrs = {"long_name": f"Monthly climatology of {var}"}
-    std.attrs = {"long_name": f"Temporal standard deviation of {var}"}
+    std.attrs = {"long_name": create_std_long_name(var, remove_seasonal_cycle_from_std)}
     mean.attrs = {"long_name": f"Temporal mean of {var}"}
     if source_units is not None:
         clim.attrs["units"] = source_units
