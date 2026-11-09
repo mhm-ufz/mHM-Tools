@@ -733,6 +733,26 @@ def climatology(data):
     return data_clim.reindex(month=np.arange(1, 13), fill_value=np.nan)
 
 
+def select_time_steps_by_year_and_month(obj, years=None, months=None):
+    """Keep only the time steps of the given years and calendar months.
+
+    Args:
+        obj: DataArray or Dataset with a ``time`` dimension.
+        years: Years to keep, or None to keep every year.
+        months: Calendar months (1-12) to keep, or None to keep every month.
+
+    Returns
+    -------
+        The selection of `obj`, lazy data stays lazy.
+    """
+    keep_steps = np.ones(obj.sizes["time"], dtype=bool)
+    if years is not None:
+        keep_steps &= obj["time"].dt.year.isin(years).values
+    if months is not None:
+        keep_steps &= obj["time"].dt.month.isin(months).values
+    return obj.isel(time=keep_steps)
+
+
 def get_clim_from_ds(ds, input_var=None, factor=1):
     """Calculate climatology from a Dataset or DataArray.
 
