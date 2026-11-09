@@ -77,6 +77,8 @@ SPEARMAN_BLOCK_BUDGET_MIB = 32
 # Anomalies from a monthly climatology need several values per calendar month;
 # with fewer years the seasonal cycle is kept in the std and the correlation.
 MIN_YEARS_TO_REMOVE_SEASONAL_CYCLE = 5
+# the correlation of the 12 climatology values measures nothing but the cycle
+CLIMATOLOGY_SEASONALITY_LABEL = "seasonal cycle only"
 
 
 class EvalDataset:
@@ -837,6 +839,24 @@ def create_std_long_name(var, remove_seasonal_cycle_from_std):
     return f"Temporal standard deviation of {var} incl. the seasonal cycle"
 
 
+def create_seasonality_label(remove_seasonal_cycle):
+    """Create the label stating whether the seasonal cycle was removed.
+
+    It ends the std and Spearman panel titles and is stored as `seasonality`
+    attribute of `rel_std` and `spearman`. The correlation of the climatologies
+    uses `CLIMATOLOGY_SEASONALITY_LABEL` instead.
+
+    Args:
+        remove_seasonal_cycle (bool): Whether the anomalies from the monthly
+            climatology were used.
+
+    Returns
+    -------
+        "deseasonalised" or "with seasonal cycle".
+    """
+    return "deseasonalised" if remove_seasonal_cycle else "with seasonal cycle"
+
+
 def get_stats_one_pass(
     path,
     var,
@@ -1062,6 +1082,8 @@ def plot_map(
     output_path,
     overlapping_years=None,
     season_months=None,
+    std_seasonality=None,
+    spearman_seasonality=None,
 ):
     """Create a 2x2 figure of relative mean, relative std, Spearman correlation, and seasonal means.
 
@@ -1069,7 +1091,9 @@ def plot_map(
     standard deviation, (3) Spearman correlation, of the (by default
     deseasonalised) time series or, without a direct comparison, of the
     climatologies, and (4) monthly seasonal means for both datasets.
-    `season_months` names the compared season in the title.
+    `season_months` names the compared season in the title, `std_seasonality`
+    and `spearman_seasonality` (see `create_seasonality_label`) state in the
+    panel titles whether the seasonal cycle was removed.
     """
     rel_mean = np.where(rel_mean == np.inf, np.nan, rel_mean)
     rel_mean = np.where(rel_mean < 0, np.nan, rel_mean)
@@ -1093,8 +1117,10 @@ def plot_map(
     im1, bounds1, extend1, ticks1 = plot_single_map(
         axes[0, 1], rel_std, std_diff_1, bounds_type="quantiles"
     )
+    std_label = f", {std_seasonality}" if std_seasonality else ""
     axes[0, 1].set_title(
-        f"Relative temporal Standarddeviation (median={np.nanmedian(rel_std):.2f})"
+        f"Relative temporal Standarddeviation{std_label} "
+        f"(median={np.nanmedian(rel_std):.2f})"
     )
 
     im2, bounds2, extend2, ticks2 = plot_single_map(
@@ -1106,7 +1132,10 @@ def plot_map(
         bounds_type="quantiles",
     )
 
-    axes[1, 0].set_title(f"Spearman Correlation (median={np.nanmedian(spearman):.2f})")
+    spearman_label = f", {spearman_seasonality}" if spearman_seasonality else ""
+    axes[1, 0].set_title(
+        f"Spearman Correlation{spearman_label} (median={np.nanmedian(spearman):.2f})"
+    )
 
     # Plot for the seasonality
     months = np.arange(1, 13, 1)
@@ -1656,12 +1685,18 @@ def create_map_from_output(
         rel_mean = ds["rel_mean"]
         rel_mean = np.where(rel_mean == np.inf, np.nan, rel_mean)
         rel_std = ds.get("rel_std", None)
+        std_seasonality = (
+            rel_std.attrs.get("seasonality") if rel_std is not None else None
+        )
         rel_std = (
             np.where(rel_std == np.inf, np.nan, rel_std)
             if rel_std is not None
             else None
         )
         spearman = ds.get("spearman", None)
+        spearman_seasonality = (
+            spearman.attrs.get("seasonality") if spearman is not None else None
+        )
         input_clim = (
             ds[f"{input_name}_clim"] if f"{input_name}_clim" in ds else ds["input_clim"]
         )
@@ -1683,6 +1718,8 @@ def create_map_from_output(
             input_name=input_name,
             ref_name=ref_name,
             output_path=output_path,
+            std_seasonality=std_seasonality,
+            spearman_seasonality=spearman_seasonality,
         )
     elif global_climate:
         rel_mean_diff = (
@@ -2202,6 +2239,9 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
                             for stack in (input_ts_np, ref_ts_np):
                                 stack[in_month] -= np.nanmean(stack[in_month], axis=0)
                     spearman_basis = "the monthly anomalies of the time series"
+                spearman_seasonality = create_seasonality_label(
+                    remove_seasonal_cycle_from_corr
+                )
                 spearman, spearman_pval = calculate_spearman_map(input_ts_np, ref_ts_np)
             except ValueError as ve:
                 logger.error("Input and ref do not have the same temporal extent.")
@@ -2219,6 +2259,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
             input_clim_np = input_clim_np[season_index]
             ref_clim_np = ref_clim_np[season_index]
         spearman_basis = "the monthly climatologies"
+        spearman_seasonality = CLIMATOLOGY_SEASONALITY_LABEL
         if not np.any(np.isfinite(input_clim_np) & np.isfinite(ref_clim_np)):
             msg = (
                 "Input and reference climatologies have no paired finite values "
@@ -2356,6 +2397,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
         rel_std.attrs = {
             "units": "1",
             "long_name": "Relative standard deviation (input / reference)",
+            "seasonality": create_seasonality_label(remove_seasonal_cycle_from_std),
         }
         output["rel_std"] = rel_std
     if full_metrics:
@@ -2364,6 +2406,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
             "long_name": (
                 f"Spearman rank correlation of {spearman_basis} (input vs reference)"
             ),
+            "seasonality": spearman_seasonality,
         }
         spearman_pval.attrs = {
             "units": "1",
@@ -2428,6 +2471,8 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
                 output_path=output_path,
                 overlapping_years=overlapping_years,
                 season_months=season_months,
+                std_seasonality=rel_std.attrs["seasonality"],
+                spearman_seasonality=spearman_seasonality,
             )
         elif global_climate:
             rel_mean_diff = (
@@ -3094,6 +3139,15 @@ def gridded_data_evaluation(  # noqa: PLR0913
                     input_name=input.name,
                     ref_name=ref.name,
                     season_months=season_months,
+                    std_seasonality=create_seasonality_label(
+                        remove_seasonal_cycle_from_std
+                    ),
+                    # bootstrapping correlates the raw series or the climatologies
+                    spearman_seasonality=(
+                        create_seasonality_label(False)
+                        if stream_metrics
+                        else CLIMATOLOGY_SEASONALITY_LABEL
+                    ),
                 )
             elif global_climate:
                 rel_mean_diff = (
