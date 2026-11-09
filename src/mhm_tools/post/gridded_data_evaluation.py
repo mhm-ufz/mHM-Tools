@@ -2710,35 +2710,46 @@ def get_available_years(
     """Determine available years from constrains and datasets.
 
     If no reference data is given it will only be the input years inside
-    the year slice.
+    the year slice. See `select_available_years`.
     """
     logger.info("Determining available years.")
-    # get all years from input data
     years_in = get_years_from_path(input_path, file_name=input_file_name)
-    years_in.sort()
-    logger.debug(f"Input years: {years_in}")
-
-    # get all years from reference data
-    years_ref = get_years_from_path(
-        ref_path, raise_exception=False, file_name=ref_file_name
+    years_ref = (
+        get_years_from_path(ref_path, raise_exception=False, file_name=ref_file_name)
+        if ref_path is not None
+        else []
     )
-    years_ref.sort()
-    logger.debug(f"Ref years: {years_ref}")
+    logger.debug(f"Input years: {sorted(years_in)}; ref years: {sorted(years_ref)}")
+    return select_available_years(years_in, years_ref, year_slice, direct_comp)
 
-    # find overlapping years
-    years = []
-    possible_years = years_in
-    if not direct_comp and years_ref:
-        possible_years.extend([y for y in years_ref if y not in possible_years])
-        possible_years.sort()
-    for year in possible_years:
-        if year_slice.start is not None and year < year_slice.start:
-            continue
-        if year_slice.stop is not None and year > year_slice.stop:
-            continue
-        if not years_ref or year in years_ref or not direct_comp:
-            years.append(year)
-    return years
+
+def select_available_years(years_in, years_ref, year_slice=None, direct_comp=True):
+    """Select the years to compare from the years of both datasets.
+
+    Args:
+        years_in (list of int): Years of the input dataset.
+        years_ref (list of int): Years of the reference dataset, empty without one.
+        year_slice (slice, optional): First and last allowed year.
+        direct_comp (bool): Keep only the years both datasets cover; otherwise
+            the years of either dataset.
+
+    Returns
+    -------
+        Sorted list of the selected years.
+    """
+    year_slice = year_slice if year_slice is not None else slice(None, None)
+    candidates = set(years_in)
+    if years_ref:
+        if direct_comp:
+            candidates &= set(years_ref)
+        else:
+            candidates |= set(years_ref)
+    return [
+        year
+        for year in sorted(candidates)
+        if (year_slice.start is None or year >= year_slice.start)
+        and (year_slice.stop is None or year <= year_slice.stop)
+    ]
 
 
 def year_structure_paths(path: Path, file_name="*.*") -> bool:
