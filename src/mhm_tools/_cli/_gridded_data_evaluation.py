@@ -75,6 +75,17 @@ def add_args(parser):
     required.add_argument(
         "--output-dir", help="Path for the output dir.", required=True
     )
+    optional.add_argument(
+        "--overview-pdf-name",
+        default=None,
+        required=False,
+        help=(
+            """Name of the PDF in --output-dir holding the statistics tables and
+            every figure, the whole domain first and then each region of
+            --create-wmo-region-output. By default
+            overview_<input-name>_<ref-name>.pdf."""
+        ),
+    )
 
     optional.add_argument(
         "--input-var",
@@ -483,4 +494,5 @@ def run(args):
         season_months=(
             create_season_months(args.season) if args.season is not None else None
         ),
+        overview_pdf_name=args.overview_pdf_name,
     )

@@ -35,6 +35,7 @@ from mhm_tools.common.logger import ErrorLogger, log_arguments, log_errors
 from mhm_tools.common.metrics.metrics_handler import (
     calculate_results_metric,
     create_results_csv,
+    normalize_results_metric,
 )
 from mhm_tools.common.netcdf import generate_bounds_for_all_coords
 from mhm_tools.common.plotter import (
@@ -46,6 +47,7 @@ from mhm_tools.common.plotter import (
     get_percent_diff_bounds,
     plot_single_map,
     round_sensibly,
+    write_metric_plot_overview_pdf,
 )
 from mhm_tools.common.resolution_handler import Resolution, get_file_res
 from mhm_tools.common.time_utils import (
@@ -1828,6 +1830,128 @@ def write_comparison_plots(
     ]
 
 
+def create_overview_table_rows(tables, region_label):
+    """Create the table rows of one section of the overview PDF.
+
+    Every table contributes the columns of its row of `region_label` as one
+    block, so tables with different columns fit into one table.
+
+    Args:
+        tables (dict): Table name to DataFrame with a ``region`` column, as
+            logged, e.g. the relative statistics and one table per metric.
+        region_label (str): "Global" for the whole domain or a WMO region.
+
+    Returns
+    -------
+        List of dicts with ``variable`` (table name), ``statistic`` and
+        ``value``; tables without a row of the region are left out.
+    """
+    rows = []
+    for table_name, table in tables.items():
+        region_rows = table[table["region"] == region_label].drop(columns="region")
+        if region_rows.empty:
+            continue
+        # to_dict keeps the type of every column, so cell counts stay integers
+        rows.extend(
+            {"variable": table_name, "statistic": statistic, "value": value}
+            for statistic, value in region_rows.to_dict("records")[0].items()
+        )
+    return rows
+
+
+def write_overview_pdf(
+    output_file,
+    relative_stats_table,
+    metric_tables,
+    plot_files_by_region,
+    input_name,
+    ref_name,
+):
+    """Write the PDF with the statistics tables and the figures of a comparison.
+
+    The PDF starts with the table and the figures of the whole domain, followed
+    by the table and the figures of every WMO region that has figures.
+
+    Args:
+        output_file (Path): PDF file to write.
+        relative_stats_table (pd.DataFrame): Median relative statistics per
+            region, see `create_relative_stats_table`.
+        metric_tables (dict): Table per spatial metric, see
+            `create_region_metric_tables`.
+        plot_files_by_region (dict): Figure paths per WMO region, None for the
+            whole domain first.
+        input_name, ref_name (str): Names of the datasets.
+
+    Returns
+    -------
+        Path of the written PDF.
+    """
+    tables = {"relative statistics (median)": relative_stats_table, **metric_tables}
+    title = f"Statistics of {input_name} against {ref_name}"
+    region_tables = {}
+    for region_name, region_files in plot_files_by_region.items():
+        if region_name is None or not region_files:
+            continue
+        region_rows = create_overview_table_rows(tables, region_name)
+        if region_rows:
+            region_tables[region_files[0]] = (
+                f"{title}{format_region_title(region_name)}",
+                region_rows,
+            )
+    output_file = write_metric_plot_overview_pdf(
+        output_file=output_file,
+        plot_files=[
+            plot_file
+            for region_files in plot_files_by_region.values()
+            for plot_file in region_files
+        ],
+        summary_rows=create_overview_table_rows(tables, "Global"),
+        title=title,
+        highlight_best_values=False,
+        tables_before_plot_files=region_tables,
+        table_columns=["variable", "statistic", "value"],
+        log_tables=False,
+    )
+    logger.info(f"Wrote the overview PDF to {output_file}")
+    return output_file
+
+
+def read_metric_tables(output_path, input_name, ref_name, result_metric, region_names):
+    """Read the spatial metric tables of a comparison back from their CSVs.
+
+    The region CSV, which holds the "Global" row too, is read when regions are
+    requested and it exists, otherwise the domain CSV. A metric without CSV is
+    left out with a warning.
+
+    Args:
+        output_path (Path): Directory of the CSV files.
+        input_name, ref_name (str): Names of the datasets.
+        result_metric (str): Metrics of the run, see `normalize_results_metric`.
+        region_names (list of str): Requested WMO regions.
+
+    Returns
+    -------
+        Dict of the table per metric name, each with a ``region`` column.
+    """
+    metrics = normalize_results_metric(result_metric)
+    metrics = (metrics,) if isinstance(metrics, str) else metrics
+    output_name = f"{input_name}-{ref_name}".replace(" ", "_")
+    tables = {}
+    for metric in metrics:
+        region_file = output_path / f"{output_name}_{metric.lower()}_regions.csv"
+        domain_file = output_path / f"{output_name}_{metric.lower()}.csv"
+        if region_names and region_file.is_file():
+            tables[metric] = pd.read_csv(region_file)
+        elif domain_file.is_file():
+            table = pd.read_csv(domain_file, index_col=0)
+            table = table.drop(columns="name", errors="ignore")
+            table.insert(0, "region", "Global")
+            tables[metric] = table
+        else:
+            logger.warning(f"No {metric} table in {output_path}, left out of the PDF.")
+    return tables
+
+
 def create_map_from_output(
     output_path,
     input_name,
@@ -1835,11 +1959,16 @@ def create_map_from_output(
     bias_only=False,
     global_climate=False,
     region_names=(),
+    result_metric="all",
+    overview_pdf_file=None,
 ):
     """Read the relative statistics file and draw its figures again.
 
     The figures are drawn for the whole domain and once per WMO region in
     `region_names`; the season and the seasonality labels come from the file.
+    With `overview_pdf_file` the overview PDF is written again: its relative
+    statistics are recalculated from the file and the tables of the metrics in
+    `result_metric` are read from the CSVs of the run.
     """
     file = get_rel_stat_file(output_path, input_name, ref_name)
     logger.info(f"Plotting data from {file}")
@@ -1859,8 +1988,8 @@ def create_map_from_output(
             }.items()
         }
         season_months = ds.attrs.get("season_months")
-    for region_name in [None, *region_names]:
-        write_comparison_plots(
+    plot_files_by_region = {
+        region_name: write_comparison_plots(
             input_name=input_name,
             ref_name=ref_name,
             output_path=output_path,
@@ -1874,6 +2003,33 @@ def create_map_from_output(
             region_name=region_name,
             **fields,
         )
+        for region_name in [None, *region_names]
+    }
+    if overview_pdf_file is None:
+        return
+    relative_stats_table = create_relative_stats_table(
+        fields,
+        fields["input_clim"],
+        fields["ref_clim"],
+        region_names,
+        input_name,
+        ref_name,
+    )
+    metric_tables = (
+        {}
+        if bias_only or global_climate
+        else read_metric_tables(
+            output_path, input_name, ref_name, result_metric, region_names
+        )
+    )
+    write_overview_pdf(
+        overview_pdf_file,
+        relative_stats_table,
+        metric_tables,
+        plot_files_by_region,
+        input_name,
+        ref_name,
+    )
 
 
 def get_stats(  # noqa: PLR0913
@@ -2155,6 +2311,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
     remove_seasonal_cycle_from_std=False,
     remove_seasonal_cycle_from_corr=True,
     season_months=None,
+    overview_pdf_file=None,
 ):
     """Compare the two datasets.
 
@@ -2166,7 +2323,9 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
     `remove_seasonal_cycle_from_std` takes the std from the anomalies of the
     monthly climatology; `remove_seasonal_cycle_from_corr` correlates the
     monthly anomalies of the time series instead of the series themselves.
-    Only the months in `season_months` are compared.
+    Only the months in `season_months` are compared. With `overview_pdf_file`
+    a run that plots and is no bootstrap selection also writes the tables and
+    the figures to this PDF.
     """
     output_path = Path(output_path)
     if bootstrap_index is not None:
@@ -2256,6 +2415,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
     # compare and save statistics
     full_metrics = not bias_only and not global_climate
     with_std = not bias_only
+    metric_tables = {}
 
     if direct_comp or stream_metrics:
         input_ts, ref_ts = input["time_series"], ref["time_series"]
@@ -2331,7 +2491,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
                     metric=result_metric,
                     log_table=False,
                 )
-                create_region_metric_tables(
+                metric_tables = create_region_metric_tables(
                     input_ts_np,
                     ref_ts_np,
                     get_coord_values(input, lat=True),
@@ -2395,7 +2555,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
             metric=result_metric,
             log_table=False,
         )
-        create_region_metric_tables(
+        metric_tables = create_region_metric_tables(
             input_clim_np,
             ref_clim_np,
             get_coord_values(input, lat=True),
@@ -2562,7 +2722,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
     write_xarray_to_file(ds=output, file_path=file_name, compression=compression)
     logger.info(f"Written output to {file_name}")
     if bootstrap_index is None:
-        create_relative_stats_table(
+        relative_stats_table = create_relative_stats_table(
             output,
             input_clim,
             ref_clim,
@@ -2576,8 +2736,8 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
             ),
         )
     if plot:
-        for region_name in [None, *region_names]:
-            write_comparison_plots(
+        plot_files_by_region = {
+            region_name: write_comparison_plots(
                 rel_mean=rel_mean,
                 input_clim=input_clim,
                 ref_clim=ref_clim,
@@ -2593,6 +2753,17 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
                 std_seasonality=rel_std.attrs["seasonality"] if with_std else None,
                 spearman_seasonality=spearman_seasonality if full_metrics else None,
                 region_name=region_name,
+            )
+            for region_name in [None, *region_names]
+        }
+        if bootstrap_index is None and overview_pdf_file is not None:
+            write_overview_pdf(
+                overview_pdf_file,
+                relative_stats_table,
+                metric_tables,
+                plot_files_by_region,
+                input_name,
+                ref_name,
             )
     return file_name
 
@@ -2972,6 +3143,7 @@ def gridded_data_evaluation(  # noqa: PLR0913
     remove_seasonal_cycle_from_std=False,
     remove_seasonal_cycle_from_corr=True,
     season_months=None,
+    overview_pdf_name=None,
 ):
     """Validate a spatial variable by comparing dataset climatologies.
 
@@ -2986,9 +3158,15 @@ def gridded_data_evaluation(  # noqa: PLR0913
     bootstrap selection) the seasonal cycle is kept in both. Bootstrapping always
     correlates with the seasonal cycle. `season_months` restricts all
     statistics and metrics to these calendar months.
+
+    The tables and the figures are also written to the PDF `overview_pdf_name`
+    in `output_path`, by default ``overview_<input>_<ref>.pdf``.
     """
     output_path = Path(output_path)
     region_names = select_regions(regions) if create_wmo_region_output else []
+    overview_pdf_file = output_path / (
+        overview_pdf_name or f"overview_{input.name}_{ref.name}.pdf".replace(" ", "_")
+    )
     input_path = input.path
     ref_path = ref.path
     logger.debug(
@@ -3007,6 +3185,8 @@ def gridded_data_evaluation(  # noqa: PLR0913
             bias_only=bias_only,
             global_climate=global_climate,
             region_names=region_names,
+            result_metric=result_metric,
+            overview_pdf_file=overview_pdf_file,
         )
         return
 
@@ -3200,7 +3380,7 @@ def gridded_data_evaluation(  # noqa: PLR0913
                 stat_files, input_name=input.name, ref_name=ref.name
             )
             rel_stat_file = get_rel_stat_file(output_path, input.name, ref.name)
-            create_relative_stats_table(
+            relative_stats_table = create_relative_stats_table(
                 results,
                 results["input_clim"],
                 results["ref_clim"],
@@ -3213,8 +3393,8 @@ def gridded_data_evaluation(  # noqa: PLR0913
                     else None
                 ),
             )
-            for region_name in [None, *region_names]:
-                write_comparison_plots(
+            plot_files_by_region = {
+                region_name: write_comparison_plots(
                     input_name=input.name,
                     ref_name=ref.name,
                     output_path=output_path,
@@ -3233,6 +3413,17 @@ def gridded_data_evaluation(  # noqa: PLR0913
                     region_name=region_name,
                     **results,
                 )
+                for region_name in [None, *region_names]
+            }
+            # the spatial metrics differ per selection and are not combined
+            write_overview_pdf(
+                overview_pdf_file,
+                relative_stats_table,
+                {},
+                plot_files_by_region,
+                input.name,
+                ref.name,
+            )
         else:
             logger.error("There are no statfiles created from the evaluation.")
     else:
@@ -3271,4 +3462,5 @@ def gridded_data_evaluation(  # noqa: PLR0913
                 remove_seasonal_cycle_from_std=remove_seasonal_cycle_from_std,
                 remove_seasonal_cycle_from_corr=remove_seasonal_cycle_from_corr,
                 season_months=season_months,
+                overview_pdf_file=overview_pdf_file,
             )
