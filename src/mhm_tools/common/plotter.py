@@ -656,13 +656,15 @@ def plot_single_map(
     # cmap = plt.cm.RdBu,
     bounds_type="fixed",
     under_color=None,
+    max_extended_vmin=None,
     **imshow_kwargs,
 ):
     """Plot a single map on a Matplotlib Axes.
 
     Bounds and colormap come from `create_discrete_colour_norm`, see there for
-    the behaviour of `bounds_type`. `imshow_kwargs` (e.g. extent, origin,
-    transform) are passed on to `ax.imshow`.
+    the behaviour of `bounds_type` and `max_extended_vmin`, so the style of
+    `get_metric_plot_style` can be passed on as it is. `imshow_kwargs` (e.g.
+    extent, origin, transform) are passed on to `ax.imshow`.
 
     Returns
     -------
@@ -684,6 +686,7 @@ def plot_single_map(
         cmap=cmap,
         bounds_type=bounds_type,
         under_color=under_color,
+        max_extended_vmin=max_extended_vmin,
     )
     im = ax.imshow(np.asarray(values), cmap=cmap, norm=norm, **imshow_kwargs)
     return im, bounds, extent, ticks
