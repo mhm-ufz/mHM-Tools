@@ -117,17 +117,18 @@ def test_gridded_data_evaluation_parses_mask_var():
 
 
 @pytest.mark.parametrize(
-    ("extra_args", "expected_region_output"),
+    ("extra_args", "expected_region_output", "expected_pdf_name"),
     [
-        ([], False),
-        (["--create-wmo-region-output"], True),
-        (["--write-region-stats"], True),
+        ([], False, None),
+        (["--create-wmo-region-output"], True, None),
+        (["--write-region-stats"], True, None),
+        (["--overview-pdf-name", "et.pdf"], False, "et.pdf"),
     ],
 )
-def test_gridded_data_evaluation_cli_region_output_and_seasonality_defaults(
-    monkeypatch, extra_args, expected_region_output
+def test_gridded_data_evaluation_cli_output_options_and_seasonality_defaults(
+    monkeypatch, extra_args, expected_region_output, expected_pdf_name
 ):
-    """--write-region-stats is an alias, and only the std keeps its seasonal cycle."""
+    """The region alias and PDF name reach the evaluation; the std keeps its cycle."""
     captured = {}
     monkeypatch.setattr(
         "mhm_tools.post.gridded_data_evaluation.gridded_data_evaluation",
@@ -141,6 +142,7 @@ def test_gridded_data_evaluation_cli_region_output_and_seasonality_defaults(
 
     assert result.exit_code == 0, result.output
     assert captured["create_wmo_region_output"] is expected_region_output
+    assert captured["overview_pdf_name"] == expected_pdf_name
     assert captured["remove_seasonal_cycle_from_std"] is False
     assert captured["remove_seasonal_cycle_from_corr"] is True
 

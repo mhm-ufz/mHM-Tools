@@ -649,3 +649,34 @@ def test_write_metric_plot_overview_pdf_passes_notes_to_the_table(
 
     assert table_calls[0]["notes"] == ["beta > 30: 1 of 2 stations"]
     assert table_calls[1]["notes"] is None
+
+
+def test_write_metric_plot_overview_pdf_uses_given_columns_without_logging(
+    tmp_path, monkeypatch
+):
+    """Given table columns replace the derived ones; log_tables=False logs nothing."""
+    styled_columns = []
+    logged_tables = []
+    monkeypatch.setattr(
+        plotter,
+        "_style_metric_summary_table",
+        lambda **kwargs: styled_columns.append(kwargs["columns"]),
+    )
+    monkeypatch.setattr(
+        plotter,
+        "_log_metric_summary_table",
+        lambda *args, **_kwargs: logged_tables.append(args),
+    )
+    summary_rows = [{"variable": "SPAEF", "statistic": "avg_spaef", "value": 0.5}]
+
+    output_file = plotter.write_metric_plot_overview_pdf(
+        output_file=tmp_path / "overview.pdf",
+        plot_files=[],
+        summary_rows=summary_rows,
+        table_columns=["variable", "statistic", "value"],
+        log_tables=False,
+    )
+
+    assert output_file.is_file()
+    assert styled_columns == [["variable", "statistic", "value"]]
+    assert logged_tables == []

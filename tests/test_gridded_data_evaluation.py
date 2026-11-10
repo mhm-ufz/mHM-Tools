@@ -15,6 +15,7 @@ from mhm_tools.post.gridded_data_evaluation import (
     apply_spatial_mask,
     combine_results,
     compare_input_with_ref,
+    create_overview_table_rows,
     create_period_mean_series,
     crop_datasets_to_spatial_overlap,
     get_file_stats,
@@ -24,10 +25,12 @@ from mhm_tools.post.gridded_data_evaluation import (
     gridded_data_evaluation,
     infer_time_resolution_hours_from_files,
     plot_map,
+    read_metric_tables,
     regridd_to_higher_spatial_resolution,
     resample_to_target_freq,
     select_available_years,
     write_comparison_plots,
+    write_overview_pdf,
 )
 
 
@@ -1248,3 +1251,94 @@ def test_plot_map_uses_ratio_and_correlation_colour_scales(monkeypatch, tmp_path
     assert rho_bounds[0] == pytest.approx(0.0)
     assert rho_bounds[-1] == pytest.approx(1.0)
     assert rho_extend == "min"
+
+
+def test_create_overview_table_rows():
+    """Every table adds its row of the region as one block, counts stay integers."""
+    relative_name = "relative statistics (median)"
+    tables = {
+        relative_name: pd.DataFrame(
+            {"region": ["Global", "Europe"], "cells": [30, 12], "rel_mean": [1.1, 0.9]}
+        ),
+        "SPAEF": pd.DataFrame({"region": ["Global"], "avg_spaef": [0.5]}),
+    }
+
+    europe_rows = create_overview_table_rows(tables, "Europe")
+    global_rows = create_overview_table_rows(tables, "Global")
+
+    assert europe_rows == [
+        {"variable": relative_name, "statistic": "cells", "value": 12},
+        {"variable": relative_name, "statistic": "rel_mean", "value": 0.9},
+    ]
+    assert not isinstance(europe_rows[0]["value"], float)
+    assert [(row["variable"], row["statistic"]) for row in global_rows] == [
+        (relative_name, "cells"),
+        (relative_name, "rel_mean"),
+        ("SPAEF", "avg_spaef"),
+    ]
+
+
+def test_write_overview_pdf_orders_domain_then_regions(monkeypatch, tmp_path):
+    """The domain table opens the PDF, a region's table precedes its first figure."""
+    calls = []
+    monkeypatch.setattr(
+        "mhm_tools.post.gridded_data_evaluation.write_metric_plot_overview_pdf",
+        lambda **kwargs: calls.append(kwargs) or kwargs["output_file"],
+    )
+    relative_stats_table = pd.DataFrame(
+        {"region": ["Global", "Europe", "Africa"], "rel_mean": [1.0, 1.1, 0.9]}
+    )
+    metric_tables = {
+        "SPAEF": pd.DataFrame({"region": ["Global", "Europe"], "avg_spaef": [0.5, 0.4]})
+    }
+    domain_file = tmp_path / "domain.png"
+    europe_file = tmp_path / "europe.png"
+    europe_climate_file = tmp_path / "europe_climate.png"
+
+    write_overview_pdf(
+        tmp_path / "overview.pdf",
+        relative_stats_table,
+        metric_tables,
+        {
+            None: [domain_file],
+            "Europe": [europe_file, europe_climate_file],
+            "Africa": [],
+        },
+        "in",
+        "ref",
+    )
+
+    (call,) = calls
+    assert call["plot_files"] == [domain_file, europe_file, europe_climate_file]
+    assert [row["value"] for row in call["summary_rows"]] == [1.0, 0.5]
+    # Africa has statistics but no figures, so it gets no table either
+    assert list(call["tables_before_plot_files"]) == [europe_file]
+    europe_title, europe_rows = call["tables_before_plot_files"][europe_file]
+    assert europe_title == "Statistics of in against ref - Europe"
+    assert [row["value"] for row in europe_rows] == [1.1, 0.4]
+
+
+def test_read_metric_tables_prefers_region_csvs(tmp_path):
+    """Region CSVs are read when regions are requested, else the domain CSVs."""
+    pd.DataFrame({"region": ["Global", "Europe"], "avg_spaef": [0.5, 0.4]}).to_csv(
+        tmp_path / "in-ref_spaef_regions.csv", index=False
+    )
+    # the domain CSVs are written with their index, like create_results_csv does
+    for metric, value in (("spaef", 0.5), ("esp", 0.7)):
+        pd.DataFrame({"name": ["in-ref"], f"avg_{metric}": [value]}).to_csv(
+            tmp_path / f"in-ref_{metric}.csv"
+        )
+
+    region_tables = read_metric_tables(
+        tmp_path, "in", "ref", "spaef,esp,tsm", ["Europe"]
+    )
+    domain_tables = read_metric_tables(tmp_path, "in", "ref", "spaef", [])
+
+    assert list(region_tables) == ["SPAEF", "ESP"]
+    assert region_tables["SPAEF"]["region"].tolist() == ["Global", "Europe"]
+    assert region_tables["ESP"].to_dict("records") == [
+        {"region": "Global", "avg_esp": 0.7}
+    ]
+    assert domain_tables["SPAEF"].to_dict("records") == [
+        {"region": "Global", "avg_spaef": 0.5}
+    ]
