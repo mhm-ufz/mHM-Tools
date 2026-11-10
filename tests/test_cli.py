@@ -116,6 +116,35 @@ def test_gridded_data_evaluation_parses_mask_var():
     assert args.mask_var == "mask_l2"
 
 
+@pytest.mark.parametrize(
+    ("extra_args", "expected_region_output"),
+    [
+        ([], False),
+        (["--create-wmo-region-output"], True),
+        (["--write-region-stats"], True),
+    ],
+)
+def test_gridded_data_evaluation_cli_region_output_and_seasonality_defaults(
+    monkeypatch, extra_args, expected_region_output
+):
+    """--write-region-stats is an alias, and only the std keeps its seasonal cycle."""
+    captured = {}
+    monkeypatch.setattr(
+        "mhm_tools.post.gridded_data_evaluation.gridded_data_evaluation",
+        lambda **kwargs: captured.update(kwargs),
+    )
+    command = _build_click_command("gridded-data-evaluation", _gridded_data_evaluation)
+
+    result = CliRunner().invoke(
+        command, ["--input-path", "input.nc", "--output-dir", "out", *extra_args]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["create_wmo_region_output"] is expected_region_output
+    assert captured["remove_seasonal_cycle_from_std"] is False
+    assert captured["remove_seasonal_cycle_from_corr"] is True
+
+
 def test_converter_nc_ascii_only_header_writes_requested_new_file(
     tmp_path, monkeypatch
 ):

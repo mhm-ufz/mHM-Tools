@@ -4,12 +4,14 @@ import pytest
 import xarray as xr
 
 from mhm_tools.common.logger import configure_mhm_tools_logger
+from mhm_tools.common.plotter import plot_single_map
 from mhm_tools.common.time_utils import (
     normalize_time_axis,
     resample_to_target_freq,
 )
 from mhm_tools.common.xarray_utils import get_ds_extend
 from mhm_tools.post.gridded_data_evaluation import (
+    EvalDataset,
     apply_spatial_mask,
     combine_results,
     compare_input_with_ref,
@@ -19,9 +21,13 @@ from mhm_tools.post.gridded_data_evaluation import (
     get_stats,
     get_stats_one_pass,
     get_stats_one_pass_subset,
+    gridded_data_evaluation,
     infer_time_resolution_hours_from_files,
+    plot_map,
     regridd_to_higher_spatial_resolution,
     resample_to_target_freq,
+    select_available_years,
+    write_comparison_plots,
 )
 
 
@@ -1018,10 +1024,14 @@ def test_compare_input_with_ref_correlates_monthly_anomalies(
         assert rho_opposite_cycle == pytest.approx(1.0)
         assert rho_mirrored_anomalies == pytest.approx(-1.0)
         assert "monthly anomalies" in long_name
+        assert output["spearman"].attrs["seasonality"] == "deseasonalised"
     else:
         assert rho_opposite_cycle < 0
         assert rho_mirrored_anomalies > 0
         assert "monthly anomalies" not in long_name
+        assert output["spearman"].attrs["seasonality"] == "with seasonal cycle"
+    # the std keeps the seasonal cycle by default
+    assert output["rel_std"].attrs["seasonality"] == "with seasonal cycle"
 
 
 def test_compare_input_with_ref_uses_only_season_months(monkeypatch, tmp_path):
@@ -1032,3 +1042,209 @@ def test_compare_input_with_ref_uses_only_season_months(monkeypatch, tmp_path):
 
     assert metric_maps.shape[0] == 6 * 4
     np.testing.assert_array_equal(output.attrs["season_months"], np.arange(4, 10))
+
+
+def test_select_available_years():
+    """The common years for the direct comparison, otherwise the union."""
+    years_in, years_ref = [2001, 2000, 2002, 2003], [2002, 2003, 2004]
+
+    assert select_available_years(years_in, years_ref) == [2002, 2003]
+    assert select_available_years(years_in, years_ref, direct_comp=False) == [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+    ]
+    assert select_available_years(
+        years_in, years_ref, slice(2001, 2003), direct_comp=False
+    ) == [2001, 2002, 2003]
+    assert select_available_years(years_in, [], slice(2001, None)) == [
+        2001,
+        2002,
+        2003,
+    ]
+
+
+def _run_gridded_data_evaluation(monkeypatch, tmp_path, ref_years, **evaluation_kwargs):
+    """Run `gridded_data_evaluation` with faked years and a faked comparison.
+
+    The input covers 2000-2009 and the reference `ref_years`. Both directories
+    hold a year folder, which bootstrapping requires; no data is read.
+
+    Args:
+        monkeypatch: pytest fixture used to fake the reading and the comparison.
+        tmp_path (Path): Directory of the fake datasets and the output.
+        ref_years (iterable of int): Years of the reference.
+        **evaluation_kwargs: Passed on to `gridded_data_evaluation`.
+
+    Returns
+    -------
+        Dict of the keyword arguments `compare_input_with_ref` received.
+    """
+    years = {"input": list(range(2000, 2010)), "ref": list(ref_years)}
+    for dataset_name in years:
+        year_dir = tmp_path / dataset_name / "2000"
+        year_dir.mkdir(parents=True)
+        (year_dir / "data.nc").touch()
+    captured = {}
+    module = "mhm_tools.post.gridded_data_evaluation"
+    monkeypatch.setattr(
+        f"{module}.get_years_from_path",
+        lambda path, **_kwargs: years[path.name],
+    )
+    monkeypatch.setattr(
+        f"{module}.compare_input_with_ref",
+        lambda *_args, **kwargs: captured.update(kwargs),
+    )
+    gridded_data_evaluation(
+        input=EvalDataset(tmp_path / "input", "in", "v", 1, "*.nc"),
+        ref=EvalDataset(tmp_path / "ref", "ref", "v", 1, "*.nc"),
+        output_path=tmp_path / "out",
+        **evaluation_kwargs,
+    )
+    return captured
+
+
+@pytest.mark.parametrize(
+    ("ref_years", "mode", "expected_removal"),
+    [
+        (range(2005, 2009), {}, False),
+        (range(2005, 2010), {}, True),
+        (range(2007, 2010), {"direct_comp": False}, False),
+        (
+            range(2000, 2010),
+            {"direct_comp": False, "n_bootstrap_years": 3, "n_bootstrap_selections": 1},
+            False,
+        ),
+    ],
+    ids=["4-common-years", "5-common-years", "union-but-3-common", "bootstrap-of-3"],
+)
+def test_gridded_data_evaluation_keeps_seasonal_cycle_below_five_common_years(
+    monkeypatch, tmp_path, ref_years, mode, expected_removal
+):
+    """The seasonal cycle is only removed when both datasets share 5 years.
+
+    Only the common years count, also where the union of the years is compared,
+    and a bootstrap selection counts at most its own number of years.
+    """
+    captured = _run_gridded_data_evaluation(
+        monkeypatch,
+        tmp_path,
+        ref_years,
+        remove_seasonal_cycle_from_std=True,
+        remove_seasonal_cycle_from_corr=True,
+        **mode,
+    )
+
+    assert captured["remove_seasonal_cycle_from_std"] is expected_removal
+    # bootstrapping always correlates with the seasonal cycle
+    if "n_bootstrap_years" not in mode:
+        assert captured["remove_seasonal_cycle_from_corr"] is expected_removal
+
+
+@pytest.mark.parametrize(
+    ("create_wmo_region_output", "expected_regions"), [(False, []), (True, ["Europe"])]
+)
+def test_gridded_data_evaluation_evaluates_regions_only_with_region_output(
+    monkeypatch, tmp_path, create_wmo_region_output, expected_regions
+):
+    """Regions and their CSV tables are only passed on with the region output."""
+    captured = _run_gridded_data_evaluation(
+        monkeypatch,
+        tmp_path,
+        range(2000, 2010),
+        regions="Europe",
+        create_wmo_region_output=create_wmo_region_output,
+    )
+
+    assert captured["region_names"] == expected_regions
+    assert captured["write_region_stats"] is create_wmo_region_output
+
+
+def _create_comparison_fields():
+    """Build relative statistics and climatologies on a 5x6 grid in Europe.
+
+    Returns
+    -------
+        Dict of `rel_mean`, `rel_std`, `spearman`, `input_clim` and `ref_clim`,
+        with one negative correlation.
+    """
+    rng = np.random.default_rng(0)
+    coords = {"lat": np.linspace(60.0, 40.0, 5), "lon": np.linspace(0.0, 20.0, 6)}
+    clim_coords = {"month": np.arange(1, 13), **coords}
+    spearman = rng.uniform(0.2, 0.9, (5, 6))
+    spearman[0, 0] = -0.3
+    return {
+        "rel_mean": xr.DataArray(
+            rng.uniform(0.6, 1.5, (5, 6)), dims=("lat", "lon"), coords=coords
+        ),
+        "rel_std": xr.DataArray(
+            rng.uniform(0.7, 1.3, (5, 6)), dims=("lat", "lon"), coords=coords
+        ),
+        "spearman": xr.DataArray(spearman, dims=("lat", "lon"), coords=coords),
+        "input_clim": xr.DataArray(
+            rng.uniform(0.5, 3.0, (12, 5, 6)),
+            dims=("month", "lat", "lon"),
+            coords=clim_coords,
+        ),
+        "ref_clim": xr.DataArray(
+            rng.uniform(0.5, 3.0, (12, 5, 6)),
+            dims=("month", "lat", "lon"),
+            coords=clim_coords,
+        ),
+    }
+
+
+def test_write_comparison_plots_names_region_figures_and_skips_empty_regions(
+    tmp_path,
+):
+    """A region figure carries the region in its name; one outside is skipped."""
+    fields = _create_comparison_fields()
+
+    for region_name in ("Europe", "Africa"):
+        write_comparison_plots(
+            input_name="in",
+            ref_name="ref",
+            output_path=tmp_path,
+            region_name=region_name,
+            **fields,
+        )
+
+    assert (tmp_path / "et_map_in_ref_region_Europe.png").is_file()
+    assert not list(tmp_path.glob("*Africa*"))
+
+
+def test_plot_map_uses_ratio_and_correlation_colour_scales(monkeypatch, tmp_path):
+    """The ratios are centred on 1, and negative correlations fall below 0 to 1.
+
+    Like the alpha and beta maps of discharge-evaluation, the ratio scales are
+    symmetric around 1 with an odd number of bins, so one bin is centred on 1.
+    """
+    drawn_maps = []
+
+    def recording_plot_single_map(ax, values, **kwargs):
+        """Draw the map and record its bin edges and colorbar extension."""
+        image, bounds, extend, ticks = plot_single_map(ax, values, **kwargs)
+        drawn_maps.append((bounds, extend))
+        return image, bounds, extend, ticks
+
+    monkeypatch.setattr(
+        "mhm_tools.post.gridded_data_evaluation.plot_single_map",
+        recording_plot_single_map,
+    )
+
+    plot_map(
+        input_name="in",
+        ref_name="ref",
+        output_path=tmp_path,
+        **_create_comparison_fields(),
+    )
+
+    (mean_bounds, _), (std_bounds, _), (rho_bounds, rho_extend) = drawn_maps
+    for bounds in (mean_bounds, std_bounds):
+        assert bounds[0] + bounds[-1] == pytest.approx(2.0)
+        assert (bounds.size - 1) % 2 == 1
+    assert rho_bounds[0] == pytest.approx(0.0)
+    assert rho_bounds[-1] == pytest.approx(1.0)
+    assert rho_extend == "min"
