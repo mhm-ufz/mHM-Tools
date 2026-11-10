@@ -468,3 +468,17 @@ def test_pre_exports_manifest_formatters():
     """Both manifest-based formatters are public Python APIs."""
     assert pre.format_lc_periods is format_lc_periods
     assert pre.format_soil_horizons is format_soil_horizons
+
+
+def test_format_soil_horizons_names_a_wrong_bulk_density_unit(tmp_path):
+    """A kg/m3 raster declared as g/cm3 fails early on the unit."""
+    input_path = tmp_path / "soil"
+    input_path.mkdir()
+    manifest = _write_soil_manifest(input_path)
+    manifest.write_text(manifest.read_text().replace("kg/m3", "g/cm3"))
+    _write_soil_inputs(input_path)
+    dem = tmp_path / "dem.tif"
+    _write_raster(dem, np.ones((2, 2), dtype=np.float32))
+
+    with pytest.raises(ValueError, match="Check the bulk density unit"):
+        format_soil_horizons(manifest, dem, tmp_path / "out", "nc")

@@ -1,5 +1,6 @@
 """Tests for streamed gridded LAI NetCDF formatting."""
 
+import inspect
 from pathlib import Path
 
 import netCDF4
@@ -7,6 +8,7 @@ import numpy as np
 import pandas as pd
 import pytest
 import rasterio
+import rasterio.warp
 import xarray as xr
 from pyproj import Transformer
 
@@ -136,6 +138,109 @@ def test_format_lai_netcdf_warps_to_a_projected_dem(tmp_path: Path):
         assert dataset.attrs["projection"] == "epsg:32647"
         assert dataset["xc"].attrs["standard_name"] == "projection_x_coordinate"
         assert np.any(dataset["lai"].values > 0)
+
+
+def _monthly(field):
+    return np.broadcast_to(field, (12, *field.shape))
+
+
+@pytest.mark.parametrize(
+    ("crs", "mapping", "step"),
+    [
+        ("EPSG:32647", True, 5000.0),
+        ("EPSG:32647", False, 5000.0),
+        ("EPSG:4326", True, 0.1),
+    ],
+)
+def test_lai_on_x_y_axes_is_warped_from_its_own_crs(tmp_path: Path, crs, mapping, step):
+    """Projected or lon/lat x/y axes onto a lon/lat DEM, the CRS from the grid mapping or input_crs."""
+    from pyproj import CRS
+
+    dem = tmp_path / "dem.tif"
+    _write_dem(dem)
+    to_source = Transformer.from_crs("EPSG:4326", crs, always_xy=True)
+    corners_x, corners_y = to_source.transform(
+        [98.5, 102.5, 98.5, 102.5], [28.5, 28.5, 31.5, 31.5]
+    )
+    x = np.arange(min(corners_x), max(corners_x), step)
+    y = np.arange(min(corners_y), max(corners_y), step)
+    scale = 1.0 if crs == "EPSG:4326" else 1e-3
+    lai = xr.DataArray(
+        _monthly((x[None, :] + y[:, None]) * scale),
+        dims=("time", "y", "x"),
+        coords={
+            "time": pd.date_range("2001-01-01", periods=12, freq="MS"),
+            "y": y,
+            "x": x,
+        },
+        name="lai",
+        attrs={"grid_mapping": "crs"} if mapping else {},
+    ).to_dataset()
+    if mapping:
+        lai["crs"] = xr.DataArray(0, attrs={"crs_wkt": CRS(crs).to_wkt()})
+    lai.to_netcdf(tmp_path / "lai.nc")
+
+    output = format_lai_netcdf_file(
+        tmp_path / "lai.nc",
+        dem,
+        tmp_path / "out.nc",
+        input_crs=None if mapping else crs,
+    )
+
+    with xr.open_dataset(output) as result:
+        source_x, source_y = to_source.transform(
+            *np.meshgrid(result["xc"].values, result["yc"].values)
+        )
+        np.testing.assert_allclose(
+            result["lai"].values[0], (source_x + source_y) * scale, rtol=1e-3
+        )
+
+
+def _write_curvilinear_lai(path: Path) -> None:
+    """Write a rotated lat/lon grid holding lon + lat."""
+    rows, cols = np.meshgrid(np.arange(50.0), np.arange(60.0), indexing="ij")
+    lat = 28.0 + 0.1 * rows + 0.02 * cols
+    lon = 98.0 + 0.1 * cols - 0.02 * rows
+    xr.Dataset(
+        {"lai": (("time", "y", "x"), _monthly(lon + lat))},
+        coords={
+            "time": pd.date_range("2001-01-01", periods=12, freq="MS"),
+            "lat": (("y", "x"), lat, {"standard_name": "latitude"}),
+            "lon": (("y", "x"), lon, {"standard_name": "longitude"}),
+        },
+    ).to_netcdf(path)
+
+
+def test_lai_on_2d_lat_lon_is_warped_onto_the_dem(tmp_path: Path):
+    """A curvilinear (rotated) lat/lon grid goes straight onto the DEM through its geolocation."""
+    if "src_geoloc_array" not in inspect.signature(rasterio.warp.reproject).parameters:
+        pytest.skip("geolocation warps need rasterio 1.4 or newer")
+    dem = tmp_path / "dem.tif"
+    _write_dem(dem)
+    _write_curvilinear_lai(tmp_path / "lai.nc")
+
+    output = format_lai_netcdf_file(tmp_path / "lai.nc", dem, tmp_path / "out.nc")
+
+    with xr.open_dataset(output) as result:
+        centre_lon, centre_lat = np.meshgrid(result["xc"].values, result["yc"].values)
+        np.testing.assert_allclose(
+            result["lai"].values[0], centre_lon + centre_lat, atol=0.01
+        )
+
+
+def test_curvilinear_lai_on_an_old_rasterio_says_what_it_needs(
+    tmp_path: Path, monkeypatch
+):
+    """Without geolocation warps the 2D case fails clearly; nothing pins rasterio."""
+    monkeypatch.setattr(
+        rasterio.warp, "reproject", lambda _source, _destination, **_kwargs: None
+    )
+    dem = tmp_path / "dem.tif"
+    _write_dem(dem)
+    _write_curvilinear_lai(tmp_path / "lai.nc")
+
+    with pytest.raises(ValueError, match=r"rasterio 1\.4 or newer"):
+        format_lai_netcdf_file(tmp_path / "lai.nc", dem, tmp_path / "out.nc")
 
 
 @pytest.mark.parametrize("during_write", [False, True])

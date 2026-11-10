@@ -397,6 +397,10 @@ def _read_soil_manifest(input_file: PathLike):
 
 
 _SOIL_BLOCK_ROWS = 64
+_VALID_SOIL_CELL = (
+    "A valid cell lies inside the DEM, has clay, sand and silt >= 0 with a "
+    "positive sum, and bulk density in (0, 5] g/cm3 after unit conversion."
+)
 
 
 def _open_raster(stack: ExitStack, path: Path):
@@ -480,6 +484,27 @@ def _open_soil_grid(
             properties[name] = stack.enter_context(WarpedVRT(source, **options))
         warped.append(properties)
     return reference, reference_crs, warped
+
+
+def _check_bulk_density(warped, horizons, unit, factor):
+    """Reject a declared unit that puts a horizon's median bulk density off-scale."""
+    for horizon, properties in zip(horizons, warped):
+        layer = properties["bulk_density"]
+        values = layer.read(
+            1,
+            out_shape=(min(layer.height, 256), min(layer.width, 256)),
+            masked=True,
+            out_dtype="float64",
+        ).filled(np.nan)
+        values = values[np.isfinite(values) & (values > 0)]
+        if not values.size or 0.1 <= np.median(values) * factor <= 5:
+            continue
+        msg = (
+            f"Soil horizon {horizon['horizon']} has a median bulk density of "
+            f"{np.median(values) * factor:g} g/cm3 when read as {unit!r}; expected "
+            "0.1-5 g/cm3. Check the bulk density unit."
+        )
+        raise ValueError(msg)
 
 
 def _dem_valid(reference, window=None):
@@ -740,7 +765,7 @@ def _stream_classic_soil(
                 database.executemany(insert, map(tuple, unique.tolist()))
             database.commit()
         if not found:
-            msg = "No cell has valid soil data in every horizon."
+            msg = "No cell has valid soil data in every horizon. " + _VALID_SOIL_CELL
             raise ValueError(msg)
         rows = database.execute(
             f"SELECT {', '.join(names)} FROM profiles ORDER BY {', '.join(names)}"
@@ -920,7 +945,7 @@ def _stream_horizon_soil(
             packed = _packed_texture_keys(clay, sand, valid)
             observed.update(np.unique(packed).tolist())
     if not observed:
-        msg = "No valid soil cells were found in any horizon."
+        msg = "No valid soil cells were found in any horizon. " + _VALID_SOIL_CELL
         raise ValueError(msg)
     keys = np.asarray(sorted(observed), dtype=np.uint64)
     density_sum = np.zeros(keys.size, dtype=np.float64)
@@ -1168,6 +1193,7 @@ def format_soil_horizons(
                 dem_crs=dem_crs,
                 resampling=resampling,
             )
+            _check_bulk_density(warped, horizons, unit, density_factor)
             if fill_nodata:
                 warped = _fill_soil_layers(
                     stack,
