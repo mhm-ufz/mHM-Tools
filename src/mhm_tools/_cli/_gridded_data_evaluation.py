@@ -343,15 +343,22 @@ def add_args(parser):
         required=False,
         default="all",
         help=(
-            "WMO regions the statistics are tabled for next to the whole domain: "
-            "'all', 'none' or a comma separated list."
+            "WMO regions of --create-wmo-region-output: 'all', 'none' or a comma "
+            "separated list."
         ),
     )
     flags.add_argument(
+        "--create-wmo-region-output",
         "--write-region-stats",
+        dest="create_wmo_region_output",
         action="store_true",
         required=False,
-        help="Also write the statistics tables of the domain and the regions to CSV.",
+        help=(
+            """also evaluate every WMO region in --regions: the statistics tables
+            get a row per region and are written to CSV, and every figure is
+            drawn again per region, cropped to it with its own colour scale.
+            --write-region-stats is the former name"""
+        ),
     )
     add_netcdf_compression_args(parser)
 
@@ -470,7 +477,7 @@ def run(args):
         result_metric=args.metric,
         compression=get_netcdf_compression(args),
         regions=args.regions,
-        write_region_stats=args.write_region_stats,
+        create_wmo_region_output=args.create_wmo_region_output,
         remove_seasonal_cycle_from_std="std" not in preserved_seasonality,
         remove_seasonal_cycle_from_corr="corr" not in preserved_seasonality,
         season_months=(

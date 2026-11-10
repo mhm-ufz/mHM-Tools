@@ -54,6 +54,8 @@ from mhm_tools.common.time_utils import (
 )
 from mhm_tools.common.utils import (
     cut_to_filled_area,
+    format_region_title,
+    sanitize_name,
     select_regions,
     split_file_list,
     write_stats_table,
@@ -861,6 +863,19 @@ def create_seasonality_label(remove_seasonal_cycle):
     return "deseasonalised" if remove_seasonal_cycle else "with seasonal cycle"
 
 
+def create_region_file_suffix(region_name):
+    """Create the file name suffix of a figure of one WMO region.
+
+    Args:
+        region_name (str or None): WMO region, None for the whole domain.
+
+    Returns
+    -------
+        "_region_<region>" with a file-safe region name, "" for the domain.
+    """
+    return f"_region_{sanitize_name(region_name)}" if region_name else ""
+
+
 def get_stats_one_pass(
     path,
     var,
@@ -1088,6 +1103,7 @@ def plot_map(
     season_months=None,
     std_seasonality=None,
     spearman_seasonality=None,
+    region_name=None,
 ):
     """Create a 2x2 figure of relative mean, relative std, Spearman correlation, and seasonal means.
 
@@ -1098,6 +1114,7 @@ def plot_map(
     `season_months` names the compared season in the title, `std_seasonality`
     and `spearman_seasonality` (see `create_seasonality_label`) state in the
     panel titles whether the seasonal cycle was removed.
+    `region_name` names the WMO region in the title and the file names.
     """
     rel_mean = np.where(rel_mean == np.inf, np.nan, rel_mean)
     rel_mean = np.where(rel_mean < 0, np.nan, rel_mean)
@@ -1106,7 +1123,7 @@ def plot_map(
     fig, axes = plt.subplots(2, 2, figsize=(10.5, 4.68))
     title = create_comparison_title(
         input_name, ref_name, overlapping_years, season_months
-    )
+    ) + format_region_title(region_name)
     fig.suptitle(title, fontweight="normal", fontsize="x-large")
 
     # the ratios look like the alpha and beta maps of discharge-evaluation
@@ -1208,7 +1225,9 @@ def plot_map(
         for spine in ax.spines.values():
             spine.set_linewidth(0.25)
     plt.tight_layout()
-    file_name = f"et_map_{input_name}_{ref_name}.png".replace(" ", "_")
+    region_suffix = create_region_file_suffix(region_name)
+    file_name = f"et_map_{input_name}_{ref_name}{region_suffix}.png"
+    file_name = file_name.replace(" ", "_")
     plt.savefig(output_path / file_name, dpi=800)
     plt.close(fig)
     logger.info(f"created et_map {output_path / file_name}")
@@ -1225,10 +1244,12 @@ def plot_map_bias_only(
     overlapping_years=None,
     total_rel_mean=None,
     season_months=None,
+    region_name=None,
 ):
     """Create a 3-panel plot with relative mean, mean difference, and climatology.
 
     `season_months` names the compared season in the title.
+    `region_name` names the WMO region in the title and the file names.
     """
     rel_mean = np.where(rel_mean == np.inf, np.nan, rel_mean)
     ref_mean_map = np.asarray(np.nanmean(ref_clim, axis=0))
@@ -1244,7 +1265,7 @@ def plot_map_bias_only(
 
     title = create_comparison_title(
         input_name, ref_name, overlapping_years, season_months
-    )
+    ) + format_region_title(region_name)
     fig.suptitle(title, fontweight="normal", fontsize="x-large")
 
     # the ratio looks like the beta maps of discharge-evaluation
@@ -1368,7 +1389,9 @@ def plot_map_bias_only(
         spine.set_linewidth(0.25)
     plt.tight_layout()
 
-    file_name = f"et_map_bias_only_{input_name}_{ref_name}.png".replace(" ", "_")
+    region_suffix = create_region_file_suffix(region_name)
+    file_name = f"et_map_bias_only_{input_name}_{ref_name}{region_suffix}.png"
+    file_name = file_name.replace(" ", "_")
     plt.savefig(output_path / file_name, dpi=800)
     plt.close(fig)
     logger.info(f"created et_map {output_path / file_name}")
@@ -1383,17 +1406,19 @@ def plot_map_global_climate(
     output_path,
     overlapping_years=None,
     season_months=None,
+    region_name=None,
 ):
     """Create a plot showing relative mean, relative std and seasonality.
 
     `season_months` names the compared season in the title.
+    `region_name` names the WMO region in the title and the file names.
     """
     rel_mean = np.where(rel_mean == np.inf, np.nan, rel_mean)
     rel_std = np.where(rel_std == np.inf, np.nan, rel_std)
     fig, axes = plt.subplots(2, 1, figsize=(10.5, 6.2))
     title = create_comparison_title(
         input_name, ref_name, overlapping_years, season_months
-    )
+    ) + format_region_title(region_name)
     fig.suptitle(title, fontweight="normal", fontsize="x-large")
 
     mean_diff_1 = max(np.abs(1 - np.nanmin(rel_mean)), np.abs(1 - np.nanmax(rel_mean)))
@@ -1432,7 +1457,9 @@ def plot_map_global_climate(
         for spine in ax.spines.values():
             spine.set_linewidth(0.25)
     plt.tight_layout()
-    file_name = f"et_map_global_climate_{input_name}_{ref_name}.png".replace(" ", "_")
+    region_suffix = create_region_file_suffix(region_name)
+    file_name = f"et_map_global_climate_{input_name}_{ref_name}{region_suffix}.png"
+    file_name = file_name.replace(" ", "_")
     plt.savefig(output_path / file_name, dpi=800)
     plt.close(fig)
     logger.info(f"created et_map {output_path / file_name}")
@@ -1448,10 +1475,12 @@ def plot_map_global_climate2(
     overlapping_years=None,
     total_rel_mean=None,
     season_months=None,
+    region_name=None,
 ):
     """Create a plot showing relative mean and monthly climatology difference.
 
     `season_months` names the compared season in the title.
+    `region_name` names the WMO region in the title and the file names.
     """
     rel_mean = np.where(rel_mean == np.inf, np.nan, rel_mean)
     diff_mean = np.asarray(np.where(diff_mean == np.inf, np.nan, diff_mean))
@@ -1461,7 +1490,7 @@ def plot_map_global_climate2(
     ax_diff = fig.add_subplot(gs[0, 1:3])
     title = create_comparison_title(
         input_name, ref_name, overlapping_years, season_months
-    )
+    ) + format_region_title(region_name)
     fig.suptitle(title, fontweight="normal", fontsize="x-large")
 
     im0, bounds0, extend0, ticks0 = plot_single_map(
@@ -1516,7 +1545,9 @@ def plot_map_global_climate2(
             spine.set_linewidth(0.25)
     plt.tight_layout()
 
-    file_name = f"et_map_global_climate2_{input_name}_{ref_name}.png".replace(" ", "_")
+    region_suffix = create_region_file_suffix(region_name)
+    file_name = f"et_map_global_climate2_{input_name}_{ref_name}{region_suffix}.png"
+    file_name = file_name.replace(" ", "_")
     plt.savefig(output_path / file_name, dpi=800)
     plt.close(fig)
     logger.info(f"created et_map {output_path / file_name}")
@@ -1531,6 +1562,7 @@ def plot_map_local_climate(
     output_path,
     overlapping_years=None,
     season_months=None,
+    region_name=None,
 ):
     """Create monthly local-climate maps for relative and absolute differences.
 
@@ -1538,6 +1570,7 @@ def plot_map_local_climate(
     - Relative climatology difference in percent
     - Absolute climatology difference in native units (e.g. mm/day)
     `season_months` names the compared season in the title.
+    `region_name` names the WMO region in the title and the file names.
     """
     month_labels = (
         "Jan",
@@ -1611,6 +1644,7 @@ def plot_map_local_climate(
             )
         else:
             title = "Local Climate Comparison"
+        title += format_region_title(region_name)
         fig.suptitle(f"{title}\n{panel_title}", fontsize="x-large", fontweight="normal")
 
         im = None
@@ -1649,12 +1683,14 @@ def plot_map_local_climate(
         plt.close(fig)
         logger.info(f"created et_map {output_path / output_file_name}")
 
-    rel_file_name = f"et_map_local_climate_rel_{input_name}_{ref_name}.png".replace(
-        " ", "_"
-    )
-    abs_file_name = f"et_map_local_climate_abs_{input_name}_{ref_name}.png".replace(
-        " ", "_"
-    )
+    rel_file_name = (
+        f"et_map_local_climate_rel_{input_name}_{ref_name}"
+        f"{create_region_file_suffix(region_name)}.png"
+    ).replace(" ", "_")
+    abs_file_name = (
+        f"et_map_local_climate_abs_{input_name}_{ref_name}"
+        f"{create_region_file_suffix(region_name)}.png"
+    ).replace(" ", "_")
     _plot_monthly_panels(
         rel_monthly,
         "Monthly Relative Climatology Difference",
@@ -1670,34 +1706,68 @@ def plot_map_local_climate(
     )
 
 
-def create_map_from_output(
-    output_path, input_name, ref_name, bias_only=False, global_climate=False
+def write_comparison_plots(
+    rel_mean,
+    input_clim,
+    ref_clim,
+    input_name,
+    ref_name,
+    output_path,
+    rel_std=None,
+    spearman=None,
+    bias_only=False,
+    global_climate=False,
+    overlapping_years=None,
+    season_months=None,
+    std_seasonality=None,
+    spearman_seasonality=None,
+    region_name=None,
 ):
-    """Read in statistics netcdf and create a map plots from it."""
-    file = get_rel_stat_file(output_path, input_name, ref_name)
-    logger.info(f"Plotting data from {file}")
-    with get_xarray_ds_from_file(file, force_decending_y=True) as ds:
-        rel_mean = ds["rel_mean"]
-        rel_mean = np.where(rel_mean == np.inf, np.nan, rel_mean)
-        rel_std = ds.get("rel_std", None)
-        std_seasonality = (
-            rel_std.attrs.get("seasonality") if rel_std is not None else None
-        )
-        rel_std = (
-            np.where(rel_std == np.inf, np.nan, rel_std)
-            if rel_std is not None
-            else None
-        )
-        spearman = ds.get("spearman", None)
-        spearman_seasonality = (
-            spearman.attrs.get("seasonality") if spearman is not None else None
-        )
-        input_clim = (
-            ds[f"{input_name}_clim"] if f"{input_name}_clim" in ds else ds["input_clim"]
-        )
-        ref_clim = (
-            ds[f"{ref_name}_clim"] if f"{ref_name}_clim" in ds else ds["ref_clim"]
-        )
+    """Write the figures of one comparison for the whole domain or one WMO region.
+
+    The overview map needs `rel_std` and `spearman`, `global_climate` writes the
+    climate difference and the monthly local climate maps, and every other run
+    the bias-only map. With `region_name` every field is cropped to the region
+    first, so its colour limits, medians and seasonality are the region's own.
+
+    Args:
+        rel_mean (xr.DataArray): Relative mean (input / reference).
+        input_clim, ref_clim (xr.DataArray): Monthly climatologies of both datasets.
+        input_name, ref_name (str): Names of the datasets.
+        output_path (Path): Directory the figures are written to.
+        rel_std, spearman (xr.DataArray, optional): Relative std and Spearman map.
+        bias_only, global_climate (bool): Mode of the comparison.
+        overlapping_years, season_months (list of int, optional): Compared years
+            and calendar months, named in the titles.
+        std_seasonality, spearman_seasonality (str, optional): Seasonality labels
+            of the std and Spearman panels, see `create_seasonality_label`.
+        region_name (str, optional): WMO region to crop to, None for the domain.
+    """
+    fields = {
+        "rel_mean": rel_mean,
+        "input_clim": input_clim,
+        "ref_clim": ref_clim,
+        "rel_std": rel_std,
+        "spearman": spearman,
+    }
+    if region_name is not None:
+        fields = {
+            name: None if field is None else crop_to_region(field, region_name)
+            for name, field in fields.items()
+        }
+        if not bool(np.isfinite(fields["rel_mean"]).any()):
+            logger.info(f"Skipping the figures of {region_name}: no valid cell in it.")
+            return
+    rel_mean, input_clim, ref_clim, rel_std, spearman = fields.values()
+    shared_args = {
+        "input_name": input_name,
+        "ref_name": ref_name,
+        "output_path": output_path,
+        "overlapping_years": overlapping_years,
+        "season_months": season_months,
+        "region_name": region_name,
+    }
+    input_total, ref_total = np.nanmean(input_clim), np.nanmean(ref_clim)
     if (
         rel_std is not None
         and spearman is not None
@@ -1710,47 +1780,79 @@ def create_map_from_output(
             spearman=spearman,
             ref_clim=ref_clim,
             input_clim=input_clim,
-            input_name=input_name,
-            ref_name=ref_name,
-            output_path=output_path,
             std_seasonality=std_seasonality,
             spearman_seasonality=spearman_seasonality,
+            **shared_args,
         )
     elif global_climate:
-        rel_mean_diff = (
-            100
-            * (np.nanmean(input_clim, axis=0) - np.nanmean(ref_clim, axis=0))
-            / np.nanmean(ref_clim, axis=0)
-        )
+        input_mean_map = np.nanmean(input_clim, axis=0)
+        ref_mean_map = np.nanmean(ref_clim, axis=0)
+        rel_mean_diff = 100 * (input_mean_map - ref_mean_map) / ref_mean_map
         rel_mean_diff = np.where(
             np.nanmax(ref_clim, axis=0) < 0.1, np.nan, rel_mean_diff
         )
         plot_map_global_climate2(
             rel_mean=rel_mean_diff,
-            diff_mean=np.nanmean(input_clim, axis=0) - np.nanmean(ref_clim, axis=0),
-            input_name=input_name,
-            ref_name=ref_name,
-            output_path=output_path,
-            total_rel_mean=100
-            * (np.nanmean(input_clim) - np.nanmean(ref_clim))
-            / np.nanmean(ref_clim),
+            diff_mean=input_mean_map - ref_mean_map,
+            total_rel_mean=100 * (input_total - ref_total) / ref_total,
+            **shared_args,
         )
-        plot_map_local_climate(
-            input_clim=input_clim,
-            ref_clim=ref_clim,
-            input_name=input_name,
-            ref_name=ref_name,
-            output_path=output_path,
-        )
+        plot_map_local_climate(input_clim=input_clim, ref_clim=ref_clim, **shared_args)
     else:
         plot_map_bias_only(
             rel_mean=rel_mean,
             ref_clim=ref_clim,
             input_clim=input_clim,
+            total_rel_mean=input_total / ref_total,
+            **shared_args,
+        )
+
+
+def create_map_from_output(
+    output_path,
+    input_name,
+    ref_name,
+    bias_only=False,
+    global_climate=False,
+    region_names=(),
+):
+    """Read the relative statistics file and draw its figures again.
+
+    The figures are drawn for the whole domain and once per WMO region in
+    `region_names`; the season and the seasonality labels come from the file.
+    """
+    file = get_rel_stat_file(output_path, input_name, ref_name)
+    logger.info(f"Plotting data from {file}")
+    with get_xarray_ds_from_file(file, force_decending_y=True) as ds:
+        input_clim_key = (
+            f"{input_name}_clim" if f"{input_name}_clim" in ds else "input_clim"
+        )
+        ref_clim_key = f"{ref_name}_clim" if f"{ref_name}_clim" in ds else "ref_clim"
+        fields = {
+            name: ds[key].load() if key in ds else None
+            for name, key in {
+                "rel_mean": "rel_mean",
+                "rel_std": "rel_std",
+                "spearman": "spearman",
+                "input_clim": input_clim_key,
+                "ref_clim": ref_clim_key,
+            }.items()
+        }
+        season_months = ds.attrs.get("season_months")
+    for region_name in [None, *region_names]:
+        write_comparison_plots(
             input_name=input_name,
             ref_name=ref_name,
             output_path=output_path,
-            total_rel_mean=np.nanmean(input_clim) / np.nanmean(ref_clim),
+            bias_only=bias_only,
+            global_climate=global_climate,
+            season_months=season_months,
+            std_seasonality=getattr(fields["rel_std"], "attrs", {}).get("seasonality"),
+            spearman_seasonality=getattr(fields["spearman"], "attrs", {}).get(
+                "seasonality"
+            ),
+            region_name=region_name,
+            **fields,
         )
 
 
@@ -2454,58 +2556,23 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
             ),
         )
     if plot:
-        if full_metrics:
-            plot_map(
+        for region_name in [None, *region_names]:
+            write_comparison_plots(
+                rel_mean=rel_mean,
+                input_clim=input_clim,
+                ref_clim=ref_clim,
+                input_name=input_name,
+                ref_name=ref_name,
+                output_path=output_path,
                 rel_std=rel_std,
-                rel_mean=rel_mean,
                 spearman=spearman,
-                ref_clim=ref_clim,
-                input_clim=input_clim,
-                input_name=input_name,
-                ref_name=ref_name,
-                output_path=output_path,
+                bias_only=bias_only,
+                global_climate=global_climate,
                 overlapping_years=overlapping_years,
                 season_months=season_months,
-                std_seasonality=rel_std.attrs["seasonality"],
-                spearman_seasonality=spearman_seasonality,
-            )
-        elif global_climate:
-            rel_mean_diff = (
-                100
-                * (np.nanmean(input_clim, axis=0) - np.nanmean(ref_clim, axis=0))
-                / np.nanmean(ref_clim, axis=0)
-            )
-            rel_mean_diff = np.where(
-                np.nanmax(ref_clim, axis=0) < 0.1, np.nan, rel_mean_diff
-            )
-            plot_map_global_climate2(
-                rel_mean=rel_mean_diff,
-                diff_mean=np.nanmean(input_clim, axis=0) - np.nanmean(ref_clim, axis=0),
-                input_name=input_name,
-                ref_name=ref_name,
-                output_path=output_path,
-                overlapping_years=overlapping_years,
-                season_months=season_months,
-            )
-            plot_map_local_climate(
-                input_clim=input_clim,
-                ref_clim=ref_clim,
-                input_name=input_name,
-                ref_name=ref_name,
-                output_path=output_path,
-                season_months=season_months,
-            )
-        else:
-            plot_map_bias_only(
-                rel_mean=rel_mean,
-                ref_clim=ref_clim,
-                input_clim=input_clim,
-                input_name=input_name,
-                ref_name=ref_name,
-                output_path=output_path,
-                overlapping_years=overlapping_years,
-                total_rel_mean=np.nanmean(input_clim) / np.nanmean(ref_clim),
-                season_months=season_months,
+                std_seasonality=rel_std.attrs["seasonality"] if with_std else None,
+                spearman_seasonality=spearman_seasonality if full_metrics else None,
+                region_name=region_name,
             )
     return file_name
 
@@ -2881,16 +2948,17 @@ def gridded_data_evaluation(  # noqa: PLR0913
     n_cpus=1,
     compression=None,
     regions="all",
-    write_region_stats=False,
+    create_wmo_region_output=False,
     remove_seasonal_cycle_from_std=False,
     remove_seasonal_cycle_from_corr=True,
     season_months=None,
 ):
     """Validate a spatial variable by comparing dataset climatologies.
 
-    `regions` ("all", "none" or a comma separated list of WMO regions) selects
-    the regions the statistics are tabled for next to the whole domain;
-    `write_region_stats` also writes those tables to CSV.
+    With `create_wmo_region_output` the statistics tables get a row per WMO
+    region in `regions` ("all", "none" or a comma separated list), are written
+    to CSV, and every figure is drawn again for each region, cropped to it.
+    Otherwise only the whole domain is evaluated.
 
     `remove_seasonal_cycle_from_std`/`_corr` take the std and the Spearman
     correlation from the anomalies of the monthly climatology. With fewer than
@@ -2900,7 +2968,7 @@ def gridded_data_evaluation(  # noqa: PLR0913
     statistics and metrics to these calendar months.
     """
     output_path = Path(output_path)
-    region_names = select_regions(regions)
+    region_names = select_regions(regions) if create_wmo_region_output else []
     input_path = input.path
     ref_path = ref.path
     logger.debug(
@@ -2918,6 +2986,7 @@ def gridded_data_evaluation(  # noqa: PLR0913
             ref_name=ref.name,
             bias_only=bias_only,
             global_climate=global_climate,
+            region_names=region_names,
         )
         return
 
@@ -3095,7 +3164,9 @@ def gridded_data_evaluation(  # noqa: PLR0913
                     result_metric=result_metric,
                     compression=compression,
                     region_names=region_names,
-                    write_region_stats=write_region_stats,
+                    write_region_stats=create_wmo_region_output,
+                    # the figures are drawn once from the medians of all runs
+                    plot=False,
                     remove_seasonal_cycle_from_std=remove_seasonal_cycle_from_std,
                     # bootstrapping correlates with the seasonal cycle on purpose
                     remove_seasonal_cycle_from_corr=False,
@@ -3118,21 +3189,17 @@ def gridded_data_evaluation(  # noqa: PLR0913
                 ref.name,
                 output_file=(
                     rel_stat_file.with_name(f"{rel_stat_file.stem}_regions.csv")
-                    if write_region_stats
+                    if create_wmo_region_output
                     else None
                 ),
             )
-            if (
-                "spearman" in results
-                and "rel_std" in results
-                and not bias_only
-                and not global_climate
-            ):
-                plot_map(
-                    **results,
-                    output_path=output_path,
+            for region_name in [None, *region_names]:
+                write_comparison_plots(
                     input_name=input.name,
                     ref_name=ref.name,
+                    output_path=output_path,
+                    bias_only=bias_only,
+                    global_climate=global_climate,
                     season_months=season_months,
                     std_seasonality=create_seasonality_label(
                         remove_seasonal_cycle_from_std
@@ -3143,45 +3210,8 @@ def gridded_data_evaluation(  # noqa: PLR0913
                         if stream_metrics
                         else CLIMATOLOGY_SEASONALITY_LABEL
                     ),
-                )
-            elif global_climate:
-                rel_mean_diff = (
-                    100
-                    * (
-                        np.nanmean(results["input_clim"], axis=0)
-                        - np.nanmean(results["ref_clim"], axis=0)
-                    )
-                    / np.nanmean(results["ref_clim"], axis=0)
-                )
-                rel_mean_diff = np.where(
-                    np.nanmax(results["ref_clim"], axis=0) < 0.1, np.nan, rel_mean_diff
-                )
-                plot_map_global_climate2(
-                    rel_mean=rel_mean_diff,
-                    diff_mean=np.nanmean(results["input_clim"], axis=0)
-                    - np.nanmean(results["ref_clim"], axis=0),
-                    output_path=output_path,
-                    input_name=input.name,
-                    ref_name=ref.name,
-                    season_months=season_months,
-                )
-                plot_map_local_climate(
-                    input_clim=results["input_clim"],
-                    ref_clim=results["ref_clim"],
-                    input_name=input.name,
-                    ref_name=ref.name,
-                    output_path=output_path,
-                    season_months=season_months,
-                )
-            else:
-                plot_map_bias_only(
-                    rel_mean=results["rel_mean"],
-                    input_clim=results["input_clim"],
-                    ref_clim=results["ref_clim"],
-                    output_path=output_path,
-                    input_name=input.name,
-                    ref_name=ref.name,
-                    season_months=season_months,
+                    region_name=region_name,
+                    **results,
                 )
         else:
             logger.error("There are no statfiles created from the evaluation.")
@@ -3217,7 +3247,7 @@ def gridded_data_evaluation(  # noqa: PLR0913
                 result_metric=result_metric,
                 compression=compression,
                 region_names=region_names,
-                write_region_stats=write_region_stats,
+                write_region_stats=create_wmo_region_output,
                 remove_seasonal_cycle_from_std=remove_seasonal_cycle_from_std,
                 remove_seasonal_cycle_from_corr=remove_seasonal_cycle_from_corr,
                 season_months=season_months,
