@@ -1145,6 +1145,8 @@ def write_metric_plot_overview_pdf(
     tables_before_plot_files: Optional[
         Mapping[Path, Tuple[str, Sequence[Mapping[str, object]]]]
     ] = None,
+    table_columns: Optional[Sequence[str]] = None,
+    log_tables: bool = True,
 ) -> Path:
     """Write a PDF overview with summary table and plot pages.
 
@@ -1169,6 +1171,10 @@ def write_metric_plot_overview_pdf(
     tables_before_plot_files : Mapping[Path, tuple[str, Sequence[Mapping]]], optional
         Title and summary rows of a further table, written right before the
         page of the plot file it is keyed by, e.g. a region's table.
+    table_columns : Sequence[str], optional
+        Columns of every table, by default derived from the summary rows.
+    log_tables : bool, optional
+        Also log every table, e.g. False when the caller logs them itself.
 
     Returns
     -------
@@ -1197,6 +1203,8 @@ def write_metric_plot_overview_pdf(
                 title=title or "Metric plot overview",
                 notes=notes,
                 highlight_best_values=highlight_best_values,
+                columns=table_columns,
+                log_table=log_tables,
             )
         for plot_file in existing_plot_files:
             if plot_file in tables_before_plot_files:
@@ -1206,6 +1214,8 @@ def write_metric_plot_overview_pdf(
                     summary_rows=table_rows,
                     title=table_title,
                     highlight_best_values=highlight_best_values,
+                    columns=table_columns,
+                    log_table=log_tables,
                 )
             image = plt.imread(plot_file)
             fig, ax = plt.subplots(figsize=(11, 8.5))
@@ -1271,6 +1281,8 @@ def _write_metric_summary_table_pages(
     rows_per_page: int = 24,
     notes: Optional[Sequence[str]] = None,
     highlight_best_values: bool = True,
+    columns: Optional[Sequence[str]] = None,
+    log_table: bool = True,
 ) -> None:
     """Write paginated metric summary table pages to a PDF.
 
@@ -1288,17 +1300,24 @@ def _write_metric_summary_table_pages(
         Lines written below the table on every page.
     highlight_best_values : bool, optional
         Colour the best value of every metric.
+    columns : Sequence[str], optional
+        Table columns, by default derived from the summary rows.
+    log_table : bool, optional
+        Also log the table.
 
     Returns
     -------
     None
     """
-    columns = ["realisation", "variable"]
-    if any("value" in row for row in summary_rows):
-        columns.append("value")
-    if any("n" in row for row in summary_rows):
-        columns.extend(["n", "min", "max", "mean", "median"])
-    _log_metric_summary_table(summary_rows, columns, title=title)
+    if columns is None:
+        columns = ["realisation", "variable"]
+        if any("value" in row for row in summary_rows):
+            columns.append("value")
+        if any("n" in row for row in summary_rows):
+            columns.extend(["n", "min", "max", "mean", "median"])
+    columns = list(columns)
+    if log_table:
+        _log_metric_summary_table(summary_rows, columns, title=title)
     # an empty row separates the metrics, like the blank line in the logged table
     table_rows = []
     for row in summary_rows:
