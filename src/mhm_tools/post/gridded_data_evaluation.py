@@ -38,7 +38,11 @@ from mhm_tools.common.metrics.metrics_handler import (
 )
 from mhm_tools.common.netcdf import generate_bounds_for_all_coords
 from mhm_tools.common.plotter import (
+    KGE_UNDER_COLOR,
+    add_map_colorbar,
+    create_axis_label,
     create_comparison_title,
+    get_metric_plot_style,
     get_percent_diff_bounds,
     plot_single_map,
     round_sensibly,
@@ -1105,17 +1109,15 @@ def plot_map(
     )
     fig.suptitle(title, fontweight="normal", fontsize="x-large")
 
-    # Set common colormap and normalization limits for mean_et and mean_aet
-    mean_diff_1 = max(np.abs(1 - np.nanmin(rel_mean)), np.abs(1 - np.nanmax(rel_mean)))
+    # the ratios look like the alpha and beta maps of discharge-evaluation
     im0, bounds0, extend0, ticks0 = plot_single_map(
-        axes[0, 0], rel_mean, mean_diff_1, bounds_type="fixed"
+        axes[0, 0], rel_mean, bounds_type="data", **get_metric_plot_style("beta")
     )
     axes[0, 0].set_title(
         f"Relative temporal Mean (median={np.nanmedian(rel_mean):.2f})"
     )
-    std_diff_1 = max(np.abs(1 - np.nanmin(rel_std)), np.abs(1 - np.nanmax(rel_std)))
     im1, bounds1, extend1, ticks1 = plot_single_map(
-        axes[0, 1], rel_std, std_diff_1, bounds_type="quantiles"
+        axes[0, 1], rel_std, bounds_type="data", **get_metric_plot_style("alpha")
     )
     std_label = f", {std_seasonality}" if std_seasonality else ""
     axes[0, 1].set_title(
@@ -1123,13 +1125,13 @@ def plot_map(
         f"(median={np.nanmedian(rel_std):.2f})"
     )
 
+    correlation_style = get_metric_plot_style("spearman")
+    if np.nanmin(spearman) < 0:
+        # the scale runs from 0 to 1 and every negative correlation gets the
+        # under colour, instead of the scale following them below 0
+        correlation_style.update(vmin=0.0, under_color=KGE_UNDER_COLOR)
     im2, bounds2, extend2, ticks2 = plot_single_map(
-        axes[1, 0],
-        spearman,
-        vmin=np.nanmin(spearman),
-        vmax=1,
-        cmap=plt.cm.viridis_r,
-        bounds_type="quantiles",
+        axes[1, 0], spearman, bounds_type="data", **correlation_style
     )
 
     spearman_label = f", {spearman_seasonality}" if spearman_seasonality else ""
@@ -1188,22 +1190,11 @@ def plot_map(
     ax_twy.set_ylabel("Ratio (Input / Reference)", color="#0000A7")
     ax_twy.tick_params(axis="y", labelcolor="#0000A7")
 
-    divider0 = make_axes_locatable(axes[0, 0])
-    cax = divider0.append_axes("right", size="5%", pad=0.1)
-    fig.colorbar(
-        im0, cax=cax, label="", boundaries=bounds0, extend=extend0, ticks=ticks0
-    )
-
-    divider1 = make_axes_locatable(axes[0, 1])
-    cax2 = divider1.append_axes("right", size="5%", pad=0.1)
-    fig.colorbar(
-        im1, cax=cax2, label="", boundaries=bounds1, extend=extend1, ticks=ticks1
-    )
-
-    divider2 = make_axes_locatable(axes[1, 0])
-    cax = divider2.append_axes("right", size="5%", pad=0.1)
-    fig.colorbar(
-        im2, cax=cax, label="", boundaries=bounds2, extend=extend2, ticks=ticks2
+    ratio_label = create_axis_label(f"{input_name} / {ref_name}")
+    add_map_colorbar(fig, axes[0, 0], im0, bounds0, extend0, ticks0, ratio_label)
+    add_map_colorbar(fig, axes[0, 1], im1, bounds1, extend1, ticks1, ratio_label)
+    add_map_colorbar(
+        fig, axes[1, 0], im2, bounds2, extend2, ticks2, create_axis_label("rho")
     )
 
     for ax in axes.flat:
@@ -1256,9 +1247,9 @@ def plot_map_bias_only(
     )
     fig.suptitle(title, fontweight="normal", fontsize="x-large")
 
-    mean_diff_1 = max(np.abs(1 - np.nanmin(rel_mean)), np.abs(1 - np.nanmax(rel_mean)))
+    # the ratio looks like the beta maps of discharge-evaluation
     im0, bounds0, extend0, ticks0 = plot_single_map(
-        ax_rel_mean, rel_mean, mean_diff_1, bounds_type="fixed"
+        ax_rel_mean, rel_mean, bounds_type="data", **get_metric_plot_style("beta")
     )
     title_rel_mean = f"a) Relative Mean (median={np.nanmedian(rel_mean):.2f}"
     if total_rel_mean is not None:
@@ -1342,10 +1333,14 @@ def plot_map_bias_only(
     ax_twy.set_ylabel("Ratio (Input / Reference)", color="#0000A7")
     ax_twy.tick_params(axis="y", labelcolor="#0000A7")
 
-    divider0 = make_axes_locatable(ax_rel_mean)
-    cax = divider0.append_axes("right", size="5%", pad=0.1)
-    fig.colorbar(
-        im0, cax=cax, label="", boundaries=bounds0, extend=extend0, ticks=ticks0
+    add_map_colorbar(
+        fig,
+        ax_rel_mean,
+        im0,
+        bounds0,
+        extend0,
+        ticks0,
+        create_axis_label(f"{input_name} / {ref_name}"),
     )
 
     divider1 = make_axes_locatable(ax_diff_mean)
