@@ -927,3 +927,23 @@ def test_ncpus_zero_and_minus_one_use_all_cores(
 
     assert result.exit_code == 0, result.output
     assert received_calls[0]["n_cpus"] == (os.cpu_count() or 1)
+
+
+def test_discharge_eval_comparison_cli_passes_the_crs(monkeypatch):
+    """Hand --crs on to the comparison plots, and None without it."""
+    received_calls = []
+    monkeypatch.setattr(
+        "mhm_tools.post.discharge_eval_comparison.write_discharge_eval_comparison_plots",
+        lambda **kwargs: received_calls.append(kwargs),
+    )
+    command = _build_click_command(
+        "discharge-eval-comparison", _discharge_eval_comparison
+    )
+    arguments = ["--input-path", "run1", "--input-path", "run2", "--output-dir", "out"]
+
+    with_crs = CliRunner().invoke(command, [*arguments, "--crs", "EPSG:3035"])
+    without_crs = CliRunner().invoke(command, arguments)
+
+    assert with_crs.exit_code == 0, with_crs.output
+    assert without_crs.exit_code == 0, without_crs.output
+    assert [call["crs"] for call in received_calls] == ["EPSG:3035", None]
