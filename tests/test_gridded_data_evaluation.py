@@ -4,7 +4,7 @@ import pytest
 import xarray as xr
 
 from mhm_tools.common.logger import configure_mhm_tools_logger
-from mhm_tools.common.plotter import plot_single_map
+from mhm_tools.common.plotter import RATIO_BOUNDS, plot_single_map
 from mhm_tools.common.time_utils import (
     normalize_time_axis,
     resample_to_target_freq,
@@ -1255,10 +1255,11 @@ def test_write_comparison_plots_names_region_figures_and_skips_empty_regions(
 
 
 def test_plot_map_uses_ratio_and_correlation_colour_scales(monkeypatch, tmp_path):
-    """The ratios are centred on 1, and negative correlations fall below 0 to 1.
+    """The ratios use fixed ratio bins, and negative correlations fall below 0 to 1.
 
-    Like the alpha and beta maps of discharge-evaluation, the ratio scales are
-    symmetric around 1 with an odd number of bins, so one bin is centred on 1.
+    Like the alpha and beta maps of discharge-evaluation, the ratio scales take
+    one of the `RATIO_BOUNDS` sets, which never reach below 0 and centre one of
+    their odd number of bins on 1.
     """
     drawn_maps = []
 
@@ -1282,8 +1283,11 @@ def test_plot_map_uses_ratio_and_correlation_colour_scales(monkeypatch, tmp_path
 
     (mean_bounds, _), (std_bounds, _), (rho_bounds, rho_extend) = drawn_maps
     for bounds in (mean_bounds, std_bounds):
-        assert bounds[0] + bounds[-1] == pytest.approx(2.0)
+        assert any(np.array_equal(bounds, edges) for edges in RATIO_BOUNDS.values())
+        assert bounds[0] > 0
         assert (bounds.size - 1) % 2 == 1
+        centre_bin = (bounds.size - 1) // 2
+        assert bounds[centre_bin] < 1 < bounds[centre_bin + 1]
     assert rho_bounds[0] == pytest.approx(0.0)
     assert rho_bounds[-1] == pytest.approx(1.0)
     assert rho_extend == "min"

@@ -52,6 +52,23 @@ PERCENT_DIFF_BOUNDS = {
     75: (-75, -60, -45, -30, -15, -5, 5, 15, 30, 45, 60, 75),
     100: (-100, -75, -50, -25, -10, 10, 25, 50, 75, 100),
 }
+# bin edges of ratio maps per factor around 1; the edges below 1 are roughly
+# the reciprocals of those above, so halving and doubling look equally strong,
+# and the middle of the 9 bins is centred on 1
+RATIO_BOUNDS = {
+    1.25: (0.8, 0.85, 0.9, 0.95, 0.98, 1.02, 1.05, 1.1, 1.18, 1.25),
+    1.5: (0.67, 0.75, 0.8, 0.9, 0.95, 1.05, 1.1, 1.25, 1.33, 1.5),
+    2.0: (0.5, 0.6, 0.7, 0.8, 0.9, 1.1, 1.25, 1.5, 1.75, 2.0),
+}
+# multiples of a power of ten the bins of skewed positive maps (e.g. RMSE) sit
+# on, densest first; the densest one that fits about 9 bins is used
+LOG_BIN_STEPS = (
+    (1.0, 1.5, 2.0, 3.0, 5.0, 7.5),
+    (1.0, 2.0, 3.0, 5.0),
+    (1.0, 2.0, 5.0),
+    (1.0, 3.0),
+    (1.0,),
+)
 # colour of the bin around the center of every diverging map, the grey in the
 # middle of coolwarm
 NEUTRAL_COLOR = "#dcdddd"
@@ -271,7 +288,9 @@ def get_metric_plot_style(metric_name, kge_vmin=KGE_CONSTANT_MEAN_BOUND):
     """Get the colour settings of a metric map.
 
     Skill and correlation metrics get a sequential map, ratios and differences
-    a diverging map centred on their no-difference value.
+    a diverging map centred on their no-difference value. Ratios centred on 1
+    use the fixed bins of `RATIO_BOUNDS` (``ratio_bins``), so they never reach
+    below 0, and the RMSE bins that widen with the value (``log_bins``).
 
     Args:
         metric_name: Metric name, e.g. ``"kge"``, ``"alpha"`` or ``"diff"``.
@@ -279,9 +298,10 @@ def get_metric_plot_style(metric_name, kge_vmin=KGE_CONSTANT_MEAN_BOUND):
 
     Returns
     -------
-        Dict with ``cmap``, ``center``, ``vmin``, ``vmax``, ``under_color`` and
-        ``max_extended_vmin`` for ``create_discrete_colour_norm`` with
-        ``bounds_type="data"``. None limits are derived from the data.
+        Dict with ``cmap``, ``center``, ``vmin``, ``vmax``, ``under_color``,
+        ``max_extended_vmin``, ``ratio_bins`` and ``log_bins`` for
+        ``create_discrete_colour_norm`` with ``bounds_type="data"``. None limits
+        are derived from the data.
     """
     metric = metric_name.lower()
     style = {
@@ -291,6 +311,8 @@ def get_metric_plot_style(metric_name, kge_vmin=KGE_CONSTANT_MEAN_BOUND):
         "vmax": None,
         "under_color": None,
         "max_extended_vmin": None,
+        "ratio_bins": False,
+        "log_bins": False,
     }
     if metric == "kge":
         style.update(vmin=kge_vmin, vmax=1.0, under_color=KGE_UNDER_COLOR)
@@ -302,7 +324,7 @@ def get_metric_plot_style(metric_name, kge_vmin=KGE_CONSTANT_MEAN_BOUND):
         # positive correlations stay on the scale, only negative ones extend
         style.update(vmax=1.0, max_extended_vmin=0.0)
     elif metric in ONE_CENTERED_METRICS:
-        style.update(cmap="coolwarm_r", center=1.0)
+        style.update(cmap="coolwarm_r", center=1.0, ratio_bins=True)
     elif (
         metric in ZERO_CENTERED_METRICS
         or metric in PERCENT_METRICS
@@ -310,7 +332,8 @@ def get_metric_plot_style(metric_name, kge_vmin=KGE_CONSTANT_MEAN_BOUND):
     ):
         style.update(cmap="coolwarm_r", center=0.0)
     elif metric == "rmse":
-        style.update(cmap="magma_r", vmin=0.0)
+        # errors are skewed, so most cells would share one linear bin
+        style.update(cmap="magma_r", vmin=0.0, log_bins=True)
     return style
 
 
@@ -445,6 +468,91 @@ def get_percent_diff_bounds(values, largest=None):
     return np.array(PERCENT_DIFF_BOUNDS[limit], dtype=float)
 
 
+def get_ratio_bounds(values):
+    """Return the narrowest ratio bin edges that hold the values.
+
+    The spread is measured on the log of the ratios, so 0.5 and 2 count as
+    equally far from 1. Outliers are ignored the way `calculate_colour_limits`
+    ignores them on every other map, so they get a colorbar arrow instead of
+    widening the bins.
+
+    Parameters
+    ----------
+    values : array_like
+        Ratios centred on 1, e.g. input / reference.
+
+    Returns
+    -------
+    ndarray
+        Bin edges from `RATIO_BOUNDS`: a factor of 1.25, 1.5 or 2 around 1,
+        the narrowest that holds the ratios, the factor 2 when they spread
+        further.
+    """
+    ratios = np.asarray(values, dtype=float)
+    ratios = ratios[np.isfinite(ratios) & (ratios > 0)]
+    widest = max(RATIO_BOUNDS)
+    if ratios.size == 0:
+        return np.array(RATIO_BOUNDS[widest], dtype=float)
+    largest_factor = np.exp(calculate_colour_limits(np.log(ratios), center=0.0)[1])
+    factor = next(
+        (
+            factor
+            for factor in sorted(RATIO_BOUNDS)
+            if largest_factor <= factor * (1 + 1e-9)
+        ),
+        widest,
+    )
+    return np.array(RATIO_BOUNDS[factor], dtype=float)
+
+
+def get_log_bounds(values, bin_count=9):
+    """Return bin edges from 0 that widen with the value, for skewed positive maps.
+
+    The edges are nice values (see `LOG_BIN_STEPS`) from about the 5th
+    percentile up to the upper colour limit of `calculate_colour_limits`, so
+    the many small values and the long tail both get several bins. The densest
+    step pattern that fits `bin_count` bins is used.
+
+    Parameters
+    ----------
+    values : array_like
+        Positive values, e.g. RMSE.
+    bin_count : int, optional
+        Largest number of bins.
+
+    Returns
+    -------
+    ndarray or None
+        Bin edges starting at 0, or None when the values span less than a
+        factor of 10, which linear bins resolve better.
+    """
+    positive = np.asarray(values, dtype=float)
+    positive = positive[np.isfinite(positive) & (positive > 0)]
+    if positive.size == 0:
+        return None
+    low = float(np.quantile(positive, 0.05))
+    upper = calculate_colour_limits(positive, vmin=0.0)[1]
+    if upper < 10 * low:
+        return None
+    exponents = range(
+        int(np.floor(np.log10(low))) - 1, int(np.ceil(np.log10(upper))) + 2
+    )
+    for steps in LOG_BIN_STEPS:
+        nice_values = np.unique(
+            [
+                float(f"{step * 10.0**exponent:.6g}")
+                for exponent in exponents
+                for step in steps
+            ]
+        )
+        first = nice_values[nice_values <= low][-1]
+        last = nice_values[nice_values >= upper][0]
+        edges = nice_values[(nice_values >= first) & (nice_values <= last)]
+        if edges.size <= bin_count:
+            break
+    return np.concatenate(([0.0], edges[-bin_count:]))
+
+
 def create_bin_colormap(cmap, bin_count, extent, under_color=None, centred=False):
     """Create the colormap of a discrete colour norm with one colour per bin.
 
@@ -495,6 +603,8 @@ def create_discrete_colour_norm(
     bounds_type="fixed",
     under_color=None,
     max_extended_vmin=None,
+    ratio_bins=False,
+    log_bins=False,
 ):
     """Create a discrete colour norm with about 9 bins for one map.
 
@@ -517,6 +627,15 @@ def create_discrete_colour_norm(
       +-75 % or +-100 %) that holds the values without their outliers, see
       `get_percent_diff_bounds`, or `diff_to_mean` when given, ignoring center,
       vmin and vmax; values beyond the bins get an arrow
+    - "ratio": use the narrowest `RATIO_BOUNDS` (a factor of 1.25, 1.5 or 2
+      around 1) that holds the values without their outliers, see
+      `get_ratio_bounds`, ignoring center, vmin and vmax; values beyond the
+      bins get an arrow. `ratio_bins` turns "data" into "ratio", so the style
+      of `get_metric_plot_style` can be passed on as it is
+
+    `log_bins` replaces the bins of a sequential map whose values span more
+    than a factor of 10 with bins from 0 that widen with the value, see
+    `get_log_bounds`; values above them get an arrow.
 
     Returns
     -------
@@ -544,6 +663,7 @@ def create_discrete_colour_norm(
             decimals += 1
         return min(decimals, 6)
 
+    bounds_type = "ratio" if ratio_bins and bounds_type == "data" else bounds_type
     if bounds_type == "max" and diff_to_mean is not None:
         vmin = center - diff_to_mean
         vmax = center + diff_to_mean
@@ -583,8 +703,17 @@ def create_discrete_colour_norm(
     diverging = bounds_type in {"fixed", "max"} or (
         bounds_type == "data" and center is not None
     )
+    # ratios and skewed values over more than a decade take fixed bin sets
+    fixed_bounds = (
+        get_ratio_bounds(values_np)
+        if bounds_type == "ratio"
+        else get_log_bounds(values_np) if log_bins and not diverging else None
+    )
     if bounds_type == "percent":
         bounds = get_percent_diff_bounds(values_np, largest=diff_to_mean)
+        ticks = bounds
+    elif fixed_bounds is not None:
+        bounds = fixed_bounds
         ticks = bounds
     elif diverging:
         # one bin is centred on the center value, so values close to it stand
@@ -617,7 +746,7 @@ def create_discrete_colour_norm(
             ticks = np.round(np.concatenate(([vmin], even_edges, [vmax])), 6)
 
     extent = "neither"
-    if bounds_type in {"data", "given", "percent"}:
+    if bounds_type in {"data", "given", "percent", "ratio"}:
         # every value outside the bounds gets an arrow on the colorbar
         finite_values = values_np[np.isfinite(values_np)]
         below = finite_values.size > 0 and finite_values.min() < bounds[0]
@@ -639,7 +768,7 @@ def create_discrete_colour_norm(
         bounds.size - 1,
         extent,
         under_color=under_color,
-        centred=diverging or bounds_type == "percent",
+        centred=diverging or bounds_type in {"percent", "ratio"},
     )
     norm = BoundaryNorm(bounds, cmap.N)
     return cmap, norm, bounds, extent, ticks
@@ -657,14 +786,18 @@ def plot_single_map(
     bounds_type="fixed",
     under_color=None,
     max_extended_vmin=None,
+    ratio_bins=False,
+    log_bins=False,
     **imshow_kwargs,
 ):
     """Plot a single map on a Matplotlib Axes.
 
     Bounds and colormap come from `create_discrete_colour_norm`, see there for
-    the behaviour of `bounds_type` and `max_extended_vmin`, so the style of
-    `get_metric_plot_style` can be passed on as it is. `imshow_kwargs` (e.g.
-    extent, origin, transform) are passed on to `ax.imshow`.
+    the behaviour of `bounds_type`, `max_extended_vmin`, `ratio_bins` and
+    `log_bins`, so the style of `get_metric_plot_style` can be passed on as it
+    is.
+    `imshow_kwargs` (e.g. extent, origin, transform) are passed on to
+    `ax.imshow`.
 
     Returns
     -------
@@ -687,6 +820,8 @@ def plot_single_map(
         bounds_type=bounds_type,
         under_color=under_color,
         max_extended_vmin=max_extended_vmin,
+        ratio_bins=ratio_bins,
+        log_bins=log_bins,
     )
     im = ax.imshow(np.asarray(values), cmap=cmap, norm=norm, **imshow_kwargs)
     return im, bounds, extent, ticks
@@ -1849,6 +1984,8 @@ def plot_discrete_data_map(  # noqa: PLR0913
     panel_title=None,
     center=None,
     percent_difference=False,
+    ratio_bins=False,
+    log_bins=False,
 ):
     """Plot a map with about 9 discrete colour bins and a colorbar.
 
@@ -1856,7 +1993,10 @@ def plot_discrete_data_map(  # noqa: PLR0913
     `under_color` paints every value below vmin in one colour of its own. A
     `center` makes it a diverging map with one bin centred on that value.
     `percent_difference` uses the bins of `PERCENT_DIFF_BOUNDS` instead, as
-    narrow as the data allows (+-25 %, +-50 %, +-75 % or +-100 %).
+    narrow as the data allows (+-25 %, +-50 %, +-75 % or +-100 %), and
+    `ratio_bins` those of `RATIO_BOUNDS` (a factor of 1.25, 1.5 or 2 around 1).
+    `log_bins` uses bins that widen with the value for skewed positive values
+    over more than a decade, see `get_log_bounds`.
     """
     _require_cartopy()
 
@@ -1866,6 +2006,8 @@ def plot_discrete_data_map(  # noqa: PLR0913
     bounds_type = "given" if center is None else "max"
     if percent_difference:
         bounds_type = "percent"
+    if ratio_bins:
+        bounds_type = "ratio"
     image, bounds, extend, ticks = plot_single_map(
         ax,
         arr,
@@ -1876,6 +2018,7 @@ def plot_discrete_data_map(  # noqa: PLR0913
         cmap=cmap,
         bounds_type=bounds_type,
         under_color=under_color,
+        log_bins=log_bins,
         extent=extent,
         origin=origin,
         transform=ccrs.PlateCarree(),
@@ -1916,6 +2059,8 @@ def plot_map(  # noqa: PLR0913
     panel_title: Optional[str] = None,
     max_extended_vmin: Optional[float] = None,
     percent_difference: bool = False,
+    ratio_bins: bool = False,
+    log_bins: bool = False,
 ) -> None:
     """
     Plot and save a 2D DataArray over longitude and latitude using Cartopy.
@@ -1951,6 +2096,13 @@ def plot_map(  # noqa: PLR0913
         Colour the data, given in percent, with the bins of
         `PERCENT_DIFF_BOUNDS`: +-25 %, +-50 %, +-75 % or +-100 %, the
         narrowest that holds the data without its outliers.
+    ratio_bins : bool, optional
+        Colour ratios centred on 1 with the bins of `RATIO_BOUNDS`: a factor
+        of 1.25, 1.5 or 2, the narrowest that holds the data without its
+        outliers.
+    log_bins : bool, optional
+        Colour skewed positive values over more than a decade, e.g. RMSE, with
+        bins from 0 that widen with the value, see `get_log_bounds`.
     """
     _require_cartopy()
 
@@ -2003,6 +2155,8 @@ def plot_map(  # noqa: PLR0913
             under_color=under_color,
             center=center,
             percent_difference=percent_difference,
+            ratio_bins=ratio_bins,
+            log_bins=log_bins,
             **map_args,
         )
 

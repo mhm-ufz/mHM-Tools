@@ -651,6 +651,48 @@ def test_write_metric_plot_overview_pdf_passes_notes_to_the_table(
     assert table_calls[1]["notes"] is None
 
 
+@pytest.mark.parametrize(
+    ("ratios", "expected_factor"),
+    [
+        (np.linspace(0.9, 1.1, 101), 1.25),
+        (np.linspace(0.7, 1.4, 101), 1.5),
+        (np.linspace(0.55, 1.9, 101), 2.0),
+        (np.array([0.6, 1.0, 1.0]), 2.0),
+        (np.concatenate([np.linspace(0.95, 1.05, 980), np.full(20, 20.0)]), 2.0),
+    ],
+    ids=[
+        "within-1.25",
+        "within-1.5",
+        "within-2",
+        "reciprocal-of-0.6",
+        "2-percent-at-20",
+    ],
+)
+def test_get_ratio_bounds_picks_the_narrowest_set(ratios, expected_factor):
+    """The spread is measured on the log of the ratios, so 0.6 needs the factor 2."""
+    bounds = plotter.get_ratio_bounds(ratios)
+
+    np.testing.assert_allclose(bounds, plotter.RATIO_BOUNDS[expected_factor])
+
+
+def test_create_discrete_colour_norm_with_ratio_bins():
+    """The beta style keeps a ratio map above 0 and centred on 1, outliers extend."""
+    rng = np.random.default_rng(0)
+    # many dry cells with ratios around 20 once stretched the scale to -21.5..23.5
+    ratios = np.concatenate([rng.uniform(0.6, 1.8, 900), rng.uniform(15, 23, 100)])
+
+    _, _, bounds, extent, _ = plotter.create_discrete_colour_norm(
+        ratios, bounds_type="data", **plotter.get_metric_plot_style("beta")
+    )
+
+    assert any(np.array_equal(bounds, edges) for edges in plotter.RATIO_BOUNDS.values())
+    assert bounds[0] > 0
+    assert (bounds.size - 1) % 2 == 1
+    centre_bin = (bounds.size - 1) // 2
+    assert bounds[centre_bin] < 1 < bounds[centre_bin + 1]
+    assert extent == "max"
+
+
 def test_write_metric_plot_overview_pdf_uses_given_columns_without_logging(
     tmp_path, monkeypatch
 ):
