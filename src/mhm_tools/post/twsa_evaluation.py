@@ -60,6 +60,8 @@ Outputs
 - the selected metric maps again per evaluation region.
 - on request ``twsa_cells_<input>_vs_<ref>_region_<region>.png`` per evaluation
   region, with every grid cell over time and the region mean of both datasets.
+- ``twsa_overview_<input>_vs_<ref>.pdf`` with the metrics table of the domain
+  and the regions and every figure, the domain first and then each region.
 
 Authors
 -------
@@ -74,6 +76,7 @@ import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import xarray as xr
 from matplotlib.collections import LineCollection
 
 from mhm_tools.common.constants import (
@@ -101,6 +104,7 @@ from mhm_tools.common.plotter import (
     get_metric_plot_style,
     plot_map,
     style_axes,
+    write_table_and_figures_pdf,
 )
 from mhm_tools.common.time_utils import (
     get_time_bounds,
@@ -733,18 +737,18 @@ def create_twsa_stats_table(
 
     Returns
     -------
-        DataFrame of the medians per region.
+        DataFrame of the medians per region, with the logged title in
+        ``attrs["title"]``.
     """
     variables = [name for name in ("kge", *KGE_COMPONENTS, "rmse") if name in metric_ds]
     stats_df = calculate_region_medians(metric_ds, variables, region_names)
     rmse_note = ""
     if "rmse" in variables:
         rmse_note = f" (rmse in {metric_ds['rmse'].attrs.get('units', 'mm')})"
-    write_stats_table(
-        stats_df,
-        title=f"Median TWSA metrics of {input_name} against {ref_name}{rmse_note}",
-        output_file=output_file,
+    stats_df.attrs["title"] = (
+        f"Median TWSA metrics of {input_name} against {ref_name}{rmse_note}"
     )
+    write_stats_table(stats_df, title=stats_df.attrs["title"], output_file=output_file)
     return stats_df
 
 
@@ -955,12 +959,14 @@ def create_region_outputs(
     max_cell_lines=DEFAULT_MAX_REGION_CELL_LINES,
     metrics=AVAILABLE_METRICS,
     plot_cells=False,
+    years=None,
 ):
     """Write the metric maps and optionally the cell series plot per region.
 
     Args:
-        input_twsa: Monthly input anomaly of the whole domain.
-        ref_twsa: Monthly reference anomaly of the whole domain.
+        input_twsa: Monthly input anomaly of the whole domain, or None when a
+            redraw has no anomalies, which leaves out the cell series plots.
+        ref_twsa: Monthly reference anomaly of the whole domain, or None.
         metric_ds: Dataset holding the calculated metrics, or None for none.
         output_dir: Directory the outputs are written to.
         region_names: Regions to write.
@@ -970,6 +976,8 @@ def create_region_outputs(
         max_cell_lines: Most cell lines drawn per dataset.
         metrics: Metric names mapped per region, empty for none.
         plot_cells: Also plot every grid cell over time per region.
+        years: First and last compared year for the titles, None to take them
+            from the anomalies.
 
     Returns
     -------
@@ -977,19 +985,30 @@ def create_region_outputs(
     """
     output_dir = Path(output_dir)
     written = {}
+    plot_cells = plot_cells and input_twsa is not None
     if not plot_cells and (metric_ds is None or not metrics):
         return written
-    time_index = pd.DatetimeIndex(input_twsa["time"].values)
-    years = (time_index[0].year, time_index[-1].year)
+    if years is None and input_twsa is not None:
+        time_index = pd.DatetimeIndex(input_twsa["time"].values)
+        years = (time_index[0].year, time_index[-1].year)
     for region_name in region_names:
-        region_input = crop_to_region(input_twsa, region_name)
-        region_ref = crop_to_region(ref_twsa, region_name)
-        if region_input.sizes["lat"] == 0 or region_input.sizes["lon"] == 0:
+        # the anomalies tell whether a region holds data; a redraw without them
+        # asks the mapped metrics instead
+        region_fields = (
+            [
+                crop_to_region(input_twsa, region_name),
+                crop_to_region(ref_twsa, region_name),
+            ]
+            if input_twsa is not None
+            else [crop_to_region(metric_ds[list(metrics)], region_name).to_array()]
+        )
+        if any(
+            field.sizes["lat"] == 0 or field.sizes["lon"] == 0
+            for field in region_fields
+        ):
             logger.info(f"Skipping region {region_name}: no cells inside its bounds.")
             continue
-        if not bool(region_input.notnull().any()) or not bool(
-            region_ref.notnull().any()
-        ):
+        if not all(bool(field.notnull().any()) for field in region_fields):
             logger.info(f"Skipping region {region_name}: no valid data inside it.")
             continue
         suffix = (
@@ -998,8 +1017,7 @@ def create_region_outputs(
         )
         if plot_cells:
             written[f"{region_name} cell_series_plot"] = create_region_cell_series_plot(
-                region_input,
-                region_ref,
+                *region_fields,
                 output_dir / f"twsa_cells_{suffix}.png",
                 input_name,
                 ref_name,
@@ -1021,6 +1039,156 @@ def create_region_outputs(
         for key, path in region_maps.items():
             written[f"{region_name} {key}"] = path
     return written
+
+
+def read_twsa_outputs(output_dir, input_name, ref_name):
+    """Read the metrics and the monthly anomalies of an earlier run for a redraw.
+
+    Args:
+        output_dir (Path): Output directory of the earlier run.
+        input_name, ref_name (str): Dataset names of the earlier run.
+
+    Returns
+    -------
+        Tuple of the metrics Dataset, the input and the reference anomaly (both
+        None unless both were written) and the first and last compared year
+        (None when unknown).
+
+    Raises
+    ------
+        FileNotFoundError: The metrics file a redraw needs is missing.
+    """
+    suffix = f"{sanitize_name(input_name)}_vs_{sanitize_name(ref_name)}"
+    metrics_file = output_dir / f"twsa_metrics_{suffix}.nc"
+    if not metrics_file.is_file():
+        msg = (
+            f"--only-plot needs {metrics_file}, which a run without --only-plot "
+            "writes; check --output-dir, --input-name and --ref-name."
+        )
+        with ErrorLogger(logger):
+            raise FileNotFoundError(msg)
+    with xr.open_dataset(metrics_file) as ds:
+        metric_ds = ds.load()
+    anomaly_files = [
+        output_dir / f"twsa_monthly_{sanitize_name(name)}.nc"
+        for name in (input_name, ref_name)
+    ]
+    anomalies = [None, None]
+    if all(file.is_file() for file in anomaly_files):
+        for index, file in enumerate(anomaly_files):
+            with xr.open_dataset(file) as ds:
+                anomalies[index] = ds["twsa"].load()
+    input_twsa, ref_twsa = anomalies
+    years = None
+    if "first_year" in metric_ds.attrs:
+        years = (int(metric_ds.attrs["first_year"]), int(metric_ds.attrs["last_year"]))
+    elif input_twsa is not None:
+        time_index = pd.DatetimeIndex(input_twsa["time"].values)
+        years = (time_index[0].year, time_index[-1].year)
+    return metric_ds, input_twsa, ref_twsa, years
+
+
+def write_twsa_figures(
+    metric_ds,
+    input_twsa,
+    ref_twsa,
+    output_dir,
+    input_name,
+    ref_name,
+    region_names,
+    selected_metrics,
+    years=None,
+    kge_vmin=KGE_VMIN,
+    plot_kge_components=False,
+    plot_region_cells=False,
+    max_region_cell_lines=DEFAULT_MAX_REGION_CELL_LINES,
+    region_stats_file=None,
+    overview_pdf_name=None,
+):
+    """Write the metrics table, the metric maps, the region outputs and the PDF.
+
+    The evaluation calls it after writing its fields, a redraw with the fields
+    read back by `read_twsa_outputs`.
+
+    Args:
+        metric_ds: Dataset of the calculated metrics, or None for none.
+        input_twsa, ref_twsa: Monthly anomalies, or None to leave out the cell
+            series plots.
+        output_dir (Path): Directory the outputs are written to.
+        input_name, ref_name (str): Dataset names used in titles and file names.
+        region_names (list of str): Regions to write.
+        selected_metrics (list of str): Metrics that are mapped.
+        years (tuple of int, optional): First and last compared year for the
+            titles.
+        kge_vmin, plot_kge_components, plot_region_cells, max_region_cell_lines:
+            See `twsa_evaluation`.
+        region_stats_file (Path, optional): CSV file of the metrics table, None
+            to only log it.
+        overview_pdf_name (str, optional): Name of the PDF in `output_dir`.
+
+    Returns
+    -------
+        Dict of the written output file paths.
+    """
+    suffix = f"{sanitize_name(input_name)}_vs_{sanitize_name(ref_name)}"
+    written_files = {}
+    stats_df = None
+    if metric_ds is not None:
+        stats_df = create_twsa_stats_table(
+            metric_ds,
+            region_names,
+            input_name,
+            ref_name,
+            output_file=region_stats_file,
+        )
+        if region_stats_file is not None:
+            written_files["region_stats"] = region_stats_file
+        # a KGE is only readable next to its components, so they are mapped with it
+        map_metrics = []
+        for metric in selected_metrics:
+            map_metrics.append(metric)
+            if metric == "kge" and plot_kge_components:
+                map_metrics.extend(KGE_COMPONENTS)
+        logger.info(f"Plotting {', '.join(map_metrics)} as maps.")
+        written_files.update(
+            create_metric_maps(
+                metric_ds,
+                output_dir,
+                input_name,
+                ref_name,
+                kge_vmin=kge_vmin,
+                metrics=map_metrics,
+                years=years,
+            )
+        )
+    if region_names:
+        logger.info(f"Writing the outputs of {len(region_names)} region(s).")
+    written_files.update(
+        create_region_outputs(
+            input_twsa,
+            ref_twsa,
+            metric_ds,
+            output_dir,
+            region_names,
+            input_name,
+            ref_name,
+            kge_vmin=kge_vmin,
+            max_cell_lines=max_region_cell_lines,
+            metrics=tuple(selected_metrics),
+            plot_cells=plot_region_cells,
+            years=years,
+        )
+    )
+    # without metrics there is no table, and possibly no figure either
+    overview_pdf = write_table_and_figures_pdf(
+        output_dir / (overview_pdf_name or f"twsa_overview_{suffix}.pdf"),
+        stats_df,
+        written_files.values(),
+        stats_df.attrs["title"] if stats_df is not None else "",
+    )
+    if overview_pdf is not None:
+        written_files["overview_pdf"] = overview_pdf
+    return written_files
 
 
 def twsa_evaluation(  # noqa: PLR0913
@@ -1050,6 +1218,8 @@ def twsa_evaluation(  # noqa: PLR0913
     plot_kge_components=False,
     plot_region_cells=False,
     write_region_stats=False,
+    overview_pdf_name=None,
+    only_plot=False,
 ):
     """Evaluate a modelled total water storage anomaly against a reference.
 
@@ -1083,6 +1253,12 @@ def twsa_evaluation(  # noqa: PLR0913
         plot_region_cells: Also plot every grid cell over time per region.
         write_region_stats: Also write the metrics table of the domain and the
             regions to CSV; it is always logged.
+        overview_pdf_name: Name of the PDF with the metrics table and every
+            figure in `output_dir`, None for ``twsa_overview_<input>_vs_<ref>.pdf``.
+        only_plot: Redraw the table, the maps, the region outputs and the PDF
+            from the files an earlier run wrote to `output_dir`, without reading
+            the data; it needs the metrics file, the cell series plots also the
+            monthly anomaly files.
 
     Returns
     -------
@@ -1108,6 +1284,38 @@ def twsa_evaluation(  # noqa: PLR0913
         with ErrorLogger(logger):
             raise ValueError(msg)
     region_names = select_regions(regions)
+    suffix = f"{sanitize_name(input_name)}_vs_{sanitize_name(ref_name)}"
+    figure_options = {
+        "kge_vmin": kge_vmin,
+        "plot_kge_components": plot_kge_components,
+        "plot_region_cells": plot_region_cells,
+        "max_region_cell_lines": max_region_cell_lines,
+        "region_stats_file": (
+            output_dir / f"twsa_region_stats_{suffix}.csv"
+            if write_region_stats
+            else None
+        ),
+        "overview_pdf_name": overview_pdf_name,
+    }
+    if only_plot:
+        metric_ds, input_twsa, ref_twsa, years = read_twsa_outputs(
+            output_dir, input_name, ref_name
+        )
+        if plot_region_cells and input_twsa is None:
+            logger.warning("The cell series plots need both monthly anomaly files.")
+        # only the metrics the earlier run calculated can be mapped
+        return write_twsa_figures(
+            metric_ds,
+            input_twsa,
+            ref_twsa,
+            output_dir,
+            input_name,
+            ref_name,
+            region_names,
+            [name for name in selected_metrics if name in metric_ds],
+            years=years,
+            **figure_options,
+        )
     baseline_slice = create_baseline_slice(baseline_start_year, baseline_end_year)
 
     input_da, input_format = read_twsa_data_array(
@@ -1186,6 +1394,8 @@ def twsa_evaluation(  # noqa: PLR0913
         log_kge_coverage(metric_ds, min_valid_months)
         log_zero_mean_beta_risk(metric_ds)
 
+    time_index = pd.DatetimeIndex(input_twsa["time"].values)
+    years = (time_index[0].year, time_index[-1].year)
     run_attributes = {
         "input_dataset": input_name,
         "reference_dataset": ref_name,
@@ -1195,53 +1405,22 @@ def twsa_evaluation(  # noqa: PLR0913
         "baseline_period": f"{baseline_start_year}-{baseline_end_year}",
         "min_valid_months": min_valid_months,
         "compared_months_total": int(input_twsa.sizes["time"]),
+        # a redraw names the compared period in its titles from these
+        "first_year": years[0],
+        "last_year": years[1],
         "metrics": ", ".join(selected_metrics) or "none",
     }
     if offset_source is not None:
         run_attributes["kge_offset_source"] = offset_source
 
-    suffix = f"{sanitize_name(input_name)}_vs_{sanitize_name(ref_name)}"
     written_files = {}
     if metric_ds is not None:
         metric_ds = set_metric_attributes(metric_ds, run_attributes)
+        # the components are always written, but only mapped on request
         written_files["metrics"] = write_twsa_dataset(
             metric_ds,
             output_dir / f"twsa_metrics_{suffix}.nc",
             compression=compression,
-        )
-        # the components are always written, but only mapped on request
-        region_stats_file = (
-            output_dir / f"twsa_region_stats_{suffix}.csv"
-            if write_region_stats
-            else None
-        )
-        create_twsa_stats_table(
-            metric_ds,
-            region_names,
-            input_name,
-            ref_name,
-            output_file=region_stats_file,
-        )
-        if region_stats_file is not None:
-            written_files["region_stats"] = region_stats_file
-        # a KGE is only readable next to its components, so they are mapped with it
-        map_metrics = []
-        for metric in selected_metrics:
-            map_metrics.append(metric)
-            if metric == "kge" and plot_kge_components:
-                map_metrics.extend(KGE_COMPONENTS)
-        logger.info(f"Plotting {', '.join(map_metrics)} as maps.")
-        time_index = pd.DatetimeIndex(input_twsa["time"].values)
-        written_files.update(
-            create_metric_maps(
-                metric_ds,
-                output_dir,
-                input_name,
-                ref_name,
-                kge_vmin=kge_vmin,
-                metrics=map_metrics,
-                years=(time_index[0].year, time_index[-1].year),
-            )
         )
     if write_twsa:
         for da, name, key in (
@@ -1259,21 +1438,18 @@ def twsa_evaluation(  # noqa: PLR0913
                 output_dir / f"twsa_monthly_{sanitize_name(name)}.nc",
                 compression=compression,
             )
-    if region_names:
-        logger.info(f"Writing the outputs of {len(region_names)} region(s).")
     written_files.update(
-        create_region_outputs(
+        write_twsa_figures(
+            metric_ds,
             input_twsa,
             ref_twsa,
-            metric_ds,
             output_dir,
-            region_names,
             input_name,
             ref_name,
-            kge_vmin=kge_vmin,
-            max_cell_lines=max_region_cell_lines,
-            metrics=tuple(selected_metrics),
-            plot_cells=plot_region_cells,
+            region_names,
+            selected_metrics,
+            years=years,
+            **figure_options,
         )
     )
     return written_files

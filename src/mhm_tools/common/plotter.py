@@ -14,6 +14,7 @@ Authors
 
 import calendar
 import logging
+import textwrap
 from pathlib import Path
 from typing import Mapping, Optional, Sequence, Tuple
 
@@ -1444,6 +1445,44 @@ def write_metric_plot_overview_pdf(
             pdf.savefig(fig, dpi=dpi)
             plt.close(fig)
     _append_pdf_files_to_pdf(output_file, append_pdf_files)
+    return output_file
+
+
+def write_table_and_figures_pdf(output_file, table, plot_files, title):
+    """Write a PDF with one table as it is logged and the PNG figures of a run.
+
+    The table rows are regions, not competing runs, so no best value is
+    coloured, and the table is not logged again.
+
+    Args:
+        output_file (Path): PDF file to write.
+        table (pd.DataFrame or None): Table written first, with its own
+            columns; None for no table page.
+        plot_files (iterable of Path): Written files in the order they are
+            shown; only the PNG files are drawn, e.g. GIFs and NetCDFs are
+            left out.
+        title (str): Title of the table page, wrapped to fit the page.
+
+    Returns
+    -------
+        Path of the written PDF, or None when there is neither a table row nor
+        a figure to write.
+    """
+    rows = [] if table is None else table.to_dict("records")
+    png_files = [Path(file) for file in plot_files if Path(file).suffix == ".png"]
+    if not rows and not png_files:
+        logger.info(f"No table and no figure to write to {output_file}.")
+        return None
+    output_file = write_metric_plot_overview_pdf(
+        output_file=output_file,
+        plot_files=png_files,
+        summary_rows=rows,
+        title="\n".join(textwrap.wrap(title, width=100)),
+        highlight_best_values=False,
+        table_columns=None if table is None else list(table.columns),
+        log_tables=False,
+    )
+    logger.info(f"Wrote the overview PDF to {output_file}")
     return output_file
 
 

@@ -529,6 +529,7 @@ def test_snow_evaluation_writes_its_outputs(tmp_path):
     assert (output_dir / "snow_season_metrics_difference_model_minus_obs.nc").is_file()
     assert (output_dir / "classification_accuracy_model_vs_obs.png").is_file()
     assert (output_dir / "snow_cover_percentage_model_vs_obs.png").is_file()
+    assert written["overview_pdf"] == output_dir / "snow_overview_model_vs_obs.pdf"
 
     metrics = xr.open_dataset(output_dir / "snow_season_metrics_model.nc")
     span = metrics["season_span_days"].values

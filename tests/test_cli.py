@@ -693,6 +693,50 @@ def test_available_mem_reaches_the_evaluation_in_gb(
 
 
 @pytest.mark.parametrize(
+    ("pdf_args", "expected_pdf_name"),
+    [([], None), (["--overview-pdf-name", "x.pdf"], "x.pdf")],
+)
+@pytest.mark.parametrize(
+    ("module", "evaluation_path"),
+    [
+        (_snow_evaluation, "mhm_tools.post.snow_evaluation.snow_evaluation"),
+        (_twsa_evaluation, "mhm_tools.post.twsa_evaluation.twsa_evaluation"),
+    ],
+)
+def test_overview_pdf_name_reaches_snow_and_twsa_evaluation(
+    monkeypatch, module, evaluation_path, pdf_args, expected_pdf_name
+):
+    """Hand the name of the overview PDF on, None for the default name."""
+    received_arguments = {}
+    monkeypatch.setattr(
+        evaluation_path, lambda **kwargs: received_arguments.update(kwargs) or {}
+    )
+    # the twsa evaluation would otherwise start a dask cluster
+    monkeypatch.setattr(
+        "mhm_tools.common.parallel.create_dask_cluster",
+        lambda _ncpus: contextlib.nullcontext(),
+    )
+    parser = argparse.ArgumentParser()
+    module.add_args(parser)
+
+    module.run(
+        parser.parse_args(
+            [
+                "--input-path",
+                "in",
+                "--ref-path",
+                "ref",
+                "--output-dir",
+                "out",
+                *pdf_args,
+            ]
+        )
+    )
+
+    assert received_arguments["overview_pdf_name"] == expected_pdf_name
+
+
+@pytest.mark.parametrize(
     "args",
     [
         ["evaluation", "discharge-evaluation", "-h"],

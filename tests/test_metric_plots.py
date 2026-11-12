@@ -693,6 +693,56 @@ def test_create_discrete_colour_norm_with_ratio_bins():
     assert extent == "max"
 
 
+def test_write_table_and_figures_pdf_draws_the_table_and_only_png_figures(
+    tmp_path, monkeypatch
+):
+    """The table keeps its columns, only the PNGs follow it, nothing is logged twice."""
+    calls = []
+    monkeypatch.setattr(
+        plotter,
+        "write_metric_plot_overview_pdf",
+        lambda **kwargs: calls.append(kwargs) or kwargs["output_file"],
+    )
+    table = pd.DataFrame(
+        {"region": ["Global", "Europe"], "cells": [10, 4], "accuracy": [0.97, 0.83]}
+    )
+    files = [
+        tmp_path / name
+        for name in ("map.png", "cover.gif", "metrics.nc", "map_region_Europe.png")
+    ]
+
+    output_file = plotter.write_table_and_figures_pdf(
+        tmp_path / "overview.pdf", table, files, "Median snow statistics " * 10
+    )
+
+    (call,) = calls
+    assert output_file == tmp_path / "overview.pdf"
+    assert call["summary_rows"] == table.to_dict("records")
+    assert call["table_columns"] == ["region", "cells", "accuracy"]
+    assert call["plot_files"] == [files[0], files[3]]
+    assert call["log_tables"] is False
+    assert call["highlight_best_values"] is False
+    # the long title is wrapped onto several lines
+    assert "\n" in call["title"]
+
+
+def test_write_table_and_figures_pdf_skips_without_table_and_figures(
+    tmp_path, monkeypatch
+):
+    """A run without a table and figures, e.g. TWSA fields only, writes no PDF."""
+    calls = []
+    monkeypatch.setattr(
+        plotter, "write_metric_plot_overview_pdf", lambda **kwargs: calls.append(kwargs)
+    )
+
+    output_file = plotter.write_table_and_figures_pdf(
+        tmp_path / "overview.pdf", None, [tmp_path / "twsa_monthly_mhm.nc"], ""
+    )
+
+    assert output_file is None
+    assert calls == []
+
+
 def test_write_metric_plot_overview_pdf_writes_extra_tables_after_the_summary(
     tmp_path, monkeypatch
 ):
