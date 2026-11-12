@@ -1293,6 +1293,28 @@ def test_plot_map_uses_ratio_and_correlation_colour_scales(monkeypatch, tmp_path
     assert rho_extend == "min"
 
 
+def test_write_comparison_plots_hides_ratios_where_reference_close_to_zero(
+    monkeypatch, tmp_path
+):
+    """A cell whose reference mean is close to zero reaches the ratio maps as NaN."""
+    fields = _create_comparison_fields()
+    fields["ref_clim"][:, 2, 3] = 1e-4
+    captured = {}
+    monkeypatch.setattr(
+        "mhm_tools.post.gridded_data_evaluation.plot_map",
+        lambda **kwargs: captured.update(kwargs) or tmp_path / "map.png",
+    )
+
+    write_comparison_plots(
+        input_name="in", ref_name="ref", output_path=tmp_path, **fields
+    )
+
+    for name in ("rel_mean", "rel_std"):
+        values = np.asarray(captured[name])
+        assert np.isnan(values[2, 3])
+        assert np.isfinite(np.delete(values, 2 * values.shape[1] + 3)).all()
+
+
 def test_create_overview_table_rows():
     """Every table adds its row of the region as one block, counts stay integers."""
     relative_name = "relative statistics (median)"

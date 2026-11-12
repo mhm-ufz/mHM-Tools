@@ -72,6 +72,11 @@ LOG_BIN_STEPS = (
 # colour of the bin around the center of every diverging map, the grey in the
 # middle of coolwarm
 NEUTRAL_COLOR = "#dcdddd"
+# background of gridded map cells without data, e.g. the ocean; darker than the
+# neutral bin and the light grey below the correlation scale
+MAP_NO_DATA_COLOR = "0.45"
+# gridded map cells hidden because the reference is close to zero
+LOW_REFERENCE_COLOR = "white"
 # metrics stored as fractions but mapped in percent
 PERCENT_METRICS = {"rel_diff"}
 # recessive ink for axes, labels and captions
@@ -175,6 +180,65 @@ def style_map_axes(ax):
     for spine in ax.spines.values():
         spine.set_linewidth(0.25)
     return ax
+
+
+def draw_low_reference_cells(ax, low_reference):
+    """Draw the cells a map hides for a reference close to zero in their own colour.
+
+    The hidden cells are NaN like the cells without data, so they get a layer of
+    their own above the map instead of showing the no-data background.
+
+    Args:
+        ax: Matplotlib axes holding the map, drawn by imshow without an extent.
+        low_reference (array_like of bool): True where the reference is close to
+            zero, on the grid of the map.
+
+    Returns
+    -------
+        The image of the hidden cells.
+    """
+    hidden = np.where(np.asarray(low_reference, dtype=bool), 1.0, np.nan)
+    return ax.imshow(
+        hidden,
+        cmap=ListedColormap([LOW_REFERENCE_COLOR]),
+        vmin=0.0,
+        vmax=1.0,
+        interpolation="nearest",
+    )
+
+
+def add_no_data_legend(owner, low_reference_label=None, **placement):
+    """Explain the no-data colour of a map and, if given, its hidden cells.
+
+    Args:
+        owner: Axes the legend is placed below, or a figure.
+        low_reference_label (str, optional): Label of the cells hidden for a
+            reference close to zero, None to leave them out.
+        **placement: Legend keywords replacing the placement below the axes.
+
+    Returns
+    -------
+        The legend.
+    """
+    handles = [mpatches.Patch(facecolor=MAP_NO_DATA_COLOR, label="no data")]
+    if low_reference_label is not None:
+        handles.append(
+            mpatches.Patch(
+                facecolor=LOW_REFERENCE_COLOR,
+                edgecolor=AXIS_COLOR,
+                label=low_reference_label,
+            )
+        )
+    style = {
+        "loc": "upper center",
+        "bbox_to_anchor": (0.5, -0.02),
+        "ncol": len(handles),
+        "frameon": False,
+        "fontsize": "small",
+        "handlelength": 1.4,
+    }
+    style.update(placement)
+    return owner.legend(handles=handles, **style)
 
 
 def add_map_colorbar(fig, ax, mappable, bounds, extend, ticks, label):

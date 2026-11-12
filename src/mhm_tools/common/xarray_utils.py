@@ -837,6 +837,52 @@ def calculate_region_medians(ds, variables, region_names):
     return pd.DataFrame(rows, columns=["region", "cells", *variables])
 
 
+def create_reference_close_to_zero_mask(reference, fraction=0.01):
+    """Flag the cells whose reference is close to zero.
+
+    "Close" is relative to the typical reference, which keeps the threshold
+    free of units.
+
+    Args:
+        reference (xr.DataArray): Reference values, e.g. a mean map.
+        fraction (float): Cells whose absolute reference is below this fraction
+            of the median absolute reference over all cells are flagged.
+
+    Returns
+    -------
+        Boolean DataArray like `reference`, True where the reference is close to
+        zero; cells without a reference are False.
+    """
+    magnitude = np.abs(reference.values)
+    if not np.isfinite(magnitude).any():
+        return reference.copy(data=np.zeros(magnitude.shape, dtype=bool))
+    return reference.copy(data=magnitude < fraction * np.nanmedian(magnitude))
+
+
+def mask_where_reference_close_to_zero(values, reference, fraction=0.01):
+    """Hide the cells whose reference is close to zero, e.g. on a ratio map.
+
+    A ratio divides by the reference, so it explodes where the reference is
+    close to zero, see `create_reference_close_to_zero_mask`.
+
+    Args:
+        values (xr.DataArray): Values to mask, e.g. input / reference.
+        reference (xr.DataArray): Reference on the same grid, with the same
+            dimension names as `values`.
+        fraction (float): Cells whose absolute reference is below this fraction
+            of the median absolute reference over all cells are hidden.
+
+    Returns
+    -------
+        Copy of `values` with NaN where the reference is close to zero.
+    """
+    close_to_zero = create_reference_close_to_zero_mask(reference, fraction)
+    # compared cell by cell, so grids whose coordinates differ only in float
+    # precision are not dropped by an alignment
+    close_to_zero = close_to_zero.transpose(*values.dims).values
+    return values.copy(data=np.where(close_to_zero, np.nan, values.values))
+
+
 def convert_dataarray_units(da, to_units, from_units=None):
     """Convert a DataArray to other units of the same kind, keeping its attributes.
 

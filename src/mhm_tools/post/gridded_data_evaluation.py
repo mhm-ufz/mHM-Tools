@@ -40,9 +40,12 @@ from mhm_tools.common.metrics.metrics_handler import (
 from mhm_tools.common.netcdf import generate_bounds_for_all_coords
 from mhm_tools.common.plotter import (
     KGE_UNDER_COLOR,
+    MAP_NO_DATA_COLOR,
     add_map_colorbar,
+    add_no_data_legend,
     create_axis_label,
     create_comparison_title,
+    draw_low_reference_cells,
     get_metric_plot_style,
     get_percent_diff_bounds,
     plot_single_map,
@@ -66,12 +69,14 @@ from mhm_tools.common.xarray_utils import (
     SPEARMAN_BYTES_PER_ELEMENT,
     calculate_region_medians,
     calculate_spearman_over_time,
+    create_reference_close_to_zero_mask,
     crop_ds,
     crop_to_region,
     get_clim_from_ds,
     get_coord_key,
     get_ds_extend,
     get_overlapping_time_slice,
+    mask_where_reference_close_to_zero,
     normalize_lat_lon,
     regrid_mask,
     regrid_to_coarser_grid,
@@ -87,6 +92,12 @@ SPEARMAN_BLOCK_BUDGET_MIB = 32
 MIN_YEARS_TO_REMOVE_SEASONAL_CYCLE = 5
 # the correlation of the 12 climatology values measures nothing but the cycle
 CLIMATOLOGY_SEASONALITY_LABEL = "seasonal cycle only"
+# the ratio maps hide a cell whose reference mean is below this share of its
+# median, the percent difference maps one whose reference is below the minimum
+RATIO_MIN_REFERENCE_SHARE = 0.05
+PERCENT_MIN_REFERENCE = 0.1
+RATIO_HIDDEN_LABEL = f"reference < {RATIO_MIN_REFERENCE_SHARE:.0%} of its median"
+PERCENT_HIDDEN_LABEL = f"reference < {PERCENT_MIN_REFERENCE:g}"
 
 
 class EvalDataset:
@@ -1106,6 +1117,7 @@ def plot_map(
     std_seasonality=None,
     spearman_seasonality=None,
     region_name=None,
+    reference_close_to_zero=None,
 ):
     """Create a 2x2 figure of relative mean, relative std, Spearman correlation, and seasonal means.
 
@@ -1117,6 +1129,8 @@ def plot_map(
     and `spearman_seasonality` (see `create_seasonality_label`) state in the
     panel titles whether the seasonal cycle was removed.
     `region_name` names the WMO region in the title and the file names.
+    `reference_close_to_zero` marks the ratio cells hidden for a reference close
+    to zero, which are drawn white, unlike the grey cells without data.
     Returns the path of the written figure.
     """
     rel_mean = np.where(rel_mean == np.inf, np.nan, rel_mean)
@@ -1144,6 +1158,9 @@ def plot_map(
         f"Relative temporal Standarddeviation{std_label} "
         f"(median={np.nanmedian(rel_std):.2f})"
     )
+    if reference_close_to_zero is not None:
+        for ax in (axes[0, 0], axes[0, 1]):
+            draw_low_reference_cells(ax, reference_close_to_zero)
 
     correlation_style = get_metric_plot_style("spearman")
     if np.nanmin(spearman) < 0:
@@ -1225,8 +1242,13 @@ def plot_map(
         ax.set_yticks([])
         ax.set_xticks([])
         ax.yaxis.labelpad = 0
+        ax.set_facecolor(MAP_NO_DATA_COLOR)
         for spine in ax.spines.values():
             spine.set_linewidth(0.25)
+    add_no_data_legend(
+        axes[1, 0],
+        RATIO_HIDDEN_LABEL if np.any(reference_close_to_zero) else None,
+    )
     plt.tight_layout()
     region_suffix = create_region_file_suffix(region_name)
     file_name = f"et_map_{input_name}_{ref_name}{region_suffix}.png"
@@ -1249,11 +1271,14 @@ def plot_map_bias_only(
     total_rel_mean=None,
     season_months=None,
     region_name=None,
+    reference_close_to_zero=None,
 ):
     """Create a 3-panel plot with relative mean, mean difference, and climatology.
 
     `season_months` names the compared season in the title.
     `region_name` names the WMO region in the title and the file names.
+    `reference_close_to_zero` marks the ratio cells hidden for a reference close
+    to zero, which are drawn white, unlike the grey cells without data.
     Returns the path of the written figure.
     """
     rel_mean = np.where(rel_mean == np.inf, np.nan, rel_mean)
@@ -1282,6 +1307,8 @@ def plot_map_bias_only(
         title_rel_mean += f", mean={total_rel_mean:.2f}"
     title_rel_mean += ")"
     ax_rel_mean.set_title(title_rel_mean)
+    if reference_close_to_zero is not None:
+        draw_low_reference_cells(ax_rel_mean, reference_close_to_zero)
 
     # diff_abs_max = int(round(np.nanmax(np.abs(diff_mean)) + 0.5))
     # if not np.isfinite(diff_abs_max) or diff_abs_max == 0:
@@ -1388,10 +1415,15 @@ def plot_map_bias_only(
         ax.set_yticks([])
         ax.set_xticks([])
         ax.yaxis.labelpad = 0
+        ax.set_facecolor(MAP_NO_DATA_COLOR)
     for spine in ax_rel_mean.spines.values():
         spine.set_linewidth(0.25)
     for spine in ax_diff_mean.spines.values():
         spine.set_linewidth(0.25)
+    add_no_data_legend(
+        ax_rel_mean,
+        RATIO_HIDDEN_LABEL if np.any(reference_close_to_zero) else None,
+    )
     plt.tight_layout()
 
     region_suffix = create_region_file_suffix(region_name)
@@ -1482,11 +1514,14 @@ def plot_map_global_climate2(
     total_rel_mean=None,
     season_months=None,
     region_name=None,
+    reference_close_to_zero=None,
 ):
     """Create a plot showing relative mean and monthly climatology difference.
 
     `season_months` names the compared season in the title.
     `region_name` names the WMO region in the title and the file names.
+    `reference_close_to_zero` marks the percent cells hidden for a reference
+    close to zero, which are drawn white, unlike the grey cells without data.
     Returns the path of the written figure.
     """
     rel_mean = np.where(rel_mean == np.inf, np.nan, rel_mean)
@@ -1508,6 +1543,8 @@ def plot_map_global_climate2(
         title_rel_mean += f", mean={total_rel_mean:.1f}"
     title_rel_mean += ")"
     ax_rel_mean.set_title(title_rel_mean)
+    if reference_close_to_zero is not None:
+        draw_low_reference_cells(ax_rel_mean, reference_close_to_zero)
 
     vmin = np.nanquantile(diff_mean, 0.01)
     vmax = np.nanquantile(diff_mean, 0.99)
@@ -1542,14 +1579,20 @@ def plot_map_global_climate2(
     ax_rel_mean.set_yticks([])
     ax_rel_mean.set_xticks([])
     ax_rel_mean.yaxis.labelpad = 0
+    ax_rel_mean.set_facecolor(MAP_NO_DATA_COLOR)
     for spine in ax_rel_mean.spines.values():
         spine.set_linewidth(0.25)
     if diff_mean.ndim != 1:
         ax_diff.set_yticks([])
         ax_diff.set_xticks([])
         ax_diff.yaxis.labelpad = 0
+        ax_diff.set_facecolor(MAP_NO_DATA_COLOR)
         for spine in ax_diff.spines.values():
             spine.set_linewidth(0.25)
+    add_no_data_legend(
+        ax_rel_mean,
+        PERCENT_HIDDEN_LABEL if np.any(reference_close_to_zero) else None,
+    )
     plt.tight_layout()
 
     region_suffix = create_region_file_suffix(region_name)
@@ -1614,12 +1657,18 @@ def plot_map_local_climate(
             raise ValueError(msg)
 
     # Avoid unstable percentages where reference climatology is close to zero.
-    ref_safe = np.where(np.abs(ref_clim) < 0.1, np.nan, ref_clim)
+    low_reference = np.abs(ref_clim) < PERCENT_MIN_REFERENCE
+    ref_safe = np.where(low_reference, np.nan, ref_clim)
     rel_monthly = 100.0 * (input_clim - ref_safe) / ref_safe
     abs_monthly = input_clim - ref_clim
 
     def _plot_monthly_panels(
-        values, panel_title, output_file_name, colorbar_label, bounds_type="max"
+        values,
+        panel_title,
+        output_file_name,
+        colorbar_label,
+        bounds_type="max",
+        low_reference=None,
     ):
         values = np.where(values == np.inf, np.nan, values)
         values = np.where(values == -np.inf, np.nan, values)
@@ -1669,10 +1718,13 @@ def plot_map_local_climate(
                 center=0,
                 bounds_type=bounds_type,
             )
+            if low_reference is not None:
+                draw_low_reference_cells(ax, low_reference[month_idx])
             ax.set_title(month_labels[month_idx], fontsize="medium")
             ax.set_xticks([])
             ax.set_yticks([])
             ax.yaxis.labelpad = 0
+            ax.set_facecolor(MAP_NO_DATA_COLOR)
             for spine in ax.spines.values():
                 spine.set_linewidth(0.25)
 
@@ -1687,7 +1739,13 @@ def plot_map_local_climate(
         # shortest form of every tick, so 25 and 2.5 instead of 25.0 and 2.5
         cbar.set_ticks(ticks, labels=[f"{tick + 0.0:g}" for tick in ticks])
         cbar.ax.tick_params(labelsize=8)
-        fig.subplots_adjust(left=0.03, right=0.94, bottom=0.04, top=0.89)
+        add_no_data_legend(
+            fig,
+            PERCENT_HIDDEN_LABEL if np.any(low_reference) else None,
+            loc="lower center",
+            bbox_to_anchor=(0.5, 0.0),
+        )
+        fig.subplots_adjust(left=0.03, right=0.94, bottom=0.07, top=0.89)
         plt.savefig(output_path / output_file_name, dpi=400)
         plt.close(fig)
         logger.info(f"created et_map {output_path / output_file_name}")
@@ -1706,6 +1764,7 @@ def plot_map_local_climate(
         rel_file_name,
         "Relative Climatology Difference [%]",
         bounds_type="percent",
+        low_reference=low_reference,
     )
     _plot_monthly_panels(
         abs_monthly,
@@ -1736,9 +1795,12 @@ def write_comparison_plots(
     """Write the figures of one comparison for the whole domain or one WMO region.
 
     The overview map needs `rel_std` and `spearman`, `global_climate` writes the
-    climate difference and the monthly local climate maps, and every other run
-    the bias-only map. With `region_name` every field is cropped to the region
+    climate difference map, and every other run the bias-only map. Every mode
+    also writes the monthly local climate maps. With `region_name` every field is cropped to the region
     first, so its colour limits, medians and seasonality are the region's own.
+    The ratio maps hide the cells whose reference mean is below 5 % of its
+    median over the domain and draw them white, unlike the grey cells without
+    data, see `create_reference_close_to_zero_mask`.
 
     Args:
         rel_mean (xr.DataArray): Relative mean (input / reference).
@@ -1757,12 +1819,25 @@ def write_comparison_plots(
     -------
         List of the written figure paths, empty for a region without valid cells.
     """
+    # ratios explode where the reference is close to zero; they are hidden
+    # before the region crop, so every figure hides the same cells
+    reference_mean = ref_clim.mean("month", skipna=True)
+    rel_mean = mask_where_reference_close_to_zero(
+        rel_mean, reference_mean, RATIO_MIN_REFERENCE_SHARE
+    )
+    if rel_std is not None:
+        rel_std = mask_where_reference_close_to_zero(
+            rel_std, reference_mean, RATIO_MIN_REFERENCE_SHARE
+        )
     fields = {
         "rel_mean": rel_mean,
         "input_clim": input_clim,
         "ref_clim": ref_clim,
         "rel_std": rel_std,
         "spearman": spearman,
+        "reference_close_to_zero": create_reference_close_to_zero_mask(
+            reference_mean, RATIO_MIN_REFERENCE_SHARE
+        ),
     }
     if region_name is not None:
         fields = {
@@ -1772,7 +1847,9 @@ def write_comparison_plots(
         if not bool(np.isfinite(fields["rel_mean"]).any()):
             logger.info(f"Skipping the figures of {region_name}: no valid cell in it.")
             return []
-    rel_mean, input_clim, ref_clim, rel_std, spearman = fields.values()
+    rel_mean, input_clim, ref_clim, rel_std, spearman, reference_close_to_zero = (
+        fields.values()
+    )
     shared_args = {
         "input_name": input_name,
         "ref_name": ref_name,
@@ -1788,45 +1865,45 @@ def write_comparison_plots(
         and not bias_only
         and not global_climate
     ):
-        return [
-            plot_map(
-                rel_std=rel_std,
-                rel_mean=rel_mean,
-                spearman=spearman,
-                ref_clim=ref_clim,
-                input_clim=input_clim,
-                std_seasonality=std_seasonality,
-                spearman_seasonality=spearman_seasonality,
-                **shared_args,
-            )
-        ]
-    if global_climate:
+        figure_file = plot_map(
+            rel_std=rel_std,
+            rel_mean=rel_mean,
+            spearman=spearman,
+            ref_clim=ref_clim,
+            input_clim=input_clim,
+            std_seasonality=std_seasonality,
+            spearman_seasonality=spearman_seasonality,
+            reference_close_to_zero=reference_close_to_zero,
+            **shared_args,
+        )
+    elif global_climate:
         input_mean_map = np.nanmean(input_clim, axis=0)
         ref_mean_map = np.nanmean(ref_clim, axis=0)
         rel_mean_diff = 100 * (input_mean_map - ref_mean_map) / ref_mean_map
-        rel_mean_diff = np.where(
-            np.nanmax(ref_clim, axis=0) < 0.1, np.nan, rel_mean_diff
-        )
-        climate_file = plot_map_global_climate2(
+        low_reference = np.nanmax(ref_clim, axis=0) < PERCENT_MIN_REFERENCE
+        rel_mean_diff = np.where(low_reference, np.nan, rel_mean_diff)
+        figure_file = plot_map_global_climate2(
             rel_mean=rel_mean_diff,
             diff_mean=input_mean_map - ref_mean_map,
             total_rel_mean=100 * (input_total - ref_total) / ref_total,
+            reference_close_to_zero=low_reference,
             **shared_args,
         )
-        return [
-            climate_file,
-            *plot_map_local_climate(
-                input_clim=input_clim, ref_clim=ref_clim, **shared_args
-            ),
-        ]
-    return [
-        plot_map_bias_only(
+    else:
+        figure_file = plot_map_bias_only(
             rel_mean=rel_mean,
             ref_clim=ref_clim,
             input_clim=input_clim,
             total_rel_mean=input_total / ref_total,
+            reference_close_to_zero=reference_close_to_zero,
             **shared_args,
         )
+    # every mode shows the monthly climatology differences next to its map
+    return [
+        figure_file,
+        *plot_map_local_climate(
+            input_clim=input_clim, ref_clim=ref_clim, **shared_args
+        ),
     ]
 
 
