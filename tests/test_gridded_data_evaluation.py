@@ -1147,6 +1147,42 @@ def test_gridded_data_evaluation_keeps_seasonal_cycle_below_five_common_years(
 
 
 @pytest.mark.parametrize(
+    ("mode", "expected_years"),
+    [
+        ({}, range(2005, 2010)),
+        ({"direct_comp": False, "stream_metrics": True}, range(2005, 2010)),
+        ({"direct_comp": False, "global_climate": True}, range(2005, 2010)),
+        ({"direct_comp": False}, range(2000, 2012)),
+        (
+            {
+                "direct_comp": False,
+                "stream_metrics": True,
+                "n_bootstrap_years": 3,
+                "n_bootstrap_selections": 1,
+            },
+            range(2000, 2012),
+        ),
+    ],
+    ids=[
+        "direct",
+        "stream-metrics",
+        "global-climate",
+        "no-direct-comparison",
+        "bootstrap",
+    ],
+)
+def test_gridded_data_evaluation_compares_common_years(
+    monkeypatch, tmp_path, mode, expected_years
+):
+    """Direct comparisons use the common years, independent draws the union."""
+    captured = _run_gridded_data_evaluation(
+        monkeypatch, tmp_path, range(2005, 2012), **mode
+    )
+
+    assert captured["available_years"] == list(expected_years)
+
+
+@pytest.mark.parametrize(
     ("create_wmo_region_output", "expected_regions"), [(False, []), (True, ["Europe"])]
 )
 def test_gridded_data_evaluation_evaluates_regions_only_with_region_output(

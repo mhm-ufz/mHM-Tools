@@ -3230,9 +3230,14 @@ def gridded_data_evaluation(  # noqa: PLR0913
         if ref_path is not None
         else []
     )
-    # the streamed metrics compare the common years like the direct comparison
+    # modes comparing the datasets directly use the years both cover; bootstrapping
+    # draws the years of each dataset independently and, like the comparison of
+    # the climatologies only, keeps the union
+    compares_common_years = not bootstrap_requested and (
+        direct_comp or stream_metrics or global_climate
+    )
     available_years = select_available_years(
-        years_in, years_ref, year_slice, direct_comp or stream_metrics
+        years_in, years_ref, year_slice, compares_common_years
     )
     logger.info(f"Years {available_years} are available for comparison.")
     if not available_years:
