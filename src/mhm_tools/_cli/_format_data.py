@@ -209,6 +209,7 @@ def run(args: Namespace) -> None:
             "output_temporal_resolution": (
                 args.output_temporal_resolution or "long-term-mean-monthly"
             ),
+            "input_crs": args.input_crs,
             "dem_crs": args.dem_crs,
         }
         if args.resampling is not None:

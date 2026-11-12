@@ -160,6 +160,8 @@ def test_format_data_dispatches_gridded_lai_without_lookup(
         "output",
         "--resampling",
         "bilinear",
+        "-s",
+        "EPSG:32737",
     ]
     result = CliRunner().invoke(
         cli, [*arguments, *temporal_args, "--significant-digits", "4"]
@@ -174,6 +176,7 @@ def test_format_data_dispatches_gridded_lai_without_lookup(
         "dem_file": Path("dem.tif"),
         "output_path": Path("output"),
         "output_temporal_resolution": expected_resolution,
+        "input_crs": "EPSG:32737",
         "dem_crs": None,
         "resampling": "bilinear",
     }

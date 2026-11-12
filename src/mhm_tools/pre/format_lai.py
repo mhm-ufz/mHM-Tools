@@ -1478,17 +1478,22 @@ def format_lai_netcdf_data(
     *,
     output_temporal_resolution: str = "long-term-mean-monthly",
     source_variable: str | None = None,
+    input_crs: str | None = None,
     dem_crs: str | None = None,
     resampling="bilinear",
     compression=None,
 ) -> Path:
-    """Write gridded LAI as ``lai.nc`` in an output directory."""
+    """Write gridded LAI as ``lai.nc`` in an output directory.
+
+    ``input_crs`` overrides the CRS of the LAI coordinates.
+    """
     return format_lai_netcdf_file(
         input_file,
         dem_file,
         Path(output_path) / "lai.nc",
         output_temporal_resolution=output_temporal_resolution,
         source_variable=source_variable,
+        input_crs=input_crs,
         dem_crs=dem_crs,
         resampling=resampling,
         compression=compression,
