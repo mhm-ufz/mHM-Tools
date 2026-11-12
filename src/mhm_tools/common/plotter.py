@@ -112,16 +112,21 @@ CORRELATION_METRICS = {
     "spearman",
 }
 HIGHER_IS_BETTER_METRICS = {
+    "accuracy",
     "comb",
     "esp",
     "kge",
     "mspaef",
     "nse",
     "spaef",
+    "spearman",
 }
 LOWER_IS_BETTER_METRICS = {
+    "rmse",
     "waspaef",
 }
+# ratios of the region statistics, best at 1 in the summary tables
+ONE_CENTERED_SUMMARY_METRICS = {"rel-mean", "rel-std"}
 METRIC_SUMMARY_VALUE_COLUMNS = {"value", "min", "max", "mean", "median"}
 
 try:  # cartopy is optional
@@ -1346,6 +1351,7 @@ def write_metric_plot_overview_pdf(
     ] = None,
     table_columns: Optional[Sequence[str]] = None,
     log_tables: bool = True,
+    extra_tables: Optional[Sequence[Tuple[str, Sequence[Mapping[str, object]]]]] = None,
 ) -> Path:
     """Write a PDF overview with summary table and plot pages.
 
@@ -1374,6 +1380,9 @@ def write_metric_plot_overview_pdf(
         Columns of every table, by default derived from the summary rows.
     log_tables : bool, optional
         Also log every table, e.g. False when the caller logs them itself.
+    extra_tables : Sequence[tuple[str, Sequence[Mapping]]], optional
+        Title and summary rows of further tables written right after the
+        summary table, e.g. one per region of a PDF without figures.
 
     Returns
     -------
@@ -1389,7 +1398,8 @@ def write_metric_plot_overview_pdf(
     existing_plot_files = [
         plot_file for plot_file in existing_plot_files if plot_file.is_file()
     ]
-    if not existing_plot_files and not summary_rows:
+    extra_tables = list(extra_tables or [])
+    if not existing_plot_files and not summary_rows and not extra_tables:
         msg = "No plots or summary rows available for overview PDF."
         raise ValueError(msg)
     append_pdf_files = append_pdf_files or []
@@ -1401,6 +1411,15 @@ def write_metric_plot_overview_pdf(
                 summary_rows=summary_rows,
                 title=title or "Metric plot overview",
                 notes=notes,
+                highlight_best_values=highlight_best_values,
+                columns=table_columns,
+                log_table=log_tables,
+            )
+        for table_title, table_rows in extra_tables:
+            _write_metric_summary_table_pages(
+                pdf=pdf,
+                summary_rows=table_rows,
+                title=table_title,
                 highlight_best_values=highlight_best_values,
                 columns=table_columns,
                 log_table=log_tables,
@@ -1760,9 +1779,10 @@ def _get_metric_summary_preference(metric_name):
         Preference mode and optional target value.
     """
     normalized_name = _normalize_metric_summary_name(metric_name)
-    if normalized_name in ONE_CENTERED_METRICS:
+    if normalized_name in ONE_CENTERED_METRICS | ONE_CENTERED_SUMMARY_METRICS:
         return "center", 1.0
-    if normalized_name in ZERO_CENTERED_METRICS:
+    # a difference such as mean_diff or first_snow_day_diff is best at 0
+    if normalized_name in ZERO_CENTERED_METRICS or normalized_name.endswith("-diff"):
         return "center", 0.0
     if normalized_name in HIGHER_IS_BETTER_METRICS:
         return "max", None
@@ -1782,9 +1802,11 @@ def _normalize_metric_summary_name(metric_name):
     Returns
     -------
     str
-        Normalized metric name.
+        Normalized metric name; a trailing label in parentheses, e.g. the
+        reference of "spaef (gleam)", is left out.
     """
-    normalized_name = str(metric_name).strip().lower().replace("_", "-")
+    normalized_name = str(metric_name).split(" (", 1)[0]
+    normalized_name = normalized_name.strip().lower().replace("_", "-")
     if normalized_name.startswith("avg-"):
         normalized_name = normalized_name[4:]
     return normalized_name

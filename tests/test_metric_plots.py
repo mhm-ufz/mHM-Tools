@@ -693,6 +693,49 @@ def test_create_discrete_colour_norm_with_ratio_bins():
     assert extent == "max"
 
 
+def test_write_metric_plot_overview_pdf_writes_extra_tables_after_the_summary(
+    tmp_path, monkeypatch
+):
+    """Further tables follow the summary table, also in a PDF without figures."""
+    table_titles = []
+    monkeypatch.setattr(
+        plotter,
+        "_write_metric_summary_table_pages",
+        lambda **kwargs: table_titles.append(kwargs["title"]),
+    )
+    rows = [{"realisation": "ecland", "variable": "kge", "value": 0.5}]
+
+    plotter.write_metric_plot_overview_pdf(
+        output_file=tmp_path / "comparison.pdf",
+        plot_files=[],
+        summary_rows=rows,
+        title="Global",
+        extra_tables=[("Europe", rows), ("Asia", rows)],
+    )
+
+    assert table_titles == ["Global", "Europe", "Asia"]
+
+
+@pytest.mark.parametrize(
+    ("metric_name", "expected_preference"),
+    [
+        ("rmse", ("min", None)),
+        ("accuracy", ("max", None)),
+        ("spearman", ("max", None)),
+        ("rel_mean", ("center", 1.0)),
+        ("rel_std", ("center", 1.0)),
+        ("mean_diff", ("center", 0.0)),
+        ("first_snow_day_diff", ("center", 0.0)),
+        ("kge", ("max", None)),
+    ],
+)
+def test_metric_summary_preferences_of_region_statistics(
+    metric_name, expected_preference
+):
+    """Every region statistic is scored towards its best value."""
+    assert plotter._get_metric_summary_preference(metric_name) == expected_preference
+
+
 def test_write_metric_plot_overview_pdf_uses_given_columns_without_logging(
     tmp_path, monkeypatch
 ):
