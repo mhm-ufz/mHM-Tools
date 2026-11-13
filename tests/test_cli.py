@@ -116,6 +116,37 @@ def test_gridded_data_evaluation_parses_mask_var():
     assert args.mask_var == "mask_l2"
 
 
+@pytest.mark.parametrize(
+    ("extra_args", "expected_region_output", "expected_pdf_name"),
+    [
+        ([], False, None),
+        (["--create-wmo-region-output"], True, None),
+        (["--write-region-stats"], True, None),
+        (["--overview-pdf-name", "et.pdf"], False, "et.pdf"),
+    ],
+)
+def test_gridded_data_evaluation_cli_output_options_and_seasonality_defaults(
+    monkeypatch, extra_args, expected_region_output, expected_pdf_name
+):
+    """The region alias and PDF name reach the evaluation; the std keeps its cycle."""
+    captured = {}
+    monkeypatch.setattr(
+        "mhm_tools.post.gridded_data_evaluation.gridded_data_evaluation",
+        lambda **kwargs: captured.update(kwargs),
+    )
+    command = _build_click_command("gridded-data-evaluation", _gridded_data_evaluation)
+
+    result = CliRunner().invoke(
+        command, ["--input-path", "input.nc", "--output-dir", "out", *extra_args]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["create_wmo_region_output"] is expected_region_output
+    assert captured["overview_pdf_name"] == expected_pdf_name
+    assert captured["remove_seasonal_cycle_from_std"] is False
+    assert captured["remove_seasonal_cycle_from_corr"] is True
+
+
 def test_converter_nc_ascii_only_header_writes_requested_new_file(
     tmp_path, monkeypatch
 ):
@@ -662,6 +693,50 @@ def test_available_mem_reaches_the_evaluation_in_gb(
 
 
 @pytest.mark.parametrize(
+    ("pdf_args", "expected_pdf_name"),
+    [([], None), (["--overview-pdf-name", "x.pdf"], "x.pdf")],
+)
+@pytest.mark.parametrize(
+    ("module", "evaluation_path"),
+    [
+        (_snow_evaluation, "mhm_tools.post.snow_evaluation.snow_evaluation"),
+        (_twsa_evaluation, "mhm_tools.post.twsa_evaluation.twsa_evaluation"),
+    ],
+)
+def test_overview_pdf_name_reaches_snow_and_twsa_evaluation(
+    monkeypatch, module, evaluation_path, pdf_args, expected_pdf_name
+):
+    """Hand the name of the overview PDF on, None for the default name."""
+    received_arguments = {}
+    monkeypatch.setattr(
+        evaluation_path, lambda **kwargs: received_arguments.update(kwargs) or {}
+    )
+    # the twsa evaluation would otherwise start a dask cluster
+    monkeypatch.setattr(
+        "mhm_tools.common.parallel.create_dask_cluster",
+        lambda _ncpus: contextlib.nullcontext(),
+    )
+    parser = argparse.ArgumentParser()
+    module.add_args(parser)
+
+    module.run(
+        parser.parse_args(
+            [
+                "--input-path",
+                "in",
+                "--ref-path",
+                "ref",
+                "--output-dir",
+                "out",
+                *pdf_args,
+            ]
+        )
+    )
+
+    assert received_arguments["overview_pdf_name"] == expected_pdf_name
+
+
+@pytest.mark.parametrize(
     "args",
     [
         ["evaluation", "discharge-evaluation", "-h"],
@@ -852,3 +927,23 @@ def test_ncpus_zero_and_minus_one_use_all_cores(
 
     assert result.exit_code == 0, result.output
     assert received_calls[0]["n_cpus"] == (os.cpu_count() or 1)
+
+
+def test_discharge_eval_comparison_cli_passes_the_crs(monkeypatch):
+    """Hand --crs on to the comparison plots, and None without it."""
+    received_calls = []
+    monkeypatch.setattr(
+        "mhm_tools.post.discharge_eval_comparison.write_discharge_eval_comparison_plots",
+        lambda **kwargs: received_calls.append(kwargs),
+    )
+    command = _build_click_command(
+        "discharge-eval-comparison", _discharge_eval_comparison
+    )
+    arguments = ["--input-path", "run1", "--input-path", "run2", "--output-dir", "out"]
+
+    with_crs = CliRunner().invoke(command, [*arguments, "--crs", "EPSG:3035"])
+    without_crs = CliRunner().invoke(command, arguments)
+
+    assert with_crs.exit_code == 0, with_crs.output
+    assert without_crs.exit_code == 0, without_crs.output
+    assert [call["crs"] for call in received_calls] == ["EPSG:3035", None]

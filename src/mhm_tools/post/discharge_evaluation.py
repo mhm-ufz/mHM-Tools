@@ -2427,6 +2427,15 @@ def evaludate_discharge_data(  # noqa: PLR0913
     if metric_plot_types is None:
         metric_plot_types = ["cdf", "map", "catchment-map"]
     metric_plot_types = list(metric_plot_types)
+    grid_dim_names = (
+        _get_model_grid_dim_names(model_data_path, model_file_name, sim_variable)
+        if gauge_coordinate_file is not None
+        else None
+    )
+    gauges_crs = read_gauge_crs(
+        gauge_coordinate_file if gauge_coordinate_file is not None else scc_gauges_file,
+        grid_dim_names=grid_dim_names,
+    )
     if not only_plot or not stats_output_file.is_file():
         observed_ds, model_ds = Q_data_to_xarray(
             model_data_path=model_data_path,
@@ -2525,6 +2534,10 @@ def evaludate_discharge_data(  # noqa: PLR0913
         else:
             logger.info("Using the results from bootstraping.")
             results_df = pd.DataFrame(results)
+        # the CRS of projected gauge coordinates lets discharge-eval-comparison
+        # draw its maps in it
+        if gauges_crs is not None:
+            results_df["crs"] = CRS.from_user_input(gauges_crs).to_string()
         results_df.to_csv(stats_output_file)
     else:
         logger.info(f"Reading results from {stats_output_file}...")
@@ -2573,19 +2586,6 @@ def evaludate_discharge_data(  # noqa: PLR0913
         years = None
         if start_date is not None and end_date is not None:
             years = (pd.Timestamp(start_date).year, pd.Timestamp(end_date).year)
-        grid_dim_names = (
-            _get_model_grid_dim_names(model_data_path, model_file_name, sim_variable)
-            if gauge_coordinate_file is not None
-            else None
-        )
-        gauges_crs = read_gauge_crs(
-            (
-                gauge_coordinate_file
-                if gauge_coordinate_file is not None
-                else scc_gauges_file
-            ),
-            grid_dim_names=grid_dim_names,
-        )
         metric_plot_files.extend(
             plot_map(results_df, output_path, years=years, crs=gauges_crs) or []
         )

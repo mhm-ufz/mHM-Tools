@@ -278,5 +278,12 @@ def test_selecting_both_metrics_writes_them_into_one_file(tmp_path):
     assert _plotted_metrics(output_dir) == {"kge", "rmse"}
 
 
+def test_twsa_evaluation_writes_the_overview_pdf(tmp_path):
+    """The metrics table and the maps also end up in one PDF."""
+    output_dir = _evaluate(tmp_path, ["kge"])
+
+    assert (output_dir / "twsa_overview_mhm_vs_grace.pdf").is_file()
+
+
 if __name__ == "__main__":
     unittest.main()

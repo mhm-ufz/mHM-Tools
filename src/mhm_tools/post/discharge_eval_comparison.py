@@ -258,8 +258,7 @@ def _resolve_reference_name(reference_name, input_names, dfs_by_name):
     reference_name = reference_name or input_names[0]
     if reference_name not in dfs_by_name:
         msg = (
-            f"--ref-name {reference_name!r} not found among input names "
-            f"{input_names}."
+            f"--ref-name {reference_name!r} not found among input names {input_names}."
         )
         with ErrorLogger(logger):
             raise ValueError(msg)
@@ -284,6 +283,30 @@ def _get_region_extent(region):
     bounds = WMO_REGION_BOUNDS[region]
     lon_slice, lat_slice = bounds["lon_slice"], bounds["lat_slice"]
     return lon_slice.start, lon_slice.stop, lat_slice.start, lat_slice.stop
+
+
+def _get_results_crs(results_df):
+    """Get the CRS of the gauge coordinates stored in a results table.
+
+    Parameters
+    ----------
+    results_df : pandas.DataFrame
+        Results table; discharge-evaluation writes a ``crs`` column for
+        projected gauge coordinates.
+
+    Returns
+    -------
+    str or None
+        The CRS, e.g. "EPSG:3035", or None for lon/lat coordinates.
+    """
+    if "crs" not in results_df.columns:
+        return None
+    crs_values = results_df["crs"].dropna().unique()
+    if len(crs_values) > 1:
+        msg = f"The results hold gauge coordinates in several CRS: {list(crs_values)}."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    return crs_values[0] if len(crs_values) else None
 
 
 def _prepare_discharge_metric_diff_data(
@@ -355,6 +378,7 @@ def plot_discharge_metric_diff_map(
     dpi=PLOT_DPI,
     extent=None,
     region=None,
+    crs=None,
 ):
     """Plot a gauge map of one metric's difference between two runs.
 
@@ -388,6 +412,10 @@ def plot_discharge_metric_diff_map(
         own extent, padded by 10%.
     region : str, optional
         Region name, added to the plot title and output file name.
+    crs : str, optional
+        CRS of projected gauge coordinates, e.g. "EPSG:3035"; the map is then
+        drawn in it. None for lon/lat coordinates. An explicit ``extent`` is
+        always given in lon/lat.
 
     Returns
     -------
@@ -431,7 +459,13 @@ def plot_discharge_metric_diff_map(
         size_scale = (200 / len(diff)) ** 0.5
     point_size = max(4, point_size * size_scale)
 
+    from mhm_tools.post.discharge_evaluation import _create_map_projection
+
+    map_crs, lons, lats = _create_map_projection(crs, lons, lats)
+    # a region extent is given in lon/lat, the data extent in the map's CRS
+    extent_crs = ccrs.PlateCarree()
     if extent is None:
+        extent_crs = map_crs
         min_lon, max_lon = np.nanmin(lons), np.nanmax(lons)
         min_lat, max_lat = np.nanmin(lats), np.nanmax(lats)
         lon_pad = (max_lon - min_lon) * 0.1 or 0.1
@@ -445,9 +479,9 @@ def plot_discharge_metric_diff_map(
 
     fig, ax = plt.subplots(
         figsize=calculate_map_figure_size(extent),
-        subplot_kw={"projection": ccrs.PlateCarree()},
+        subplot_kw={"projection": map_crs},
     )
-    ax.set_extent(extent, crs=ccrs.PlateCarree())
+    ax.set_extent(extent, crs=extent_crs)
     ax.add_feature(cfeature.BORDERS, linewidth=0.3)
     ax.add_feature(cfeature.COASTLINE, linewidth=0.5)
     ax.add_feature(cfeature.LAND, facecolor="0.97")
@@ -463,7 +497,7 @@ def plot_discharge_metric_diff_map(
         alpha=0.85,
         edgecolor="white",
         linewidth=0.25,
-        transform=ccrs.PlateCarree(),
+        transform=map_crs,
     )
     add_map_colorbar(
         fig, ax, sc, bounds, extend, ticks, create_axis_label(f"Δ{variable}")
@@ -500,6 +534,7 @@ def write_discharge_metric_diff_maps(
     reference_name=None,
     cmap="coolwarm_r",
     dpi=PLOT_DPI,
+    crs=None,
 ):
     """Write per-gauge metric diff maps comparing runs against a baseline.
 
@@ -523,6 +558,9 @@ def write_discharge_metric_diff_maps(
         Diverging colormap name, centered on zero.
     dpi : int, optional
         Output image resolution.
+    crs : str, optional
+        CRS of projected gauge coordinates, e.g. "EPSG:3035". Defaults to the
+        ``crs`` column of the baseline run's results, else lon/lat.
 
     Returns
     -------
@@ -542,6 +580,7 @@ def write_discharge_metric_diff_maps(
     dfs_by_name = _read_dfs_by_name(input_paths, input_names, file_names)
     reference_name = _resolve_reference_name(reference_name, input_names, dfs_by_name)
     reference_df = dfs_by_name[reference_name]
+    crs = crs if crs is not None else _get_results_crs(reference_df)
 
     output_files = []
     for other_name, other_df in dfs_by_name.items():
@@ -557,6 +596,7 @@ def write_discharge_metric_diff_maps(
                 output_dir=output_dir,
                 cmap=cmap,
                 dpi=dpi,
+                crs=crs,
             )
             if output_file is not None:
                 output_files.append(output_file)
@@ -573,6 +613,7 @@ def write_discharge_metric_diff_region_maps(
     reference_name=None,
     cmap="coolwarm_r",
     dpi=PLOT_DPI,
+    crs=None,
 ):
     """Write one metric diff map per discharge-evaluation region with data.
 
@@ -601,6 +642,9 @@ def write_discharge_metric_diff_region_maps(
         Diverging colormap name, centered on zero.
     dpi : int, optional
         Output image resolution.
+    crs : str, optional
+        CRS of projected gauge coordinates, e.g. "EPSG:3035". Defaults to the
+        ``crs`` column of the baseline run's results, else lon/lat.
 
     Returns
     -------
@@ -624,6 +668,7 @@ def write_discharge_metric_diff_region_maps(
         df["region"] = df["id"].apply(get_region_from_id)
     reference_name = _resolve_reference_name(reference_name, input_names, dfs_by_name)
     reference_df = dfs_by_name[reference_name]
+    crs = crs if crs is not None else _get_results_crs(reference_df)
 
     output_files = []
     for region in WMO_REGION_BOUNDS:
@@ -645,6 +690,7 @@ def write_discharge_metric_diff_region_maps(
                     dpi=dpi,
                     extent=extent,
                     region=region,
+                    crs=crs,
                 )
                 if output_file is not None:
                     output_files.append(output_file)
@@ -924,6 +970,7 @@ def write_discharge_eval_comparison_plots(  # noqa: PLR0913
     max_mean_factor=30,
     results_file_name="discharge_eval_comparison_results.csv",
     overview_pdf_name="discharge_eval_comparison_overview.pdf",
+    crs=None,
 ):
     """Write discharge-evaluation comparison plots from `results.csv` files.
 
@@ -966,6 +1013,10 @@ def write_discharge_eval_comparison_plots(  # noqa: PLR0913
         Name of the metric summary CSV inside output_dir.
     overview_pdf_name : str, optional
         Name of the overview PDF inside output_dir.
+    crs : str, optional
+        CRS of projected gauge coordinates for the diff maps, e.g.
+        "EPSG:3035". Defaults to the ``crs`` column of the baseline run's
+        results, else lon/lat.
 
     Returns
     -------
@@ -1127,6 +1178,7 @@ def write_discharge_eval_comparison_plots(  # noqa: PLR0913
                     reference_name=reference_name,
                     cmap=map_diff_cmap,
                     dpi=map_diff_dpi,
+                    crs=crs,
                 )
             )
             region_files.extend(
@@ -1138,6 +1190,7 @@ def write_discharge_eval_comparison_plots(  # noqa: PLR0913
                     reference_name=reference_name,
                     cmap=map_diff_cmap,
                     dpi=map_diff_dpi,
+                    crs=crs,
                 )
             )
 

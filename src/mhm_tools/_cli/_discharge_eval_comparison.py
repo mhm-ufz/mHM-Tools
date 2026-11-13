@@ -135,6 +135,15 @@ def add_args(parser):
         help="Output image resolution for map-diff plots.",
     )
     optional.add_argument(
+        "--crs",
+        default=None,
+        help=(
+            "CRS of the gauge x/y in the results, e.g. EPSG:3035, for map-diff. "
+            "Defaults to the crs column discharge-evaluation writes for projected "
+            "gauges, else lon/lat."
+        ),
+    )
+    optional.add_argument(
         "--max-mean-factor",
         required=False,
         default=30.0,
@@ -211,4 +220,5 @@ def run(args):
         max_mean_factor=args.max_mean_factor,
         results_file_name=args.results_file_name,
         overview_pdf_name=args.overview_pdf_name,
+        crs=args.crs,
     )

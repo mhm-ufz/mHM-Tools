@@ -183,35 +183,6 @@ def test_gauges_are_matched_by_coordinates_without_node_station_ids():
     np.testing.assert_array_equal(matched_x, [20.0, 0.0])
 
 
-@pytest.fixture
-def _offline_map_projections(monkeypatch):
-    """Record the projection of every saved map and skip the map features.
-
-    Coastlines and borders would be downloaded by cartopy; the tests only need
-    the gauges, so ``add_feature`` is a no-op.
-
-    Returns
-    -------
-    list
-        The cartopy projection of every figure saved by ``plot_map``.
-    """
-    pytest.importorskip("cartopy")
-    from cartopy.mpl.geoaxes import GeoAxes
-    from matplotlib.figure import Figure
-
-    projections = []
-    save_figure = Figure.savefig
-
-    def record_and_save(figure, *args, **kwargs):
-        """Record the map projection before saving the figure."""
-        projections.append(figure.axes[0].projection)
-        return save_figure(figure, *args, **kwargs)
-
-    monkeypatch.setattr(GeoAxes, "add_feature", lambda *args, **kwargs: None)
-    monkeypatch.setattr(Figure, "savefig", record_and_save)
-    return projections
-
-
 def test_plot_map_draws_gauges_in_degrees_on_a_plate_carree_map(
     tmp_path, _offline_map_projections
 ):
@@ -1048,6 +1019,62 @@ class TestEvaluateDirect(unittest.TestCase):
                 self.assertEqual(df.loc[0, "id"], 42)
                 # plot_cdf not called for small sample sizes
                 mock_plot.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("gauges_crs", "expected_crs"), [("EPSG:3035", "EPSG:3035"), (None, None)]
+)
+def test_discharge_evaluation_writes_the_crs_of_projected_gauges(
+    tmp_path, gauges_crs, expected_crs
+):
+    """Write the CRS of projected gauges as crs column, and none for lon/lat."""
+    from rasterio.crs import CRS
+
+    times = pd.date_range("2005-01-01", periods=3, freq="D")
+    observed_ds = xr.Dataset(
+        {"discharge": (("id", "time"), [[1.0, 2.0, 3.0]])},
+        coords={"id": [42], "time": times},
+    )
+    model_ds = xr.Dataset(
+        {
+            "discharge": (("id", "time"), [[1.0, 2.0, 3.0]]),
+            "facc": (("id",), [1000.0]),
+            "x": (("id",), [4.0e6]),
+            "y": (("id",), [3.0e6]),
+        },
+        coords={"id": [42], "time": times},
+    )
+    with patch.object(
+        discharge_evaluation,
+        "Q_data_to_xarray",
+        return_value=(observed_ds, model_ds),
+    ), patch.object(
+        discharge_evaluation,
+        "gen_hydrograph_by_data_sets",
+        return_value={"id": 42, "alpha": 1.0, "beta": 1.0, "gamma": 0.5},
+    ), patch.object(
+        discharge_evaluation,
+        "read_gauge_crs",
+        return_value=CRS.from_user_input(gauges_crs) if gauges_crs else None,
+    ), patch.object(
+        discharge_evaluation, "plot_map"
+    ):
+        discharge_evaluation.evaludate_discharge_data(
+            model_data_path="sim.nc",
+            observed_data_path="obs.nc",
+            facc_file="restart.nc",
+            output_path=tmp_path,
+            n_jobs=1,
+            direct_comparison=True,
+            n_boostrap_selections=0,
+            overwrite=True,
+        )
+
+    results = pd.read_csv(tmp_path / "discharge_eval_results.csv", index_col=0)
+    if expected_crs is None:
+        assert "crs" not in results.columns
+    else:
+        assert results["crs"].tolist() == [expected_crs]
 
 
 # -----------------------------
