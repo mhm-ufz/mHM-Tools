@@ -18,6 +18,7 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 
+from mhm_tools.common.categorical_raster import _format_categories
 from mhm_tools.common.constants import (
     DEM_DERIVATIVE_EXTENSIONS,
     FACC_UNITS,
@@ -33,7 +34,6 @@ from mhm_tools.common.file_handler import (
     write_xarray_to_geotiff,
     write_xarray_to_netcdf,
 )
-from mhm_tools.common.categorical_raster import _format_categories
 from mhm_tools.common.topography import calculate_aspect, calculate_slope
 from mhm_tools.pre.latlon import xy_to_latlon
 

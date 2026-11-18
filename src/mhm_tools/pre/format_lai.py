@@ -24,12 +24,12 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import NamedTuple, Union
 
-from mhm_tools.common.constants import NO_DATA
-from mhm_tools.common.file_handler import write_xarray_to_file
 from mhm_tools.common.categorical_raster import (
     format_categorical_data,
     get_categorical_output_path,
 )
+from mhm_tools.common.constants import NO_DATA
+from mhm_tools.common.file_handler import write_xarray_to_file
 from mhm_tools.common.lookup_handler import (
     _is_blank,
     _required_integer,

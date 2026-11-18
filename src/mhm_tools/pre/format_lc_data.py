@@ -38,14 +38,14 @@ from rasterio.enums import Resampling
 from rasterio.vrt import WarpedVRT
 from rasterio.windows import Window
 
-from mhm_tools.common.constants import NO_DATA
-from mhm_tools.common.file_handler import write_xarray_to_file
 from mhm_tools.common.categorical_raster import (
     CategoryLookup,
     fill_grid_nodata,
     format_categorical_data,
     get_categorical_output_path,
 )
+from mhm_tools.common.constants import NO_DATA
+from mhm_tools.common.file_handler import write_xarray_to_file
 from mhm_tools.common.lookup_handler import (
     _lookup_mapping,
     _normalise_field_name,
