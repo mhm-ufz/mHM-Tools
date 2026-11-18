@@ -43,7 +43,7 @@ from rasterio.windows import Window
 
 from mhm_tools.common.constants import NO_DATA
 from mhm_tools.common.file_handler import write_xarray_to_file
-from mhm_tools.common.format_data import (
+from mhm_tools.common.categorical_raster import (
     fill_grid_nodata,
     format_categorical_data,
     get_categorical_output_path,
@@ -886,7 +886,7 @@ def _create_soil_dataset(reference, reference_crs, horizons, values):
         attrs={
             "Conventions": "CF-1.8",
             "title": "Horizon-specific soil classes for mHM",
-            "source": "mhm-tools format-data soil manifest",
+            "source": "mhm-tools format-soilgrids",
         },
     )
 

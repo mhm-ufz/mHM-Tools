@@ -40,7 +40,7 @@ from rasterio.windows import Window
 
 from mhm_tools.common.constants import NO_DATA
 from mhm_tools.common.file_handler import write_xarray_to_file
-from mhm_tools.common.format_data import (
+from mhm_tools.common.categorical_raster import (
     CategoryLookup,
     fill_grid_nodata,
     format_categorical_data,
@@ -474,7 +474,7 @@ def _create_lc_dataset(reference, reference_crs, periods, values):
         attrs={
             "Conventions": "CF-1.8",
             "title": "Temporal land-cover classes for mHM",
-            "source": "mhm-tools format-data land-cover manifest",
+            "source": "mhm-tools format-morph-categorical land-cover manifest",
         },
     )
 

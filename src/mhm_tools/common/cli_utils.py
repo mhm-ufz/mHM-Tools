@@ -98,6 +98,51 @@ def add_netcdf_compression_args(parser):
     )
 
 
+def add_format_grid_args(required, optional, input_help):
+    """Add the input, DEM, output and CRS options shared by the format commands.
+
+    Parameters
+    ----------
+    required : argparse._ArgumentGroup
+        Group receiving -i, -d and -o.
+    optional : argparse._ArgumentGroup
+        Group receiving -s and -r.
+    input_help : str
+        Help text of -i, which differs per command.
+
+    Returns
+    -------
+    None
+    """
+    required.add_argument(
+        "-i", "--input-file", dest="input_file", required=True, help=input_help
+    )
+    required.add_argument(
+        "-d",
+        "--dem-file",
+        required=True,
+        help="DEM providing the output grid and coordinate reference system.",
+    )
+    required.add_argument(
+        "-o",
+        "--output-dir",
+        "--output-path",
+        dest="output_path",
+        required=True,
+        help="Directory where the formatted output files are written.",
+    )
+    optional.add_argument(
+        "-s",
+        "--input-crs",
+        help="CRS to assign when the input raster has no CRS metadata.",
+    )
+    optional.add_argument(
+        "-r",
+        "--dem-crs",
+        help="CRS to assign when the DEM has no CRS metadata.",
+    )
+
+
 def add_missing_aspect_arg(parser):
     """Add the --missing-aspect option of the commands that write an aspect.
 

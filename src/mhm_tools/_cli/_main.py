@@ -89,7 +89,9 @@ _COMMAND_GROUPS: List[Tuple[str, str, List[Tuple[str, object]]]] = [
         "Convert maps and categorical data for mHM.",
         [
             ("rasterize-map", "mhm_tools._cli._rasterize_map"),
-            ("format-data", "mhm_tools._cli._format_data"),
+            ("format-morph-categorical", "mhm_tools._cli._format_morph_categorical"),
+            ("format-soilgrids", "mhm_tools._cli._format_soilgrids"),
+            ("format-lai-netcdf", "mhm_tools._cli._format_lai_netcdf"),
         ],
     ),
     (

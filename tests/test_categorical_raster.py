@@ -1,4 +1,4 @@
-"""Tests for the shared helpers behind the format-data workflows."""
+"""Tests for the shared helpers behind the categorical format commands."""
 
 import logging
 
@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from mhm_tools.common.format_data import _reclassify, fill_grid_nodata
+from mhm_tools.common.categorical_raster import _reclassify, fill_grid_nodata
 
 GLOBCOVER_MAPPING = {11.0: 3, 40.0: 1, 190.0: 2, 210.0: 3}
 
@@ -114,7 +114,7 @@ def test_reclassify_logs_unmatched_uint8_categories(caplog, monkeypatch):
     # caplog; monkeypatch restores the setting after this test.
     monkeypatch.setattr(logging.getLogger("mhm_tools"), "propagate", True)
 
-    with caplog.at_level(logging.WARNING, logger="mhm_tools.common.format_data"):
+    with caplog.at_level(logging.WARNING, logger="mhm_tools.common.categorical_raster"):
         classes = _reclassify(create_category_raster(values, 0), GLOBCOVER_MAPPING)
 
     np.testing.assert_array_equal(classes, [[3, -9999, -9999], [-9999, 1, -9999]])

@@ -19,7 +19,7 @@ from typing import Union
 
 import numpy as np
 
-from mhm_tools.common.format_data import (
+from mhm_tools.common.categorical_raster import (
     format_categorical_data,
     get_categorical_output_path,
 )

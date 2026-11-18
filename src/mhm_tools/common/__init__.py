@@ -14,12 +14,12 @@ Files
 .. autosummary::
    :toctree:
 
+   ~mhm_tools.common.categorical_raster
    ~mhm_tools.common.cli_utils
    ~mhm_tools.common.constants
    ~mhm_tools.common.crs_handler
    ~mhm_tools.common.esri_grid
    ~mhm_tools.common.file_handler
-   ~mhm_tools.common.format_data
    ~mhm_tools.common.logger
    ~mhm_tools.common.netcdf
    ~mhm_tools.common.plotter

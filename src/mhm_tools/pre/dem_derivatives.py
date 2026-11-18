@@ -33,7 +33,7 @@ from mhm_tools.common.file_handler import (
     write_xarray_to_geotiff,
     write_xarray_to_netcdf,
 )
-from mhm_tools.common.format_data import _format_categories
+from mhm_tools.common.categorical_raster import _format_categories
 from mhm_tools.common.topography import calculate_aspect, calculate_slope
 from mhm_tools.pre.latlon import xy_to_latlon
 
