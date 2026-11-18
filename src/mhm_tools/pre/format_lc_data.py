@@ -146,16 +146,13 @@ def _raster_crs(dataset, override, label: str) -> CRS:
 
 def _lc_resampling(requested) -> Resampling:
     """Return categorical resampling for a Rasterio virtual warp."""
-    if isinstance(requested, Resampling):
-        return requested
     method = str(getattr(requested, "name", requested)).strip().lower()
     method = {"auto": "mode", "near": "nearest"}.get(method, method)
-    try:
-        return Resampling[method]
-    except KeyError as exc:
-        choices = "nearest, bilinear, cubic, average, or mode"
-        msg = f"Unsupported raster resampling method {requested!r}; expected {choices}."
-        raise ValueError(msg) from exc
+    # bilinear, cubic or average would invent land-cover classes
+    if method not in {"nearest", "mode"}:
+        msg = f"Unsupported resampling {requested!r}; expected auto, nearest or mode."
+        raise ValueError(msg)
+    return Resampling[method]
 
 
 def _lc_windows(dataset):

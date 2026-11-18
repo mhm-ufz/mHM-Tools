@@ -226,7 +226,24 @@ def _soil_classdefinition_text(table, class_field: str) -> str:
         msg = "No valid soil horizon rows were found."
         raise ValueError(msg)
 
+    # several raster codes may share a soil class, whose horizons mHM reads once
+    unique_rows = {}
+    for row in output_rows:
+        key = (row["soil_class"], row["horizon"])
+        if unique_rows.setdefault(key, row) != row:
+            msg = f"Soil class {key[0]} horizon {key[1]} has differing lookup rows."
+            raise ValueError(msg)
+    output_rows = list(unique_rows.values())
+    # mHM uses the soil class as index, so the classes must be 1..N
     unique_soil_classes = {row["soil_class"] for row in output_rows}
+    expected_classes = set(range(1, len(unique_soil_classes) + 1))
+    if unique_soil_classes != expected_classes:
+        missing = sorted(expected_classes - unique_soil_classes)
+        msg = (
+            f"mHM needs soil classes numbered 1 to {len(expected_classes)}; "
+            f"missing: {missing}."
+        )
+        raise ValueError(msg)
     lines = [f"nSoil_Types {len(unique_soil_classes)}\n", _CLASSDEFINITION_HEADER]
     for row in output_rows:
         lines.append(

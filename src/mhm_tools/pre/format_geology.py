@@ -70,7 +70,8 @@ def _required_bool_int(value: object, row_number: int, field: object) -> int:
     if _is_blank(value):
         msg = f"Row {row_number} has an empty value for required field {field!r}."
         raise ValueError(msg)
-    if isinstance(value, (bool, np.bool_)):
+    # booleans and numbers, e.g. 1.0 from a REAL column
+    if isinstance(value, (bool, int, float, np.bool_, np.number)) and value in (0, 1):
         return int(value)
 
     value_text = str(value).strip().lower()
@@ -117,22 +118,29 @@ def _classdefinition_rows(table, class_field: str) -> list:
     geo_class_field = geo_class_field or geology_class_field
     karstic_field = _required_field(field_lookup, "KARSTIC")
 
-    rows = []
+    rows = {}
     for row_number, (_, row) in enumerate(table.iterrows(), start=2):
-        rows.append(
-            {
-                "geo_param": _required_integer(
-                    row[geo_class_field], geo_class_field, row_number
-                ),
-                "class_unit": _required_integer(
-                    row[geology_class_field], geology_class_field, row_number
-                ),
-                "karstic": _required_bool_int(
-                    row[karstic_field], row_number, karstic_field
-                ),
-            }
-        )
-    return sorted(rows, key=lambda item: (item["geo_param"], item["class_unit"]))
+        entry = {
+            "geo_param": _required_integer(
+                row[geo_class_field], geo_class_field, row_number
+            ),
+            "class_unit": _required_integer(
+                row[geology_class_field], geology_class_field, row_number
+            ),
+            "karstic": _required_bool_int(
+                row[karstic_field], row_number, karstic_field
+            ),
+        }
+        # several raster codes may share a class unit, which mHM must see once
+        if rows.setdefault(entry["class_unit"], entry) != entry:
+            msg = (
+                f"Row {row_number} gives class unit {entry['class_unit']} other "
+                "GeoParam or Karstic values than an earlier row."
+            )
+            raise ValueError(msg)
+    return sorted(
+        rows.values(), key=lambda item: (item["geo_param"], item["class_unit"])
+    )
 
 
 def _classdefinition_text(table, class_field: str) -> str:

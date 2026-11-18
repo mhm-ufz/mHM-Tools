@@ -77,10 +77,10 @@ def add_args(parser: ArgumentParser) -> None:
     )
     optional.add_argument(
         "--resampling",
-        choices=("auto", "nearest", "bilinear", "cubic", "average", "mode"),
+        choices=("auto", "nearest", "mode"),
         help=(
-            "Spatial resampling method. Default: nearest for soil, geology and "
-            "lai, auto (majority/nearest for classes) for lc."
+            "Spatial resampling method of the classes. Default: nearest for "
+            "soil, geology and lai, auto (majority/nearest) for lc."
         ),
     )
     optional.add_argument(

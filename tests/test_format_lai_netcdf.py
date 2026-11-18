@@ -395,3 +395,152 @@ def test_lai_disk_guard_accounts_for_uncompressed_output(monkeypatch, tmp_path):
         format_lai.assert_lai_output_fits(
             12, 4, 6, tmp_path, compression=NetcdfCompression(complevel=0)
         )
+
+
+def _write_lai_at(path: Path, times, values=None, encoding=None) -> None:
+    """Write an LAI cube on the grid of ``_write_lai`` at the given times.
+
+    Args:
+        path (Path): Output NetCDF file.
+        times (array-like): Time stamps of the cube.
+        values (numpy.ndarray): LAI of shape (time, 3, 2); 1.0 by default.
+        encoding (dict): Encoding of the ``lai`` variable, or None.
+    """
+    values = np.ones((len(times), 3, 2)) if values is None else values
+    xr.DataArray(
+        values,
+        dims=("time", "lat", "lon"),
+        coords={"time": times, "lat": [30.0, 30.5, 31.0], "lon": [99.5, 101.5]},
+        name="lai",
+    ).to_dataset().to_netcdf(path, encoding={"lai": encoding or {}})
+
+
+def test_mid_month_stamps_fill_their_whole_month():
+    """Monthly LAI stamped on the 15th covers its month from the 1st on."""
+    times = pd.to_datetime(["2001-01-15", "2001-02-15", "2001-03-15"])
+    monthly = xr.DataArray([1.0, 2.0, 3.0], dims=("time",), coords={"time": times})
+
+    daily = prepare_lai_temporal(monthly, "daily").data
+
+    assert pd.Timestamp(daily["time"].values[0]) == pd.Timestamp("2001-01-01")
+    assert daily.sizes["time"] == 31 + 28 + 31
+    assert daily.sel(time="2001-02-10").item() == 2.0
+
+
+def test_float32_axes_count_as_regular():
+    """Float32 rounding near 180 degrees must not make a 1/12 degree axis irregular."""
+    axis = (80.0 + (np.arange(1200) + 0.5) / 12).astype("float32")
+
+    assert format_lai._axis_step(axis, "longitude") == pytest.approx(1 / 12, rel=1e-4)
+
+
+def test_lai_variable_is_preferred_over_other_cubes():
+    """A file holding Fpar and Lai uses Lai, and two unnamed cubes need a choice."""
+    cube = xr.DataArray(np.zeros((2, 2, 2)), dims=("time", "lat", "lon"))
+    dataset = xr.Dataset({"Fpar_500m": cube, "Lai_500m": cube})
+
+    assert format_lai.find_variable(dataset, None, "lat", "lon").name == "Lai_500m"
+    with pytest.raises(ValueError, match="--source-variable"):
+        format_lai.find_variable(
+            dataset.rename({"Lai_500m": "other"}), None, "lat", "lon"
+        )
+
+
+def test_a_month_without_data_raises_instead_of_lai_zero(tmp_path: Path):
+    """Daily LAI without March cannot give a monthly March."""
+    times = pd.date_range("2001-01-01", "2001-05-31", freq="D")
+    times = times[times.month != 3]
+    _write_lai_at(tmp_path / "lai.nc", times)
+    _write_dem(tmp_path / "dem.tif")
+
+    with pytest.raises(ValueError, match="no data at 1 output time step"):
+        format_lai_netcdf_file(
+            tmp_path / "lai.nc",
+            tmp_path / "dem.tif",
+            tmp_path / "out.nc",
+            output_temporal_resolution="monthly",
+        )
+
+
+def test_noleap_calendar_keeps_the_real_months():
+    """A noleap October-September year is averaged by its real months."""
+    times = xr.date_range(
+        "2000-10-01", periods=12, freq="MS", calendar="noleap", use_cftime=True
+    )
+    data = xr.DataArray(np.arange(12.0), dims=("time",), coords={"time": times})
+
+    monthly = prepare_lai_temporal(data, "long-term-mean-monthly").data
+
+    assert monthly.sel(time=10).item() == 0.0
+    assert monthly.sel(time=1).item() == 3.0
+
+
+def test_packed_codes_outside_valid_range_are_not_lai(tmp_path: Path):
+    """MODIS-like fill code 254 with valid_range 0..100 must not become LAI 25.4."""
+    values = np.full((12, 3, 2), 1.0)
+    values[:, 0, 0] = 25.4
+    _write_lai_at(
+        tmp_path / "lai.nc",
+        pd.date_range("2001-01-01", periods=12, freq="MS"),
+        values,
+        encoding={"dtype": "int16", "scale_factor": 0.1},
+    )
+    with netCDF4.Dataset(tmp_path / "lai.nc", "a") as dataset:
+        dataset["lai"].setncattr("valid_range", np.array([0, 100], dtype="int16"))
+    _write_dem(tmp_path / "dem.tif")
+
+    output = format_lai_netcdf_file(
+        tmp_path / "lai.nc", tmp_path / "dem.tif", tmp_path / "out.nc"
+    )
+
+    with xr.open_dataset(output) as result:
+        assert np.nanmax(result["lai"].values) == pytest.approx(1.0)
+
+
+def test_projected_axes_without_grid_mapping_need_an_input_crs(tmp_path: Path):
+    """x/y in metres without a grid mapping must not be read as degrees."""
+    xr.DataArray(
+        np.ones((12, 3, 4)),
+        dims=("time", "y", "x"),
+        coords={
+            "time": pd.date_range("2001-01-01", periods=12, freq="MS"),
+            "y": 3300000.0 + 5000.0 * np.arange(3),
+            "x": 500000.0 + 5000.0 * np.arange(4),
+        },
+        name="lai",
+    ).to_dataset().to_netcdf(tmp_path / "lai.nc")
+    _write_dem(tmp_path / "dem.tif")
+
+    with pytest.raises(ValueError, match="--input-crs"):
+        format_lai_netcdf_file(
+            tmp_path / "lai.nc", tmp_path / "dem.tif", tmp_path / "out.nc"
+        )
+
+
+def test_global_lai_is_cut_to_the_dem_before_aggregation(tmp_path: Path, monkeypatch):
+    """Only the source cells around a small DEM reach the time aggregation."""
+    xr.DataArray(
+        np.ones((12, 180, 360)),
+        dims=("time", "lat", "lon"),
+        coords={
+            "time": pd.date_range("2001-01-01", periods=12, freq="MS"),
+            "lat": np.arange(-89.5, 90),
+            "lon": np.arange(-179.5, 180),
+        },
+        name="lai",
+    ).to_dataset().to_netcdf(tmp_path / "lai.nc")
+    _write_dem(tmp_path / "dem.tif")
+    sizes = []
+
+    def record_sizes(data, *args, **kwargs):
+        """Record the spatial size of the cube passed to the aggregation."""
+        sizes.append((data.sizes["lat"], data.sizes["lon"]))
+        return prepare_lai_temporal(data, *args, **kwargs)
+
+    monkeypatch.setattr(format_lai, "prepare_lai_temporal", record_sizes)
+    format_lai_netcdf_file(
+        tmp_path / "lai.nc", tmp_path / "dem.tif", tmp_path / "out.nc"
+    )
+
+    # the 0.5 degree DEM spans 2 x 3 degrees, plus one DEM cell and 2 LAI cells
+    assert sizes and sizes[0][0] < 10 and sizes[0][1] < 10

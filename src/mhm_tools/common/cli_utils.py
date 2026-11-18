@@ -98,7 +98,12 @@ def add_netcdf_compression_args(parser):
     )
 
 
-def add_format_grid_args(required, optional, input_help):
+def add_format_grid_args(
+    required,
+    optional,
+    input_help,
+    input_crs_help="CRS to assign when the input raster has no CRS metadata.",
+):
     """Add the input, DEM, output and CRS options shared by the format commands.
 
     Parameters
@@ -109,6 +114,8 @@ def add_format_grid_args(required, optional, input_help):
         Group receiving -s and -r.
     input_help : str
         Help text of -i, which differs per command.
+    input_crs_help : str
+        Help text of -s.
 
     Returns
     -------
@@ -131,11 +138,7 @@ def add_format_grid_args(required, optional, input_help):
         required=True,
         help="Directory where the formatted output files are written.",
     )
-    optional.add_argument(
-        "-s",
-        "--input-crs",
-        help="CRS to assign when the input raster has no CRS metadata.",
-    )
+    optional.add_argument("-s", "--input-crs", help=input_crs_help)
     optional.add_argument(
         "-r",
         "--dem-crs",

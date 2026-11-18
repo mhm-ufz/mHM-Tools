@@ -45,9 +45,14 @@ def test_aspect_is_the_compass_bearing_of_the_steepest_descent(
     assert aspect[2, 2] == pytest.approx(expected)
 
 
-def test_aspect_of_flat_ground_is_90_by_default():
-    """Give flat cells 90 degrees, neutral in the PET aspect correction of mHM."""
-    aspect = calculate_aspect(np.full((3, 3), 12.0), from_origin(0.0, 3.0, 1.0, 1.0))
+@pytest.mark.parametrize("elevation", [12.0, 0.1, 49.58])
+def test_aspect_of_flat_ground_is_90_by_default(elevation):
+    """Give flat cells 90 degrees, neutral in the PET aspect correction of mHM.
+
+    Elevations like 0.1 are not exact in binary, which must not tilt a flat cell.
+    """
+    flat = np.full((3, 3), elevation)
+    aspect = calculate_aspect(flat, from_origin(0.0, 3.0, 1.0, 1.0))
     np.testing.assert_array_equal(aspect, 90.0)
 
 

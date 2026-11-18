@@ -26,7 +26,7 @@ from mhm_tools.common.constants import (
     FDIR_FILLVALUE,
     NO_DATA,
 )
-from mhm_tools.common.crs_handler import resolve_crs
+from mhm_tools.common.crs_handler import resolve_crs, set_spatial_dims
 from mhm_tools.common.file_handler import (
     get_nodata,
     get_raster_data,
@@ -82,17 +82,21 @@ def create_dem_derivatives(
     extension = _validate_extension(output_extension)
     variable_attrs = create_variable_attrs(facc_unit)
     # flow directions and aspect assume that the first row is the northernmost
-    dem = get_raster_data(
+    opened = get_raster_data(
         input_file, var_name=var_name, crs=crs, force_decending_y=True
     )
+    dem = opened
     try:
+        # the values are processed as (y, x), also for inputs stored as (x, y)
+        if dem.dims != (dem.rio.y_dim, dem.rio.x_dim):
+            dem = set_spatial_dims(dem.transpose(dem.rio.y_dim, dem.rio.x_dim))
         resolved_crs = resolve_crs(dem, crs, required=True)
         derivatives = compute_dem_derivatives(
             dem, resolved_crs, facc_unit=facc_unit, missing_aspect=missing_aspect
         )
         grid = _grid_coordinates(dem, resolved_crs)
     finally:
-        dem.close()
+        opened.close()
 
     output_path = Path(output_path)
     if extension == "nc":
@@ -140,17 +144,21 @@ def create_facc_from_fdir(
     extension = _validate_extension(output_extension)
     variable_attrs = create_variable_attrs(facc_unit)
     # the flow direction codes assume that the first row is the northernmost
-    fdir = get_raster_data(
+    opened = get_raster_data(
         input_file, var_name=var_name, crs=crs, force_decending_y=True
     )
+    fdir = opened
     try:
+        # the values are processed as (y, x), also for inputs stored as (x, y)
+        if fdir.dims != (fdir.rio.y_dim, fdir.rio.x_dim):
+            fdir = set_spatial_dims(fdir.transpose(fdir.rio.y_dim, fdir.rio.x_dim))
         resolved_crs = resolve_crs(fdir, crs, required=True)
         facc = compute_facc_from_fdir(
             fdir, resolved_crs, ftype=ftype, facc_unit=facc_unit
         )
         grid = _grid_coordinates(fdir, resolved_crs)
     finally:
-        fdir.close()
+        opened.close()
 
     output_path = Path(output_path)
     if extension == "nc":

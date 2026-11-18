@@ -193,3 +193,23 @@ def test_dem_derivatives_ascending_lat_matches_descending(tmp_path):
                 north[name].sortby("y", ascending=False).values,
                 err_msg=name,
             )
+
+
+def test_dem_derivatives_of_a_lon_lat_ordered_dem_match_lat_lon(tmp_path):
+    """Derive the same fields and grid from a DEM stored as (lon, lat)."""
+    lat = 50.045 - 0.01 * np.arange(5)
+    lat_lon = _write_netcdf_dem(tmp_path / "lat_lon.nc", _slope_dem(), lat)
+    lon_lat = tmp_path / "lon_lat.nc"
+    with xr.open_dataset(lat_lon) as ds:
+        ds.transpose("lon", "lat").to_netcdf(lon_lat)
+
+    (reference_file,) = create_dem_derivatives(lat_lon, tmp_path / "lat_lon_out.nc")
+    (output_file,) = create_dem_derivatives(lon_lat, tmp_path / "lon_lat_out.nc")
+
+    with xr.open_dataset(reference_file) as reference, xr.open_dataset(
+        output_file
+    ) as output:
+        for name in (*DERIVATIVE_ATTRS, "lat", "lon"):
+            np.testing.assert_allclose(
+                output[name].values, reference[name].values, err_msg=name
+            )

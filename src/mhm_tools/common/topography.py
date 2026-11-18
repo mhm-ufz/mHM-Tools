@@ -75,8 +75,10 @@ def calculate_aspect(
     centre = np.where(invalid, np.nan, values)
     padded = np.pad(centre, 1, constant_values=np.nan)
     rows, cols = centre.shape
-    gradient_east = np.zeros(centre.shape)
-    gradient_north = np.zeros(centre.shape)
+    # sums of the east/west and north/south neighbours, kept apart so that
+    # equal neighbours cancel exactly and flat cells are detected as flat
+    east_west = np.zeros((2, rows, cols))
+    north_south = np.zeros((2, rows, cols))
     for row_offset in (-1, 0, 1):
         for col_offset in (-1, 0, 1):
             window = padded[
@@ -85,9 +87,13 @@ def calculate_aspect(
             ]
             neighbour = np.where(np.isnan(window), centre, window)
             # Horn weights the side neighbours twice as heavily as the corners
-            gradient_east += col_offset * (2 - abs(row_offset)) * neighbour
-            gradient_north -= row_offset * (2 - abs(col_offset)) * neighbour
+            if col_offset:
+                east_west[int(col_offset < 0)] += (2 - abs(row_offset)) * neighbour
+            if row_offset:
+                north_south[int(row_offset > 0)] += (2 - abs(col_offset)) * neighbour
     del padded
+    gradient_east = east_west[0] - east_west[1]
+    gradient_north = north_south[0] - north_south[1]
     if latlon:
         from pyflwdir.gis_utils import degree_metres_x, degree_metres_y
 

@@ -30,6 +30,12 @@
 
 ### Fixed
 
+- `topography-upscaling` gives flat cells the `--missing-aspect` also on float DEMs with decimals, e.g. read from `.asc`. Rounding left a residue of about 1e-15 in the north-south gradient of `calculate_aspect`, so flat cells got 0 or 180, i.e. north- or south-facing.
+- `create-dem-derivatives` reads a DEM or flow direction stored as (x, y) or (lon, lat). Before, it derived every field on the transposed grid and swapped the x and y coordinates.
+- `format-morph-categorical` keeps the orientation of a DEM stored as (x, y), refuses `bilinear`, `cubic` and `average` resampling, which invent classes, also for land-cover manifests, and raises when no class lies inside the DEM domain, e.g. after a wrong `-s`, instead of writing a raster of nodata.
+- `format-morph-categorical -t geology` and `-t soil` list raster codes that share a class unit or soil class once in the class definition and refuse duplicates that disagree. Before, mHM read one parameter set per duplicated row or miscounted the soil horizons. Soil classes must be numbered 1 to N, as mHM uses them as index, and a REAL KARSTIC column holding 1.0 and 0.0 is accepted.
+- `format-morph-categorical -t lai` writes `LAI_class.*`, the name mHM reads, instead of `lai_class.*`. `LAI_classdefinition.txt` keeps a space between values of eight or more characters, and joins land-use names with spaces, commas or slashes by `_`, so mHM's list-directed read neither runs values together nor splits a name.
+- `format-lai-netcdf` assigns monthly or annual LAI stamped mid- or end-period to its whole period instead of shifting it, raises for a time step without data instead of writing LAI 0, reads noleap and other cftime calendars by their real months, masks values outside `valid_range`, `valid_min` or `valid_max` such as the MODIS fill codes 248-254, asks for `--input-crs` for x/y axes without grid mapping instead of reading them as degrees, and accepts float32 axes at 1/12 or 0.1 degree. A file with several cubes uses the one named like LAI or asks for the new `--source-variable` instead of taking the first, e.g. FPAR. Only the source cells around the DEM are read, so a global record no longer has to fit into memory.
 - `format_lai_netcdf_file` warps projected x/y LAI from its CF grid mapping, or from the new `input_crs`, instead of reading every source as lon/lat. A curvilinear LAI with 2D latitude and longitude is warped straight onto the DEM through its geolocation arrays; this needs rasterio 1.4 or newer, other LAI grids work with any rasterio.
 - `link-folder-tree` links nothing when `--output-dir` is `--input-dir`, also when given by another path. With `--overwrite` it previously deleted every file and replaced it with a link to itself.
 - `discharge-evaluation` in bootstrap mode wrote the mean ratio as `alpha` and the standard deviation ratio as `beta`, the reverse of the KGE components and of direct mode. Its CDF plots no longer fail on the missing `kge` and `nse` columns.
@@ -46,6 +52,8 @@
 
 ### Tests
 
+- Format commands: (x, y) DEMs, refused class-inventing resampling and input outside the DEM; deduplicated and gap-checked geology and soil class definitions and a REAL KARSTIC column; the LAI class file name and definition spacing; for gridded LAI mid-month stamps, float32 axes, the variable choice and `--source-variable`, a missing month, a noleap calendar, `valid_range`, projected axes without CRS and the crop to the DEM.
+- `calculate_aspect`: flat cells at 0.1 and 49.58 m; `create-dem-derivatives`: a DEM stored as (lon, lat).
 - The `test` extra installs mHM 5.13 or newer, and the GitLab test job stops before pytest if mHM cannot be imported, so the restart creation tests run the real mHM import check. `scripts/install_mhm_tools.sh --extras test` takes mHM from conda-forge.
 - CLI: exit code 0 when a command returns a result, and Click's exit codes for `-h`, `--version` and an unknown option.
 - `crop-mhm-setup`: a read-only source copied as a writable file that a second crop overwrites, and a header written without a mask warning when no mask is given.

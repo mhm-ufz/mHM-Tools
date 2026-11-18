@@ -140,18 +140,26 @@ def test_format_help_documents_manifest_layout(command, header, example_row):
 
 
 @pytest.mark.parametrize(
-    ("extra_args", "expected_resolution", "expected_resampling"),
+    ("extra_args", "expected_resolution", "expected_resampling", "expected_variable"),
     [
-        ([], "long-term-mean-monthly", "bilinear"),
+        ([], "long-term-mean-monthly", "bilinear", None),
         (
-            ["--output-temporal-resolution", "monthly", "--resampling", "nearest"],
+            [
+                "--output-temporal-resolution",
+                "monthly",
+                "--resampling",
+                "nearest",
+                "--source-variable",
+                "Lai_500m",
+            ],
             "monthly",
             "nearest",
+            "Lai_500m",
         ),
     ],
 )
 def test_format_lai_netcdf_dispatches_with_defaults(
-    monkeypatch, extra_args, expected_resolution, expected_resampling
+    monkeypatch, extra_args, expected_resolution, expected_resampling, expected_variable
 ):
     """Gridded LAI needs no lookup and falls back to the documented defaults."""
     captured = _capture_formatter(
@@ -178,6 +186,7 @@ def test_format_lai_netcdf_dispatches_with_defaults(
         "dem_file": Path("dem.tif"),
         "output_path": Path("output"),
         "output_temporal_resolution": expected_resolution,
+        "source_variable": expected_variable,
         "input_crs": "EPSG:32737",
         "dem_crs": None,
         "resampling": expected_resampling,

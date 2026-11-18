@@ -23,7 +23,20 @@ def add_args(parser: ArgumentParser) -> None:
     required = parser.add_argument_group("required arguments")
     optional = parser.add_argument_group("optional arguments")
     add_format_grid_args(
-        required, optional, input_help="Path to the gridded LAI NetCDF file."
+        required,
+        optional,
+        input_help="Path to the gridded LAI NetCDF file.",
+        input_crs_help=(
+            "CRS of the LAI x/y coordinates, overriding their grid mapping. "
+            "Default: the grid mapping, else lon/lat (EPSG:4326)."
+        ),
+    )
+    optional.add_argument(
+        "--source-variable",
+        help=(
+            "LAI variable to read. Default: lai, LAI, leaf_area_index, or the "
+            "only time-varying grid named like LAI."
+        ),
     )
     optional.add_argument(
         "--output-temporal-resolution",
@@ -59,6 +72,7 @@ def run(args: Namespace) -> None:
         dem_file=Path(args.dem_file),
         output_path=Path(args.output_path),
         output_temporal_resolution=args.output_temporal_resolution,
+        source_variable=args.source_variable,
         input_crs=args.input_crs,
         dem_crs=args.dem_crs,
         resampling=args.resampling,
