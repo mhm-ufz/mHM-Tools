@@ -437,3 +437,22 @@ def check_grid_compatibility(header_1, header_2, name_1="LA", name_2="LB"):
         )
         with ErrorLogger(logger):
             raise ValueError(msg)
+
+
+def get_header_cell_centers(header):
+    """Return the cell-centre coordinates of an ASCII grid header.
+
+    Parameters
+    ----------
+    header : dict
+        Header with ncols, nrows, xllcorner, yllcorner and cellsize.
+
+    Returns
+    -------
+    tuple of numpy.ndarray
+        x centres from west to east and y centres from north to south.
+    """
+    cellsize = float(header["cellsize"])
+    x_values = float(header["xllcorner"]) + (np.arange(int(header["ncols"])) + 0.5) * cellsize
+    y_values = float(header["yllcorner"]) + (np.arange(int(header["nrows"])) + 0.5) * cellsize
+    return x_values, y_values[::-1]

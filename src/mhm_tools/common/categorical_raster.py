@@ -35,6 +35,8 @@ logger = logging.getLogger(__name__)
 PathLike = Union[str, Path]
 _INPUT_SUFFIXES = {".asc", ".nc", ".tif", ".tiff"}
 _OUTPUT_SUFFIXES = {".asc", ".nc", ".tif"}
+# methods that keep class values; bilinear, cubic or average would invent classes
+_CLASS_RESAMPLING = ("auto", "nearest", "mode")
 _NODATA = np.int32(NO_DATA)
 _LOOKUP_INDEX_DTYPES = {1: np.uint8, 2: np.uint16}
 _LOOKUP_CHUNK_SIZE = 2**24
@@ -48,7 +50,7 @@ def get_categorical_output_path(
     if f".{extension}" not in _OUTPUT_SUFFIXES:
         msg = "Output extension must be 'nc', 'asc', or 'tif'."
         raise ValueError(msg)
-    return Path(output_path) / f"{output_name.lower()}.{extension}"
+    return Path(output_path) / f"{output_name}.{extension}"
 
 
 def _nodata_values(data: xr.DataArray):
@@ -448,6 +450,15 @@ def prepare_categorical_data(
         suffixes = ", ".join(sorted(_INPUT_SUFFIXES))
         msg = f"Input must be a raster with one of these suffixes: {suffixes}."
         raise ValueError(msg)
+    if str(getattr(resampling, "name", resampling)).lower() not in _CLASS_RESAMPLING:
+        msg = (
+            f"Resampling {resampling!r} would invent classes; use one of "
+            f"{', '.join(_CLASS_RESAMPLING)}."
+        )
+        raise ValueError(msg)
+    # the aligned values come in (y, x) order, so the output grid must as well
+    reference = set_spatial_dims(reference)
+    reference = reference.transpose(reference.rio.y_dim, reference.rio.x_dim)
 
     source = get_raster_data(input_file, crs=input_crs)
     try:
@@ -467,6 +478,12 @@ def prepare_categorical_data(
             mask_reference=mask_reference,
         )
         values = np.asarray(aligned.values, dtype=np.int32)
+        if not np.any((values != _NODATA) & _reference_valid(reference)):
+            msg = (
+                f"No class of {input_file} lies inside the reference domain; "
+                "check that the input and reference CRS are correct."
+            )
+            raise ValueError(msg)
         if fill_nodata:
             values = _fill_aligned_nodata(
                 values,

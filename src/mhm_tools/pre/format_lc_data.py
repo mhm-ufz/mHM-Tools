@@ -38,14 +38,14 @@ from rasterio.enums import Resampling
 from rasterio.vrt import WarpedVRT
 from rasterio.windows import Window
 
-from mhm_tools.common.constants import NO_DATA
-from mhm_tools.common.file_handler import write_xarray_to_file
-from mhm_tools.common.format_data import (
+from mhm_tools.common.categorical_raster import (
     CategoryLookup,
     fill_grid_nodata,
     format_categorical_data,
     get_categorical_output_path,
 )
+from mhm_tools.common.constants import NO_DATA
+from mhm_tools.common.file_handler import write_xarray_to_file
 from mhm_tools.common.lookup_handler import (
     _lookup_mapping,
     _normalise_field_name,
@@ -146,16 +146,13 @@ def _raster_crs(dataset, override, label: str) -> CRS:
 
 def _lc_resampling(requested) -> Resampling:
     """Return categorical resampling for a Rasterio virtual warp."""
-    if isinstance(requested, Resampling):
-        return requested
     method = str(getattr(requested, "name", requested)).strip().lower()
     method = {"auto": "mode", "near": "nearest"}.get(method, method)
-    try:
-        return Resampling[method]
-    except KeyError as exc:
-        choices = "nearest, bilinear, cubic, average, or mode"
-        msg = f"Unsupported raster resampling method {requested!r}; expected {choices}."
-        raise ValueError(msg) from exc
+    # bilinear, cubic or average would invent land-cover classes
+    if method not in {"nearest", "mode"}:
+        msg = f"Unsupported resampling {requested!r}; expected auto, nearest or mode."
+        raise ValueError(msg)
+    return Resampling[method]
 
 
 def _lc_windows(dataset):
@@ -474,7 +471,7 @@ def _create_lc_dataset(reference, reference_crs, periods, values):
         attrs={
             "Conventions": "CF-1.8",
             "title": "Temporal land-cover classes for mHM",
-            "source": "mhm-tools format-data land-cover manifest",
+            "source": "mhm-tools format-morph-categorical land-cover manifest",
         },
     )
 

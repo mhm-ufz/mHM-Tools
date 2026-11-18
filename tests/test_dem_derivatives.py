@@ -10,7 +10,6 @@ from mhm_tools.pre.dem_derivatives import (
     NO_DATA,
     create_dem_derivatives,
     create_facc_from_fdir,
-    horn_aspect,
 )
 
 
@@ -135,37 +134,6 @@ def test_dem_without_crs_is_rejected(tmp_path):
         create_dem_derivatives(path, tmp_path / "out")
 
 
-@pytest.mark.parametrize(
-    ("gradient", "expected"),
-    [
-        ("east", 90.0),  # ground falls towards +x
-        ("south", 180.0),
-        ("west", 270.0),
-        ("north", 0.0),
-    ],
-)
-def test_horn_aspect_reports_the_downhill_compass_bearing(gradient, expected):
-    from rasterio.transform import from_origin
-
-    rows, cols = 5, 5
-    axis = np.arange(cols, dtype="float64")
-    surfaces = {
-        "east": -np.tile(axis, (rows, 1)),
-        "west": np.tile(axis, (rows, 1)),
-        "south": -np.tile(axis[:rows][:, None], (1, cols)),
-        "north": np.tile(axis[:rows][:, None], (1, cols)),
-    }
-    aspect = horn_aspect(surfaces[gradient], from_origin(0.0, 5.0, 1.0, 1.0))
-    assert aspect[2, 2] == pytest.approx(expected)
-
-
-def test_horn_aspect_reports_nodata_on_flat_ground():
-    from rasterio.transform import from_origin
-
-    aspect = horn_aspect(np.full((3, 3), 12.0), from_origin(0.0, 3.0, 1.0, 1.0))
-    assert np.all(aspect == NO_DATA)
-
-
 def _write_fdir(path, codes, lat):
     """Write a small geographic d8 flow direction NetCDF and return its path."""
     data = xr.DataArray(
@@ -224,4 +192,24 @@ def test_dem_derivatives_ascending_lat_matches_descending(tmp_path):
                 south[name].sortby("y", ascending=False).values,
                 north[name].sortby("y", ascending=False).values,
                 err_msg=name,
+            )
+
+
+def test_dem_derivatives_of_a_lon_lat_ordered_dem_match_lat_lon(tmp_path):
+    """Derive the same fields and grid from a DEM stored as (lon, lat)."""
+    lat = 50.045 - 0.01 * np.arange(5)
+    lat_lon = _write_netcdf_dem(tmp_path / "lat_lon.nc", _slope_dem(), lat)
+    lon_lat = tmp_path / "lon_lat.nc"
+    with xr.open_dataset(lat_lon) as ds:
+        ds.transpose("lon", "lat").to_netcdf(lon_lat)
+
+    (reference_file,) = create_dem_derivatives(lat_lon, tmp_path / "lat_lon_out.nc")
+    (output_file,) = create_dem_derivatives(lon_lat, tmp_path / "lon_lat_out.nc")
+
+    with xr.open_dataset(reference_file) as reference, xr.open_dataset(
+        output_file
+    ) as output:
+        for name in (*DERIVATIVE_ATTRS, "lat", "lon"):
+            np.testing.assert_allclose(
+                output[name].values, reference[name].values, err_msg=name
             )

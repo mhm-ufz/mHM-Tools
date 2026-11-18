@@ -143,7 +143,7 @@ def read_format_manifest(input_file: PathLike, required_columns):
     try:
         table = pd.read_csv(manifest)
     except Exception as exc:
-        msg = f"Could not read format-data manifest {manifest}: {exc}"
+        msg = f"Could not read manifest {manifest}: {exc}"
         raise ValueError(msg) from exc
     if table.empty:
         msg = f"Format-data manifest {manifest} is empty."
