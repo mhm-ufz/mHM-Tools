@@ -68,10 +68,7 @@ def add_args(parser: ArgumentParser) -> None:
         "--bulkdensity-step",
         type=float,
         default=0.1,
-        help=(
-            "Bulk-density class interval of the asc (mHM v5) output; nc classes "
-            "are keyed on texture and keep the class mean. Default: 0.1."
-        ),
+        help="Bulk-density class interval. Default: 0.1.",
     )
     optional.add_argument(
         "--no-fill-nodata",
