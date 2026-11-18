@@ -34,7 +34,6 @@ from mhm_tools._cli import (
     _latlon,
     _link_folder_tree,
     _long_term_mean,
-    _merge,
     _metric_plots,
     _mhm_run_overview,
     _prepare_mhm_forcings,
@@ -326,7 +325,6 @@ RENAMED_OPTIONS = (
         ("--output-name", "--out-file"),
         "out_file",
     ),
-    (_merge, "--input-file-name", ("--input-name",), "input_name"),
     (
         _metric_plots,
         "--input-file-name",
@@ -831,12 +829,6 @@ def test_ratio_cli_defaults_to_ratio_nc():
             _fill_nearest,
             "mhm_tools.pre.fill_nearest.fill_nearest",
             ["-i", "input", "-o", "output"],
-        ),
-        (
-            "merge-files",
-            _merge,
-            "mhm_tools.pre.merge.merge_files",
-            ["-i", "input", "-o", "merged.nc"],
         ),
     ],
 )
