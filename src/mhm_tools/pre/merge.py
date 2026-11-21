@@ -175,7 +175,8 @@ def merge_files(input_path, input_file_part, output, n_cpus, preserve_folders=Fa
             # cdo.copy(input=str(files[0]), output=str(out_file), options="-O")
             if out_file.exists() or out_file.is_symlink():
                 out_file.unlink()
-            out_file.symlink_to(file_list[0])
+            # absolute target, a relative one is resolved from the link's folder
+            out_file.symlink_to(file_list[0].resolve())
             out_files.append(out_file)
         elif len(file_list) > 1:
             with tempfile.TemporaryDirectory(dir=out_file.parent) as tmpdir:
