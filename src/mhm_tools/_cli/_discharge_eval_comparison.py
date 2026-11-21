@@ -154,6 +154,15 @@ def add_args(parser):
             "plots keep them. Use inf to keep all stations."
         ),
     )
+    optional.add_argument(
+        "--common-gauges",
+        action="store_true",
+        help=(
+            "Only use gauges that have a finite value of the respective metric in "
+            "every input, so all inputs are compared on the same gauges. By default "
+            "every input uses all of its gauges."
+        ),
+    )
 
 
 def _validate_discharge_comparison_plot_types(plot_types):
@@ -221,4 +230,5 @@ def run(args):
         results_file_name=args.results_file_name,
         overview_pdf_name=args.overview_pdf_name,
         crs=args.crs,
+        common_gauges=args.common_gauges,
     )

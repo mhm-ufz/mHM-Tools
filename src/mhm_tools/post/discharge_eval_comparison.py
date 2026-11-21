@@ -89,6 +89,58 @@ def _read_dfs_by_name(input_paths, input_names, file_names):
     return dfs_by_name
 
 
+def _set_values_outside_common_gauges_to_nan(dfs_by_name, variables):
+    """Set metric values to NaN for gauges that are not finite in every input.
+
+    The common gauges are found per variable, so a gauge without e.g. `nse`
+    in one input still counts for `kge`. Rows are kept, so `id` and the gauge
+    coordinates stay available for the maps.
+
+    Parameters
+    ----------
+    dfs_by_name : dict[str, pandas.DataFrame]
+        Results table by input label.
+    variables : Sequence[str]
+        Metric columns to restrict to the common gauges.
+
+    Returns
+    -------
+    dict[str, pandas.DataFrame]
+        Tables with the values of gauges outside the common gauges set to NaN.
+    """
+    for variable in variables:
+        missing_in = [
+            name for name, df in dfs_by_name.items() if variable not in df.columns
+        ]
+        if len(missing_in) == len(dfs_by_name):
+            continue
+        if missing_in:
+            # restricting to a column some inputs lack would remove every value
+            logger.warning(
+                f"--common-gauges: {variable!r} is missing in {missing_in}; "
+                "not restricting it to common gauges."
+            )
+            continue
+        finite_ids_by_name = {
+            name: set(
+                df.loc[np.isfinite(pd.to_numeric(df[variable], errors="coerce")), "id"]
+            )
+            for name, df in dfs_by_name.items()
+        }
+        common_ids = set.intersection(*finite_ids_by_name.values())
+        if not common_ids:
+            logger.warning(
+                f"--common-gauges: no gauge has a finite {variable!r} in every input."
+            )
+        for name, df in dfs_by_name.items():
+            df[variable] = df[variable].where(df["id"].isin(common_ids))
+            logger.info(
+                f"--common-gauges: {variable!r} of {name!r} keeps {len(common_ids)} "
+                f"of {len(finite_ids_by_name[name])} gauges."
+            )
+    return dfs_by_name
+
+
 def _write_sanitized_results_csvs(
     input_paths,
     input_names,
@@ -98,6 +150,7 @@ def _write_sanitized_results_csvs(
     value_min=DEFAULT_VALUE_MIN,
     value_max=DEFAULT_VALUE_MAX,
     max_mean_factor=None,
+    common_gauges=False,
 ):
     """Write one sanitized `results.csv` copy per input, for plotting.
 
@@ -131,6 +184,9 @@ def _write_sanitized_results_csvs(
     max_mean_factor : float, optional
         Leave out stations whose beta is above this factor or below its
         inverse, per input. None keeps every station.
+    common_gauges : bool, optional
+        After filtering, keep the `variables` values only for gauges that are
+        finite in every input (see `_set_values_outside_common_gauges_to_nan`).
 
     Returns
     -------
@@ -146,8 +202,8 @@ def _write_sanitized_results_csvs(
         create_table_results_within_mean_factor,
     )
 
-    sanitized_paths = []
-    for index, input_name in enumerate(input_names):
+    sanitized_dfs_by_name = {}
+    for input_name in input_names:
         df, left_out_notes = create_table_results_within_mean_factor(
             dfs_by_name[input_name], max_mean_factor
         )
@@ -180,8 +236,16 @@ def _write_sanitized_results_csvs(
                     )
                 invalid = invalid | impossible
             df[variable] = values.where(~invalid)
+        sanitized_dfs_by_name[input_name] = df
+
+    # after both filters, so a gauge left out in one input is left out in all
+    if common_gauges:
+        _set_values_outside_common_gauges_to_nan(sanitized_dfs_by_name, variables)
+
+    sanitized_paths = []
+    for index, input_name in enumerate(input_names):
         sanitized_path = output_dir / f"{index:03d}_{_sanitize_name(input_name)}.csv"
-        df.to_csv(sanitized_path, index=False)
+        sanitized_dfs_by_name[input_name].to_csv(sanitized_path, index=False)
         sanitized_paths.append(sanitized_path)
     return sanitized_paths
 
@@ -971,6 +1035,7 @@ def write_discharge_eval_comparison_plots(  # noqa: PLR0913
     results_file_name="discharge_eval_comparison_results.csv",
     overview_pdf_name="discharge_eval_comparison_overview.pdf",
     crs=None,
+    common_gauges=False,
 ):
     """Write discharge-evaluation comparison plots from `results.csv` files.
 
@@ -1017,6 +1082,10 @@ def write_discharge_eval_comparison_plots(  # noqa: PLR0913
         CRS of projected gauge coordinates for the diff maps, e.g.
         "EPSG:3035". Defaults to the ``crs`` column of the baseline run's
         results, else lon/lat.
+    common_gauges : bool, optional
+        Compare all runs on the same gauges: per variable, only gauges with a
+        finite value in every run are kept, in plots and tables. By default
+        every run uses all of its gauges.
 
     Returns
     -------
@@ -1074,6 +1143,7 @@ def write_discharge_eval_comparison_plots(  # noqa: PLR0913
             file_names=file_names,
             variables=variables,
             output_dir=tmp_dir,
+            common_gauges=common_gauges,
         )
         # the tables leave out stations with an extreme bias, the plots keep them
         table_paths = _write_sanitized_results_csvs(
@@ -1083,6 +1153,7 @@ def write_discharge_eval_comparison_plots(  # noqa: PLR0913
             variables=variables,
             output_dir=Path(tmp_dir) / "tables",
             max_mean_factor=max_mean_factor,
+            common_gauges=common_gauges,
         )
 
         if shared_plot_types:
