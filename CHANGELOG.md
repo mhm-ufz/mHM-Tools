@@ -16,6 +16,7 @@
 - `snow-evaluation` and `twsa-evaluation` also write an overview PDF, `snow_overview_<input>_vs_<ref>.pdf` and `twsa_overview_<input>_vs_<ref>.pdf`: the median statistics table of the domain and the regions as it is logged, then every figure, the domain first and then each region. The gifs of `snow-evaluation` stay separate files. A `twsa-evaluation` run without metrics and figures writes no PDF. `--overview-pdf-name` sets another file name.
 - `snow-evaluation --only-plot` and `twsa-evaluation --only-plot` redraw the statistics table, every map and plot of the domain and the regions and the overview PDF from the files of an earlier run in `--output-dir`, without reading the data again. A redraw needs the accuracy file of `snow-evaluation` or the metrics file of `twsa-evaluation` and stops with an error naming it when it is missing, instead of starting the full evaluation; without the season difference file the snow table holds only the accuracy, the snow cover plots and gifs need the snow cover files, and the TWSA cell series plots the monthly anomaly files. The result files now carry the compared years as `first_year` and `last_year`, so a redraw names them in its titles. The region accuracy maps of `snow-evaluation` are cropped from the accuracy of the whole domain instead of calculated again per region.
 - `discharge-evaluation` writes the CRS of projected gauge coordinates into `discharge_eval_results.csv` as `crs` column, e.g. `EPSG:3035`; gauges in lon/lat get no column. `discharge-eval-comparison` draws its difference maps in that CRS, and `--crs` sets it for results written without the column. The region maps keep their WMO extents, given in lon/lat and drawn in the CRS of the map.
+- `discharge-eval-comparison --common-gauges` compares every input on the same gauges: for each metric, only gauges with a finite value in every input are kept, in the plots and the tables. The log states how many gauges each input keeps per metric. A metric missing in some inputs is not restricted, with a warning. By default every input uses all of its gauges.
 
 ### Changed
 
@@ -45,6 +46,7 @@
 
 ### Fixed
 
+- `merge` linked folders with a single file to a relative path, which pointed nowhere from the link's folder when `--input-dir` was relative, so the final merge failed with `Unsupported file type`. The links now point to the absolute file path.
 - `discharge-eval-comparison` stopped with `Axis limits cannot be NaN or Inf` for gauges in projected coordinates, e.g. EPSG:3035 metres, because its difference maps took them for degrees.
 - `link-folder-tree` links nothing when `--output-dir` is `--input-dir`, also when given by another path. With `--overwrite` it previously deleted every file and replaced it with a link to itself.
 - `discharge-evaluation` in bootstrap mode wrote the mean ratio as `alpha` and the standard deviation ratio as `beta`, the reverse of the KGE components and of direct mode. Its CDF plots no longer fail on the missing `kge` and `nse` columns.
