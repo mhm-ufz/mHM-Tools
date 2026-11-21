@@ -313,6 +313,10 @@ def locate_lai_cube(dataset, source_variable=None, log=None) -> _LaiSource:
         lai_data, lat_dim, lon_dim = use_coordinate_dimensions(
             lai_data, lat_coord, lon_coord, lat_dim, lon_dim
         )
+    if lai_data.ndim > 3:  # a size-1 band or level dimension, as GDAL writes, holds no information
+        spare = [dim for dim in lai_data.dims if dim not in (lat_dim, lon_dim)
+                 and lai_data.sizes[dim] == 1 and "time" not in str(dim).lower()]
+        lai_data = lai_data.squeeze(spare[: lai_data.ndim - 3], drop=True)
     time_dim = find_time_dimension(lai_data, lat_dim, lon_dim)
     if time_dim is None:
         msg = "LAI variable must contain exactly one temporal dimension."
@@ -1050,16 +1054,32 @@ def stream_lai_grid(
                     },
                 )
             check_cancelled()
-            if log:
-                log("Writing staged LAI through the shared NetCDF writer.")
+            written = {"done": 0, "total": 1, "percent": -1}
+
+            def started(graph, _state):
+                written.update(done=0, total=max(1, len(graph)), percent=-1)
+
+            def finished(*_args):
+                written["done"] += 1
+                percent = min(100, 100 * written["done"] // written["total"])
+                if percent == written["percent"]:
+                    return
+                written["percent"] = percent
+                if progress is not None:
+                    progress(50.0 + percent / 2)
+                if log and percent % 10 == 0:
+                    log(f"Writing LAI: {percent}%.")
+
             with dask.config.set(scheduler="synchronous"), Callback(
-                pretask=check_cancelled
+                start_state=started, pretask=check_cancelled, posttask=finished
             ):
+                # chunks of one time step match the staged blocks, so each
+                # compressed chunk is written once instead of rewritten per step
                 write_xarray_to_file(
                     dataset,
                     temporary_file,
                     compression=compression,
-                    encoding={"lai": {"_FillValue": NODATA}},
+                    encoding={"lai": {"_FillValue": NODATA, "chunksizes": chunks}},
                 )
             check_cancelled()
         temporary_file.replace(output)

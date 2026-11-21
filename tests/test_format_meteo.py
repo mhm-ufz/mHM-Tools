@@ -95,3 +95,37 @@ def test_time_blocks_are_merged_into_one_file(tmp_path):
         np.testing.assert_array_equal(ds["time"].values, starts)
         np.testing.assert_array_equal(ds["time_bnds"].values, bounds)
         np.testing.assert_allclose(ds["pre"][:, 0, 0], [0.0, 1.0, 1.0])
+
+
+def test_a_noleap_calendar_is_put_on_the_gregorian_one(tmp_path):
+    """29 February, which a noleap calendar lacks, repeats 28 February."""
+    times = xr.date_range("2004-02-27", periods=4, freq="D", calendar="noleap", use_cftime=True)
+    values = np.broadcast_to(np.arange(4, dtype="float64")[:, None, None], (4, 2, 2))
+    xr.Dataset(
+        {"tavg": (("time", "lat", "lon"), values.copy(), {"units": "Celsius"})},
+        coords={"time": times, "lat": [51.0, 50.0], "lon": [10.0, 11.0]},
+    ).to_netcdf(tmp_path / "tavg.nc")
+    write_header(tmp_path / "header.txt", HEADER)
+    spec = MeteoFolderSpec(
+        "tavg", tmp_path, crs="EPSG:4326", pattern="tavg.nc", temporal_resolution="Daily",
+        output_temporal_resolution="Daily", aggregation="Average", unit="Celsius", variable="tavg",
+    )
+    output = tmp_path / "out" / "tavg.nc"
+    assert format_meteo_data(spec, output, tmp_path / "header.txt", grid_crs="EPSG:4326") == 5
+    with xr.open_dataset(output) as ds:
+        np.testing.assert_allclose(ds["tavg"][:, 0, 0], [0, 1, 1, 2, 3])
+        assert str(ds["time"].values[2])[:10] == "2004-02-29"
+
+
+def test_a_gap_in_the_forcing_is_named(tmp_path):
+    """The error says where the first missing steps are."""
+    _write_hourly_precipitation(tmp_path / "tp.nc", "2001-01-01T00", 48)
+    with xr.open_dataset(tmp_path / "tp.nc") as ds:
+        ds.load().drop_isel(time=range(10, 15)).to_netcdf(tmp_path / "gap.nc")
+    write_header(tmp_path / "header.txt", HEADER)
+    spec = MeteoFolderSpec(
+        "pre", tmp_path, crs="EPSG:4326", pattern="gap.nc", temporal_resolution="Hourly",
+        output_temporal_resolution="Daily", aggregation="Sum", unit="mm", variable="tp",
+    )
+    with pytest.raises(ValueError, match="5 step\\(s\\) missing after 2001-01-01T09:00"):
+        format_meteo_data(spec, tmp_path / "out.nc", tmp_path / "header.txt", grid_crs="EPSG:4326")

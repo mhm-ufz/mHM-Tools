@@ -264,8 +264,12 @@ def time_index(values, cadence, *, continuous=True):
     offset = {"Hourly": pd.DateOffset(hours=1), "Daily": pd.DateOffset(days=1),
               "Monthly": pd.DateOffset(months=1), "Yearly": pd.DateOffset(years=1)}[cadence]
     # one stamp in each consecutive calendar period, wherever in it (mid-month, month end, 23:00)
-    if continuous and len(index) > 1 and not (np.diff(output_periods(index.values, cadence).astype("int64")) == 1).all():
-        msg = f"Timestamps are not continuous {cadence.lower()} input."
+    steps = np.diff(output_periods(index.values, cadence).astype("int64")) if continuous else np.ones(1)
+    if (steps != 1).any():
+        gap = int(np.flatnonzero(steps != 1)[0])
+        where = (f"{int(steps[gap]) - 1} step(s) missing after {index[gap]:%Y-%m-%dT%H:%M}" if steps[gap] > 1
+                 else f"two timestamps in the period of {index[gap]:%Y-%m-%dT%H:%M}")
+        msg = f"Timestamps are not continuous {cadence.lower()} input: {where}."
         raise ValueError(msg)
     return index, offset
 
@@ -833,6 +837,32 @@ def get_meteo_files(spec: MeteoFolderSpec) -> list[Path]:
     return files
 
 
+def _gregorian(ds):
+    """Put a cftime calendar (noleap, 360_day, ...) on the proleptic Gregorian one mHM uses.
+
+    The days that calendar lacks (29 February; the 5 or 6 a 360-day year spreads out)
+    repeat the step before them, which keeps the file lazily indexed.
+    """
+    import xarray as xr
+
+    names = [name for name in ("time", "valid_time") if name in ds.coords and ds[name].dtype == object]
+    if not names:
+        return ds
+    name, calendar = names[0], ds[names[0]].dt.calendar
+    frequency = xr.infer_freq(ds[name]) if ds.sizes[name] > 2 else None
+    bounds = ds[name].attrs.get("bounds")
+    converted = ds.drop_vars([bounds] if bounds in ds else []).convert_calendar(
+        "proleptic_gregorian", dim=name, align_on="year" if calendar == "360_day" else "date")
+    converted[name].attrs.pop("bounds", None)
+    if frequency is None:
+        return converted
+    times = xr.date_range(converted[name].values[0], converted[name].values[-1], freq=frequency,
+                          calendar="proleptic_gregorian", use_cftime=False)
+    logger.info("Converted the %s calendar to the Gregorian one; %d inserted step(s) repeat the step "
+                "before them.", calendar, times.size - converted.sizes[name])
+    return converted.reindex({name: times}, method="ffill")
+
+
 def _open_dataset(path: Path):
     import xarray as xr
 
@@ -840,10 +870,12 @@ def _open_dataset(path: Path):
     for engine in ("netcdf4", "h5netcdf", "scipy", None):
         try:
             kwargs = {} if engine is None else {"engine": engine}
-            return xr.open_dataset(
+            dataset = xr.open_dataset(
                 path, decode_times=True, mask_and_scale=True, **kwargs)
         except Exception as exc:
             first_error = first_error or exc
+            continue
+        return _gregorian(dataset)
     msg = f"Could not open {path} ({first_error}): check that it is a complete NetCDF file."
     raise RuntimeError(msg)
 

@@ -544,3 +544,41 @@ def test_global_lai_is_cut_to_the_dem_before_aggregation(tmp_path: Path, monkeyp
 
     # the 0.5 degree DEM spans 2 x 3 degrees, plus one DEM cell and 2 LAI cells
     assert sizes and sizes[0][0] < 10 and sizes[0][1] < 10
+
+
+def test_lai_is_written_one_time_step_per_chunk_with_progress(tmp_path: Path):
+    """Chunks matching the staged blocks keep long monthly writes fast."""
+    source, dem = tmp_path / "source.nc", tmp_path / "dem.tif"
+    _write_lai(source)
+    _write_dem(dem)
+    progress, messages = [], []
+
+    output = format_lai_netcdf_file(
+        source,
+        dem,
+        tmp_path / "lai.nc",
+        output_temporal_resolution="monthly",
+        progress=progress.append,
+        log=messages.append,
+    )
+
+    with netCDF4.Dataset(output) as dataset:
+        assert dataset["lai"].chunking() == [1, 4, 6]
+    assert any(50 < value < 100 for value in progress)
+    assert progress[-1] == 100
+    assert any(message.startswith("Writing LAI:") for message in messages)
+
+
+def test_a_size_one_band_dimension_is_ignored(tmp_path: Path):
+    """GDAL exports carry a band dimension of length 1."""
+    source, dem = tmp_path / "source.nc", tmp_path / "dem.tif"
+    _write_lai(source)
+    with xr.open_dataset(source) as dataset:
+        banded = dataset.load().assign(lai=dataset.lai.expand_dims(band=[1], axis=1))
+    banded.to_netcdf(tmp_path / "banded.nc")
+    _write_dem(dem)
+
+    output = format_lai_netcdf_file(tmp_path / "banded.nc", dem, tmp_path / "lai.nc")
+
+    with xr.open_dataset(output) as dataset:
+        assert dataset["lai"].shape == (12, 4, 6)

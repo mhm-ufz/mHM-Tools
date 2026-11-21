@@ -706,6 +706,12 @@ def write_xarray_to_netcdf(
                 for key in QUANTIZATION_ENCODING_KEYS:
                     safe_encoding[var].pop(key, None)
                 safe_encoding[var].update(settings)
+        # the sanitizer drops chunk sizes inherited from inputs; a caller's stay
+        safe_encoding.update({
+            var: {**safe_encoding[var], "chunksizes": settings["chunksizes"]}
+            for var, settings in encoding.items()
+            if "chunksizes" in settings and var in safe_encoding
+        })
         # Numeric time axes (including LAI months) store units as attributes.
         for name, attrs in numeric_coord_attrs.items():
             if np.issubdtype(ds_clean[name].dtype, np.number):
@@ -756,7 +762,7 @@ def _get_netcdf_write_dataset_and_data_vars(ds, var_name=None):
                 f"Requested var_name {var_name!r} not found in dataset. "
                 "Using all data variables instead."
             )
-        logger.info(f"Taking data vars from list of ds.data_vars {ds.data_vars}")
+        logger.debug(f"Taking data vars from list of ds.data_vars {ds.data_vars}")
         metadata_vars = get_netcdf_metadata_data_vars(ds)
         data_vars = [var for var in ds.data_vars if var not in metadata_vars]
     else:
@@ -969,7 +975,7 @@ def write_xarray_to_file(
             raise NotImplementedError(msg)
     if create_folder and not file_path.parent.is_dir():
         file_path.parent.mkdir(parents=True, exist_ok=True)
-    logger.info(f"Writing file to {file_path}")
+    logger.debug(f"Writing file to {file_path}")
     # ds = chunk_if_too_big(ds)
     # ds = ds.chunk({'time': 512, 'lat': 121, 'lon': 131})
     if suffix == ".asc":

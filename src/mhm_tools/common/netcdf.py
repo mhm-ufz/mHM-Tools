@@ -998,7 +998,7 @@ def prepare_dataset_for_netcdf_write(
     _normalize_data_vars_for_netcdf(ds_clean, data_vars, merged_encoding)
 
     safe_encoding = sanitize_nc_encoding(ds_clean, merged_encoding)
-    logger.info(f"Using encoding: {safe_encoding}")
+    logger.debug(f"Using encoding: {safe_encoding}")
     set_netcdf_encoding(ds_clean, safe_encoding)
     ds_clean = prepare_time_bounds_encoding(ds_clean, strip_time_attrs=True)
     sanitize_coordinate_encoding(ds_clean, compression)
