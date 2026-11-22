@@ -96,6 +96,12 @@ FDIR_CODES = {
     "ldd": tuple(range(1, 10)),
 }
 """Valid flow direction codes per type, pits included (255 is a d8 pit too)."""
+FDIR_CODE_BY_OFFSET = {
+    "d8": ((32, 64, 128), (16, 0, 1), (8, 4, 2)),
+    "ldd": ((7, 8, 9), (4, 5, 6), (1, 2, 3)),
+}
+"""Flow direction code per downstream offset: rows north to south, columns west
+to east, the pit in the centre."""
 DEM_DERIVATIVE_EXTENSIONS = ("nc", "asc", "tif")
 """Output file extensions of create-dem-derivatives."""
 FACC_UNITS = ("cell", "km2")

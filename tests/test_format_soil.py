@@ -4,6 +4,7 @@ from pathlib import Path
 
 import geopandas as gpd
 import numpy as np
+import pandas as pd
 import pytest
 import rasterio
 import xarray as xr
@@ -15,7 +16,11 @@ from mhm_tools.common.file_handler import (
     get_xarray_ds_from_file,
     write_xarray_to_file,
 )
-from mhm_tools.pre.format_soil import format_soil_data, write_soil_classdefinition
+from mhm_tools.pre.format_soil import (
+    _soil_classdefinition_text,
+    format_soil_data,
+    write_soil_classdefinition,
+)
 
 
 def _write_category_raster(path: Path) -> None:
@@ -406,3 +411,49 @@ def test_definition_is_validated_before_raster_is_written(tmp_path: Path):
 
     assert not (output_path / "soil_class.nc").exists()
     assert not (output_path / "soil_classdefinition.txt").exists()
+
+
+def _create_single_horizon_lookup(soil_classes, clay):
+    """Create a row-per-horizon soil lookup with one horizon per row.
+
+    Args:
+        soil_classes (list): Soil class of each row.
+        clay (list or float): Clay content of each row in percent.
+
+    Returns:
+        pandas.DataFrame: The lookup table.
+    """
+    return pd.DataFrame(
+        {
+            "SOIL_CLASS": soil_classes,
+            "HORIZON": 1,
+            "UPPER_DEPTH": 0,
+            "LOWER_DEPTH": 300,
+            "CLAY": clay,
+            "SAND": 30,
+            "SILT": 40,
+            "BULK_DENSITY": 1.4,
+        }
+    )
+
+
+def test_soil_classdefinition_lists_a_shared_horizon_once():
+    """Rows mapping several raster codes to one soil class give one horizon row."""
+    table = _create_single_horizon_lookup([1, 1, 2], 30)
+
+    lines = _soil_classdefinition_text(table, "SOIL_CLASS").splitlines()
+
+    assert lines[0] == "nSoil_Types 2"
+    assert [line.split("\t")[:2] for line in lines[2:]] == [["1", "1"], ["2", "1"]]
+    with pytest.raises(ValueError, match="differing lookup rows"):
+        _soil_classdefinition_text(
+            _create_single_horizon_lookup([1, 1], [30, 35]), "SOIL_CLASS"
+        )
+
+
+def test_soil_classdefinition_rejects_classes_with_gaps():
+    """mHM indexes soil classes, so 1, 5, 9 cannot stand for three classes."""
+    table = _create_single_horizon_lookup([1, 5, 9], 30)
+
+    with pytest.raises(ValueError, match=r"missing: \[2, 3\]"):
+        _soil_classdefinition_text(table, "SOIL_CLASS")

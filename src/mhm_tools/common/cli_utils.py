@@ -98,6 +98,84 @@ def add_netcdf_compression_args(parser):
     )
 
 
+def add_format_grid_args(
+    required,
+    optional,
+    input_help,
+    input_crs_help="CRS to assign when the input raster has no CRS metadata.",
+):
+    """Add the input, DEM, output and CRS options shared by the format commands.
+
+    Parameters
+    ----------
+    required : argparse._ArgumentGroup
+        Group receiving -i, -d and -o.
+    optional : argparse._ArgumentGroup
+        Group receiving -s and -r.
+    input_help : str
+        Help text of -i, which differs per command.
+    input_crs_help : str
+        Help text of -s.
+
+    Returns
+    -------
+    None
+    """
+    required.add_argument(
+        "-i", "--input-file", dest="input_file", required=True, help=input_help
+    )
+    required.add_argument(
+        "-d",
+        "--dem-file",
+        required=True,
+        help="DEM providing the output grid and coordinate reference system.",
+    )
+    required.add_argument(
+        "-o",
+        "--output-dir",
+        "--output-path",
+        dest="output_path",
+        required=True,
+        help="Directory where the formatted output files are written.",
+    )
+    optional.add_argument("-s", "--input-crs", help=input_crs_help)
+    optional.add_argument(
+        "-r",
+        "--dem-crs",
+        help="CRS to assign when the DEM has no CRS metadata.",
+    )
+
+
+def add_missing_aspect_arg(parser):
+    """Add the --missing-aspect option of the commands that write an aspect.
+
+    Parameters
+    ----------
+    parser : argparse.ArgumentParser or argparse._ArgumentGroup
+        Parser or group the option is added to.
+
+    Returns
+    -------
+    None
+    """
+    parser.add_argument(
+        "--missing-aspect",
+        type=float,
+        default=90.0,
+        help=(
+            "Aspect in degrees of flat cells, which have no aspect. The PET aspect "
+            "correction of mHM (PET process 0 or 1 in mHM 5, -2 or 1 in mHM 6) is "
+            "smallest for north-facing and largest for south-facing cells on the "
+            "northern hemisphere, and the other way round on the southern one. At "
+            "its default aspect threshold of 180, 90 and 270 get the factor halfway "
+            "in between, so the default 90 treats flat cells as neutral. Give -9999 "
+            "or nan to leave them missing: mHM 5 and 6 read a missing aspect inside "
+            "their mask as 1 degree without a warning, i.e. as facing north. "
+            "Default: 90."
+        ),
+    )
+
+
 def get_netcdf_compression(args):
     """Return the NetCDF compression settings the parsed arguments ask for.
 

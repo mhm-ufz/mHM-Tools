@@ -48,6 +48,7 @@ dependencies = [
   "scipy",
   "joblib",
   "crick",
+  "dask",
   "distributed",
   "seaborn",
   "netCDF4",

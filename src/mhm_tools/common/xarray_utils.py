@@ -93,6 +93,37 @@ def combine_region_grids(priority_grid, fallback_grid):
     return fallback_grid.where(~np.isfinite(priority_grid), priority_grid)
 
 
+def get_masked_values(data_array, chunk_side=None):
+    """Get the values of a 2-D grid with NaN in its missing cells.
+
+    Args:
+        data_array (xarray.DataArray): 2-D grid; NaN and its declared nodata
+            value mark missing cells.
+        chunk_side (int): Side length of square dask chunks, or None to load the
+            values into memory.
+
+    Returns
+    -------
+        xarray.DataArray: float64 values with dims ``("y", "x")`` and no
+        coordinates, dask backed when chunked.
+    """
+    # file_handler imports this module, so it is imported here
+    from mhm_tools.common.file_handler import get_nodata
+
+    if chunk_side is None:
+        values = data_array.values
+    else:
+        values = data_array.chunk(dict.fromkeys(data_array.dims, chunk_side)).data
+    values = xr.DataArray(values, dims=("y", "x")).astype("float64")
+    nodata = get_nodata(data_array)
+    if nodata is not None and np.isfinite(nodata):
+        is_nodata = xr.apply_ufunc(
+            np.isclose, values, float(nodata), dask="parallelized", output_dtypes=[bool]
+        )
+        values = values.where(~is_nodata)
+    return values
+
+
 def create_valid_data_mask(data_array, treat_zero_as_missing=True):
     """Return a boolean validity mask, treating NaN (and optionally 0) as missing.
 
@@ -1408,4 +1439,147 @@ def get_ds_extend(ds, var=None, recursive_search=True, resolutions=None):
             float(np.nanmax(lat_vals)) + float(res) / 2,
         ),
         res,
+    )
+
+
+def calculate_mesh_resolution(values, axis, label="coordinate"):
+    """Return the median spacing along one axis of a 2-D coordinate mesh.
+
+    Parameters
+    ----------
+    values : numpy.ndarray
+        2-D coordinate mesh.
+    axis : int
+        Axis along which the spacing is taken.
+    label : str, optional
+        Name used in the error message.
+
+    Returns
+    -------
+    float
+        Median of the positive finite spacings.
+    """
+    diffs = np.abs(np.diff(values, axis=axis))
+    diffs = diffs[np.isfinite(diffs) & (diffs > 0)]
+    if not diffs.size:
+        msg = f"{label} needs at least two values."
+        raise ValueError(msg)
+    return float(np.nanmedian(diffs))
+
+
+def reindex_to_header(da, x_dim, y_dim, header, fill_value=None):
+    """Return `da` on the cell centres of an ASCII grid header, without interpolating.
+
+    Parameters
+    ----------
+    da : xarray.DataArray
+        Data whose `x_dim`/`y_dim` already lie on the header's lattice.
+    x_dim, y_dim : str
+        Names of the spatial dimensions.
+    header : dict
+        Grid header with ncols, nrows, xllcorner, yllcorner and cellsize.
+    fill_value : float, optional
+        Value outside `da`; NaN by default.
+
+    Returns
+    -------
+    xarray.DataArray
+        `da` sliced and padded to the header's grid.
+    """
+    from mhm_tools.common.esri_grid import get_header_cell_centers
+
+    x_values, y_values = get_header_cell_centers(header)
+    return da.reindex(
+        {x_dim: x_values, y_dim: y_values},
+        method="nearest",
+        tolerance=abs(float(header["cellsize"])) * 1e-6,
+        fill_value=float("nan") if fill_value is None else fill_value,
+    )
+
+
+def resample_nearest_rectilinear(
+    da, source_x, source_y, target_x, target_y, output_x, output_y
+):
+    """Sample a rectilinear source at exact two-dimensional target points.
+
+    Parameters
+    ----------
+    da : xarray.DataArray
+        Source data with a time and two spatial dimensions.
+    source_x, source_y : numpy.ndarray
+        1-D source axes.
+    target_x, target_y : numpy.ndarray
+        2-D sample points in the source coordinates.
+    output_x, output_y : numpy.ndarray
+        1-D axes of the output grid.
+
+    Returns
+    -------
+    xarray.DataArray
+        Sampled data with dimensions (time, lat, lon).
+    """
+    source_x_mesh, source_y_mesh = np.meshgrid(source_x, source_y)
+    return resample_nearest_curvilinear(
+        da, source_x_mesh, source_y_mesh, output_x, output_y, target_x, target_y
+    )
+
+
+def resample_nearest_curvilinear(
+    da, source_x, source_y, output_x, output_y, sample_x=None, sample_y=None
+):
+    """Nearest-neighbour sample a curvilinear source onto an output grid.
+
+    Parameters
+    ----------
+    da : xarray.DataArray
+        Source data with a time and two spatial dimensions.
+    source_x, source_y : numpy.ndarray
+        2-D source coordinates.
+    output_x, output_y : numpy.ndarray
+        1-D axes of the output grid.
+    sample_x, sample_y : numpy.ndarray, optional
+        2-D sample points in the source coordinates; the output axes by default.
+
+    Returns
+    -------
+    xarray.DataArray
+        Sampled data with dimensions (time, lat, lon), NaN outside the source.
+    """
+    from scipy.spatial import cKDTree
+
+    spatial_dims = [
+        dim for dim in da.dims
+        if dim not in {"time", "valid_time", "bnds"} and da.sizes[dim] > 1
+    ]
+    if len(spatial_dims) != 2:
+        msg = f"Variable {da.name!r} must have exactly two spatial dimensions."
+        raise ValueError(msg)
+    y_dim, x_dim = spatial_dims
+    source_points = np.column_stack(
+        [np.asarray(source_x).reshape(-1), np.asarray(source_y).reshape(-1)]
+    )
+    if sample_x is None or sample_y is None:
+        x_mesh, y_mesh = np.meshgrid(output_x, output_y)
+    else:
+        x_mesh = np.asarray(sample_x, dtype="float64")
+        y_mesh = np.asarray(sample_y, dtype="float64")
+    target_points = np.column_stack([x_mesh.reshape(-1), y_mesh.reshape(-1)])
+    finite = np.isfinite(source_points).all(axis=1)
+    if not finite.any():
+        msg = "Source grid has no finite coordinates."
+        raise ValueError(msg)
+    _, indices = cKDTree(source_points[finite]).query(target_points)
+    indices = np.flatnonzero(finite)[indices]
+    values = np.asarray(da.transpose("time", y_dim, x_dim).values)
+    sampled = values.reshape(values.shape[0], -1)[:, indices]
+    sampled = sampled.reshape(values.shape[0], len(output_y), len(output_x)).astype("float64")
+    dx = calculate_mesh_resolution(source_x, axis=1) / 2
+    dy = calculate_mesh_resolution(source_y, axis=0) / 2
+    inside = ((x_mesh >= np.nanmin(source_x) - dx) & (x_mesh <= np.nanmax(source_x) + dx)
+              & (y_mesh >= np.nanmin(source_y) - dy) & (y_mesh <= np.nanmax(source_y) + dy))
+    sampled[:, ~inside] = np.nan
+    return xr.DataArray(
+        sampled,
+        dims=("time", "lat", "lon"),
+        coords={"time": da["time"], "lat": output_y, "lon": output_x},
     )
