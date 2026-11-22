@@ -847,3 +847,31 @@ def resample_to_target_freq(
         )
     # logger.debug(f"Input file after align {ds_input}")
     return ds_input, ds_ref
+
+
+def create_season_months(season):
+    """Create the list of months of a season given by its first and last month.
+
+    A season running over the new year, e.g. ``"10,3"``, wraps around December.
+
+    Args:
+        season (str): First and last month as ``"first,last"``, e.g. ``"4,9"``.
+
+    Returns
+    -------
+        List of the months from the first to the last month, e.g. [4, ..., 9].
+    """
+    parts = [part.strip() for part in str(season).split(",")]
+    if len(parts) != 2 or not all(part.isdigit() for part in parts):
+        msg = (
+            f"A season needs a first and a last month as 'first,last', got {season!r}."
+        )
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    first_month, last_month = int(parts[0]), int(parts[1])
+    if not (1 <= first_month <= 12 and 1 <= last_month <= 12):
+        msg = f"Season months must lie between 1 and 12, got {season!r}."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    n_months = (last_month - first_month) % 12 + 1
+    return [(first_month - 1 + offset) % 12 + 1 for offset in range(n_months)]

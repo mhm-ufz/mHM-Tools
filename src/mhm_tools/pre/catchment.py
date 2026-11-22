@@ -2519,16 +2519,31 @@ class Catchment:
 
     @staticmethod
     def create_frame(ds, frame=0, frame_value=0):
-        """If a frame is used this frame is set to no data values as a frame."""
+        """Set the outermost ``frame`` rows and columns of every variable to a value.
+
+        The frame replaces the outer cells of the grid, it does not add cells.
+
+        Args:
+            ds (xr.Dataset): Dataset whose 2D variables get the frame, changed in place.
+            frame (int): Width of the frame in cells; 0 leaves the dataset unchanged.
+            frame_value (float or dict): Value written into the frame of every
+                variable, or a dict with one value per variable name.
+
+        Returns
+        -------
+            xr.Dataset: The dataset with the frame.
+        """
         logger.info(f"Creating a frame of {frame} cells around the domain.")
         if frame > 0:
             for var in ds.data_vars:
+                value = (
+                    frame_value[var] if isinstance(frame_value, dict) else frame_value
+                )
                 data = ds.variables[var].data[:]
-                # set bounds to -9999.
-                data[:frame, :] = frame_value
-                data[-frame:, :] = frame_value
-                data[:, :frame] = frame_value
-                data[:, -frame:] = frame_value
+                data[:frame, :] = value
+                data[-frame:, :] = value
+                data[:, :frame] = value
+                data[:, -frame:] = value
                 ds.variables[var].data[:] = data
         return ds
 
@@ -2569,12 +2584,19 @@ class Catchment:
         cellsize=None,
         cut_by_basin=False,
         mask_file=None,
-        frame=1,
+        frame=0,
         buffer=0,
         variables=None,
         id_gauges_out_path=None,
     ):
-        """Write the produced data to one or multiple files."""
+        """Write the produced data to one or multiple files.
+
+        The outermost ``frame`` rows and columns become pits in ``flwdir`` and no
+        data in every other variable and in the mask (see ``create_frame``). The
+        frame replaces cells instead of adding them: with ``cut_by_basin`` the
+        ``buffer`` around the basin has to be at least ``frame``, otherwise the
+        frame overwrites the outer cells of the domain, basin cells included.
+        """
         data_vars = {}
         out_path = Path(out_path)
         if not out_path.is_dir():
@@ -2778,7 +2800,16 @@ class Catchment:
 
         # logger.debug(f"lat_slice: {lat_slice}, lon_slice: {lon_slice}")
         logger.debug(f"ds: {ds}")
-        ds = self.create_frame(ds, frame, FDIR_SINKVALUE[self.ftype])
+        # routing stops at the pits in flwdir, every other variable is no data there
+        frame_values = {
+            var_name: (
+                FDIR_SINKVALUE[self.ftype]
+                if var_name == "flwdir"
+                else self.VARIABLES[var_name]["_FillValue"]
+            )
+            for var_name in ds.data_vars
+        }
+        ds = self.create_frame(ds, frame, frame_values)
         # For the flow dir map fill masked cells adjecent to filled cells with sink instead of missing value
         # fdir_filled = self.fill_adjacent_missing_with_sink(
         #     ds["flwdir"], FDIR_FILLVALUE[self.ftype], FDIR_SINKVALUE[self.ftype]
@@ -3130,7 +3161,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
     coordinate_slices=None,
     mask_file=None,
     resolutions: Resolution = None,
-    frame=1,
+    frame=0,
     upscale=False,
     latlon=True,
     available_mem=None,
@@ -3158,6 +3189,15 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
     basin IDs, gauge ID files, masks, and optional gauge metadata/shapes.
     crop_bounds and crop_retries_left are set internally when a basin reaching
     the edge of the automatic crop reruns the delineation with a larger crop.
+
+    frame (default 0) turns the outermost frame rows and columns of the output
+    into pits in flwdir and no data in every other variable and in the mask, so
+    Ulysses mRM, which joins the eastern and western grid edges, can't route
+    across the border of a regional domain. The frame replaces cells instead of
+    adding them: a single-gauge run pads the basin by frame cells first, so only
+    a basin closer than that to the input edge loses cells, while a region or
+    multi-gauge run loses its outer frame cells, basin cells included. Global
+    runs that write basin ids ignore the frame.
     """
     logger.info(
         f"Creating catchment file for {var_name} using {var} and {ftype} from {input_file}"
@@ -3351,10 +3391,13 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
 
                 for c in catchments:
                     _compute_requested_outputs(c)
+                    # no frame: it would set the basins of the first and last
+                    # longitude column to 0 in both files, so the date line
+                    # merge could not restore them
                     c.write(
                         output_path,
                         single_file=True,
-                        frame=frame,
+                        frame=0,
                         mask_file=mask_file,
                         variables=output_vars,
                         id_gauges_out_path=id_gauges_out_path,
@@ -3504,8 +3547,9 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                 )
             l0_shape_gdf = None
             if upscale and c.catchment_mask is not None:
+                # the plain name keeps the L1 gauges written after the upscaling
                 write_gauges_out(
-                    gauge, id_gauges_out_path / f"{gauge_info_file}_{resolutions.l0}"
+                    gauge, id_gauges_out_path / f"{Path(gauge_info_file).stem}_l0"
                 )
                 try:
                     l0_shape_gdf = _vectorize_mask_to_gdf(
@@ -3542,10 +3586,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                         new_coords[1],
                     )
                     gauge.update(lat=new_coords[0], lon=new_coords[1])
-                write_gauges_out(
-                    gauge,
-                    id_gauges_out_path / f"{gauge_info_file}_{c.upscaled_resolution}",
-                )
+                write_gauges_out(gauge, id_gauges_out_path / gauge_info_file)
             c.write(
                 output_path,
                 single_file=True,
@@ -3791,9 +3832,10 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                         basin_mask=catchment_mask,
                     )
                 if upscale:
+                    # the plain name keeps the L1 gauges written after the upscaling
                     write_gauges_out(
                         gauges,
-                        id_gauges_out_path / f"{gauge_info_file}_{resolutions.l0}",
+                        id_gauges_out_path / f"{Path(gauge_info_file).stem}_l0",
                     )
                 else:
                     write_gauges_out(gauges, id_gauges_out_path / gauge_info_file)
@@ -3831,10 +3873,7 @@ def create_catchment(  # noqa: PLR0913, PLR0912, PLR0915
                         new_coords[1],
                     )
                     gauge.update(lat=new_coords[0], lon=new_coords[1])
-            write_gauges_out(
-                gauges,
-                id_gauges_out_path / f"{gauge_info_file}_{c.upscaled_resolution}",
-            )
+            write_gauges_out(gauges, id_gauges_out_path / gauge_info_file)
         c.write(
             output_path,
             single_file=True,

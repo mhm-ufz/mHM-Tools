@@ -4,24 +4,33 @@ import pytest
 import xarray as xr
 
 from mhm_tools.common.logger import configure_mhm_tools_logger
+from mhm_tools.common.plotter import RATIO_BOUNDS, plot_single_map
 from mhm_tools.common.time_utils import (
     normalize_time_axis,
     resample_to_target_freq,
 )
 from mhm_tools.common.xarray_utils import get_ds_extend
 from mhm_tools.post.gridded_data_evaluation import (
+    EvalDataset,
     apply_spatial_mask,
     combine_results,
     compare_input_with_ref,
+    create_overview_table_rows,
     create_period_mean_series,
     crop_datasets_to_spatial_overlap,
     get_file_stats,
     get_stats,
     get_stats_one_pass,
     get_stats_one_pass_subset,
+    gridded_data_evaluation,
     infer_time_resolution_hours_from_files,
+    plot_map,
+    read_metric_tables,
     regridd_to_higher_spatial_resolution,
     resample_to_target_freq,
+    select_available_years,
+    write_comparison_plots,
+    write_overview_pdf,
 )
 
 
@@ -576,9 +585,8 @@ def test_resample_to_target_freq_ignores_other_dims_during_align():
 def _period_subset(period_sums, period_counts, shape=(2, 2)):
     """Build one `get_stats_one_pass_subset` result around given buckets."""
     return (
-        np.zeros(shape),
-        np.zeros(shape),
         1,
+        np.zeros((12, *shape)),
         np.zeros((12, *shape)),
         np.zeros((12, *shape), dtype=np.uint32),
         period_sums,
@@ -659,7 +667,7 @@ def test_combine_results_consumes_subset_results():
         )
         for month in (1, 2)
     ]
-    kept_sums, kept_counts = subsets[0][5], subsets[0][6]
+    kept_sums, kept_counts = subsets[0][4], subsets[0][5]
 
     combine_results(subsets)
 
@@ -679,30 +687,40 @@ def test_create_period_mean_series_empties_its_input_buckets():
     assert period_counts == {}
 
 
-def test_period_buckets_use_compact_dtypes(tmp_path):
+@pytest.mark.parametrize(
+    ("remove_seasonal_cycle_from_std", "n_square_sums"), [(True, 12), (False, 1)]
+)
+def test_period_buckets_use_compact_dtypes(
+    tmp_path, remove_seasonal_cycle_from_std, n_square_sums
+):
     """The streamed accumulators stay compact, which bounds the peak memory.
 
     `monthly_counts` spans the whole record, so it needs uint32: uint16 would
     wrap at 65535, which 15-minute input over 44 years exceeds. A period bucket
-    only ever holds one month, so uint16 is safe there.
+    only ever holds one month, so uint16 is safe there. The square sums are
+    only kept per month when the std drops the seasonal cycle.
     """
     lat, lon = np.array([1.0, 0.0]), np.array([0.0, 1.0])
     _write_daily_year(tmp_path, 2000, "v", lat, lon, 2.0)
 
     (
         _,
-        _,
-        _,
         monthly_sums,
+        square_sums,
         monthly_counts,
         period_sums,
         period_counts,
     ) = get_stats_one_pass_subset(
-        sorted(tmp_path.glob("*.nc")), "v", with_period_series=True
+        sorted(tmp_path.glob("*.nc")),
+        "v",
+        with_period_series=True,
+        remove_seasonal_cycle_from_std=remove_seasonal_cycle_from_std,
     )
 
     assert monthly_counts.dtype == np.uint32
     assert monthly_sums.dtype == np.float64
+    assert square_sums.dtype == np.float64
+    assert square_sums.shape == (n_square_sums, lat.size, lon.size)
     assert all(values.dtype == np.float32 for values in period_sums.values())
     assert all(values.dtype == np.uint16 for values in period_counts.values())
     assert np.iinfo(np.uint16).max < 44 * 12 * 31 * 96 // 12
@@ -732,3 +750,657 @@ def test_get_stats_one_pass_period_series_matches_monthly_mean(tmp_path, ncpus):
     np.testing.assert_allclose(
         series.values, expected.values.astype(np.float32), rtol=1e-6
     )
+
+
+def _write_random_daily_record(path):
+    """Write three years of random daily values on a 4x5 grid, one cell holed.
+
+    Args:
+        path (Path): Directory the yearly files are written to.
+    """
+    lat, lon = np.array([3.0, 2.0, 1.0, 0.0]), np.arange(5.0)
+    rng = np.random.default_rng(0)
+    for year in (2000, 2001, 2002):
+        n_days = pd.date_range(f"{year}-01-01", f"{year}-12-31", freq="D").size
+        values = rng.random((n_days, lat.size, lon.size))
+        _write_daily_year(path, year, "v", lat, lon, values, nan_cell=(1, 2))
+
+
+@pytest.mark.parametrize("available_mem", [None, 1])
+def test_get_stats_direct_comp_keeps_time_series_lazy(tmp_path, available_mem):
+    """The direct comparison reads a directory lazily and computes its stats once.
+
+    The record stays in dask chunks, sized by `available_mem` when given and
+    by the files otherwise, while the statistics are already in memory.
+    """
+    _write_random_daily_record(tmp_path)
+
+    output = get_stats(
+        path=tmp_path,
+        var="v",
+        factor=2,
+        coordinate_slice=None,
+        n_bootstrap_years=None,
+        ncpus=1,
+        output_file=None,
+        available_years=[2000, 2001, 2002],
+        direct_comp=True,
+        available_mem=available_mem,
+        file_name="*.nc",
+    )
+
+    assert output["time_series"].chunks is not None
+    for stat_name in ("clim", "std", "mean"):
+        assert output[stat_name].chunks is None
+
+
+def test_get_stats_direct_comp_matches_eager_statistics(tmp_path):
+    """Lazily computed stats and series equal those of the record in memory.
+
+    The series is computed after `get_stats` returned, i.e. after it closed
+    the files, so this also checks that the lazy record can still be read.
+    """
+    _write_random_daily_record(tmp_path)
+
+    output = get_stats(
+        path=tmp_path,
+        var="v",
+        factor=2,
+        coordinate_slice=None,
+        n_bootstrap_years=None,
+        ncpus=1,
+        output_file=None,
+        available_years=[2000, 2001, 2002],
+        direct_comp=True,
+        available_mem=1,
+        file_name="*.nc",
+        remove_seasonal_cycle_from_std=True,
+    )
+
+    with xr.open_mfdataset(sorted(tmp_path.glob("*.nc"))) as ds:
+        record = ds["v"].load() * 2
+    expected_clim = record.groupby("time.month").mean("time", skipna=True)
+    expected_std = (record.groupby("time.month") - expected_clim).std(
+        "time", skipna=True
+    )
+
+    np.testing.assert_allclose(
+        output["mean"].values, record.mean("time", skipna=True).values, rtol=1e-5
+    )
+    np.testing.assert_allclose(
+        output["clim"].transpose("month", "lat", "lon").values,
+        expected_clim.values,
+        rtol=1e-5,
+    )
+    np.testing.assert_allclose(output["std"].values, expected_std.values, rtol=1e-5)
+    np.testing.assert_allclose(
+        output["time_series"].transpose("time", "lat", "lon").values,
+        record.values,
+        rtol=1e-5,
+    )
+
+
+@pytest.mark.parametrize("remove_seasonal_cycle_from_std", [True, False])
+@pytest.mark.parametrize("ncpus", [1, 2])
+def test_get_stats_one_pass_matches_direct_statistics(
+    tmp_path, ncpus, remove_seasonal_cycle_from_std
+):
+    """The streamed statistics equal the direct ones, also where steps are NaN.
+
+    One cell is NaN every second day. Streaming skips those steps per cell like
+    the direct path, instead of losing the whole cell.
+    """
+    _write_random_daily_record(tmp_path)
+    years = [2000, 2001, 2002]
+
+    streamed = get_stats_one_pass(
+        path=tmp_path,
+        var="v",
+        factor=2,
+        ncpus=ncpus,
+        available_years=years,
+        file_name="*.nc",
+        remove_seasonal_cycle_from_std=remove_seasonal_cycle_from_std,
+    )
+    direct = get_stats(
+        path=tmp_path,
+        var="v",
+        factor=2,
+        coordinate_slice=None,
+        n_bootstrap_years=None,
+        ncpus=1,
+        output_file=None,
+        available_years=years,
+        direct_comp=True,
+        file_name="*.nc",
+        remove_seasonal_cycle_from_std=remove_seasonal_cycle_from_std,
+    )
+
+    for stat_name in ("mean", "std", "clim"):
+        np.testing.assert_allclose(
+            streamed[stat_name].values,
+            direct[stat_name].transpose(*streamed[stat_name].dims).values,
+            rtol=1e-5,
+        )
+    assert np.isfinite(streamed["std"].values[1, 2])
+    assert streamed["std"].attrs["long_name"] == direct["std"].attrs["long_name"]
+
+
+def test_get_stats_one_pass_keeps_selected_years_and_season(tmp_path):
+    """Only steps of the selected years and season are read, without year folders."""
+    _write_random_daily_record(tmp_path)
+    season = list(range(4, 10))
+
+    output = get_stats_one_pass(
+        path=tmp_path,
+        var="v",
+        available_years=[2001],
+        file_name="*.nc",
+        with_period_series=True,
+        season_months=season,
+    )
+
+    with xr.open_mfdataset(sorted(tmp_path.glob("*.nc"))) as ds:
+        record = ds["v"].load()
+    in_period = record.sel(
+        time=(record.time.dt.year == 2001) & record.time.dt.month.isin(season)
+    )
+    series_time = output["time_series"]["time"]
+    assert series_time.size == 6
+    assert bool((series_time.dt.year == 2001).all())
+    assert bool(series_time.dt.month.isin(season).all())
+    np.testing.assert_allclose(
+        output["mean"].values, in_period.mean("time", skipna=True).values, rtol=1e-5
+    )
+    assert np.isnan(output["clim"].sel(month=[1, 2, 3, 10, 11, 12]).values).all()
+
+
+def test_get_file_stats_keeps_only_season_months(tmp_path):
+    """The direct statistics use only the season, also across the new year."""
+    _write_random_daily_record(tmp_path)
+    season = [10, 11, 12, 1, 2, 3]
+    with xr.open_mfdataset(sorted(tmp_path.glob("*.nc"))) as ds:
+        record = ds.load()
+
+    output = get_file_stats(record, "v", direct_comp=True, season_months=season)
+
+    in_season = record["v"].sel(time=record.time.dt.month.isin(season))
+    np.testing.assert_allclose(
+        output["mean"].values, in_season.mean("time", skipna=True).values, rtol=1e-5
+    )
+    assert np.isnan(output["clim"].sel(month=list(range(4, 10))).values).all()
+    assert bool(output["time_series"]["time"].dt.month.isin(season).all())
+
+
+def _compare_monthly_series(monkeypatch, tmp_path, **compare_kwargs):
+    """Run `compare_input_with_ref` on 4 years of monthly series on a 2x2 grid.
+
+    Cell (0, 0): the reference has the opposite seasonal cycle but the same
+    anomalies. Cell (0, 1): the same cycle but mirrored anomalies. Row 1
+    repeats row 0.
+
+    Args:
+        monkeypatch: pytest fixture used to fake the reading and writing.
+        tmp_path (Path): Output directory.
+        **compare_kwargs: Passed on to `compare_input_with_ref`.
+
+    Returns
+    -------
+        Tuple of the written relative statistics and the maps the result
+        metrics received.
+    """
+    lat, lon = np.array([51.0, 50.0]), np.array([10.0, 11.0])
+    time = pd.date_range("2000-01-01", periods=48, freq="MS")
+    seasonal_cycle = 10 * np.sin(2 * np.pi * (time.month.values - 1) / 12)
+    anomalies = np.random.default_rng(0).normal(size=time.size)
+    input_cells = [seasonal_cycle + anomalies, seasonal_cycle + anomalies]
+    ref_cells = [-seasonal_cycle + anomalies, seasonal_cycle - anomalies]
+
+    def create_stats(cells):
+        """Build a statistics dataset with the given series in both rows."""
+        series = np.stack([np.stack(cells, axis=-1)] * 2, axis=1) + 20
+        return xr.Dataset(
+            {
+                "mean": (("lat", "lon"), np.ones((2, 2))),
+                "std": (("lat", "lon"), np.ones((2, 2))),
+                "clim": (("month", "lat", "lon"), np.ones((12, 2, 2))),
+                "time_series": (("time", "lat", "lon"), series),
+            },
+            coords={"month": np.arange(1, 13), "time": time, "lat": lat, "lon": lon},
+        )
+
+    stats = [create_stats(input_cells), create_stats(ref_cells)]
+    captured = {}
+
+    def fake_create_results_csv(map1, **_kwargs):
+        """Record the maps the result metrics receive."""
+        captured["metric_maps"] = map1.copy()
+        return {}
+
+    def fake_write_xarray_to_file(ds, **_kwargs):
+        """Record the written relative statistics."""
+        captured["ds"] = ds.copy(deep=True)
+
+    module = "mhm_tools.post.gridded_data_evaluation"
+    monkeypatch.setattr(f"{module}.get_stats", lambda **_kwargs: stats.pop(0))
+    monkeypatch.setattr(
+        f"{module}.regridd_to_higher_spatial_resolution",
+        lambda ds_input, ds_ref: (ds_input, ds_ref),
+    )
+    monkeypatch.setattr(f"{module}.create_results_csv", fake_create_results_csv)
+    monkeypatch.setattr(f"{module}.write_xarray_to_file", fake_write_xarray_to_file)
+
+    compare_input_with_ref(
+        input_path=tmp_path / "input",
+        input_var="v",
+        output_path=tmp_path,
+        ref_path=tmp_path / "ref",
+        ref_var="v",
+        input_name="in",
+        ref_name="ref",
+        direct_comp=True,
+        plot=False,
+        **compare_kwargs,
+    )
+    return captured["ds"], captured["metric_maps"]
+
+
+@pytest.mark.parametrize("remove_seasonal_cycle_from_corr", [True, False])
+def test_compare_input_with_ref_correlates_monthly_anomalies(
+    monkeypatch, tmp_path, remove_seasonal_cycle_from_corr
+):
+    """Without the seasonal cycle the correlation follows the anomalies.
+
+    The opposite cycle with the same anomalies correlates perfectly, the same
+    cycle with mirrored anomalies perfectly negatively. With the cycle kept,
+    the signs flip, because the cycle dominates.
+    """
+    output, _ = _compare_monthly_series(
+        monkeypatch,
+        tmp_path,
+        remove_seasonal_cycle_from_corr=remove_seasonal_cycle_from_corr,
+    )
+
+    rho_opposite_cycle, rho_mirrored_anomalies = output["spearman"].values[0]
+    long_name = output["spearman"].attrs["long_name"]
+    if remove_seasonal_cycle_from_corr:
+        assert rho_opposite_cycle == pytest.approx(1.0)
+        assert rho_mirrored_anomalies == pytest.approx(-1.0)
+        assert "monthly anomalies" in long_name
+        assert output["spearman"].attrs["seasonality"] == "deseasonalised"
+    else:
+        assert rho_opposite_cycle < 0
+        assert rho_mirrored_anomalies > 0
+        assert "monthly anomalies" not in long_name
+        assert output["spearman"].attrs["seasonality"] == "with seasonal cycle"
+    # the std keeps the seasonal cycle by default
+    assert output["rel_std"].attrs["seasonality"] == "with seasonal cycle"
+
+
+def test_compare_input_with_ref_uses_only_season_months(monkeypatch, tmp_path):
+    """The result metrics only receive the steps of the season."""
+    output, metric_maps = _compare_monthly_series(
+        monkeypatch, tmp_path, season_months=list(range(4, 10))
+    )
+
+    assert metric_maps.shape[0] == 6 * 4
+    np.testing.assert_array_equal(output.attrs["season_months"], np.arange(4, 10))
+
+
+def test_select_available_years():
+    """The common years for the direct comparison, otherwise the union."""
+    years_in, years_ref = [2001, 2000, 2002, 2003], [2002, 2003, 2004]
+
+    assert select_available_years(years_in, years_ref) == [2002, 2003]
+    assert select_available_years(years_in, years_ref, direct_comp=False) == [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+    ]
+    assert select_available_years(
+        years_in, years_ref, slice(2001, 2003), direct_comp=False
+    ) == [2001, 2002, 2003]
+    assert select_available_years(years_in, [], slice(2001, None)) == [
+        2001,
+        2002,
+        2003,
+    ]
+
+
+def _run_gridded_data_evaluation(monkeypatch, tmp_path, ref_years, **evaluation_kwargs):
+    """Run `gridded_data_evaluation` with faked years and a faked comparison.
+
+    The input covers 2000-2009 and the reference `ref_years`. Both directories
+    hold a year folder, which bootstrapping requires; no data is read.
+
+    Args:
+        monkeypatch: pytest fixture used to fake the reading and the comparison.
+        tmp_path (Path): Directory of the fake datasets and the output.
+        ref_years (iterable of int): Years of the reference.
+        **evaluation_kwargs: Passed on to `gridded_data_evaluation`.
+
+    Returns
+    -------
+        Dict of the keyword arguments `compare_input_with_ref` received.
+    """
+    years = {"input": list(range(2000, 2010)), "ref": list(ref_years)}
+    for dataset_name in years:
+        year_dir = tmp_path / dataset_name / "2000"
+        year_dir.mkdir(parents=True)
+        (year_dir / "data.nc").touch()
+    captured = {}
+    module = "mhm_tools.post.gridded_data_evaluation"
+    monkeypatch.setattr(
+        f"{module}.get_years_from_path",
+        lambda path, **_kwargs: years[path.name],
+    )
+    monkeypatch.setattr(
+        f"{module}.compare_input_with_ref",
+        lambda *_args, **kwargs: captured.update(kwargs),
+    )
+    gridded_data_evaluation(
+        input=EvalDataset(tmp_path / "input", "in", "v", 1, "*.nc"),
+        ref=EvalDataset(tmp_path / "ref", "ref", "v", 1, "*.nc"),
+        output_path=tmp_path / "out",
+        **evaluation_kwargs,
+    )
+    return captured
+
+
+@pytest.mark.parametrize(
+    ("ref_years", "mode", "expected_removal"),
+    [
+        (range(2005, 2009), {}, False),
+        (range(2005, 2010), {}, True),
+        (range(2007, 2010), {"direct_comp": False}, False),
+        (
+            range(2000, 2010),
+            {"direct_comp": False, "n_bootstrap_years": 3, "n_bootstrap_selections": 1},
+            False,
+        ),
+    ],
+    ids=["4-common-years", "5-common-years", "union-but-3-common", "bootstrap-of-3"],
+)
+def test_gridded_data_evaluation_keeps_seasonal_cycle_below_five_common_years(
+    monkeypatch, tmp_path, ref_years, mode, expected_removal
+):
+    """The seasonal cycle is only removed when both datasets share 5 years.
+
+    Only the common years count, also where the union of the years is compared,
+    and a bootstrap selection counts at most its own number of years.
+    """
+    captured = _run_gridded_data_evaluation(
+        monkeypatch,
+        tmp_path,
+        ref_years,
+        remove_seasonal_cycle_from_std=True,
+        remove_seasonal_cycle_from_corr=True,
+        **mode,
+    )
+
+    assert captured["remove_seasonal_cycle_from_std"] is expected_removal
+    # bootstrapping always correlates with the seasonal cycle
+    if "n_bootstrap_years" not in mode:
+        assert captured["remove_seasonal_cycle_from_corr"] is expected_removal
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected_years"),
+    [
+        ({}, range(2005, 2010)),
+        ({"direct_comp": False, "stream_metrics": True}, range(2005, 2010)),
+        ({"direct_comp": False, "global_climate": True}, range(2005, 2010)),
+        ({"direct_comp": False}, range(2000, 2012)),
+        (
+            {
+                "direct_comp": False,
+                "stream_metrics": True,
+                "n_bootstrap_years": 3,
+                "n_bootstrap_selections": 1,
+            },
+            range(2000, 2012),
+        ),
+    ],
+    ids=[
+        "direct",
+        "stream-metrics",
+        "global-climate",
+        "no-direct-comparison",
+        "bootstrap",
+    ],
+)
+def test_gridded_data_evaluation_compares_common_years(
+    monkeypatch, tmp_path, mode, expected_years
+):
+    """Direct comparisons use the common years, independent draws the union."""
+    captured = _run_gridded_data_evaluation(
+        monkeypatch, tmp_path, range(2005, 2012), **mode
+    )
+
+    assert captured["available_years"] == list(expected_years)
+
+
+@pytest.mark.parametrize(
+    ("create_wmo_region_output", "expected_regions"), [(False, []), (True, ["Europe"])]
+)
+def test_gridded_data_evaluation_evaluates_regions_only_with_region_output(
+    monkeypatch, tmp_path, create_wmo_region_output, expected_regions
+):
+    """Regions and their CSV tables are only passed on with the region output."""
+    captured = _run_gridded_data_evaluation(
+        monkeypatch,
+        tmp_path,
+        range(2000, 2010),
+        regions="Europe",
+        create_wmo_region_output=create_wmo_region_output,
+    )
+
+    assert captured["region_names"] == expected_regions
+    assert captured["write_region_stats"] is create_wmo_region_output
+
+
+def _create_comparison_fields():
+    """Build relative statistics and climatologies on a 5x6 grid in Europe.
+
+    Returns
+    -------
+        Dict of `rel_mean`, `rel_std`, `spearman`, `input_clim` and `ref_clim`,
+        with one negative correlation.
+    """
+    rng = np.random.default_rng(0)
+    coords = {"lat": np.linspace(60.0, 40.0, 5), "lon": np.linspace(0.0, 20.0, 6)}
+    clim_coords = {"month": np.arange(1, 13), **coords}
+    spearman = rng.uniform(0.2, 0.9, (5, 6))
+    spearman[0, 0] = -0.3
+    return {
+        "rel_mean": xr.DataArray(
+            rng.uniform(0.6, 1.5, (5, 6)), dims=("lat", "lon"), coords=coords
+        ),
+        "rel_std": xr.DataArray(
+            rng.uniform(0.7, 1.3, (5, 6)), dims=("lat", "lon"), coords=coords
+        ),
+        "spearman": xr.DataArray(spearman, dims=("lat", "lon"), coords=coords),
+        "input_clim": xr.DataArray(
+            rng.uniform(0.5, 3.0, (12, 5, 6)),
+            dims=("month", "lat", "lon"),
+            coords=clim_coords,
+        ),
+        "ref_clim": xr.DataArray(
+            rng.uniform(0.5, 3.0, (12, 5, 6)),
+            dims=("month", "lat", "lon"),
+            coords=clim_coords,
+        ),
+    }
+
+
+def test_write_comparison_plots_names_region_figures_and_skips_empty_regions(
+    tmp_path,
+):
+    """A region figure carries the region in its name; one outside is skipped."""
+    fields = _create_comparison_fields()
+
+    for region_name in ("Europe", "Africa"):
+        write_comparison_plots(
+            input_name="in",
+            ref_name="ref",
+            output_path=tmp_path,
+            region_name=region_name,
+            **fields,
+        )
+
+    assert (tmp_path / "et_map_in_ref_region_Europe.png").is_file()
+    assert not list(tmp_path.glob("*Africa*"))
+
+
+def test_plot_map_uses_ratio_and_correlation_colour_scales(monkeypatch, tmp_path):
+    """The ratios use fixed ratio bins, and negative correlations fall below 0 to 1.
+
+    Like the alpha and beta maps of discharge-evaluation, the ratio scales take
+    one of the `RATIO_BOUNDS` sets, which never reach below 0 and centre one of
+    their odd number of bins on 1.
+    """
+    drawn_maps = []
+
+    def recording_plot_single_map(ax, values, **kwargs):
+        """Draw the map and record its bin edges and colorbar extension."""
+        image, bounds, extend, ticks = plot_single_map(ax, values, **kwargs)
+        drawn_maps.append((bounds, extend))
+        return image, bounds, extend, ticks
+
+    monkeypatch.setattr(
+        "mhm_tools.post.gridded_data_evaluation.plot_single_map",
+        recording_plot_single_map,
+    )
+
+    plot_map(
+        input_name="in",
+        ref_name="ref",
+        output_path=tmp_path,
+        **_create_comparison_fields(),
+    )
+
+    (mean_bounds, _), (std_bounds, _), (rho_bounds, rho_extend) = drawn_maps
+    for bounds in (mean_bounds, std_bounds):
+        assert any(np.array_equal(bounds, edges) for edges in RATIO_BOUNDS.values())
+        assert bounds[0] > 0
+        assert (bounds.size - 1) % 2 == 1
+        centre_bin = (bounds.size - 1) // 2
+        assert bounds[centre_bin] < 1 < bounds[centre_bin + 1]
+    assert rho_bounds[0] == pytest.approx(0.0)
+    assert rho_bounds[-1] == pytest.approx(1.0)
+    assert rho_extend == "min"
+
+
+def test_write_comparison_plots_hides_ratios_where_reference_close_to_zero(
+    monkeypatch, tmp_path
+):
+    """A cell whose reference mean is close to zero reaches the ratio maps as NaN."""
+    fields = _create_comparison_fields()
+    fields["ref_clim"][:, 2, 3] = 1e-4
+    captured = {}
+    monkeypatch.setattr(
+        "mhm_tools.post.gridded_data_evaluation.plot_map",
+        lambda **kwargs: captured.update(kwargs) or tmp_path / "map.png",
+    )
+
+    write_comparison_plots(
+        input_name="in", ref_name="ref", output_path=tmp_path, **fields
+    )
+
+    for name in ("rel_mean", "rel_std"):
+        values = np.asarray(captured[name])
+        assert np.isnan(values[2, 3])
+        assert np.isfinite(np.delete(values, 2 * values.shape[1] + 3)).all()
+
+
+def test_create_overview_table_rows():
+    """Every table adds its row of the region as one block, counts stay integers."""
+    relative_name = "relative statistics (median)"
+    tables = {
+        relative_name: pd.DataFrame(
+            {"region": ["Global", "Europe"], "cells": [30, 12], "rel_mean": [1.1, 0.9]}
+        ),
+        "SPAEF": pd.DataFrame({"region": ["Global"], "avg_spaef": [0.5]}),
+    }
+
+    europe_rows = create_overview_table_rows(tables, "Europe")
+    global_rows = create_overview_table_rows(tables, "Global")
+
+    assert europe_rows == [
+        {"variable": relative_name, "statistic": "cells", "value": 12},
+        {"variable": relative_name, "statistic": "rel_mean", "value": 0.9},
+    ]
+    assert not isinstance(europe_rows[0]["value"], float)
+    assert [(row["variable"], row["statistic"]) for row in global_rows] == [
+        (relative_name, "cells"),
+        (relative_name, "rel_mean"),
+        ("SPAEF", "avg_spaef"),
+    ]
+
+
+def test_write_overview_pdf_orders_domain_then_regions(monkeypatch, tmp_path):
+    """The domain table opens the PDF, a region's table precedes its first figure."""
+    calls = []
+    monkeypatch.setattr(
+        "mhm_tools.post.gridded_data_evaluation.write_metric_plot_overview_pdf",
+        lambda **kwargs: calls.append(kwargs) or kwargs["output_file"],
+    )
+    relative_stats_table = pd.DataFrame(
+        {"region": ["Global", "Europe", "Africa"], "rel_mean": [1.0, 1.1, 0.9]}
+    )
+    metric_tables = {
+        "SPAEF": pd.DataFrame({"region": ["Global", "Europe"], "avg_spaef": [0.5, 0.4]})
+    }
+    domain_file = tmp_path / "domain.png"
+    europe_file = tmp_path / "europe.png"
+    europe_climate_file = tmp_path / "europe_climate.png"
+
+    write_overview_pdf(
+        tmp_path / "overview.pdf",
+        relative_stats_table,
+        metric_tables,
+        {
+            None: [domain_file],
+            "Europe": [europe_file, europe_climate_file],
+            "Africa": [],
+        },
+        "in",
+        "ref",
+    )
+
+    (call,) = calls
+    assert call["plot_files"] == [domain_file, europe_file, europe_climate_file]
+    assert [row["value"] for row in call["summary_rows"]] == [1.0, 0.5]
+    # Africa has statistics but no figures, so it gets no table either
+    assert list(call["tables_before_plot_files"]) == [europe_file]
+    europe_title, europe_rows = call["tables_before_plot_files"][europe_file]
+    assert europe_title == "Statistics of in against ref - Europe"
+    assert [row["value"] for row in europe_rows] == [1.1, 0.4]
+
+
+def test_read_metric_tables_prefers_region_csvs(tmp_path):
+    """Region CSVs are read when regions are requested, else the domain CSVs."""
+    pd.DataFrame({"region": ["Global", "Europe"], "avg_spaef": [0.5, 0.4]}).to_csv(
+        tmp_path / "in-ref_spaef_regions.csv", index=False
+    )
+    # the domain CSVs are written with their index, like create_results_csv does
+    for metric, value in (("spaef", 0.5), ("esp", 0.7)):
+        pd.DataFrame({"name": ["in-ref"], f"avg_{metric}": [value]}).to_csv(
+            tmp_path / f"in-ref_{metric}.csv"
+        )
+
+    region_tables = read_metric_tables(
+        tmp_path, "in", "ref", "spaef,esp,tsm", ["Europe"]
+    )
+    domain_tables = read_metric_tables(tmp_path, "in", "ref", "spaef", [])
+
+    assert list(region_tables) == ["SPAEF", "ESP"]
+    assert region_tables["SPAEF"]["region"].tolist() == ["Global", "Europe"]
+    assert region_tables["ESP"].to_dict("records") == [
+        {"region": "Global", "avg_esp": 0.7}
+    ]
+    assert domain_tables["SPAEF"].to_dict("records") == [
+        {"region": "Global", "avg_spaef": 0.5}
+    ]

@@ -1,12 +1,19 @@
-"""Tests for the shared helpers behind the format-data workflows."""
+"""Tests for the shared helpers behind the categorical format commands."""
 
 import logging
 
 import numpy as np
+import pandas as pd
 import pytest
+import rioxarray  # noqa: F401
 import xarray as xr
 
-from mhm_tools.common.format_data import _reclassify, fill_grid_nodata
+from mhm_tools.common.categorical_raster import (
+    _reclassify,
+    fill_grid_nodata,
+    prepare_categorical_data,
+)
+from mhm_tools.pre.format_lc_data import _lc_resampling
 
 GLOBCOVER_MAPPING = {11.0: 3, 40.0: 1, 190.0: 2, 210.0: 3}
 
@@ -114,7 +121,7 @@ def test_reclassify_logs_unmatched_uint8_categories(caplog, monkeypatch):
     # caplog; monkeypatch restores the setting after this test.
     monkeypatch.setattr(logging.getLogger("mhm_tools"), "propagate", True)
 
-    with caplog.at_level(logging.WARNING, logger="mhm_tools.common.format_data"):
+    with caplog.at_level(logging.WARNING, logger="mhm_tools.common.categorical_raster"):
         classes = _reclassify(create_category_raster(values, 0), GLOBCOVER_MAPPING)
 
     np.testing.assert_array_equal(classes, [[3, -9999, -9999], [-9999, 1, -9999]])
@@ -152,3 +159,82 @@ def test_reclassify_uint8_lookup_array_matches_the_per_category_loop():
     )
 
     np.testing.assert_array_equal(lookup_classes, loop_classes)
+
+
+IDENTITY_LOOKUP = pd.DataFrame({"code": range(1, 10), "class": range(1, 10)})
+
+
+def create_utm_grid(values, x_origin=1000.0):
+    """Create a north-up EPSG:32632 grid of 100 m cells.
+
+    Args:
+        values (numpy.ndarray): Two-dimensional cell values, row 0 northernmost.
+        x_origin (float): Western edge of the grid in metres.
+
+    Returns:
+        xarray.DataArray: The values on ``y``/``x`` dimensions with a CRS.
+    """
+    rows, cols = values.shape
+    return xr.DataArray(
+        values,
+        dims=("y", "x"),
+        coords={
+            "y": 2000.0 - 100.0 * (np.arange(rows) + 0.5),
+            "x": x_origin + 100.0 * (np.arange(cols) + 0.5),
+        },
+    ).rio.write_crs("EPSG:32632")
+
+
+def write_class_raster(path, x_origin=1000.0):
+    """Write a 3x3 GeoTIFF of the classes 1..9 and return its path."""
+    classes = np.arange(1, 10, dtype=np.int32).reshape(3, 3)
+    create_utm_grid(classes, x_origin).rio.write_nodata(0).rio.to_raster(path)
+    return path
+
+
+def prepare_identity_classes(input_file, reference, resampling="nearest"):
+    """Run prepare_categorical_data with the identity lookup."""
+    return prepare_categorical_data(
+        input_file,
+        reference,
+        IDENTITY_LOOKUP,
+        "code",
+        "class",
+        variable_name="classes",
+        resampling=resampling,
+    )
+
+
+def test_prepare_categorical_data_keeps_orientation_of_x_y_ordered_reference(
+    tmp_path,
+):
+    """A reference stored as (x, y) gives the same classes as one stored as (y, x)."""
+    input_file = write_class_raster(tmp_path / "classes.tif")
+    reference = create_utm_grid(np.ones((3, 3)))
+
+    expected = prepare_identity_classes(input_file, reference)["classes"]
+    output = prepare_identity_classes(input_file, reference.transpose("x", "y"))
+
+    np.testing.assert_array_equal(
+        output["classes"].transpose("y", "x").values, expected.values
+    )
+
+
+def test_class_rasters_reject_resampling_that_invents_classes(tmp_path):
+    """Bilinear resampling would blend the classes 1 and 9 into new ones."""
+    input_file = write_class_raster(tmp_path / "classes.tif")
+    reference = create_utm_grid(np.ones((3, 3)))
+
+    with pytest.raises(ValueError, match="invent classes"):
+        prepare_identity_classes(input_file, reference, resampling="bilinear")
+    with pytest.raises(ValueError, match="auto, nearest or mode"):
+        _lc_resampling("bilinear")
+
+
+def test_prepare_categorical_data_rejects_input_outside_the_reference(tmp_path):
+    """Classes that miss the reference domain, e.g. after a wrong CRS, raise."""
+    input_file = write_class_raster(tmp_path / "classes.tif", x_origin=500000.0)
+    reference = create_utm_grid(np.ones((3, 3)))
+
+    with pytest.raises(ValueError, match="No class"):
+        prepare_identity_classes(input_file, reference)

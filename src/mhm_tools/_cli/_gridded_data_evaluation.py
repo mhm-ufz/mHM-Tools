@@ -75,6 +75,17 @@ def add_args(parser):
     required.add_argument(
         "--output-dir", help="Path for the output dir.", required=True
     )
+    optional.add_argument(
+        "--overview-pdf-name",
+        default=None,
+        required=False,
+        help=(
+            """Name of the PDF in --output-dir holding the statistics tables and
+            every figure, the whole domain first and then each region of
+            --create-wmo-region-output. By default
+            overview_<input-name>_<ref-name>.pdf."""
+        ),
+    )
 
     optional.add_argument(
         "--input-var",
@@ -154,7 +165,7 @@ def add_args(parser):
         "--ncpus",
         default=1,
         type=int,
-        help=("Number of CPUs to use"),
+        help=("Number of CPUs to use. 0 or -1 uses all cores."),
     )
     optional.add_argument(
         "--n-bootstrap-years",
@@ -176,7 +187,10 @@ def add_args(parser):
         "--no-direct-comparison",
         action="store_true",
         required=False,
-        help=("Use statistics and do not compare timeseries directly. Needs ref_path."),
+        help=(
+            "Use statistics and do not compare timeseries directly. Needs "
+            "ref_path. The correlation is then that of the monthly climatologies."
+        ),
     )
     optional.add_argument(
         "--start-year",
@@ -196,7 +210,11 @@ def add_args(parser):
         "--available-mem",
         required=False,
         default=None,
-        help=("""Available memory per cpu in Gb or Mb (default Gb)"""),
+        help=(
+            """Available memory per cpu in Gb or Mb (default Gb). Sizes the
+            chunks the direct comparison reads the records in; without it the
+            chunks follow the input files."""
+        ),
     )
     optional.add_argument(
         "--input-file-name",
@@ -271,7 +289,34 @@ def add_args(parser):
         required=False,
         help=(
             """calculate the result metrics from monthly means accumulated while
-            streaming the files, so neither record is ever held in memory"""
+            streaming the files, so neither record is ever held in memory. The
+            statistics match the direct comparison: NaNs are skipped per cell
+            and only the years both datasets cover are used"""
+        ),
+    )
+    optional.add_argument(
+        "--preserve-seasonality",
+        required=False,
+        default="std",
+        help=(
+            """keep the seasonal cycle in 'std' (temporal standard deviation,
+            the default), 'corr' (Spearman correlation), 'corr,std' or 'none';
+            the others are taken from the anomalies of the monthly climatology.
+            With fewer than 5 years covered by both datasets (per bootstrap
+            selection: at most --n-bootstrap-years) it is kept in both.
+            Bootstrapping and --no-direct-comparison always keep it in the
+            correlation. The plot titles state which"""
+        ),
+    )
+    optional.add_argument(
+        "--season",
+        required=False,
+        default=None,
+        help=(
+            """first and last month of the compared season, e.g. '4,9' for April
+            to September or '10,3' for October to March. All statistics and
+            metrics use only these months. The output file names don't carry the
+            season, so runs for different seasons need different --output-dir"""
         ),
     )
     flags.add_argument(
@@ -309,15 +354,22 @@ def add_args(parser):
         required=False,
         default="all",
         help=(
-            "WMO regions the statistics are tabled for next to the whole domain: "
-            "'all', 'none' or a comma separated list."
+            "WMO regions of --create-wmo-region-output: 'all', 'none' or a comma "
+            "separated list."
         ),
     )
     flags.add_argument(
+        "--create-wmo-region-output",
         "--write-region-stats",
+        dest="create_wmo_region_output",
         action="store_true",
         required=False,
-        help="Also write the statistics tables of the domain and the regions to CSV.",
+        help=(
+            """also evaluate every WMO region in --regions: the statistics tables
+            get a row per region and are written to CSV, and every figure is
+            drawn again per region, cropped to it with its own colour scale.
+            --write-region-stats is the former name"""
+        ),
     )
     add_netcdf_compression_args(parser)
 
@@ -332,6 +384,8 @@ def run(args):
     """
     from mhm_tools.common.cli_utils import get_available_mem_in_unit, get_coords
     from mhm_tools.common.file_handler import get_xarray_ds_from_file
+    from mhm_tools.common.parallel import resolve_ncpus
+    from mhm_tools.common.time_utils import create_season_months
     from mhm_tools.post.gridded_data_evaluation import (
         EvalDataset,
         gridded_data_evaluation,
@@ -395,6 +449,18 @@ def run(args):
         error_msg = "Options --bias_only and --global_climate are mutually exclusive."
         with ErrorLogger(logger):
             raise ValueError(error_msg)
+    preserved_seasonality = {
+        name.strip().lower()
+        for name in str(args.preserve_seasonality).split(",")
+        if name.strip()
+    } - {"none"}
+    if not preserved_seasonality <= {"corr", "std"}:
+        error_msg = (
+            f"Unknown --preserve-seasonality value {args.preserve_seasonality!r}. "
+            "Use 'none', 'corr', 'std' or 'corr,std'."
+        )
+        with ErrorLogger(logger):
+            raise ValueError(error_msg)
     gridded_data_evaluation(
         input=input,
         ref=ref,
@@ -402,7 +468,7 @@ def run(args):
         only_plot=args.only_plot,
         coordinate_slice=coordinate_slice,
         mask_da=mask_da,
-        n_cpus=args.ncpus,
+        n_cpus=resolve_ncpus(args.ncpus),
         n_bootstrap_years=args.n_boostrap_years,
         n_bootstrap_selections=args.n_bootstrap_selections,
         direct_comp=(
@@ -422,5 +488,11 @@ def run(args):
         result_metric=args.metric,
         compression=get_netcdf_compression(args),
         regions=args.regions,
-        write_region_stats=args.write_region_stats,
+        create_wmo_region_output=args.create_wmo_region_output,
+        remove_seasonal_cycle_from_std="std" not in preserved_seasonality,
+        remove_seasonal_cycle_from_corr="corr" not in preserved_seasonality,
+        season_months=(
+            create_season_months(args.season) if args.season is not None else None
+        ),
+        overview_pdf_name=args.overview_pdf_name,
     )

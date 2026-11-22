@@ -93,7 +93,7 @@ def add_args(parser):
         required=False,
         default=1,
         type=int,
-        help=("Number of cores used for parallelisation."),
+        help=("Number of cores used for parallelisation. 0 or -1 uses all cores."),
     )
     optional.add_argument(
         "--lonlatbox",
@@ -212,6 +212,7 @@ def run(args):
     """
     from mhm_tools.common.cli_utils import get_available_mem_in_unit, get_coords
     from mhm_tools.common.logger import ErrorLogger
+    from mhm_tools.common.parallel import resolve_ncpus
     from mhm_tools.pre.crop_mhm_setup import crop_mhm_setup
 
     resolutions = Resolution(
@@ -259,7 +260,7 @@ def run(args):
         lonslice=lonslice,
         latslice=latslice,
         crs=args.crs,
-        n_jobs=args.ncpus,
+        n_jobs=resolve_ncpus(args.ncpus),
         filename=args.file_name,
         available_mem_gib=available_mem,
         force_header_creation=args.create_header,

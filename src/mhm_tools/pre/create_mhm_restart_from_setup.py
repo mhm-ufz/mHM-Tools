@@ -12,6 +12,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -34,6 +35,13 @@ from mhm_tools.pre.crop_mhm_setup import crop_mhm_setup
 from mhm_tools.pre.fill_nearest import fill_nearest
 
 logger = logging.getLogger(__name__)
+
+# oldest mHM version (major, minor) whose Python bindings the runner supports
+_MIN_MHM_VERSION = (5, 13)
+_MHM_INSTALL_HINT = (
+    'pip install "mhm-tools[mhm]" (or [mhm5]) or '
+    'conda install -c conda-forge "mhm>=5.13,<6"'
+)
 
 
 def _snap_grid_bound(value, resolution=None):
@@ -205,14 +213,41 @@ def _coord_bounds(values):
     return lower, upper
 
 
+def _calculate_tile_overlaps(tile, mask_da, lon_key, lat_key):
+    """Calculate which mask columns and rows overlap a setup tile.
+
+    Cell edges from drifting coordinates (e.g. 40.00000000000004 for 40) reach
+    into the neighbouring tile, so a cell only counts when more than a
+    thousandth of its width lies inside the tile.
+
+    Parameters
+    ----------
+    tile : MHMSetupTile
+        Setup tile whose slices hold its cell bounds.
+    mask_da : xarray.DataArray
+        Mask with 1-D longitude and latitude coordinates.
+    lon_key, lat_key : str
+        Names of the mask's longitude and latitude coordinates.
+
+    Returns
+    -------
+    tuple of numpy.ndarray
+        Boolean overlap of the longitude columns and of the latitude rows.
+    """
+    overlaps = []
+    for coord_key, tile_slice in ((lon_key, tile.lonslice), (lat_key, tile.latslice)):
+        tile_min = min(float(tile_slice.start), float(tile_slice.stop))
+        tile_max = max(float(tile_slice.start), float(tile_slice.stop))
+        lower, upper = _coord_bounds(mask_da[coord_key].values)
+        tolerance = 1e-3 * (upper - lower)
+        overlaps.append((lower < tile_max - tolerance) & (upper > tile_min + tolerance))
+    return tuple(overlaps)
+
+
 def _tile_has_active_mask_cell(tile, mask_da):
     """Return whether an L1 tile overlaps at least one active mask cell."""
     lon_key = get_coord_key(mask_da, lon=True)
     lat_key = get_coord_key(mask_da, lat=True)
-    lon_min = min(float(tile.lonslice.start), float(tile.lonslice.stop))
-    lon_max = max(float(tile.lonslice.start), float(tile.lonslice.stop))
-    lat_min = min(float(tile.latslice.start), float(tile.latslice.stop))
-    lat_max = max(float(tile.latslice.start), float(tile.latslice.stop))
 
     active = mask_da.transpose(..., lat_key, lon_key)
     extra_dims = [dim for dim in active.dims if dim not in (lat_key, lon_key)]
@@ -220,10 +255,9 @@ def _tile_has_active_mask_cell(tile, mask_da):
     if extra_dims:
         active_values = np.any(active_values, axis=tuple(range(len(extra_dims))))
 
-    lon_lower, lon_upper = _coord_bounds(mask_da[lon_key].values)
-    lat_lower, lat_upper = _coord_bounds(mask_da[lat_key].values)
-    lon_overlaps = (lon_lower < lon_max) & (lon_upper > lon_min)
-    lat_overlaps = (lat_lower < lat_max) & (lat_upper > lat_min)
+    lon_overlaps, lat_overlaps = _calculate_tile_overlaps(
+        tile, mask_da, lon_key, lat_key
+    )
     overlap = np.outer(lat_overlaps, lon_overlaps)
     return bool(np.any(active_values & overlap))
 
@@ -232,15 +266,9 @@ def _tile_mask_section(tile, mask_da):
     """Return the mask cells whose bounds overlap a setup tile."""
     lon_key = get_coord_key(mask_da, lon=True)
     lat_key = get_coord_key(mask_da, lat=True)
-    lon_min = min(float(tile.lonslice.start), float(tile.lonslice.stop))
-    lon_max = max(float(tile.lonslice.start), float(tile.lonslice.stop))
-    lat_min = min(float(tile.latslice.start), float(tile.latslice.stop))
-    lat_max = max(float(tile.latslice.start), float(tile.latslice.stop))
-
-    lon_lower, lon_upper = _coord_bounds(mask_da[lon_key].values)
-    lat_lower, lat_upper = _coord_bounds(mask_da[lat_key].values)
-    lon_overlaps = (lon_lower < lon_max) & (lon_upper > lon_min)
-    lat_overlaps = (lat_lower < lat_max) & (lat_upper > lat_min)
+    lon_overlaps, lat_overlaps = _calculate_tile_overlaps(
+        tile, mask_da, lon_key, lat_key
+    )
     return mask_da.isel({lon_key: lon_overlaps, lat_key: lat_overlaps})
 
 
@@ -412,6 +440,90 @@ class MHMRunner:
             with ErrorLogger(logger):
                 raise RuntimeError(msg)
         return process
+
+    def check_mhm_import(self):
+        """Check that the Python used for the mHM runs imports mHM 5.13 or newer.
+
+        The check runs the same module loads and ``python`` as the mHM runs.
+
+        Returns
+        -------
+        str
+            Version of the importable mHM, or "unknown" if it cannot be read.
+
+        Raises
+        ------
+        RuntimeError
+            If mHM cannot be imported or is older than 5.13.
+        """
+        probe = "\n".join(
+            [
+                "import importlib.metadata",
+                "import sys",
+                "import mhm",
+                "try:",
+                "    version = importlib.metadata.version('mhm')",
+                "except importlib.metadata.PackageNotFoundError:",
+                "    version = getattr(mhm, '__version__', 'unknown')",
+                "print(sys.executable)",
+                "print(version)",
+            ]
+        )
+        command = self._get_module_command() + "python -c " + shlex.quote(probe)
+        process = subprocess.run(command, shell=True, capture_output=True, check=False)
+        min_version = ".".join(str(part) for part in _MIN_MHM_VERSION)
+        if process.returncode != 0:
+            stderr_lines = process.stderr.decode(errors="replace").strip().splitlines()
+            reasons = [
+                f"mHM is not installed in the Python the runs use. Install it with \
+                {_MHM_INSTALL_HINT}, or load an mHM module with --mhm-packages."
+            ]
+            if self.mhm_packages is None:
+                reasons.append(
+                    "The environment holding mHM is not activated. The runs call "
+                    f"'python' from PATH ({shutil.which('python') or 'not found'}), "
+                    f"not the Python running mhm-tools ({sys.executable})."
+                )
+            else:
+                reasons.append(
+                    f"--mhm-packages '{self.mhm_packages}' did not provide mHM: the "
+                    "'module' command is missing, or the loaded modules lack the mHM "
+                    "Python bindings or a 'python' that can import them."
+                )
+            reasons.append(
+                "mHM is installed but fails to import, e.g. because of a missing "
+                "netCDF library or a numpy build mismatch (see the error output)."
+            )
+            reason_lines = "\n".join(f"  - {reason}" for reason in reasons)
+            error_output = "\n".join(stderr_lines[-5:])
+            msg = (
+                f"mHM could not be imported, so no restart files can be created.\n"
+                f"Command: {command}\n"
+                f"Error output:\n{error_output}\n"
+                f"Possible reasons:\n{reason_lines}\n"
+                "Use --skip-mhm-run to only collect existing restart files."
+            )
+            with ErrorLogger(logger):
+                raise RuntimeError(msg)
+
+        stdout_lines = process.stdout.decode(errors="replace").strip().splitlines()
+        python_executable, version = stdout_lines[-2:]
+        version_match = re.match(r"(\d+)\.(\d+)", version)
+        if version_match is None:
+            logger.warning(
+                f"Could not read the mHM version of {python_executable}; "
+                f"mHM {min_version} or newer is required."
+            )
+        elif tuple(int(part) for part in version_match.groups()) < _MIN_MHM_VERSION:
+            msg = (
+                f"mHM {version} from {python_executable} is too old, the restart "
+                f"creation needs mHM {min_version} or newer. Install it with "
+                f"{_MHM_INSTALL_HINT}, or load a newer module with --mhm-packages."
+            )
+            with ErrorLogger(logger):
+                raise RuntimeError(msg)
+        logger.info(f"Using mHM {version} from {python_executable}")
+        return version
 
 
 def _find_restart_files(setup_path, restart_pattern, min_mtime=None):
@@ -640,6 +752,74 @@ def _mask_dem_for_tile(setup_path, l0_mask_files):
         for mask_file in matches:
             masked_files.append(_mask_dem_with_l0_file(dem_file, mask_file))
     return masked_files
+
+
+def _find_l0_file_without_valid_cells(tile):
+    """Find the DEM or flow direction file of a tile that has no valid cell.
+
+    mHM masks L0 with these files and stops when no cell is left. A file that
+    can't be read is not counted, so mHM still runs and reports it.
+
+    Parameters
+    ----------
+    tile : SetupTile
+        Prepared setup tile.
+
+    Returns
+    -------
+    pathlib.Path or None
+        The first DEM or flow direction NetCDF file without a valid cell.
+    """
+    nc_files = sorted(Path(tile.output_path).rglob("*.nc"))
+    for name_part in ("dem", "fdir"):
+        l0_files = [path for path in nc_files if name_part in path.name.lower()]
+        if not l0_files:
+            continue
+        try:
+            has_valid_cell = bool(_active_l0_mask_from_file(l0_files[0])["mask"].any())
+        except (OSError, ValueError) as exc:
+            logger.warning(f"Could not check the valid cells of {l0_files[0]}: {exc}")
+            continue
+        if not has_valid_cell:
+            return l0_files[0]
+    return None
+
+
+def _split_tiles_without_valid_l0_cells(tiles, n_jobs=1):
+    """Split prepared tiles into tiles mHM can run and tiles without valid L0 cells.
+
+    Parameters
+    ----------
+    tiles : list of SetupTile
+        Prepared setup tiles.
+    n_jobs : int
+        Number of processes reading the tile files.
+
+    Returns
+    -------
+    tuple of list
+        Tiles to run, and ``{"tile", "message"}`` entries for the tiles left out.
+    """
+    if int(n_jobs) == 1:
+        empty_files = [_find_l0_file_without_valid_cells(tile) for tile in tiles]
+    else:
+        empty_files = Parallel(n_jobs=n_jobs, backend="loky")(
+            delayed(_find_l0_file_without_valid_cells)(tile) for tile in tiles
+        )
+    run_tiles = [
+        tile for tile, empty_file in zip(tiles, empty_files) if empty_file is None
+    ]
+    empty_tiles = [
+        {"tile": tile.name, "message": f"{empty_file} has no valid cell"}
+        for tile, empty_file in zip(tiles, empty_files)
+        if empty_file is not None
+    ]
+    if empty_tiles:
+        logger.info(
+            f"Leaving out {len(empty_tiles)} tiles whose DEM or flow direction "
+            "has no valid cell."
+        )
+    return run_tiles, empty_tiles
 
 
 def _ensure_mhm_tile_dirs(setup_path):
@@ -1842,6 +2022,9 @@ def create_mhm_restart_from_setup(  # noqa: PLR0913
     """
     output_path = Path(output_path)
     mhm_n_jobs = n_jobs if mhm_n_jobs is None else mhm_n_jobs
+    # without mHM every tile would fail on its own after the tiles are prepared
+    if not skip_mhm_run:
+        MHMRunner(mhm_packages=mhm_packages).check_mhm_import()
     mask_ds = (
         mask_da.to_dataset(name=mask_var)
         if isinstance(mask_da, xr.DataArray)
@@ -1881,6 +2064,11 @@ def create_mhm_restart_from_setup(  # noqa: PLR0913
         fill_nearest_files=fill_nearest_files,
         l0_mask_files=l0_mask_files,
         update_tile_masks=update_tile_masks,
+    )
+    # mHM can't run without a valid DEM or flow direction cell, so these tiles
+    # are listed separately instead of failing or being recreated
+    prepared_tiles, empty_tiles = _split_tiles_without_valid_l0_cells(
+        prepared_tiles, n_jobs=n_jobs
     )
     if skip_mhm_run:
         logger.info(
@@ -1943,6 +2131,12 @@ def create_mhm_restart_from_setup(  # noqa: PLR0913
         )
     else:
         failed_tiles_file = _summarize_failed_tiles(failed_tiles, output_path)
+    empty_tiles_file = _summarize_failed_tiles(
+        empty_tiles,
+        output_path,
+        filename="empty_tiles.txt",
+        title="Tiles without valid DEM or flow direction cells",
+    )
 
     restart_files = [
         restart_file
@@ -1987,6 +2181,10 @@ def create_mhm_restart_from_setup(  # noqa: PLR0913
 
     logger.info(f"Created tiled mHM restart files: {restart_files}")
     logger.info(f"{len(failed_tiles)} of {len(tiles)} were missing")
+    logger.info(
+        f"{len(empty_tiles)} of {len(tiles)} had no valid DEM or flow direction "
+        f"cell and were left out, see {empty_tiles_file}"
+    )
     return {
         "restart_files": restart_files,
         "merged_restart_file": merged_restart_path,
@@ -1994,6 +2192,8 @@ def create_mhm_restart_from_setup(  # noqa: PLR0913
         "tiles": tiles,
         "failed_tiles": failed_tiles,
         "failed_tiles_file": failed_tiles_file,
+        "empty_tiles": empty_tiles,
+        "empty_tiles_file": empty_tiles_file,
     }
 
 

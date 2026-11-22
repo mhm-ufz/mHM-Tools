@@ -78,13 +78,14 @@ def add_args(parser):
         dest="n_cpus",
         default=1,
         type=int,
-        help="Number of cpus for parallel processing of multiple files.",
+        help="Number of cpus for parallel processing of multiple files. 0 or -1 uses all cores.",
     )
     add_netcdf_compression_args(parser)
 
 
 def run(args):
     """Fill missing NetCDF values using nearest valid neighbours."""
+    from mhm_tools.common.parallel import resolve_ncpus
     from mhm_tools.pre.fill_nearest import fill_nearest
 
     fill_nearest(
@@ -95,6 +96,6 @@ def run(args):
         mask_var=args.mask_var,
         fill_value=float(args.fill_value),
         default_value=args.default_value,
-        n_cpus=args.n_cpus,
+        n_cpus=resolve_ncpus(args.n_cpus),
         compression=get_netcdf_compression(args),
     )

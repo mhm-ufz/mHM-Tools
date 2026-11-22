@@ -4,6 +4,7 @@ from pathlib import Path
 
 import geopandas as gpd
 import numpy as np
+import pandas as pd
 import pytest
 import rasterio
 import xarray as xr
@@ -15,6 +16,7 @@ from mhm_tools.common.file_handler import (
     write_xarray_to_file,
 )
 from mhm_tools.pre.format_geology import (
+    _classdefinition_text,
     format_geology_data,
     write_geology_classdefinition,
 )
@@ -406,3 +408,35 @@ def test_format_geology_data_uses_exact_dem_grid(tmp_path: Path):
     finally:
         output.close()
         reference.close()
+
+
+def test_geology_classdefinition_lists_a_shared_class_unit_once():
+    """Raster codes 10 and 11 share class unit 1, which mHM must read once."""
+    table = pd.DataFrame(
+        {"CODE": [10, 11, 20], "GEOLOGY_CLASS": [1, 1, 2], "KARSTIC": [0, 0, 1]}
+    )
+
+    lines = _classdefinition_text(table, "GEOLOGY_CLASS").splitlines()
+
+    assert lines[0] == "nGeo_Formations  2"
+    assert [line.split() for line in lines[2:4]] == [
+        ["1", "1", "0", "GeoUnit-1"],
+        ["2", "2", "1", "GeoUnit-2"],
+    ]
+
+
+def test_geology_classdefinition_rejects_conflicting_shared_class_unit():
+    """A class unit cannot be karstic and non-karstic at once."""
+    table = pd.DataFrame({"GEOLOGY_CLASS": [1, 1], "KARSTIC": [0, 1]})
+
+    with pytest.raises(ValueError, match="class unit 1"):
+        _classdefinition_text(table, "GEOLOGY_CLASS")
+
+
+def test_geology_classdefinition_accepts_karstic_stored_as_real():
+    """A REAL KARSTIC column holds 1.0 and 0.0 instead of 1 and 0."""
+    table = pd.DataFrame({"GEOLOGY_CLASS": [1, 2], "KARSTIC": [1.0, 0.0]})
+
+    lines = _classdefinition_text(table, "GEOLOGY_CLASS").splitlines()
+
+    assert [line.split()[2] for line in lines[2:4]] == ["1", "0"]

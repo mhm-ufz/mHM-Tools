@@ -31,7 +31,7 @@ def _ensure_mhm_tools_logger_propagates():
     logger.setLevel(previous_level)
 
 
-def _write_results_csv(path, ids, kge, x=None, y=None):
+def _write_results_csv(path, ids, kge, x=None, y=None, crs=None):
     """Write a small discharge-evaluation-shaped results.csv for tests."""
     n = len(ids)
     df = pd.DataFrame(
@@ -42,6 +42,8 @@ def _write_results_csv(path, ids, kge, x=None, y=None):
             "y": y if y is not None else np.arange(n, dtype=float) + 50.0,
         }
     )
+    if crs is not None:
+        df["crs"] = crs
     path.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(path, index=False)
     return df
@@ -167,6 +169,87 @@ def test_write_discharge_metric_diff_maps_requires_at_least_two_inputs(
     assert "at least two" in caplog.text
 
 
+def test_get_results_crs_reads_the_crs_column():
+    """Return the crs column's value, None without it, and refuse mixed CRS."""
+    projected = pd.DataFrame({"id": [1, 2], "crs": ["EPSG:3035", "EPSG:3035"]})
+    mixed = pd.DataFrame({"id": [1, 2], "crs": ["EPSG:3035", "EPSG:4326"]})
+
+    assert dec._get_results_crs(projected) == "EPSG:3035"
+    assert dec._get_results_crs(pd.DataFrame({"id": [1, 2]})) is None
+    with pytest.raises(ValueError, match="several CRS"):
+        dec._get_results_crs(mixed)
+
+
+@pytest.mark.parametrize("region", [None, "Europe"])
+def test_plot_discharge_metric_diff_map_draws_projected_gauges_in_their_crs(
+    tmp_path, _offline_map_projections, region
+):
+    """Draw gauges in EPSG:3035 metres on an EPSG:3035 map, also zoomed to a region.
+
+    The region extent stays in lon/lat; the gauge data extent is in metres.
+    """
+    reference_df = pd.DataFrame(
+        {
+            "id": [6001, 6002, 6003],
+            "x": [4.0e6, 4.1e6, 4.2e6],
+            "y": [3.0e6, 3.1e6, 3.2e6],
+            "kge": [0.1, 0.5, 0.9],
+        }
+    )
+    other_df = reference_df.assign(kge=[0.2, 0.4, 0.95])
+
+    output_file = dec.plot_discharge_metric_diff_map(
+        reference_df=reference_df,
+        other_df=other_df,
+        reference_name="default",
+        other_name="calibrated",
+        variable="kge",
+        output_dir=tmp_path,
+        dpi=50,
+        extent=dec._get_region_extent(region) if region else None,
+        region=region,
+        crs="EPSG:3035",
+    )
+
+    assert output_file is not None
+    assert output_file.is_file()
+    assert getattr(_offline_map_projections[0], "epsg_code", None) == 3035
+
+
+@pytest.mark.parametrize(
+    "write_diff_maps",
+    [dec.write_discharge_metric_diff_maps, dec.write_discharge_metric_diff_region_maps],
+)
+@pytest.mark.parametrize(
+    ("explicit_crs", "expected_crs"),
+    [(None, "EPSG:3035"), ("EPSG:32632", "EPSG:32632")],
+)
+def test_discharge_metric_diff_maps_take_the_crs_from_the_results(
+    monkeypatch, tmp_path, write_diff_maps, explicit_crs, expected_crs
+):
+    """Hand the crs column of the baseline results on, unless a crs is given."""
+    for name, kge in [("run1", [0.5, 0.6]), ("run2", [0.6, 0.7])]:
+        _write_results_csv(
+            tmp_path / name / "results.csv", [6001, 6002], kge, crs="EPSG:3035"
+        )
+    calls = []
+    monkeypatch.setattr(
+        dec,
+        "plot_discharge_metric_diff_map",
+        lambda **kwargs: calls.append(kwargs) or Path("dummy.png"),
+    )
+
+    write_diff_maps(
+        input_paths=[str(tmp_path / "run1"), str(tmp_path / "run2")],
+        output_dir=tmp_path / "out",
+        variables=["kge"],
+        crs=explicit_crs,
+    )
+
+    assert calls
+    assert {call["crs"] for call in calls} == {expected_crs}
+
+
 def test_write_discharge_eval_comparison_plots_writes_cdf_and_violin(
     monkeypatch, tmp_path
 ):
@@ -187,7 +270,7 @@ def test_write_discharge_eval_comparison_plots_writes_cdf_and_violin(
     assert "cdf_kge.png" in output_names
     assert "violin_kge.png" in output_names
     assert (tmp_path / "out" / "cdf_kge.png").is_file()
-    assert (tmp_path / "out" / "metric_summary.csv").is_file()
+    assert (tmp_path / "out" / "discharge_eval_comparison_results.csv").is_file()
 
 
 def test_write_discharge_eval_comparison_plots_defaults_to_catchment_map_with_shape_folder(
@@ -277,6 +360,23 @@ def test_write_sanitized_results_csvs_discards_out_of_range_values(tmp_path):
     assert df["kge"].tolist()[2] == pytest.approx(0.6)
     assert df["id"].tolist() == [1, 2, 3]
     assert df["x"].tolist() == [10.0, 11.0, 12.0]
+
+
+def test_write_sanitized_results_csvs_keeps_the_crs_column(tmp_path):
+    """Keep the crs column, as the diff maps read the CRS from the sanitized copies."""
+    _write_results_csv(
+        tmp_path / "run1" / "results.csv", [1, 2], [0.5, 0.6], crs="EPSG:3035"
+    )
+
+    sanitized_paths = dec._write_sanitized_results_csvs(
+        input_paths=[str(tmp_path / "run1")],
+        input_names=["run1"],
+        file_names="results.csv",
+        variables=["kge"],
+        output_dir=tmp_path / "sanitized",
+    )
+
+    assert pd.read_csv(sanitized_paths[0])["crs"].tolist() == ["EPSG:3035"] * 2
 
 
 def test_write_sanitized_results_csvs_discards_kge_above_one(tmp_path, caplog):

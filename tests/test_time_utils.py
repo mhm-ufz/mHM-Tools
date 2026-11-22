@@ -5,6 +5,7 @@ import pandas as pd
 import xarray as xr
 
 from mhm_tools.common.time_utils import (
+    create_season_months,
     get_time_bounds,
     infer_time_bounds,
     resample_to_daily_or_hourly_adaptive,
@@ -259,3 +260,25 @@ class TestInferTimeBounds(TimeWindowBase):
         ref = self.make_cube(pd.to_datetime(["2004-01-15"]))
         with self.assertRaises(ValueError):
             infer_time_bounds(ref)
+
+
+class TestCreateSeasonMonths(unittest.TestCase):
+    """Parsing of the --season months."""
+
+    def test_a_season_within_the_year(self):
+        """April to September gives the months in between."""
+        self.assertEqual(create_season_months("4,9"), [4, 5, 6, 7, 8, 9])
+
+    def test_a_season_across_the_new_year_wraps_around(self):
+        """October to March runs over December into January."""
+        self.assertEqual(create_season_months("10,3"), [10, 11, 12, 1, 2, 3])
+
+    def test_a_single_month(self):
+        """The same first and last month is a season of one month."""
+        self.assertEqual(create_season_months("7,7"), [7])
+
+    def test_invalid_seasons_raise(self):
+        """Months outside 1-12 and a missing last month are refused."""
+        for season in ("0,5", "4", "4,13", "a,b"):
+            with self.subTest(season=season), self.assertRaises(ValueError):
+                create_season_months(season)

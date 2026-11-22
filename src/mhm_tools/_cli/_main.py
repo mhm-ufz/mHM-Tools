@@ -64,16 +64,15 @@ _COMMAND_GROUPS: List[Tuple[str, str, List[Tuple[str, object]]]] = [
                 "create-dem-derivatives",
                 "mhm_tools._cli._create_dem_derivatives",
             ),
+            ("topography-upscaling", "mhm_tools._cli._topography_upscaling"),
             ("calculate-pet", "mhm_tools._cli._calculate_pet"),
-            ("prepare-mhm-forcings", "mhm_tools._cli._prepare_mhm_forcings"),
         ],
     ),
     (
         "data-processing",
-        "Convert, regrid, merge, and derive gridded data products.",
+        "Convert, regrid, and derive gridded data products.",
         [
             ("file-converter", "mhm_tools._cli._file_converter"),
-            ("merge-files", "mhm_tools._cli._merge"),
             ("fill-nearest", "mhm_tools._cli._fill_nearest"),
             ("regrid-file", "mhm_tools._cli._regrid"),
             ("long-term-mean", "mhm_tools._cli._long_term_mean"),
@@ -85,10 +84,13 @@ _COMMAND_GROUPS: List[Tuple[str, str, List[Tuple[str, object]]]] = [
     ),
     (
         "data-converter",
-        "Convert maps and categorical data for mHM.",
+        "Convert maps, categorical data and meteorological forcing for mHM.",
         [
             ("rasterize-map", "mhm_tools._cli._rasterize_map"),
-            ("format-data", "mhm_tools._cli._format_data"),
+            ("format-morph-categorical", "mhm_tools._cli._format_morph_categorical"),
+            ("format-soilgrids", "mhm_tools._cli._format_soilgrids"),
+            ("format-lai-netcdf", "mhm_tools._cli._format_lai_netcdf"),
+            ("format-meteo", "mhm_tools._cli._format_meteo"),
         ],
     ),
     (
@@ -139,6 +141,7 @@ _COMMAND_GROUPS: List[Tuple[str, str, List[Tuple[str, object]]]] = [
                 "mhm_tools._cli._create_mhm_restart_from_setup",
             ),
             ("create-wmo-region-masks", "mhm_tools._cli._create_wmo_region_masks"),
+            ("prepare-mhm-forcings", "mhm_tools._cli._prepare_mhm_forcings"),
         ],
     ),
 ]
@@ -605,7 +608,8 @@ def _build_click_command(command_name: str, module, prog_path: Optional[str] = N
 
     def _callback(**kwargs):
         args = SimpleNamespace(**kwargs)
-        return module.run(args)
+        # a command's Python result is no exit code, so a finished run exits with 0
+        module.run(args)
 
     return GroupedCommand(
         name=command_name,

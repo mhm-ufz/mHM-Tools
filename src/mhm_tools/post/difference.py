@@ -5,7 +5,7 @@ This script is intended for NetCDF files that represent *aggregated fields*
 (such as long-term averages, climatologies, or single-time snapshots), rather
 than full time series. It loads the reference and model datasets, interpolates
 the model onto the reference grid, and then computes the difference
-(reference - model). The result is visualized as a map and, optionally, written
+(model - reference). The result is visualized as a map and, optionally, written
 to a NetCDF file.
 
 Authors
@@ -81,9 +81,9 @@ def calc_diff(
     da_mod_interp = da_mod.interp_like(da_ref)
 
     # Compute difference
-    diff = da_ref - da_mod_interp
+    diff = da_mod_interp - da_ref
     diff.attrs = dict(da_ref.attrs)
-    diff.attrs["long_name"] = f"Difference ({ref_var} minus {mod_var})"
+    diff.attrs["long_name"] = f"Difference ({mod_var} minus {ref_var})"
 
     # Prepare output directory
     out_path_dir = Path(output.output_dir)

@@ -1,6 +1,6 @@
 # mHM Tools
 
-<a href="https://mhm.pages.ufz.de/mhm-tools" title="mHM-Tools documentation" target="_blank">
+<a href="https://mhm-tools.readthedocs.io" title="mHM-Tools documentation" target="_blank">
   <img width="300" src="https://git.ufz.de/mhm/mhm-tools/-/raw/main/docs/source/_static/logo_large.png" />
 </a>
 
@@ -18,9 +18,11 @@ As of version 0.3 it covers three main use cases:
 $ pip install mhm-tools
 ```
 
+The restart creation (`create-mhm-restart-from-setup`) also needs mHM 5.13 or newer. Install it along with mhm-tools with `pip install "mhm-tools[mhm]"`, or with `[mhm5]` to stay on mHM 5 once mHM 6 is released; the [installation docs](https://mhm-tools.readthedocs.io/en/latest/#mhm-for-restart-creation) describe the conda and module options.
+
 To install from a source checkout into a clean conda environment, which nothing else in your shell interferes with (e.g. on an HPC system or to test a release), use the install script. It creates the environment if needed, ignores `PYTHONPATH`, the user site-packages and pip settings, and checks the result:
 ```shell
-$ scripts/install_mhm_tools.sh /path/to/envs/mhm-tools [--editable] [--extras test,doc] [--python 3.11]
+$ scripts/install_mhm_tools.sh /path/to/envs/mhm-tools [--editable] [--extras test,doc] [--python 3.12]
 $ conda activate /path/to/envs/mhm-tools
 ```
 
@@ -35,7 +37,9 @@ $ mhm-tools tui
 
 ## Documentation and source code
 
-* [Documentation](https://mhm.pages.ufz.de/mhm-tools), with the [command line reference](https://mhm.pages.ufz.de/mhm-tools/cli.html) and the [API reference](https://mhm.pages.ufz.de/mhm-tools/api.html)
+* [Documentation](https://mhm-tools.readthedocs.io), with the [command line reference](https://mhm-tools.readthedocs.io/en/latest/cli.html) and the [API reference](https://mhm-tools.readthedocs.io/en/latest/api.html)
+
+  We are currently migrating the documentation to Read the Docs. The previous version is still available on [GitLab Pages](https://mhm.pages.ufz.de/mhm-tools).
 * [Source code](https://git.ufz.de/mhm/mhm-tools) and [issue tracker](https://git.ufz.de/mhm/mhm-tools/-/issues)
 * [Release notes](https://git.ufz.de/mhm/mhm-tools/-/blob/main/RELEASE_NOTES.md) and the full [changelog](https://git.ufz.de/mhm/mhm-tools/-/blob/main/CHANGELOG.md)
 * mHM [homepage](https://mhm-ufz.org)

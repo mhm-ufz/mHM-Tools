@@ -228,6 +228,26 @@ def add_args(parser):
         action="store_true",
         help="Also write the statistics table of the domain and the regions to CSV.",
     )
+    flags.add_argument(
+        "--only-plot",
+        action="store_true",
+        help=(
+            """redraw the statistics table, the maps, plots and gifs of the domain
+            and the regions and the overview PDF from the files an earlier run
+            wrote to --output-dir, without reading the data again. It needs the
+            accuracy file, the day differences of the table the season
+            difference file, and the cover plots and gifs the snow cover files"""
+        ),
+    )
+    optional.add_argument(
+        "--overview-pdf-name",
+        default=None,
+        help=(
+            """Name of the PDF in --output-dir holding the statistics table of
+            the domain and the regions and every figure. By default
+            snow_overview_<input-name>_vs_<ref-name>.pdf"""
+        ),
+    )
     add_netcdf_compression_args(parser)
 
 
@@ -269,6 +289,8 @@ def run(args):
         ncpus=args.ncpus,
         compression=get_netcdf_compression(args),
         write_region_stats=args.write_region_stats,
+        overview_pdf_name=args.overview_pdf_name,
+        only_plot=args.only_plot,
     )
     for label, file_path in written_files.items():
         logger.info(f"{label}: {file_path}")

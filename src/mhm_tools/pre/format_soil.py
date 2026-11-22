@@ -41,13 +41,13 @@ from rasterio.vrt import WarpedVRT
 from rasterio.warp import transform_bounds
 from rasterio.windows import Window
 
-from mhm_tools.common.constants import NO_DATA
-from mhm_tools.common.file_handler import write_xarray_to_file
-from mhm_tools.common.format_data import (
+from mhm_tools.common.categorical_raster import (
     fill_grid_nodata,
     format_categorical_data,
     get_categorical_output_path,
 )
+from mhm_tools.common.constants import NO_DATA
+from mhm_tools.common.file_handler import write_xarray_to_file
 from mhm_tools.common.lookup_handler import (
     _is_blank,
     _normalise_field_name,
@@ -226,7 +226,24 @@ def _soil_classdefinition_text(table, class_field: str) -> str:
         msg = "No valid soil horizon rows were found."
         raise ValueError(msg)
 
+    # several raster codes may share a soil class, whose horizons mHM reads once
+    unique_rows = {}
+    for row in output_rows:
+        key = (row["soil_class"], row["horizon"])
+        if unique_rows.setdefault(key, row) != row:
+            msg = f"Soil class {key[0]} horizon {key[1]} has differing lookup rows."
+            raise ValueError(msg)
+    output_rows = list(unique_rows.values())
+    # mHM uses the soil class as index, so the classes must be 1..N
     unique_soil_classes = {row["soil_class"] for row in output_rows}
+    expected_classes = set(range(1, len(unique_soil_classes) + 1))
+    if unique_soil_classes != expected_classes:
+        missing = sorted(expected_classes - unique_soil_classes)
+        msg = (
+            f"mHM needs soil classes numbered 1 to {len(expected_classes)}; "
+            f"missing: {missing}."
+        )
+        raise ValueError(msg)
     lines = [f"nSoil_Types {len(unique_soil_classes)}\n", _CLASSDEFINITION_HEADER]
     for row in output_rows:
         lines.append(
@@ -397,6 +414,12 @@ def _read_soil_manifest(input_file: PathLike):
 
 
 _SOIL_BLOCK_ROWS = 64
+# each of the clay, sand and bulk-density bins gets 21 bits of a v6 class key
+_KEY_BIN_LIMIT = 2**21
+_VALID_SOIL_CELL = (
+    "A valid cell lies inside the DEM, has clay, sand and silt >= 0 with a "
+    "positive sum, and bulk density in (0, 5] g/cm3 after unit conversion."
+)
 
 
 def _open_raster(stack: ExitStack, path: Path):
@@ -480,6 +503,27 @@ def _open_soil_grid(
             properties[name] = stack.enter_context(WarpedVRT(source, **options))
         warped.append(properties)
     return reference, reference_crs, warped
+
+
+def _check_bulk_density(warped, horizons, unit, factor):
+    """Reject a declared unit that puts a horizon's median bulk density off-scale."""
+    for horizon, properties in zip(horizons, warped):
+        layer = properties["bulk_density"]
+        values = layer.read(
+            1,
+            out_shape=(min(layer.height, 256), min(layer.width, 256)),
+            masked=True,
+            out_dtype="float64",
+        ).filled(np.nan)
+        values = values[np.isfinite(values) & (values > 0)]
+        if not values.size or 0.1 <= np.median(values) * factor <= 5:
+            continue
+        msg = (
+            f"Soil horizon {horizon['horizon']} has a median bulk density of "
+            f"{np.median(values) * factor:g} g/cm3 when read as {unit!r}; expected "
+            "0.1-5 g/cm3. Check the bulk density unit."
+        )
+        raise ValueError(msg)
 
 
 def _dem_valid(reference, window=None):
@@ -630,15 +674,28 @@ def _quantized_soil_block(
     return valid, clay, sand, density
 
 
-def _packed_texture_keys(clay, sand, valid) -> np.ndarray:
-    """Pack the quantized clay and sand bins of valid cells into one key each.
+def _packed_soil_keys(clay, sand, density, valid) -> np.ndarray:
+    """Pack the quantized clay, sand and bulk-density bins into one key per cell.
 
-    The v6 classes are identified by their texture alone, so a single unsigned
-    key per cell lets both passes look a class up with ``np.searchsorted``.
+    The v6 classes are identified by these three bins, so a single unsigned key
+    per valid cell lets both passes look a class up with ``np.searchsorted``.
+
+    Args:
+        clay (numpy.ndarray): Quantized clay bins.
+        sand (numpy.ndarray): Quantized sand bins.
+        density (numpy.ndarray): Quantized bulk-density bins.
+        valid (numpy.ndarray): Boolean mask of the valid cells.
+
+    Returns
+    -------
+        numpy.ndarray: uint64 keys of the valid cells.
     """
-    return (clay[valid].astype(np.uint64) << np.uint64(32)) | sand[valid].astype(
-        np.uint32
-    )
+    bins = np.column_stack((clay[valid], sand[valid], density[valid]))
+    if bins.size and bins.max() >= _KEY_BIN_LIMIT:
+        msg = "The soil class steps are too small to tell the classes apart."
+        raise ValueError(msg)
+    bins = bins.astype(np.uint64)
+    return (bins[:, 0] << np.uint64(42)) | (bins[:, 1] << np.uint64(21)) | bins[:, 2]
 
 
 def _profile_block(
@@ -740,7 +797,7 @@ def _stream_classic_soil(
                 database.executemany(insert, map(tuple, unique.tolist()))
             database.commit()
         if not found:
-            msg = "No cell has valid soil data in every horizon."
+            msg = "No cell has valid soil data in every horizon. " + _VALID_SOIL_CELL
             raise ValueError(msg)
         rows = database.execute(
             f"SELECT {', '.join(names)} FROM profiles ORDER BY {', '.join(names)}"
@@ -861,21 +918,20 @@ def _create_soil_dataset(reference, reference_crs, horizons, values):
         attrs={
             "Conventions": "CF-1.8",
             "title": "Horizon-specific soil classes for mHM",
-            "source": "mhm-tools format-data soil manifest",
+            "source": "mhm-tools format-soilgrids",
         },
     )
 
 
-def _horizon_definition_text(
-    keys, density_bins, composition_step: float, density_step: float
-) -> str:
+def _horizon_definition_text(keys, composition_step: float, density_step: float) -> str:
     """Render the v6 ``soil_classdefinition_iFlag_soilDB_1.txt`` lookup.
 
-    ``keys`` are the packed texture keys of :func:`_packed_texture_keys`, one
-    per class, and ``density_bins`` their mean quantized bulk density.
+    ``keys`` are the packed keys of :func:`_packed_soil_keys`, one per class.
     """
-    clay_bins = (keys >> np.uint64(32)).astype(np.int32)
-    sand_bins = (keys & np.uint64(0xFFFFFFFF)).astype(np.int32)
+    mask = np.uint64(_KEY_BIN_LIMIT - 1)
+    clay_bins = (keys >> np.uint64(42)).astype(np.int32)
+    sand_bins = ((keys >> np.uint64(21)) & mask).astype(np.int32)
+    density_bins = (keys & mask).astype(np.int32)
     lines = [
         f"nSoil_Types {keys.size}\n",
         "ID\tCLAY[%]\tSAND[%]\tBD[gcm-3]\n",
@@ -909,7 +965,7 @@ def _stream_horizon_soil(
     for window in _soil_windows(reference):
         dem_valid = _dem_valid(reference, window)
         for properties in warped:
-            valid, clay, sand, _ = _quantized_soil_block(
+            valid, clay, sand, density = _quantized_soil_block(
                 properties,
                 window,
                 dem_valid,
@@ -917,14 +973,12 @@ def _stream_horizon_soil(
                 composition_step=composition_step,
                 density_step=density_step,
             )
-            packed = _packed_texture_keys(clay, sand, valid)
+            packed = _packed_soil_keys(clay, sand, density, valid)
             observed.update(np.unique(packed).tolist())
     if not observed:
-        msg = "No valid soil cells were found in any horizon."
+        msg = "No valid soil cells were found in any horizon. " + _VALID_SOIL_CELL
         raise ValueError(msg)
     keys = np.asarray(sorted(observed), dtype=np.uint64)
-    density_sum = np.zeros(keys.size, dtype=np.float64)
-    counts = np.zeros(keys.size, dtype=np.int64)
     raster_output = output_path / "soil_horizon_class.nc"
     definition_output = output_path / "soil_classdefinition_iFlag_soilDB_1.txt"
     chunks = (1, min(_SOIL_BLOCK_ROWS, reference.height), min(512, reference.width))
@@ -949,17 +1003,11 @@ def _stream_horizon_soil(
                     composition_step=composition_step,
                     density_step=density_step,
                 )
-                packed = _packed_texture_keys(clay, sand, valid)
+                packed = _packed_soil_keys(clay, sand, density, valid)
                 positions = np.searchsorted(keys, packed)
                 classes = np.full(valid.shape, int(NO_DATA), dtype=np.int32)
                 classes[valid] = positions.astype(np.int32) + 1
                 output[horizon_index, row : row + height, :] = classes
-                density_sum += np.bincount(
-                    positions,
-                    weights=density[valid].astype(np.float64),
-                    minlength=keys.size,
-                )
-                counts += np.bincount(positions, minlength=keys.size)
         dataset = _create_soil_dataset(
             reference,
             reference_crs,
@@ -975,9 +1023,8 @@ def _stream_horizon_soil(
                 encoding={"soil_class": {"_FillValue": int(NO_DATA)}},
             )
         temporary_file.replace(raster_output)
-    density_bins = np.floor(density_sum / counts + 0.5).astype(np.int32)
     _write_soil_classdefinition_text(
-        _horizon_definition_text(keys, density_bins, composition_step, density_step),
+        _horizon_definition_text(keys, composition_step, density_step),
         definition_output,
     )
     return raster_output, definition_output
@@ -1168,6 +1215,7 @@ def format_soil_horizons(
                 dem_crs=dem_crs,
                 resampling=resampling,
             )
+            _check_bulk_density(warped, horizons, unit, density_factor)
             if fill_nodata:
                 warped = _fill_soil_layers(
                     stack,

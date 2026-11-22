@@ -11,6 +11,7 @@ Authors
 
 import logging
 import shutil
+import stat
 from pathlib import Path
 
 import numpy as np
@@ -348,6 +349,9 @@ def crop_file(  # noqa: PLR0912 PLR0915 PLR0913
         if "header" not in input_file.name.lower():
             try:
                 shutil.copy(input_file, output_file)
+                # the copy takes the source's mode, so a read-only source would
+                # leave a copy that the next crop can't overwrite
+                output_file.chmod(output_file.stat().st_mode | stat.S_IWUSR)
                 logger.debug(f"Copied file {input_file.name} to {output_file}")
             except Exception as e:
                 logger.error(f"Can't copy {input_file} because of {e}")
@@ -511,15 +515,16 @@ def crop_file(  # noqa: PLR0912 PLR0915 PLR0913
         )
         xllcorner = None
         yllcorner = None
-        try:
-            mask_header = create_header(mask_ds["mask"], cellsize=resolutions.l0)
-            xllcorner = mask_header["xllcorner"]
-            yllcorner = mask_header["yllcorner"]
-            logger.debug(
-                f"Using xllcorner {xllcorner} and yllcorner {yllcorner} from mask header"
-            )
-        except Exception as e:
-            logger.warning(f"Failed to create header for mask file: {e}")
+        if mask_ds is not None:
+            try:
+                mask_header = create_header(mask_ds["mask"], cellsize=resolutions.l0)
+                xllcorner = mask_header["xllcorner"]
+                yllcorner = mask_header["yllcorner"]
+                logger.debug(
+                    f"Using xllcorner {xllcorner} and yllcorner {yllcorner} from mask header"
+                )
+            except Exception as e:
+                logger.warning(f"Failed to create header for mask file: {e}")
         create_header(
             ds_cropped,
             output_path=output_file.parent,

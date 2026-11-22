@@ -15,6 +15,7 @@ from mhm_tools.common.xarray_utils import (
     get_overlapping_time_slice,
     get_single_data_var,
     induce_data_var_from_file_name,
+    mask_where_reference_close_to_zero,
     normalize_lat_lon,
     normalize_longitude_range,
     regrid_mask,
@@ -655,6 +656,25 @@ class TestNormalizeLongitudeRange(unittest.TestCase):
         np.testing.assert_array_equal(
             rotated["var"].sel(lon=-179.5).values, ds["var"].sel(lon=180.5).values
         )
+
+
+def test_mask_where_reference_close_to_zero():
+    """Cells below 1 % of the median reference are hidden, the others kept."""
+    coords = {"lat": [1.0, 0.0], "lon": [0.0, 1.0, 2.0]}
+    # the median absolute reference is 1.25, so 0.005 and -0.009 are hidden
+    reference = xr.DataArray(
+        [[2.0, 1.0, 0.005], [-3.0, -0.009, 1.5]], dims=("lat", "lon"), coords=coords
+    )
+    ratios = xr.DataArray(
+        [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dims=("lat", "lon"), coords=coords
+    )
+
+    masked = mask_where_reference_close_to_zero(ratios, reference)
+
+    np.testing.assert_array_equal(
+        masked.values, [[1.0, 2.0, np.nan], [4.0, np.nan, 6.0]]
+    )
+    xr.testing.assert_identical(masked.coords.to_dataset(), ratios.coords.to_dataset())
 
 
 if __name__ == "__main__":

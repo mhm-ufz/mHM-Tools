@@ -135,8 +135,8 @@ def test_calculate_classification_accuracy_counts_matching_steps(
         _single_cell(input_values, times), _single_cell(ref_values, times)
     )
 
-    assert float(accuracy["classification_accuracy"]) == pytest.approx(expected)
-    assert int(accuracy["compared_time_steps"]) == 10
+    assert accuracy["classification_accuracy"].item() == pytest.approx(expected)
+    assert accuracy["compared_time_steps"].item() == 10
 
 
 def test_calculate_classification_accuracy_skips_steps_missing_in_either_dataset():
@@ -149,8 +149,8 @@ def test_calculate_classification_accuracy_skips_steps_missing_in_either_dataset
     accuracy = calculate_classification_accuracy(input_flag, ref_flag)
 
     # only the last six steps are comparable, three of them agree
-    assert int(accuracy["compared_time_steps"]) == 6
-    assert float(accuracy["classification_accuracy"]) == pytest.approx(0.5)
+    assert accuracy["compared_time_steps"].item() == 6
+    assert accuracy["classification_accuracy"].item() == pytest.approx(0.5)
 
 
 def test_calculate_classification_accuracy_is_undefined_without_common_steps():
@@ -162,8 +162,8 @@ def test_calculate_classification_accuracy_is_undefined_without_common_steps():
     accuracy = calculate_classification_accuracy(input_flag, ref_flag)
 
     # NaN, not 0, so "never comparable" cannot read as "never agreed"
-    assert np.isnan(float(accuracy["classification_accuracy"]))
-    assert np.isnan(float(accuracy["compared_time_steps"]))
+    assert np.isnan(accuracy["classification_accuracy"].item())
+    assert np.isnan(accuracy["compared_time_steps"].item())
 
 
 # ---------------------------------------------------------------------------
@@ -529,6 +529,7 @@ def test_snow_evaluation_writes_its_outputs(tmp_path):
     assert (output_dir / "snow_season_metrics_difference_model_minus_obs.nc").is_file()
     assert (output_dir / "classification_accuracy_model_vs_obs.png").is_file()
     assert (output_dir / "snow_cover_percentage_model_vs_obs.png").is_file()
+    assert written["overview_pdf"] == output_dir / "snow_overview_model_vs_obs.pdf"
 
     metrics = xr.open_dataset(output_dir / "snow_season_metrics_model.nc")
     span = metrics["season_span_days"].values

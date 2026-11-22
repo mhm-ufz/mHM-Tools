@@ -113,7 +113,7 @@ def add_args(parser):
         required=False,
         default=1,
         type=int,
-        help="Number of setup tiles prepared in parallel.",
+        help="Number of setup tiles prepared in parallel. 0 or -1 uses all cores.",
     )
     optional.add_argument(
         "--mhm-ncpus",
@@ -135,7 +135,7 @@ def add_args(parser):
         required=False,
         default=1,
         type=int,
-        help="Number of cores used by crop_mhm_setup inside each tile.",
+        help="Number of cores used by crop_mhm_setup inside each tile. 0 or -1 uses all cores.",
     )
     optional.add_argument(
         "--available-mem",
@@ -339,6 +339,7 @@ def run(args):
     """Crop an existing setup and run mHM to create mHM restart files."""
     from mhm_tools.common.cli_utils import get_available_mem_in_unit, get_coords
     from mhm_tools.common.file_handler import get_xarray_ds_from_file
+    from mhm_tools.common.parallel import resolve_ncpus
     from mhm_tools.pre.create_mhm_restart_from_setup import (
         create_mhm_restart_from_setup,
         merge_restart_files,
@@ -410,9 +411,11 @@ def run(args):
             l1_increment=args.l1_increment,
             l11_resolution=args.l11_resolution,
             crs=args.crs,
-            n_jobs=args.n_cpus,
-            mhm_n_jobs=args.mhm_ncpus,
-            crop_n_jobs=args.crop_ncpus,
+            n_jobs=resolve_ncpus(args.n_cpus),
+            mhm_n_jobs=(
+                None if args.mhm_ncpus is None else resolve_ncpus(args.mhm_ncpus)
+            ),
+            crop_n_jobs=resolve_ncpus(args.crop_ncpus),
             filename=args.file_name,
             available_mem_gib=available_mem,
             force_header_creation=not args.no_forced_header_creation,

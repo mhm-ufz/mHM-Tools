@@ -5,7 +5,7 @@ This script is intended for NetCDF files that represent aggregated fields
 (e.g., long-term averages, climatologies, or single-time snapshots), rather
 than full time series. The model dataset is interpolated onto the reference
 grid to ensure spatial alignment. The relative difference is then calculated
-in percent as 100 * (reference - model) / reference at each grid cell, with
+in percent as 100 * (model - reference) / reference at each grid cell, with
 division by zero safely masked as NaN.
 
 The result is plotted as a map whose colours span +-25 %, +-50 %, +-75 % or
@@ -73,10 +73,10 @@ def calc_rel_diff(  # noqa: PLR0913
     da_mod_interp = da_mod.interp_like(da_ref)
 
     # calculating relative difference in percent, if true prevents division by 0
-    diff = xr.where(da_ref != 0, 100 * (da_ref - da_mod_interp) / da_ref, np.nan)
+    diff = xr.where(da_ref != 0, 100 * (da_mod_interp - da_ref) / da_ref, np.nan)
     diff.attrs = {
         "units": "%",
-        "long_name": f"Relative difference of {mod_var} from {ref_var} (100 * (ref - mod) / ref)",
+        "long_name": f"Relative difference of {mod_var} from {ref_var} (100 * (mod - ref) / ref)",
     }
 
     # Sets output path to save plot

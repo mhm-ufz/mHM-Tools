@@ -16,16 +16,17 @@ Files
    ~mhm_tools.pre.format_geology
    ~mhm_tools.pre.format_lai
    ~mhm_tools.pre.format_lc_data
+   ~mhm_tools.pre.format_meteo
    ~mhm_tools.pre.format_soil
    ~mhm_tools.pre.landcover_ascii_to_nc
    ~mhm_tools.pre.latlon
    ~mhm_tools.pre.link_folder_tree
-   ~mhm_tools.pre.merge
    ~mhm_tools.pre.pet_calc
    ~mhm_tools.pre.prepare_mhm_forcings
    ~mhm_tools.pre.rasterize_map
    ~mhm_tools.pre.regrid
    ~mhm_tools.pre.subdomain_masks
+   ~mhm_tools.pre.topography_upscaling
 """
 
 import importlib
@@ -39,6 +40,7 @@ _MODULE_EXPORTS = {
     "fill_nearest": "fill_nearest",
     "format_geology": "format_geology",
     "format_lai": "format_lai",
+    "format_meteo": "format_meteo",
     "format_soil": "format_soil",
     "latlon": "latlon",
     "rasterize_map": "rasterize_map",
@@ -111,6 +113,7 @@ __all__ = [
     "format_lai_netcdf_file",
     "format_lc_data",
     "format_lc_periods",
+    "format_meteo",
     "format_soil",
     "format_soil_data",
     "format_soil_horizons",

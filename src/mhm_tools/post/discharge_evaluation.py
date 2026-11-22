@@ -91,6 +91,17 @@ NODE_STATION_ID_NAMES = ("station", "station_id")
 # reading gridded output at the gauges of a gauge coordinate file
 FACC_LOCATION_METHODS = ("basinex", "burek")
 GRID_LOCATION_METHODS = ("nearest", "mean-flow")
+# metrics of the region median table; left-out NaN/inf values are counted for these
+TABLE_METRICS = (
+    "kge",
+    "nse",
+    "alpha",
+    "beta",
+    "gamma",
+    "spearman_clim",
+    "diff",
+    "rel_diff",
+)
 
 
 def get_region_from_id(gauge_id):
@@ -442,7 +453,7 @@ def _materialize_data(obj, num_workers=1):
     return obj.load()
 
 
-def _read_model_file_part(  # noqa: PLR0911, PLR0913
+def _read_model_file_part(  # noqa: PLR0911, PLR0912, PLR0913
     sim_file,
     sim_variable,
     date_slice,
@@ -518,8 +529,14 @@ def _read_model_file_part(  # noqa: PLR0911, PLR0913
         if extraction_mode == "grid":
             if gauge_ids_with_values is None or x_new is None or y_new is None:
                 return None
+            sim_da = ds_sim[sim_var_local].sel(time=date_slice)
+            # picking gauge cells from the file makes netCDF4 read every gauge
+            # row x column pair separately; dask chunks on the file's own chunks
+            # read each chunk once instead
+            if sim_da.chunks is None:
+                sim_da = sim_da.chunk(sim_da.encoding.get("preferred_chunks", {}))
             sim_sel, matched_x, matched_y, ids_arr = get_sim_data_for_gauges_from_grid(
-                ds_sim[sim_var_local].sel(time=date_slice),
+                sim_da,
                 x_new,
                 y_new,
                 gauge_ids_with_values,
@@ -2234,7 +2251,7 @@ def boostap_statistics(
         [observed_da.where(observed_da.time.dt.year == year) for year in years_sim],
         dim="time",
     )
-    alpha, beta, gamma = np.nan, np.nan, np.nan
+    alpha, beta, spearman_clim = np.nan, np.nan, np.nan
     if (
         (id in obs_da_sel.id and id in sim_da_sel.id)
         and not sim_da_sel.isnull().all()
@@ -2245,11 +2262,13 @@ def boostap_statistics(
             obs_id = obs_da_sel.sel(id=id)
             clim_sim = get_clim_from_ds(sim_id)
             clim_obs = get_clim_from_ds(obs_id)
-            alpha = sim_id.mean(skipna=True) / obs_id.mean(skipna=True)
-            beta = sim_id.std(skipna=True) / obs_id.std(skipna=True)
-            gamma = spearman_correlation(clim_sim, clim_obs)[0]
+            # alpha and beta follow the kge components, the correlation is taken
+            # between the climatologies and named after that
+            alpha = sim_id.std(skipna=True) / obs_id.std(skipna=True)
+            beta = sim_id.mean(skipna=True) / obs_id.mean(skipna=True)
+            spearman_clim = spearman_correlation(clim_sim, clim_obs)[0]
             logger.debug(
-                f"results for index {index} and gauge {id}: alpha={alpha:.3f}, beta={beta:.3f}, gamma={gamma:.3f}"
+                f"results for index {index} and gauge {id}: alpha={alpha:.3f}, beta={beta:.3f}, spearman_clim={spearman_clim:.3f}"
             )
             if np.isnan(alpha):
                 logger.debug("Alpha is none for:")
@@ -2266,7 +2285,7 @@ def boostap_statistics(
         "id": id,
         "alpha": float(alpha),
         "beta": float(beta),
-        "gamma": float(gamma),
+        "spearman_clim": float(spearman_clim),
     }
 
 
@@ -2389,18 +2408,34 @@ def evaludate_discharge_data(  # noqa: PLR0913
     metric_plot_types=None,
     compression=None,
     gauge_coordinate_file=None,
+    max_mean_factor=30,
+    results_file_name="discharge_eval_results.csv",
+    overview_pdf_name="discharge_eval_overview.pdf",
 ):
     """Compare simulated with observed discharge directly or via bootstrapping.
 
     Loads/caches data, harmonizes temporal resolution, optionally bootstraps
     across years, and writes per-gauge plots and a results table. Gauge maps of
     projected gauge coordinates are drawn in the CRS of the gauges file.
+    Stations with beta above `max_mean_factor` or below its inverse are left out
+    of the region table and the PDF summary table, not the plots; None keeps all.
+    The results table is written to `results_file_name` and the overview PDF to
+    `overview_pdf_name`, both inside `output_path`.
     """
     output_path = Path(output_path)
-    stats_output_file = output_path / "results.csv"
+    stats_output_file = output_path / results_file_name
     if metric_plot_types is None:
         metric_plot_types = ["cdf", "map", "catchment-map"]
     metric_plot_types = list(metric_plot_types)
+    grid_dim_names = (
+        _get_model_grid_dim_names(model_data_path, model_file_name, sim_variable)
+        if gauge_coordinate_file is not None
+        else None
+    )
+    gauges_crs = read_gauge_crs(
+        gauge_coordinate_file if gauge_coordinate_file is not None else scc_gauges_file,
+        grid_dim_names=grid_dim_names,
+    )
     if not only_plot or not stats_output_file.is_file():
         observed_ds, model_ds = Q_data_to_xarray(
             model_data_path=model_data_path,
@@ -2499,6 +2534,10 @@ def evaludate_discharge_data(  # noqa: PLR0913
         else:
             logger.info("Using the results from bootstraping.")
             results_df = pd.DataFrame(results)
+        # the CRS of projected gauge coordinates lets discharge-eval-comparison
+        # draw its maps in it
+        if gauges_crs is not None:
+            results_df["crs"] = CRS.from_user_input(gauges_crs).to_string()
         results_df.to_csv(stats_output_file)
     else:
         logger.info(f"Reading results from {stats_output_file}...")
@@ -2507,19 +2546,27 @@ def evaludate_discharge_data(  # noqa: PLR0913
     logger.info(
         f"In total there are {len(results_df['id'].unique())} catchments of which "
     )
+    # bootstrap results hold spearman_clim instead of gamma
+    components = [
+        column
+        for column in ("alpha", "beta", "gamma", "spearman_clim")
+        if column in results_df.columns
+    ]
+    for column in components:
+        logger.info(
+            f"   {len(results_df.dropna(subset=[column])['id'].unique())} have {column} values"
+        )
     logger.info(
-        f"   {len(results_df.dropna(subset=['alpha'], how='any')['id'].unique())} have all alpha values"
+        f"   {len(results_df.dropna(subset=components)['id'].unique())} have all values"
     )
-    logger.info(
-        f"   {len(results_df.dropna(subset=['beta'], how='any')['id'].unique())} have beta values "
+    # the tables leave out stations with an extreme bias, the plots keep them
+    table_df, left_out_notes = create_table_results_within_mean_factor(
+        results_df, max_mean_factor
     )
-    logger.info(
-        f"   {len(results_df.dropna(subset=['gamma'], how='any')['id'].unique())} have all gamma values "
-    )
-    logger.info(
-        f"   {len(results_df.dropna(subset=['alpha', 'beta', 'gamma'], how='any')['id'].unique())} have all values "
-    )
-    log_discharge_region_medians(results_df)
+    left_out_notes.extend(create_non_finite_metric_notes(table_df, TABLE_METRICS))
+    for note in left_out_notes:
+        logger.info(f"Left out of the tables: {note}")
+    log_discharge_region_medians(table_df)
     metric_plot_files = []
     # only plot cdf if more than 5 results to avoid plots without enough data points
     if "cdf" in metric_plot_types and len(results_df) > 5:
@@ -2539,19 +2586,6 @@ def evaludate_discharge_data(  # noqa: PLR0913
         years = None
         if start_date is not None and end_date is not None:
             years = (pd.Timestamp(start_date).year, pd.Timestamp(end_date).year)
-        grid_dim_names = (
-            _get_model_grid_dim_names(model_data_path, model_file_name, sim_variable)
-            if gauge_coordinate_file is not None
-            else None
-        )
-        gauges_crs = read_gauge_crs(
-            (
-                gauge_coordinate_file
-                if gauge_coordinate_file is not None
-                else scc_gauges_file
-            ),
-            grid_dim_names=grid_dim_names,
-        )
         metric_plot_files.extend(
             plot_map(results_df, output_path, years=years, crs=gauges_crs) or []
         )
@@ -2569,7 +2603,7 @@ def evaludate_discharge_data(  # noqa: PLR0913
             )
         )
     values_by_variable = get_discharge_metric_values_by_variable(
-        results_df,
+        table_df,
         variables=catchment_map_variables,
     )
     hydrograph_files = get_hydrograph_pdf_files(output_path)
@@ -2579,11 +2613,14 @@ def evaludate_discharge_data(  # noqa: PLR0913
         plot_files=metric_plot_files,
     ):
         overview_file = write_metric_plot_overview_pdf(
-            output_file=output_path / "metric_plots_overview.pdf",
+            output_file=output_path / overview_pdf_name,
             plot_files=metric_plot_files,
             summary_rows=create_metric_summary_rows(values_by_variable),
             append_pdf_files=hydrograph_files,
             title="Discharge metric plots overview",
+            notes=left_out_notes,
+            # regions are no competing runs, so no best value is coloured
+            highlight_best_values=False,
         )
         logger.info(f"Wrote discharge metric overview PDF to {overview_file}.")
 
@@ -2874,10 +2911,12 @@ def get_discharge_metric_values_by_variable(df, variables=None):
     Returns
     -------
     dict[str, dict[str, np.ndarray]]
-        Metric values grouped by variable and realisation label.
+        Metric values grouped by variable and label: "all stations" first,
+        then every WMO region that has values.
     """
     if variables is None:
-        variables = ["alpha", "beta", "gamma", "kge", "nse"]
+        variables = ["alpha", "beta", "gamma", "spearman_clim", "kge", "nse"]
+    gauge_regions = df["id"].apply(get_region_from_id)
     values_by_variable = {}
     for variable in variables:
         if variable not in df.columns:
@@ -2888,10 +2927,81 @@ def get_discharge_metric_values_by_variable(df, variables=None):
         if values.empty:
             logger.warning(f"No finite values for {variable}. Skipping summary.")
             continue
-        values_by_variable[variable] = {
-            "all stations": values.to_numpy(dtype=float),
-        }
+        values_by_label = {"all stations": values.to_numpy(dtype=float)}
+        # same region order as the logged region median table
+        value_regions = gauge_regions.loc[values.index]
+        for region_name in (*WMO_INDEX_TO_REGION.values(), "Unknown"):
+            region_values = values[value_regions == region_name]
+            if not region_values.empty:
+                values_by_label[region_name] = region_values.to_numpy(dtype=float)
+        values_by_variable[variable] = values_by_label
     return values_by_variable
+
+
+def create_table_results_within_mean_factor(results_df, max_mean_factor):
+    """Leave stations whose beta lies outside the mean factor out of the tables.
+
+    Args:
+        results_df: Discharge metric rows with ``id`` and ``beta`` columns.
+        max_mean_factor (float or None): Largest beta kept, its inverse is the
+            smallest beta kept; None keeps every station.
+
+    Returns
+    -------
+        tuple: The rows with beta within the limits or NaN, and one note per
+        reason naming how many stations were left out.
+    """
+    if max_mean_factor is None:
+        return results_df, []
+    if max_mean_factor < 1:
+        msg = f"max_mean_factor must be at least 1, got {max_mean_factor}."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    if "beta" not in results_df.columns:
+        logger.warning("No beta column, so max_mean_factor leaves no station out.")
+        return results_df, []
+    beta = pd.to_numeric(results_df["beta"], errors="coerce")
+    too_high = beta > max_mean_factor
+    too_low = beta < 1 / max_mean_factor
+    # bootstrap results hold several rows per station, so stations are unique ids
+    station_count = results_df["id"].nunique()
+    notes = []
+    for reason, left_out in (
+        (f"beta > {max_mean_factor:g}", too_high),
+        (f"beta < 1/{max_mean_factor:g}", too_low),
+    ):
+        left_out_count = results_df.loc[left_out, "id"].nunique()
+        if left_out_count > 0:
+            notes.append(f"{reason}: {left_out_count} of {station_count} stations")
+    # a NaN beta is kept here and counted by create_non_finite_metric_notes
+    return results_df[~(too_high | too_low)], notes
+
+
+def create_non_finite_metric_notes(table_df, metrics):
+    """Create one note per metric naming the stations without a finite value.
+
+    Args:
+        table_df: Discharge metric rows with an ``id`` column.
+        metrics (Sequence[str]): Metric columns to check; missing ones are skipped.
+
+    Returns
+    -------
+        list[str]: Notes such as "no finite kge (NaN/inf): 5 of 4760 stations".
+    """
+    station_count = table_df["id"].nunique()
+    notes = []
+    for metric in metrics:
+        if metric not in table_df.columns:
+            continue
+        values = pd.to_numeric(table_df[metric], errors="coerce")
+        non_finite = values.replace([np.inf, -np.inf], np.nan).isna()
+        left_out_count = table_df.loc[non_finite, "id"].nunique()
+        if left_out_count > 0:
+            notes.append(
+                f"no finite {metric} (NaN/inf): {left_out_count} of "
+                f"{station_count} stations"
+            )
+    return notes
 
 
 def _should_write_discharge_overview_pdf(variables, metric_plot_types, plot_files):
@@ -2980,7 +3090,7 @@ def plot_metric_violins(df, output_path, variables=None, dpi=PLOT_DPI):
         Written PNG files.
     """
     if variables is None:
-        variables = ["alpha", "beta", "gamma", "kge", "nse"]
+        variables = ["alpha", "beta", "gamma", "spearman_clim", "kge", "nse"]
     output_path = Path(output_path)
     output_files = []
     for variable in variables:
@@ -3011,11 +3121,7 @@ def log_discharge_region_medians(results_df):
         results_df: Discharge metric rows with an ``id`` column, whose leading
             digit is the WMO region.
     """
-    metrics = [
-        metric
-        for metric in ("kge", "nse", "alpha", "beta", "gamma", "diff", "rel_diff")
-        if metric in results_df.columns
-    ]
+    metrics = [metric for metric in TABLE_METRICS if metric in results_df.columns]
     metric_df = results_df[["id", *metrics]].copy()
     metric_df[metrics] = (
         metric_df[metrics]
@@ -3043,6 +3149,7 @@ def log_discharge_region_medians(results_df):
             "Median discharge metrics per WMO region (gauges = number of "
             "gauges, NaN and inf values are left out)"
         ),
+        float_format=".2f",
     )
 
 
@@ -3065,6 +3172,7 @@ def log_discharge_results_preview(results_df, row_count=5):
             "alpha",
             "beta",
             "gamma",
+            "spearman_clim",
             "diff",
             "rel_diff",
         )
@@ -3095,7 +3203,7 @@ def log_discharge_results_preview(results_df, row_count=5):
 
 @log_errors(raise_exceptions=True)
 def plot_cdf(df, output_path, boostrap_iterations=None):
-    """Create CDF plots for alpha, beta, gamma, KGE, and NSE.
+    """Create CDF plots for the metric columns present in the results.
 
     The plots are generated for global values and with one CDF per WMO region.
     """
@@ -3103,7 +3211,12 @@ def plot_cdf(df, output_path, boostrap_iterations=None):
     # not remove a gauge from the kge and nse plots
     if logger.isEnabledFor(logging.DEBUG):
         log_discharge_results_preview(df)
-    variables = ["alpha", "beta", "gamma", "kge", "nse"]
+    # bootstrap results have no kge, nse and gamma but spearman_clim
+    variables = [
+        variable
+        for variable in ("alpha", "beta", "gamma", "spearman_clim", "kge", "nse")
+        if variable in df.columns
+    ]
     cb_colors = [
         "#000000",
         "#E69F00",

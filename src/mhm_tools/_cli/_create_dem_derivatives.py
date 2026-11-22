@@ -11,6 +11,7 @@ Authors
 """
 
 from mhm_tools.common.cli_utils import (
+    add_missing_aspect_arg,
     add_netcdf_compression_args,
     get_netcdf_compression,
 )
@@ -97,6 +98,7 @@ def add_args(parser):
             "several (create-catchment names its flow direction 'flwdir')."
         ),
     )
+    add_missing_aspect_arg(optional)
     add_netcdf_compression_args(parser)
 
 
@@ -131,6 +133,7 @@ def run(args):
             compression=get_netcdf_compression(args),
             one_file_per_variable=args.one_file_per_variable,
             facc_unit=args.facc_unit,
+            missing_aspect=args.missing_aspect,
         )
     for path in written:
         logger.info(f"Wrote {path}")

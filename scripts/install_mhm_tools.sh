@@ -5,7 +5,7 @@
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PYTHON_VERSION="3.11"
+PYTHON_VERSION=""
 EXTRAS=""
 EDITABLE=false
 ENV_DIR=""
@@ -13,7 +13,7 @@ ENV_DIR=""
 # remaining pure Python dependencies from pyproject.toml
 CONDA_PACKAGES=(
     "pip"
-    "numpy>=1.17.3,<2.4"
+    "numpy>=2.5,<3"
     "scipy"
     "pandas"
     "rasterio"
@@ -33,11 +33,12 @@ print_usage() {
 Usage: $(basename "$0") [--editable] [--extras EXTRAS] [--python VERSION] ENV_DIR
 
 Install mhm-tools from ${REPO_DIR} into the conda environment ENV_DIR.
-ENV_DIR is created with Python VERSION if it does not exist.
+ENV_DIR is created if it does not exist.
 
   --editable        install in editable mode instead of a built wheel
-  --extras EXTRAS   comma separated extras, e.g. test,doc
-  --python VERSION  Python version of a new environment (default ${PYTHON_VERSION})
+  --extras EXTRAS   comma separated extras, e.g. test,doc or mhm5 (mHM from conda-forge);
+                    lint installs ruff, black and isort in the versions of the GitLab CI
+  --python VERSION  Python version of a new environment (default: chosen by conda)
 EOF
 }
 
@@ -58,6 +59,18 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 [[ -n "$ENV_DIR" ]] || { print_usage >&2; fail "ENV_DIR is missing"; }
+
+# mHM comes from conda-forge like the other compiled packages. pip only warns
+# about an unknown extra, so an unreleased mHM version has to fail here
+MHM_PACKAGE=""
+case ",${EXTRAS}," in
+    # mHM 6 is not released yet; replace the fail with MHM_PACKAGE="mhm>=6,<7" once it is
+    *,mhm6,*) fail "mHM 6 is not released yet, use --extras mhm or mhm5" ;;
+    *,mhm5,*) MHM_PACKAGE="mhm>=5.13,<6" ;;
+    # the test extra needs mHM as well
+    *,mhm,*|*,test,*) MHM_PACKAGE="mhm>=5.13" ;;
+esac
+[[ -z "$MHM_PACKAGE" ]] || CONDA_PACKAGES+=("$MHM_PACKAGE")
 
 if command -v mamba >/dev/null 2>&1; then
     CONDA_COMMAND="mamba"
@@ -84,10 +97,11 @@ if [[ -d "$ENV_DIR/conda-meta" ]]; then
 elif [[ -e "$ENV_DIR" ]]; then
     fail "${ENV_DIR} exists but is no conda environment"
 else
-    echo "Creating the conda environment ${ENV_DIR} with Python ${PYTHON_VERSION}"
+    echo "Creating the conda environment ${ENV_DIR}${PYTHON_VERSION:+ with Python ${PYTHON_VERSION}}"
+    # without --python conda picks the Python version that fits all packages
     "$CONDA_COMMAND" create --yes --prefix "$ENV_DIR" \
         --channel conda-forge --override-channels \
-        "python=${PYTHON_VERSION}" "${CONDA_PACKAGES[@]}"
+        ${PYTHON_VERSION:+"python=${PYTHON_VERSION}"} "${CONDA_PACKAGES[@]}"
     ENV_DIR="$(cd "$ENV_DIR" && pwd)"
 fi
 PYTHON="${ENV_DIR}/bin/python"
@@ -95,7 +109,15 @@ PYTHON="${ENV_DIR}/bin/python"
 # an old (editable) mhm-tools would keep its stale files and version
 "$PYTHON" -I -m pip uninstall --yes mhm_tools >/dev/null 2>&1 || true
 
-EXTRAS_SUFFIX="${EXTRAS:+[${EXTRAS}]}"
+# lint stands for the check extra the GitLab CI installs, so ruff, black and
+# isort get the versions the CI checks with
+PIP_EXTRAS=",${EXTRAS},"
+while [[ "$PIP_EXTRAS" == *,lint,* ]]; do
+    PIP_EXTRAS="${PIP_EXTRAS/,lint,/,check,}"
+done
+PIP_EXTRAS="${PIP_EXTRAS#,}"
+PIP_EXTRAS="${PIP_EXTRAS%,}"
+EXTRAS_SUFFIX="${PIP_EXTRAS:+[${PIP_EXTRAS}]}"
 if [[ "$EDITABLE" == true ]]; then
     "$PYTHON" -I -m pip install --no-cache-dir --editable "${REPO_DIR}${EXTRAS_SUFFIX}"
     EXPECTED_DIR="${REPO_DIR}/src"
@@ -115,4 +137,6 @@ MODULE_FILE="$("$PYTHON" -I -c 'import mhm_tools; print(mhm_tools.__file__)')"
 [[ "$MODULE_FILE" == "$EXPECTED_DIR"/* ]] \
     || fail "mhm_tools is imported from ${MODULE_FILE}, expected below ${EXPECTED_DIR}"
 "${ENV_DIR}/bin/mhm-tools" --help >/dev/null
+[[ -z "$MHM_PACKAGE" ]] || "$PYTHON" -I -c 'import mhm' \
+    || fail "mHM was installed but cannot be imported"
 echo "Installed mhm-tools $("$PYTHON" -I -c 'import mhm_tools; print(mhm_tools.__version__)') from ${MODULE_FILE}"

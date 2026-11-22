@@ -36,7 +36,7 @@ classifiers = [
 ]
 dependencies = [
   "click>=8.1",
-  "numpy>=1.17.3,<2.4",
+  "numpy>=1.17.3,<3",
   "geopandas>=1.1.3,< 2",
   "rasterio",
   "xarray",
@@ -48,6 +48,7 @@ dependencies = [
   "scipy",
   "joblib",
   "crick",
+  "dask",
   "distributed",
   "seaborn",
   "netCDF4",
@@ -62,7 +63,8 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://mhm-ufz.org/"
-Documentation = "https://mhm.pages.ufz.de/mhm-tools"
+Documentation = "https://mhm-tools.readthedocs.io"
+"Documentation (GitLab Pages)" = "https://mhm.pages.ufz.de/mhm-tools"
 Source = "https://git.ufz.de/mhm/mhm-tools"
 Tracker = "https://git.ufz.de/mhm/mhm-tools/-/issues"
 Changelog = "https://git.ufz.de/mhm/mhm-tools/-/blob/main/CHANGELOG.md"
@@ -77,7 +79,10 @@ doc = [
   "docutils>=0.18", # mdinclude with myst
   "sphinx-click", # Click CLI doc
 ]
-test = ["pytest-cov>=3"]
+test = [
+  "pytest-cov>=3",
+  "mhm>=5.13", # the restart creation tests need mHM
+]
 check = [
   "black>=24,<25",
   "isort[colors]",
@@ -89,6 +94,12 @@ plot = [
 tui = [
   "trogon>=0.6.0",
 ]
+# mHM Python bindings, needed by create-mhm-restart-from-setup.
+# mhm takes the newest mHM from 5.13 on, mhm5 stays on mHM 5.
+mhm = ["mhm>=5.13"]
+mhm5 = ["mhm>=5.13,<6"]
+# mHM 6 is not released yet; uncomment once it is on PyPI and conda-forge
+# mhm6 = ["mhm>=6,<7"]
 
 [project.scripts]
 mhm-tools = "mhm_tools._cli:main"

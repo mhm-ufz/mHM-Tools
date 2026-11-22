@@ -55,6 +55,8 @@ def link_folder_tree(
 ):
     """Link all files in a folder tree to another folder tree creating symlinks for each file.
 
+    Nothing is linked when ``output_dir`` is ``input_dir``.
+
     Parameters
     ----------
     input_dir : Path
@@ -77,6 +79,13 @@ def link_folder_tree(
         msg = f"Input directory does not exist: {input_dir}"
         with ErrorLogger(logger):
             raise FileNotFoundError(msg)
+    # every target would be its input file, which --overwrite would delete and
+    # replace by a link to itself
+    if input_dir.resolve() == output_dir.resolve():
+        logger.info(
+            f"Output directory {output_dir} is the input directory, nothing is linked."
+        )
+        return
     logger.info(f"Linking files from {input_dir} to {output_dir}")
     for file in input_dir.rglob(file_name):
         relative_path = file.relative_to(input_dir).as_posix()

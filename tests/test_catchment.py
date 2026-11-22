@@ -106,6 +106,74 @@ class TestCatchment(unittest.TestCase):
         self.assertIsNotNone(c)
         self.assertIs(c.ds, self.ds)
 
+    def test_create_frame_writes_one_value_per_variable(self):
+        """Write the frame value given per variable, or one value into every variable."""
+        ds = xr.Dataset(
+            {
+                "flwdir": (["lat", "lon"], np.ones((4, 5), dtype=np.uint8)),
+                "elevtn": (["lat", "lon"], np.full((4, 5), 10.0)),
+            }
+        )
+        ring = np.ones((4, 5), dtype=bool)
+        ring[1:-1, 1:-1] = False
+
+        catchment.Catchment.create_frame(ds, 1, {"flwdir": 5, "elevtn": -9999.0})
+
+        np.testing.assert_array_equal(ds["flwdir"].values[ring], 5)
+        np.testing.assert_array_equal(ds["elevtn"].values[ring], -9999.0)
+        np.testing.assert_array_equal(ds["flwdir"].values[~ring], 1)
+        np.testing.assert_array_equal(ds["elevtn"].values[~ring], 10.0)
+
+        catchment.Catchment.create_frame(ds, 1, 0)
+
+        np.testing.assert_array_equal(ds["flwdir"].values[ring], 0)
+        np.testing.assert_array_equal(ds["elevtn"].values[ring], 0.0)
+
+    def test_write_frame_puts_pits_only_into_flwdir(self):
+        """Give the frame pits in flwdir and no data in basin, grdare and the mask."""
+        lat = np.array([4.0, 3.0, 2.0, 1.0, 0.0])
+        lon = np.array([0.0, 1.0, 2.0, 3.0, 4.0, 5.0])
+        # every row drains east into a pit (ldd 5) in the last column
+        fdir = np.full((lat.size, lon.size), 6, dtype=np.uint8)
+        fdir[:, -1] = 5
+        ds = xr.Dataset(
+            {"fdir": (["lat", "lon"], fdir)}, coords={"lat": lat, "lon": lon}
+        )
+        c = catchment.Catchment(
+            ds,
+            "fdir",
+            var="fdir",
+            ftype="ldd",
+            transform=catchment.get_transformation_matrix_nc(ds, "fdir"),
+            out_var_name="basin_ids.nc",
+            latlon=True,
+        )
+        c.get_basins()
+        c.get_grid_area()
+
+        c.write(
+            self.tmp_path,
+            single_file=True,
+            frame=1,
+            mask_file=self.tmp_path / "mask.nc",
+            variables=["flwdir", "basin", "grdare"],
+        )
+
+        ring = np.ones(fdir.shape, dtype=bool)
+        ring[1:-1, 1:-1] = False
+        with xr.open_dataset(
+            self.tmp_path / "basin_ids.nc", mask_and_scale=False
+        ) as basin_ds:
+            np.testing.assert_array_equal(basin_ds["flwdir"].values[ring], 5)
+            np.testing.assert_array_equal(basin_ds["basin"].values[ring], 0)
+            self.assertTrue(np.all(basin_ds["basin"].values[~ring] > 0))
+            np.testing.assert_array_equal(basin_ds["grdare"].values[ring], -9999)
+        with xr.open_dataset(
+            self.tmp_path / "mask.nc", mask_and_scale=False
+        ) as mask_ds:
+            np.testing.assert_array_equal(mask_ds["mask"].values[ring], 0)
+            np.testing.assert_array_equal(mask_ds["mask"].values[~ring], 1)
+
     def test_modify_data(self):
         c = catchment.Catchment(
             self.ds,
@@ -1374,6 +1442,38 @@ class TestCatchment(unittest.TestCase):
             self.assertEqual(int(merged["basin"].sel(lat=1.0, lon=0.0)), 2)
             self.assertGreater(int(merged["basin"].sel(lat=1.0, lon=-179.0)), 3)
             self.assertGreater(int(merged["basin"].sel(lat=1.0, lon=179.0)), 3)
+
+    def test_global_basin_ids_keep_the_dateline_columns(self):
+        """The frame must not clear the first and last longitude column."""
+        lat = np.array([7.5, 2.5, -2.5, -7.5])
+        lon = np.arange(-177.5, 180, 5.0)
+        fdir = np.full((lat.size, lon.size), np.nan)
+        # two land rows flowing east, across the date line
+        fdir[1:3, :] = 1
+        fdir_file = self.tmp_path / "global_fdir.nc"
+        xr.Dataset(
+            {"fdir": (["lat", "lon"], fdir)}, coords={"lat": lat, "lon": lon}
+        ).to_netcdf(fdir_file)
+        out_dir = self.tmp_path / "global_basins"
+
+        catchment.create_catchment(
+            input_file=fdir_file,
+            output_path=out_dir,
+            var_name="fdir",
+            var="fdir",
+            ftype="d8",
+            resolutions=mhm_tools.common.utils.Resolution(l0=5.0, l1=5.0),
+            upscale=True,
+            output_vars="basin",
+        )
+
+        with xr.open_dataset(out_dir / "basin_ids.nc") as ds:
+            basin = ds["basin"].sel(lat=[2.5, -2.5])
+            self.assertFalse(bool(basin.isnull().any()))
+            # each row is one basin that runs across the date line
+            np.testing.assert_array_equal(
+                basin.isel(lon=0).values, basin.isel(lon=-1).values
+            )
 
     def _make_narrow_basin_catchment(self, nlat=120, nlon=60):
         """Build a catchment whose L2 grid is only one cell wide.

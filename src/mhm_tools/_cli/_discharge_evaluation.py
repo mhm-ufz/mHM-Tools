@@ -19,6 +19,19 @@ def add_args(parser):
     required_args.add_argument(
         "--output-dir", help="Path for the output dir.", required=True
     )
+    output_names = parser.add_argument_group("output file names")
+    output_names.add_argument(
+        "--results-file-name",
+        default="discharge_eval_results.csv",
+        help="Name of the per-station results CSV inside --output-dir. "
+        "By default `discharge_eval_results.csv`.",
+    )
+    output_names.add_argument(
+        "--overview-pdf-name",
+        default="discharge_eval_overview.pdf",
+        help="Name of the overview PDF inside --output-dir. "
+        "By default `discharge_eval_overview.pdf`.",
+    )
     optional = parser.add_argument_group("optional arguments")
     flags = parser.add_argument_group("flags")
     # the names follow the other evaluation tools, the former model/observed
@@ -115,7 +128,8 @@ def add_args(parser):
         "--ncpus",
         required=False,
         default=1,
-        help=(""),
+        type=int,
+        help="Number of CPUs used to read the model files and evaluate the gauges. 0 or -1 uses all cores.",
     )
     optional.add_argument(
         "--lonlatbox",
@@ -170,6 +184,17 @@ def add_args(parser):
         default=["cdf", "map", "catchment-map"],
         choices=["cdf", "violin", "map", "catchment-map"],
         help="Metric plot types to create. Violin plots are only made on request.",
+    )
+    optional.add_argument(
+        "--max-mean-factor",
+        required=False,
+        default=30.0,
+        type=float,
+        help=(
+            "Leave stations whose beta (mean sim / mean obs) is above this factor or "
+            "below its inverse out of the region table and the PDF summary table; the "
+            "plots keep them. Use inf to keep all stations."
+        ),
     )
     optional.add_argument(
         "--n-bootstrap-years",
@@ -294,6 +319,7 @@ def run(args):
         get_netcdf_compression,
         normalize_cli_sequence,
     )
+    from mhm_tools.common.parallel import resolve_ncpus
     from mhm_tools.post.discharge_evaluation import (
         _resolve_gauge_location_method,
         evaludate_discharge_data,
@@ -320,7 +346,7 @@ def run(args):
         gauge_coordinate_file=args.gauge_coordinate_file,
         output_path=args.output_dir,
         evaluation_gauges=args.evaluation_gauges,
-        n_jobs=int(args.ncpus),
+        n_jobs=resolve_ncpus(args.ncpus),
         sim_variable=args.input_variable,
         observed_variable=args.ref_variable,
         lon_min=lon_min,
@@ -347,5 +373,8 @@ def run(args):
         mask_var=args.mask_var,
         catchment_map_variables=normalize_cli_sequence(args.catchment_map_variables),
         metric_plot_types=args.metric_plot_types,
+        max_mean_factor=args.max_mean_factor,
+        results_file_name=args.results_file_name,
+        overview_pdf_name=args.overview_pdf_name,
         compression=get_netcdf_compression(args),
     )

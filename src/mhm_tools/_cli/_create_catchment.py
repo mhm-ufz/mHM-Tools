@@ -157,7 +157,17 @@ def add_args(parser):
         default=0,
         type=int,
         help=(
-            "Creates a frame of nonflow cells around the domain to enable non global domains in ulysses mrm which connects the eastern and western boundaries."
+            "Width in cells of a frame of non-flow cells around the output grid "
+            "(default: 0, no frame). Ulysses mRM joins the eastern and western grid "
+            "edges; the frame stops a regional domain from routing across them. "
+            "Frame cells are pits in flwdir and no data in all other variables and "
+            "in the mask. Caution: the frame replaces the outermost cells, it does "
+            "not add cells. A single-gauge run pads the basin by the frame width "
+            "first, so only a basin closer than that to the input edge loses cells. "
+            "A region or multi-gauge run has no padding, so the frame overwrites "
+            "the outer cells of the requested extent, basin cells included. Global "
+            "runs that write basin ids ignore the frame; on other global runs it "
+            "cuts the east-west connection, so don't use it there."
         ),
     )
     optional_args.add_argument(
@@ -277,7 +287,7 @@ def add_args(parser):
         default=1,
         type=int,
         help=(
-            "Number of cores used for parallelisation. Only needed if multiple gauges are created."
+            "Number of cores used for parallelisation. Only needed if multiple gauges are created. 0 or -1 uses all cores."
         ),
     )
 
@@ -294,6 +304,7 @@ def run(args):  # noqa: PLR0912,PLR0915
 
     from mhm_tools.common.cli_utils import get_available_mem_in_unit, parse_lonlatbox
     from mhm_tools.common.logger import ErrorLogger
+    from mhm_tools.common.parallel import resolve_ncpus
     from mhm_tools.common.resolution_handler import Resolution
 
     from ..pre import create_catchment
@@ -457,8 +468,9 @@ def run(args):  # noqa: PLR0912,PLR0915
         l2=args.l2_resolution,
         l2_file=args.meteo_file,
     )
-    if args.ncpus > 1:
-        logger.info(f"Using {args.ncpus} cpus for catchment creation.")
+    ncpus = resolve_ncpus(args.ncpus)
+    if ncpus > 1:
+        logger.info(f"Using {ncpus} cpus for catchment creation.")
     create_catchment(
         input_file=args.input_file,
         output_path=args.output_path,
@@ -480,7 +492,7 @@ def run(args):  # noqa: PLR0912,PLR0915
         max_error=args.max_error,
         use_max_error=args.use_max_error,
         gauge_ids=gauge_ids,
-        ncpus=args.ncpus,
+        ncpus=ncpus,
         output_vars=(
             None if str(args.output_vars).strip().lower() == "all" else args.output_vars
         ),

@@ -7,6 +7,7 @@ data workflow of ``Q_data_to_xarray`` and ``evaludate_discharge_data``.
 import contextlib
 import logging
 import tempfile
+import time
 import tracemalloc
 import unittest
 from pathlib import Path
@@ -182,35 +183,6 @@ def test_gauges_are_matched_by_coordinates_without_node_station_ids():
     np.testing.assert_array_equal(matched_x, [20.0, 0.0])
 
 
-@pytest.fixture
-def _offline_map_projections(monkeypatch):
-    """Record the projection of every saved map and skip the map features.
-
-    Coastlines and borders would be downloaded by cartopy; the tests only need
-    the gauges, so ``add_feature`` is a no-op.
-
-    Returns
-    -------
-    list
-        The cartopy projection of every figure saved by ``plot_map``.
-    """
-    pytest.importorskip("cartopy")
-    from cartopy.mpl.geoaxes import GeoAxes
-    from matplotlib.figure import Figure
-
-    projections = []
-    save_figure = Figure.savefig
-
-    def record_and_save(figure, *args, **kwargs):
-        """Record the map projection before saving the figure."""
-        projections.append(figure.axes[0].projection)
-        return save_figure(figure, *args, **kwargs)
-
-    monkeypatch.setattr(GeoAxes, "add_feature", lambda *args, **kwargs: None)
-    monkeypatch.setattr(Figure, "savefig", record_and_save)
-    return projections
-
-
 def test_plot_map_draws_gauges_in_degrees_on_a_plate_carree_map(
     tmp_path, _offline_map_projections
 ):
@@ -335,6 +307,108 @@ def test_search_window_holds_the_cells_around_the_gauge_with_nan_beyond_the_grid
     np.testing.assert_array_equal(
         sim_sel["candidate_dx"], [-1, 0, 1, -1, 0, 1, -1, 0, 1]
     )
+
+
+def _write_chunked_gridded_output(output_file):
+    """Write ``_gridded_output`` compressed in chunks of 1 step x 3 rows x 2 columns.
+
+    Args:
+        output_file (Path): NetCDF file to write.
+
+    Returns
+    -------
+        Path: The written file.
+    """
+    _gridded_output().to_netcdf(
+        output_file, encoding={"rdis": {"zlib": True, "chunksizes": (1, 3, 2)}}
+    )
+    return output_file
+
+
+@pytest.mark.parametrize("search_cells", [0, 1])
+def test_gridded_file_gives_the_same_gauge_series_as_the_grid_in_memory(
+    tmp_path, search_cells
+):
+    """Read the gauge cells of a chunked file like those of the loaded grid."""
+    gauge_x, gauge_y, gauge_ids = [1400.0, 3600.0], [3550.0, 1600.0], [7, 8]
+    _, sim_sel, _, _, ids = discharge_evaluation._read_model_file_part(
+        sim_file=_write_chunked_gridded_output(tmp_path / "sim.nc"),
+        sim_variable="rdis",
+        date_slice=slice(None, None),
+        extraction_mode="grid",
+        gauge_ids_with_values=gauge_ids,
+        x_new=gauge_x,
+        y_new=gauge_y,
+        search_cells=search_cells,
+    )
+    expected, _, _, _ = discharge_evaluation.get_sim_data_for_gauges_from_grid(
+        _gridded_output(), gauge_x, gauge_y, gauge_ids, search_cells=search_cells
+    )
+    np.testing.assert_array_equal(ids, gauge_ids)
+    xr.testing.assert_equal(sim_sel, expected)
+
+
+def test_gridded_file_is_read_in_its_own_chunks(tmp_path, monkeypatch):
+    """Hand the gauge extraction the file data in dask chunks of the on-disk chunks."""
+    chunks_by_call = []
+    extract_from_grid = discharge_evaluation.get_sim_data_for_gauges_from_grid
+
+    def record_chunks_and_extract(sim_da, *args, **kwargs):
+        """Record the chunks of the data and extract the gauges as usual."""
+        chunks_by_call.append(sim_da.chunks)
+        return extract_from_grid(sim_da, *args, **kwargs)
+
+    monkeypatch.setattr(
+        discharge_evaluation,
+        "get_sim_data_for_gauges_from_grid",
+        record_chunks_and_extract,
+    )
+    discharge_evaluation._read_model_file_part(
+        sim_file=_write_chunked_gridded_output(tmp_path / "sim.nc"),
+        sim_variable="rdis",
+        date_slice=slice(None, None),
+        extraction_mode="grid",
+        gauge_ids_with_values=[7, 8],
+        x_new=[1400.0, 3600.0],
+        y_new=[3550.0, 1600.0],
+    )
+    # 3 steps of 1, the 3 rows in one chunk, the 4 columns in chunks of 2
+    assert chunks_by_call == [((1, 1, 1), (3,), (2, 2))]
+
+
+def test_gridded_file_reads_many_gauges_quickly(tmp_path):
+    """Read 2500 gauges of a chunked 600 x 600 grid file in under a second."""
+    grid_size, gauge_count = 600, 2500
+    rng = np.random.default_rng(0)
+    cell_centres = 1000.0 * np.arange(grid_size) + 500.0
+    sim_file = tmp_path / "sim.nc"
+    xr.DataArray(
+        rng.random((3, grid_size, grid_size)).astype("float32"),
+        dims=("time", "y", "x"),
+        coords={
+            "time": pd.date_range("1990-01-01", periods=3, freq="D"),
+            "y": cell_centres[::-1],
+            "x": cell_centres,
+        },
+        name="rdis",
+    ).to_netcdf(
+        sim_file,
+        encoding={"rdis": {"zlib": True, "chunksizes": (1, grid_size, grid_size)}},
+    )
+    gauge_rows, gauge_cols = rng.integers(0, grid_size, (2, gauge_count))
+    start = time.perf_counter()
+    discharge_evaluation._read_model_file_part(
+        sim_file=sim_file,
+        sim_variable="rdis",
+        date_slice=slice(None, None),
+        extraction_mode="grid",
+        gauge_ids_with_values=np.arange(gauge_count),
+        x_new=cell_centres[gauge_cols],
+        y_new=cell_centres[::-1][gauge_rows],
+    )
+    # picking the cells from the file directly took ~4.6 s for its ~350,000
+    # single-cell reads; reading the file's chunks takes ~0.01 s
+    assert time.perf_counter() - start < 1.0
 
 
 def _candidate_series(series_by_offset, observed_values):
@@ -937,14 +1011,70 @@ class TestEvaluateDirect(unittest.TestCase):
                     overwrite=True,
                 )
 
-                # results.csv exists and has expected content
-                results_csv = outdir / "results.csv"
+                # results CSV exists and has expected content
+                results_csv = outdir / "discharge_eval_results.csv"
                 self.assertTrue(results_csv.is_file())
                 df = pd.read_csv(results_csv, index_col=0)
                 self.assertIn("alpha", df.columns)
                 self.assertEqual(df.loc[0, "id"], 42)
                 # plot_cdf not called for small sample sizes
                 mock_plot.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("gauges_crs", "expected_crs"), [("EPSG:3035", "EPSG:3035"), (None, None)]
+)
+def test_discharge_evaluation_writes_the_crs_of_projected_gauges(
+    tmp_path, gauges_crs, expected_crs
+):
+    """Write the CRS of projected gauges as crs column, and none for lon/lat."""
+    from rasterio.crs import CRS
+
+    times = pd.date_range("2005-01-01", periods=3, freq="D")
+    observed_ds = xr.Dataset(
+        {"discharge": (("id", "time"), [[1.0, 2.0, 3.0]])},
+        coords={"id": [42], "time": times},
+    )
+    model_ds = xr.Dataset(
+        {
+            "discharge": (("id", "time"), [[1.0, 2.0, 3.0]]),
+            "facc": (("id",), [1000.0]),
+            "x": (("id",), [4.0e6]),
+            "y": (("id",), [3.0e6]),
+        },
+        coords={"id": [42], "time": times},
+    )
+    with patch.object(
+        discharge_evaluation,
+        "Q_data_to_xarray",
+        return_value=(observed_ds, model_ds),
+    ), patch.object(
+        discharge_evaluation,
+        "gen_hydrograph_by_data_sets",
+        return_value={"id": 42, "alpha": 1.0, "beta": 1.0, "gamma": 0.5},
+    ), patch.object(
+        discharge_evaluation,
+        "read_gauge_crs",
+        return_value=CRS.from_user_input(gauges_crs) if gauges_crs else None,
+    ), patch.object(
+        discharge_evaluation, "plot_map"
+    ):
+        discharge_evaluation.evaludate_discharge_data(
+            model_data_path="sim.nc",
+            observed_data_path="obs.nc",
+            facc_file="restart.nc",
+            output_path=tmp_path,
+            n_jobs=1,
+            direct_comparison=True,
+            n_boostrap_selections=0,
+            overwrite=True,
+        )
+
+    results = pd.read_csv(tmp_path / "discharge_eval_results.csv", index_col=0)
+    if expected_crs is None:
+        assert "crs" not in results.columns
+    else:
+        assert results["crs"].tolist() == [expected_crs]
 
 
 # -----------------------------
@@ -989,7 +1119,7 @@ class TestEvaluateBootstrap(unittest.TestCase):
                     "id": 7,
                     "alpha": 2.0,
                     "beta": 0.0,
-                    "gamma": 0.7,
+                    "spearman_clim": 0.7,
                 },
             ), patch.object(
                 discharge_evaluation, "plot_cdf"
@@ -1009,11 +1139,12 @@ class TestEvaluateBootstrap(unittest.TestCase):
                     overwrite=True,
                 )
 
-                # results.csv exists and has bootstrap content (from boostap_statistics)
-                results_csv = outdir / "results.csv"
+                # results CSV exists and has bootstrap content (from boostap_statistics)
+                results_csv = outdir / "discharge_eval_results.csv"
                 self.assertTrue(results_csv.is_file())
                 df = pd.read_csv(results_csv, index_col=0)
-                self.assertIn("gamma", df.columns)
+                self.assertIn("spearman_clim", df.columns)
+                self.assertNotIn("gamma", df.columns)
                 self.assertTrue((df["id"] == 7).all())
                 # plot_cdf not called for small sample sizes
                 mock_plot.assert_not_called()
@@ -1447,3 +1578,47 @@ class TestGaugeLocationSources(unittest.TestCase):
         np.testing.assert_array_equal(
             simulated["discharge"].sel(id=2).values, [4.0] * 4
         )
+
+
+def test_boostap_statistics_writes_std_ratio_as_alpha_and_mean_ratio_as_beta():
+    """Name the bootstrap components like the kge: alpha std ratio, beta mean ratio."""
+    time = pd.date_range("2010-01-01", "2011-12-31", freq="D")
+    observed = 10.0 + 5.0 * np.sin(2 * np.pi * time.dayofyear.values / 365.0)
+    observed_da = xr.DataArray(
+        observed[:, None], dims=("time", "id"), coords={"time": time, "id": [7]}
+    )
+    # the same variability shifted upwards, so only the means differ
+    model_da = observed_da + 10.0
+
+    result = discharge_evaluation.boostap_statistics(
+        index=0,
+        id=7,
+        model_da=model_da,
+        observed_da=observed_da,
+        total_years_sim=np.array([2010, 2011]),
+        total_years_obs=np.array([2010, 2011]),
+        n_bootstrap_years=2,
+    )
+
+    observed_mean = observed.mean()
+    assert result["alpha"] == pytest.approx(1.0)
+    assert result["beta"] == pytest.approx((observed_mean + 10.0) / observed_mean)
+    assert result["spearman_clim"] == pytest.approx(1.0)
+    assert "gamma" not in result
+
+
+def test_plot_cdf_skips_missing_metric_columns(tmp_path):
+    """Plot bootstrap results, which have no kge, nse and gamma columns."""
+    results_df = pd.DataFrame(
+        {
+            "id": [6335020, 6335021, 6335022, 6335023, 6335024, 6335025],
+            "alpha": [0.9, 1.0, 1.1, 0.8, 1.2, 1.0],
+            "beta": [1.0, 1.1, 0.9, 1.0, 1.2, 0.8],
+            "spearman_clim": [0.9, 0.8, 0.95, 0.7, 0.85, 0.9],
+        }
+    )
+
+    output_files = discharge_evaluation.plot_cdf(results_df, tmp_path)
+
+    assert output_files
+    assert not any("kge" in Path(file).name for file in output_files)

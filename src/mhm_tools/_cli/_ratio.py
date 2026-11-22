@@ -3,7 +3,7 @@ Compute and plot the spatial ratio between a model dataset and a reference datas
 
 This script reads CF-compliant NetCDF files for both model and reference datasets, computes
 the spatial ratio for a specified variable, applies any provided geographic or data
-range limits, and generates a high-resolution PNG showing that difference with customizable
+range limits, and generates a high-resolution PNG showing that ratio with customizable
 title, colorbar label, and colormap.
 
 Authors
@@ -33,8 +33,6 @@ def str2float(value):
     if not isinstance(value, str):
         msg = f"Expected a string or None, but got {type(value).__name__}."
         raise argparse.ArgumentTypeError(msg)
-        msg = f"Expected a string or None, but got {type(value).__name__}."
-        raise argparse.ArgumentTypeError(msg)
 
     try:
         return float(value)
@@ -47,7 +45,7 @@ def add_args(parser):
     """Add CLI arguments for the ratio subcommand."""
     parser.description = (
         "Compute and plot the spatial ratio between a model dataset and a reference dataset "
-        "for a specified variable: diff = (da_mod / da_ref). "
+        "for a specified variable: ratio = da_mod / da_ref. "
         "Supports wildcard matching, custom variable names, colorbar labels, "
         "titles, output file naming, optional axis limits, custom colormap, and explicit colormap range."
     )
@@ -124,17 +122,17 @@ def add_args(parser):
     )
     optional.add_argument(
         "--output-file-nc",
-        default="difference.nc",
+        default="ratio.nc",
         help="If --save_ncfile, gives the name of the file to be saved in --output_dir",
     )
     optional.add_argument(
         "--colorbar-label",
-        default="Difference (model - reference)",
+        default="Ratio (model / reference)",
         help="Label for the plot colorbar",
     )
     optional.add_argument(
         "--title",
-        default="Mean Difference (model - reference)",
+        default="Mean ratio (model / reference)",
         help="Title for the plot",
     )
     optional.add_argument(
@@ -152,7 +150,7 @@ def add_args(parser):
     optional.add_argument(
         "--cmap",
         default="coolwarm",
-        help="Matplotlib colormap name to use for the difference plot",
+        help="Matplotlib colormap name to use for the ratio plot",
     )
     optional.add_argument(
         "--vmin",

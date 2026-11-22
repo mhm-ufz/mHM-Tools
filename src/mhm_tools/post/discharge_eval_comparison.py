@@ -22,6 +22,7 @@ from mhm_tools.common.logger import ErrorLogger, log_errors
 from mhm_tools.common.plotter import (
     PLOT_DPI,
     add_map_colorbar,
+    calculate_colour_limits,
     calculate_map_figure_size,
     create_axis_label,
     create_comparison_title,
@@ -38,6 +39,8 @@ DEFAULT_DISCHARGE_COMPARISON_VARIABLES = ("kge", "nse", "alpha", "beta", "gamma"
 DISCHARGE_COMPARISON_PLOT_TYPES = ("cdf", "violin", "catchment-map", "map-diff")
 DEFAULT_VALUE_MIN = -100
 DEFAULT_VALUE_MAX = 100
+# largest colour half-range of a ΔKGE diff map; larger changes get colorbar arrows
+MAX_KGE_DIFF_HALF_RANGE = 0.5
 
 
 def _sanitize_name(value):
@@ -78,9 +81,63 @@ def _read_dfs_by_name(input_paths, input_names, file_names):
     dfs_by_name = {}
     for input_path, input_name in zip(input_paths, input_names):
         csv_files = get_metric_csv_files(input_path, file_names=file_names)
+        csv_file_list = ", ".join(str(csv_file) for csv_file in csv_files)
+        logger.info(f"Using {input_name!r} for {csv_file_list}")
         dfs_by_name[input_name] = pd.concat(
             [pd.read_csv(csv_file) for csv_file in csv_files], ignore_index=True
         )
+    return dfs_by_name
+
+
+def _set_values_outside_common_gauges_to_nan(dfs_by_name, variables):
+    """Set metric values to NaN for gauges that are not finite in every input.
+
+    The common gauges are found per variable, so a gauge without e.g. `nse`
+    in one input still counts for `kge`. Rows are kept, so `id` and the gauge
+    coordinates stay available for the maps.
+
+    Parameters
+    ----------
+    dfs_by_name : dict[str, pandas.DataFrame]
+        Results table by input label.
+    variables : Sequence[str]
+        Metric columns to restrict to the common gauges.
+
+    Returns
+    -------
+    dict[str, pandas.DataFrame]
+        Tables with the values of gauges outside the common gauges set to NaN.
+    """
+    for variable in variables:
+        missing_in = [
+            name for name, df in dfs_by_name.items() if variable not in df.columns
+        ]
+        if len(missing_in) == len(dfs_by_name):
+            continue
+        if missing_in:
+            # restricting to a column some inputs lack would remove every value
+            logger.warning(
+                f"--common-gauges: {variable!r} is missing in {missing_in}; "
+                "not restricting it to common gauges."
+            )
+            continue
+        finite_ids_by_name = {
+            name: set(
+                df.loc[np.isfinite(pd.to_numeric(df[variable], errors="coerce")), "id"]
+            )
+            for name, df in dfs_by_name.items()
+        }
+        common_ids = set.intersection(*finite_ids_by_name.values())
+        if not common_ids:
+            logger.warning(
+                f"--common-gauges: no gauge has a finite {variable!r} in every input."
+            )
+        for name, df in dfs_by_name.items():
+            df[variable] = df[variable].where(df["id"].isin(common_ids))
+            logger.info(
+                f"--common-gauges: {variable!r} of {name!r} keeps {len(common_ids)} "
+                f"of {len(finite_ids_by_name[name])} gauges."
+            )
     return dfs_by_name
 
 
@@ -92,6 +149,8 @@ def _write_sanitized_results_csvs(
     output_dir,
     value_min=DEFAULT_VALUE_MIN,
     value_max=DEFAULT_VALUE_MAX,
+    max_mean_factor=None,
+    common_gauges=False,
 ):
     """Write one sanitized `results.csv` copy per input, for plotting.
 
@@ -122,6 +181,12 @@ def _write_sanitized_results_csvs(
         Lower bound of the kept value range.
     value_max : float, optional
         Upper bound of the kept value range.
+    max_mean_factor : float, optional
+        Leave out stations whose beta is above this factor or below its
+        inverse, per input. None keeps every station.
+    common_gauges : bool, optional
+        After filtering, keep the `variables` values only for gauges that are
+        finite in every input (see `_set_values_outside_common_gauges_to_nan`).
 
     Returns
     -------
@@ -133,10 +198,18 @@ def _write_sanitized_results_csvs(
     dfs_by_name = _read_dfs_by_name(input_paths, input_names, file_names)
 
     from mhm_tools.common.plotter import HIGHER_IS_BETTER_METRICS
+    from mhm_tools.post.discharge_evaluation import (
+        create_table_results_within_mean_factor,
+    )
 
-    sanitized_paths = []
-    for index, input_name in enumerate(input_names):
-        df = dfs_by_name[input_name]
+    sanitized_dfs_by_name = {}
+    for input_name in input_names:
+        df, left_out_notes = create_table_results_within_mean_factor(
+            dfs_by_name[input_name], max_mean_factor
+        )
+        df = df.copy()
+        for note in left_out_notes:
+            logger.info(f"Left out of the {input_name!r} tables: {note}")
         for variable in variables:
             if variable not in df.columns:
                 continue
@@ -163,8 +236,16 @@ def _write_sanitized_results_csvs(
                     )
                 invalid = invalid | impossible
             df[variable] = values.where(~invalid)
+        sanitized_dfs_by_name[input_name] = df
+
+    # after both filters, so a gauge left out in one input is left out in all
+    if common_gauges:
+        _set_values_outside_common_gauges_to_nan(sanitized_dfs_by_name, variables)
+
+    sanitized_paths = []
+    for index, input_name in enumerate(input_names):
         sanitized_path = output_dir / f"{index:03d}_{_sanitize_name(input_name)}.csv"
-        df.to_csv(sanitized_path, index=False)
+        sanitized_dfs_by_name[input_name].to_csv(sanitized_path, index=False)
         sanitized_paths.append(sanitized_path)
     return sanitized_paths
 
@@ -241,8 +322,7 @@ def _resolve_reference_name(reference_name, input_names, dfs_by_name):
     reference_name = reference_name or input_names[0]
     if reference_name not in dfs_by_name:
         msg = (
-            f"--ref-name {reference_name!r} not found among input names "
-            f"{input_names}."
+            f"--ref-name {reference_name!r} not found among input names {input_names}."
         )
         with ErrorLogger(logger):
             raise ValueError(msg)
@@ -267,6 +347,30 @@ def _get_region_extent(region):
     bounds = WMO_REGION_BOUNDS[region]
     lon_slice, lat_slice = bounds["lon_slice"], bounds["lat_slice"]
     return lon_slice.start, lon_slice.stop, lat_slice.start, lat_slice.stop
+
+
+def _get_results_crs(results_df):
+    """Get the CRS of the gauge coordinates stored in a results table.
+
+    Parameters
+    ----------
+    results_df : pandas.DataFrame
+        Results table; discharge-evaluation writes a ``crs`` column for
+        projected gauge coordinates.
+
+    Returns
+    -------
+    str or None
+        The CRS, e.g. "EPSG:3035", or None for lon/lat coordinates.
+    """
+    if "crs" not in results_df.columns:
+        return None
+    crs_values = results_df["crs"].dropna().unique()
+    if len(crs_values) > 1:
+        msg = f"The results hold gauge coordinates in several CRS: {list(crs_values)}."
+        with ErrorLogger(logger):
+            raise ValueError(msg)
+    return crs_values[0] if len(crs_values) else None
 
 
 def _prepare_discharge_metric_diff_data(
@@ -338,6 +442,7 @@ def plot_discharge_metric_diff_map(
     dpi=PLOT_DPI,
     extent=None,
     region=None,
+    crs=None,
 ):
     """Plot a gauge map of one metric's difference between two runs.
 
@@ -371,6 +476,10 @@ def plot_discharge_metric_diff_map(
         own extent, padded by 10%.
     region : str, optional
         Region name, added to the plot title and output file name.
+    crs : str, optional
+        CRS of projected gauge coordinates, e.g. "EPSG:3035"; the map is then
+        drawn in it. None for lon/lat coordinates. An explicit ``extent`` is
+        always given in lon/lat.
 
     Returns
     -------
@@ -400,6 +509,11 @@ def plot_discharge_metric_diff_map(
 
     style = get_metric_plot_style("diff")
     style["cmap"] = cmap
+    if variable.lower() == "kge":
+        # the ΔKGE range follows the data, but never goes beyond +-0.5
+        _, data_vmax = calculate_colour_limits(diff, center=0.0)
+        half_range = min(data_vmax, MAX_KGE_DIFF_HALF_RANGE)
+        style.update(vmin=-half_range, vmax=half_range)
     cmap_obj, norm, bounds, extend, ticks = create_discrete_colour_norm(
         diff, bounds_type="data", **style
     )
@@ -409,7 +523,13 @@ def plot_discharge_metric_diff_map(
         size_scale = (200 / len(diff)) ** 0.5
     point_size = max(4, point_size * size_scale)
 
+    from mhm_tools.post.discharge_evaluation import _create_map_projection
+
+    map_crs, lons, lats = _create_map_projection(crs, lons, lats)
+    # a region extent is given in lon/lat, the data extent in the map's CRS
+    extent_crs = ccrs.PlateCarree()
     if extent is None:
+        extent_crs = map_crs
         min_lon, max_lon = np.nanmin(lons), np.nanmax(lons)
         min_lat, max_lat = np.nanmin(lats), np.nanmax(lats)
         lon_pad = (max_lon - min_lon) * 0.1 or 0.1
@@ -423,9 +543,9 @@ def plot_discharge_metric_diff_map(
 
     fig, ax = plt.subplots(
         figsize=calculate_map_figure_size(extent),
-        subplot_kw={"projection": ccrs.PlateCarree()},
+        subplot_kw={"projection": map_crs},
     )
-    ax.set_extent(extent, crs=ccrs.PlateCarree())
+    ax.set_extent(extent, crs=extent_crs)
     ax.add_feature(cfeature.BORDERS, linewidth=0.3)
     ax.add_feature(cfeature.COASTLINE, linewidth=0.5)
     ax.add_feature(cfeature.LAND, facecolor="0.97")
@@ -441,7 +561,7 @@ def plot_discharge_metric_diff_map(
         alpha=0.85,
         edgecolor="white",
         linewidth=0.25,
-        transform=ccrs.PlateCarree(),
+        transform=map_crs,
     )
     add_map_colorbar(
         fig, ax, sc, bounds, extend, ticks, create_axis_label(f"Δ{variable}")
@@ -478,6 +598,7 @@ def write_discharge_metric_diff_maps(
     reference_name=None,
     cmap="coolwarm_r",
     dpi=PLOT_DPI,
+    crs=None,
 ):
     """Write per-gauge metric diff maps comparing runs against a baseline.
 
@@ -501,6 +622,9 @@ def write_discharge_metric_diff_maps(
         Diverging colormap name, centered on zero.
     dpi : int, optional
         Output image resolution.
+    crs : str, optional
+        CRS of projected gauge coordinates, e.g. "EPSG:3035". Defaults to the
+        ``crs`` column of the baseline run's results, else lon/lat.
 
     Returns
     -------
@@ -520,6 +644,7 @@ def write_discharge_metric_diff_maps(
     dfs_by_name = _read_dfs_by_name(input_paths, input_names, file_names)
     reference_name = _resolve_reference_name(reference_name, input_names, dfs_by_name)
     reference_df = dfs_by_name[reference_name]
+    crs = crs if crs is not None else _get_results_crs(reference_df)
 
     output_files = []
     for other_name, other_df in dfs_by_name.items():
@@ -535,6 +660,7 @@ def write_discharge_metric_diff_maps(
                 output_dir=output_dir,
                 cmap=cmap,
                 dpi=dpi,
+                crs=crs,
             )
             if output_file is not None:
                 output_files.append(output_file)
@@ -551,6 +677,7 @@ def write_discharge_metric_diff_region_maps(
     reference_name=None,
     cmap="coolwarm_r",
     dpi=PLOT_DPI,
+    crs=None,
 ):
     """Write one metric diff map per discharge-evaluation region with data.
 
@@ -579,6 +706,9 @@ def write_discharge_metric_diff_region_maps(
         Diverging colormap name, centered on zero.
     dpi : int, optional
         Output image resolution.
+    crs : str, optional
+        CRS of projected gauge coordinates, e.g. "EPSG:3035". Defaults to the
+        ``crs`` column of the baseline run's results, else lon/lat.
 
     Returns
     -------
@@ -602,6 +732,7 @@ def write_discharge_metric_diff_region_maps(
         df["region"] = df["id"].apply(get_region_from_id)
     reference_name = _resolve_reference_name(reference_name, input_names, dfs_by_name)
     reference_df = dfs_by_name[reference_name]
+    crs = crs if crs is not None else _get_results_crs(reference_df)
 
     output_files = []
     for region in WMO_REGION_BOUNDS:
@@ -623,11 +754,63 @@ def write_discharge_metric_diff_region_maps(
                     dpi=dpi,
                     extent=extent,
                     region=region,
+                    crs=crs,
                 )
                 if output_file is not None:
                     output_files.append(output_file)
                     logger.info(f"Wrote regional diff map to {output_file}")
     return output_files
+
+
+def get_region_metric_values_by_input(
+    input_paths, variables, input_names, file_names="results.csv"
+):
+    """Get the finite metric values of every run per discharge-evaluation region.
+
+    Each gauge's region is derived from its id (see
+    `discharge_evaluation.get_region_from_id`).
+
+    Parameters
+    ----------
+    input_paths : Sequence[str]
+        `results.csv` files or directories containing them.
+    variables : Sequence[str]
+        Metric columns to collect.
+    input_names : Sequence[str]
+        Run labels matching input_paths.
+    file_names : str, optional
+        Glob pattern used when an input path is a directory.
+
+    Returns
+    -------
+    dict[str, dict[str, dict[str, np.ndarray]]]
+        Values by region, variable and run label, in `WMO_REGION_BOUNDS`
+        order; regions, variables and runs without finite values are left out.
+    """
+    from mhm_tools.post.discharge_evaluation import get_region_from_id
+
+    dfs_by_name = _read_dfs_by_name(input_paths, input_names, file_names)
+    for df in dfs_by_name.values():
+        df["region"] = df["id"].apply(get_region_from_id)
+    values_by_region = {}
+    for region in WMO_REGION_BOUNDS:
+        values_by_variable = {}
+        for variable in variables:
+            values_by_label = {}
+            for name, df in dfs_by_name.items():
+                if variable not in df.columns:
+                    continue
+                region_values = pd.to_numeric(
+                    df.loc[df["region"] == region, variable], errors="coerce"
+                )
+                region_values = region_values[np.isfinite(region_values)]
+                if not region_values.empty:
+                    values_by_label[name] = region_values.to_numpy(dtype=float)
+            if values_by_label:
+                values_by_variable[variable] = values_by_label
+        if values_by_variable:
+            values_by_region[region] = values_by_variable
+    return values_by_region
 
 
 def write_discharge_eval_comparison_region_plots(
@@ -677,7 +860,6 @@ def write_discharge_eval_comparison_region_plots(
         plot_metric_cdf_comparison,
         plot_metric_violin_comparison,
     )
-    from mhm_tools.post.discharge_evaluation import get_region_from_id
     from mhm_tools.post.metric_plots import (
         _create_metric_label_metadata,
         _get_metric_plot_colors_by_label,
@@ -688,9 +870,9 @@ def write_discharge_eval_comparison_region_plots(
         list(variables) if variables else list(DEFAULT_DISCHARGE_COMPARISON_VARIABLES)
     )
     input_names = get_metric_input_names(input_paths, input_names)
-    dfs_by_name = _read_dfs_by_name(input_paths, input_names, file_names)
-    for df in dfs_by_name.values():
-        df["region"] = df["id"].apply(get_region_from_id)
+    values_by_region = get_region_metric_values_by_input(
+        input_paths, variables, input_names, file_names
+    )
 
     label_metadata = _create_metric_label_metadata(input_names=input_names)
     colors_by_label = _get_metric_plot_colors_by_label(
@@ -700,21 +882,8 @@ def write_discharge_eval_comparison_region_plots(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     output_files = []
-    for region in WMO_REGION_BOUNDS:
-        for variable in variables:
-            values_by_label = {}
-            for name, df in dfs_by_name.items():
-                if variable not in df.columns:
-                    continue
-                region_values = pd.to_numeric(
-                    df.loc[df["region"] == region, variable], errors="coerce"
-                )
-                region_values = region_values[np.isfinite(region_values)]
-                if region_values.empty:
-                    continue
-                values_by_label[name] = region_values.to_numpy(dtype=float)
-            if not values_by_label:
-                continue
+    for region, values_by_variable in values_by_region.items():
+        for variable, values_by_label in values_by_variable.items():
             axis_limits = (axis_limits_by_variable or {}).get(variable)
             if "cdf" in plot_types:
                 output_file = (
@@ -848,12 +1017,12 @@ def write_discharge_eval_comparison_region_catchment_maps(
     return output_files
 
 
-def write_discharge_eval_comparison_plots(
+def write_discharge_eval_comparison_plots(  # noqa: PLR0913
     input_paths,
     output_dir,
     variables=None,
     input_names=None,
-    file_names="results.csv",
+    file_names="*results.csv",
     plot_types=None,
     dpi=PLOT_DPI,
     shape_folder=None,
@@ -862,6 +1031,11 @@ def write_discharge_eval_comparison_plots(
     reference_name=None,
     map_diff_cmap="coolwarm_r",
     map_diff_dpi=PLOT_DPI,
+    max_mean_factor=30,
+    results_file_name="discharge_eval_comparison_results.csv",
+    overview_pdf_name="discharge_eval_comparison_overview.pdf",
+    crs=None,
+    common_gauges=False,
 ):
     """Write discharge-evaluation comparison plots from `results.csv` files.
 
@@ -896,6 +1070,22 @@ def write_discharge_eval_comparison_plots(
         Diverging colormap name for diff maps.
     map_diff_dpi : int, optional
         Output image resolution for diff maps.
+    max_mean_factor : float, optional
+        Leave stations whose beta is above this factor or below its inverse
+        out of the summary tables (CSV and PDF), per run; the plots keep
+        them. None or inf keeps every station.
+    results_file_name : str, optional
+        Name of the metric summary CSV inside output_dir.
+    overview_pdf_name : str, optional
+        Name of the overview PDF inside output_dir.
+    crs : str, optional
+        CRS of projected gauge coordinates for the diff maps, e.g.
+        "EPSG:3035". Defaults to the ``crs`` column of the baseline run's
+        results, else lon/lat.
+    common_gauges : bool, optional
+        Compare all runs on the same gauges: per variable, only gauges with a
+        finite value in every run are kept, in plots and tables. By default
+        every run uses all of its gauges.
 
     Returns
     -------
@@ -913,6 +1103,7 @@ def write_discharge_eval_comparison_plots(
         get_metric_input_names,
         get_metric_values_by_input,
         write_metric_plots,
+        write_metric_summary_csv,
     )
 
     output_dir = Path(output_dir)
@@ -939,6 +1130,8 @@ def write_discharge_eval_comparison_plots(
     global_files = []
     region_files = []
     values_by_variable = {}
+    table_values_by_variable = {}
+    summary_rows_by_region = {}
     with tempfile.TemporaryDirectory(prefix="discharge_eval_comparison_") as tmp_dir:
         # Sanitize once, up front: a diverged/blown-up run's extreme outlier
         # values would otherwise dominate a KDE-based violin's shape or an
@@ -950,6 +1143,17 @@ def write_discharge_eval_comparison_plots(
             file_names=file_names,
             variables=variables,
             output_dir=tmp_dir,
+            common_gauges=common_gauges,
+        )
+        # the tables leave out stations with an extreme bias, the plots keep them
+        table_paths = _write_sanitized_results_csvs(
+            input_paths=input_paths,
+            input_names=input_names,
+            file_names=file_names,
+            variables=variables,
+            output_dir=Path(tmp_dir) / "tables",
+            max_mean_factor=max_mean_factor,
+            common_gauges=common_gauges,
         )
 
         if shared_plot_types:
@@ -979,7 +1183,19 @@ def write_discharge_eval_comparison_plots(
                     mask_var=mask_var,
                     style_by=None,
                     axis_limits_by_variable=axis_limits_by_variable,
+                    summary_file_name=results_file_name,
+                    overview_pdf_name=overview_pdf_name,
                 )
+            )
+            # overwrite write_metric_plots' summary CSV with the filtered stations
+            table_values_by_variable = get_metric_values_by_input(
+                input_paths=table_paths,
+                variables=variables,
+                input_names=input_names,
+            )
+            write_metric_summary_csv(
+                create_metric_summary_rows(table_values_by_variable),
+                output_dir / results_file_name,
             )
             if distribution_plot_types:
                 region_files.extend(
@@ -993,6 +1209,23 @@ def write_discharge_eval_comparison_plots(
                         axis_limits_by_variable=axis_limits_by_variable,
                     )
                 )
+                # one summary table per region, like the region cdf/violin plots
+                values_by_region = get_region_metric_values_by_input(
+                    table_paths, variables, input_names
+                )
+                for region, region_values in values_by_region.items():
+                    summary_rows_by_region[region] = create_metric_summary_rows(
+                        region_values
+                    )
+                    summary_csv_file = write_metric_summary_csv(
+                        summary_rows_by_region[region],
+                        output_dir
+                        / f"metric_summary_region_{_sanitize_name(region)}.csv",
+                    )
+                    region_files.append(summary_csv_file)
+                    logger.info(
+                        f"Wrote regional metric summary CSV to {summary_csv_file}"
+                    )
             if "catchment-map" in shared_plot_types:
                 region_files.extend(
                     write_discharge_eval_comparison_region_catchment_maps(
@@ -1016,6 +1249,7 @@ def write_discharge_eval_comparison_plots(
                     reference_name=reference_name,
                     cmap=map_diff_cmap,
                     dpi=map_diff_dpi,
+                    crs=crs,
                 )
             )
             region_files.extend(
@@ -1027,6 +1261,7 @@ def write_discharge_eval_comparison_plots(
                     reference_name=reference_name,
                     cmap=map_diff_cmap,
                     dpi=map_diff_dpi,
+                    crs=crs,
                 )
             )
 
@@ -1039,12 +1274,26 @@ def write_discharge_eval_comparison_plots(
     # this overwrites the same file rather than leaving a stale duplicate.
     png_files = [f for f in output_files if Path(f).suffix.lower() == ".png"]
     if png_files:
-        summary_rows = create_metric_summary_rows(values_by_variable)
+        summary_rows = create_metric_summary_rows(table_values_by_variable)
+        # each region's table goes right before the first plot of that region
+        tables_before_plot_files = {}
+        for region, region_rows in summary_rows_by_region.items():
+            region_plot_files = [
+                plot_file
+                for plot_file in png_files
+                if f"_region_{_sanitize_name(region)}" in Path(plot_file).name
+            ]
+            if region_plot_files and region_rows:
+                tables_before_plot_files[region_plot_files[0]] = (
+                    f"Discharge evaluation comparison: {region}",
+                    region_rows,
+                )
         overview_file = write_metric_plot_overview_pdf(
-            output_file=output_dir / "metric_plots_overview.pdf",
+            output_file=output_dir / overview_pdf_name,
             plot_files=png_files,
             summary_rows=summary_rows,
             title="Discharge evaluation comparison overview",
+            tables_before_plot_files=tables_before_plot_files,
         )
         if overview_file not in output_files:
             output_files.append(overview_file)

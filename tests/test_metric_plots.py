@@ -544,3 +544,274 @@ def test_discharge_plot_metric_violins_uses_repeated_rows(tmp_path, monkeypatch)
     ]
     assert calls[0]["values_by_label"]["all stations"].tolist() == [0.1, 0.3]
     assert calls[1]["values_by_label"]["all stations"].tolist() == [0.2, 0.6]
+
+
+def test_get_discharge_metric_values_by_variable_adds_wmo_regions():
+    """All stations come first, then every WMO region with finite values."""
+    df = pd.DataFrame({"id": [1001, 1002, 2001, 9001], "kge": [0.1, 0.3, 0.5, np.inf]})
+
+    values_by_variable = discharge_evaluation.get_discharge_metric_values_by_variable(
+        df, variables=["kge"]
+    )
+
+    assert list(values_by_variable["kge"]) == ["all stations", "Africa", "Asia"]
+    assert values_by_variable["kge"]["Africa"].tolist() == [0.1, 0.3]
+
+
+def test_get_discharge_metric_values_by_variable_skips_regions_without_values():
+    """A region with only NaN for one metric gets no label for that metric."""
+    df = pd.DataFrame({"id": [1001, 2001], "kge": [0.1, 0.5], "nse": [0.2, np.nan]})
+
+    values_by_variable = discharge_evaluation.get_discharge_metric_values_by_variable(
+        df, variables=["kge", "nse"]
+    )
+
+    assert "Asia" in values_by_variable["kge"]
+    assert "Asia" not in values_by_variable["nse"]
+
+
+def test_create_table_results_within_mean_factor_leaves_out_extreme_beta():
+    """Stations with beta beyond the factor are left out, the limits and NaN stay."""
+    results_df = pd.DataFrame(
+        {"id": [1, 2, 3, 4, 5, 6], "beta": [1.0, 31.0, 0.03, 30.0, 1 / 30, np.nan]}
+    )
+
+    table_df, notes = discharge_evaluation.create_table_results_within_mean_factor(
+        results_df, 30
+    )
+
+    assert table_df["id"].tolist() == [1, 4, 5, 6]
+    assert notes == ["beta > 30: 1 of 6 stations", "beta < 1/30: 1 of 6 stations"]
+
+
+def test_create_table_results_within_mean_factor_keeps_all_without_factor():
+    """None keeps every station, a factor below 1 is refused."""
+    results_df = pd.DataFrame({"id": [1, 2], "beta": [1.0, 100.0]})
+
+    table_df, notes = discharge_evaluation.create_table_results_within_mean_factor(
+        results_df, None
+    )
+
+    assert table_df["id"].tolist() == [1, 2]
+    assert notes == []
+    with pytest.raises(ValueError, match="at least 1"):
+        discharge_evaluation.create_table_results_within_mean_factor(results_df, 0.5)
+
+
+def test_create_table_results_within_mean_factor_counts_bootstrap_stations_once():
+    """Several left-out samples of one station count as one station."""
+    results_df = pd.DataFrame({"id": [1, 1, 1, 2], "beta": [40.0, 50.0, 1.0, 1.0]})
+
+    table_df, notes = discharge_evaluation.create_table_results_within_mean_factor(
+        results_df, 30
+    )
+
+    assert table_df["id"].tolist() == [1, 2]
+    assert notes == ["beta > 30: 1 of 2 stations"]
+
+
+def test_create_non_finite_metric_notes_counts_stations_per_metric():
+    """Only metrics with NaN or inf values get a note; missing columns are skipped."""
+    table_df = pd.DataFrame(
+        {"id": [1, 2, 3], "kge": [0.1, np.nan, np.inf], "nse": [0.1, 0.2, 0.3]}
+    )
+
+    notes = discharge_evaluation.create_non_finite_metric_notes(
+        table_df, ["kge", "nse", "gamma"]
+    )
+
+    assert notes == ["no finite kge (NaN/inf): 2 of 3 stations"]
+
+
+def test_write_metric_plot_overview_pdf_passes_notes_to_the_table(
+    tmp_path, monkeypatch
+):
+    """The notes reach the summary table pages; without notes they are None."""
+    table_calls = []
+    monkeypatch.setattr(
+        plotter,
+        "_write_metric_summary_table_pages",
+        lambda **kwargs: table_calls.append(kwargs),
+    )
+    summary_rows = [{"realisation": "all stations", "variable": "kge", "value": 0.5}]
+
+    plotter.write_metric_plot_overview_pdf(
+        output_file=tmp_path / "with_notes.pdf",
+        plot_files=[],
+        summary_rows=summary_rows,
+        notes=["beta > 30: 1 of 2 stations"],
+    )
+    plotter.write_metric_plot_overview_pdf(
+        output_file=tmp_path / "without_notes.pdf",
+        plot_files=[],
+        summary_rows=summary_rows,
+    )
+
+    assert table_calls[0]["notes"] == ["beta > 30: 1 of 2 stations"]
+    assert table_calls[1]["notes"] is None
+
+
+@pytest.mark.parametrize(
+    ("ratios", "expected_factor"),
+    [
+        (np.linspace(0.9, 1.1, 101), 1.25),
+        (np.linspace(0.7, 1.4, 101), 1.5),
+        (np.linspace(0.55, 1.9, 101), 2.0),
+        (np.array([0.6, 1.0, 1.0]), 2.0),
+        (np.concatenate([np.linspace(0.95, 1.05, 980), np.full(20, 20.0)]), 2.0),
+    ],
+    ids=[
+        "within-1.25",
+        "within-1.5",
+        "within-2",
+        "reciprocal-of-0.6",
+        "2-percent-at-20",
+    ],
+)
+def test_get_ratio_bounds_picks_the_narrowest_set(ratios, expected_factor):
+    """The spread is measured on the log of the ratios, so 0.6 needs the factor 2."""
+    bounds = plotter.get_ratio_bounds(ratios)
+
+    np.testing.assert_allclose(bounds, plotter.RATIO_BOUNDS[expected_factor])
+
+
+def test_create_discrete_colour_norm_with_ratio_bins():
+    """The beta style keeps a ratio map above 0 and centred on 1, outliers extend."""
+    rng = np.random.default_rng(0)
+    # many dry cells with ratios around 20 once stretched the scale to -21.5..23.5
+    ratios = np.concatenate([rng.uniform(0.6, 1.8, 900), rng.uniform(15, 23, 100)])
+
+    _, _, bounds, extent, _ = plotter.create_discrete_colour_norm(
+        ratios, bounds_type="data", **plotter.get_metric_plot_style("beta")
+    )
+
+    assert any(np.array_equal(bounds, edges) for edges in plotter.RATIO_BOUNDS.values())
+    assert bounds[0] > 0
+    assert (bounds.size - 1) % 2 == 1
+    centre_bin = (bounds.size - 1) // 2
+    assert bounds[centre_bin] < 1 < bounds[centre_bin + 1]
+    assert extent == "max"
+
+
+def test_write_table_and_figures_pdf_draws_the_table_and_only_png_figures(
+    tmp_path, monkeypatch
+):
+    """The table keeps its columns, only the PNGs follow it, nothing is logged twice."""
+    calls = []
+    monkeypatch.setattr(
+        plotter,
+        "write_metric_plot_overview_pdf",
+        lambda **kwargs: calls.append(kwargs) or kwargs["output_file"],
+    )
+    table = pd.DataFrame(
+        {"region": ["Global", "Europe"], "cells": [10, 4], "accuracy": [0.97, 0.83]}
+    )
+    files = [
+        tmp_path / name
+        for name in ("map.png", "cover.gif", "metrics.nc", "map_region_Europe.png")
+    ]
+
+    output_file = plotter.write_table_and_figures_pdf(
+        tmp_path / "overview.pdf", table, files, "Median snow statistics " * 10
+    )
+
+    (call,) = calls
+    assert output_file == tmp_path / "overview.pdf"
+    assert call["summary_rows"] == table.to_dict("records")
+    assert call["table_columns"] == ["region", "cells", "accuracy"]
+    assert call["plot_files"] == [files[0], files[3]]
+    assert call["log_tables"] is False
+    assert call["highlight_best_values"] is False
+    # the long title is wrapped onto several lines
+    assert "\n" in call["title"]
+
+
+def test_write_table_and_figures_pdf_skips_without_table_and_figures(
+    tmp_path, monkeypatch
+):
+    """A run without a table and figures, e.g. TWSA fields only, writes no PDF."""
+    calls = []
+    monkeypatch.setattr(
+        plotter, "write_metric_plot_overview_pdf", lambda **kwargs: calls.append(kwargs)
+    )
+
+    output_file = plotter.write_table_and_figures_pdf(
+        tmp_path / "overview.pdf", None, [tmp_path / "twsa_monthly_mhm.nc"], ""
+    )
+
+    assert output_file is None
+    assert calls == []
+
+
+def test_write_metric_plot_overview_pdf_writes_extra_tables_after_the_summary(
+    tmp_path, monkeypatch
+):
+    """Further tables follow the summary table, also in a PDF without figures."""
+    table_titles = []
+    monkeypatch.setattr(
+        plotter,
+        "_write_metric_summary_table_pages",
+        lambda **kwargs: table_titles.append(kwargs["title"]),
+    )
+    rows = [{"realisation": "ecland", "variable": "kge", "value": 0.5}]
+
+    plotter.write_metric_plot_overview_pdf(
+        output_file=tmp_path / "comparison.pdf",
+        plot_files=[],
+        summary_rows=rows,
+        title="Global",
+        extra_tables=[("Europe", rows), ("Asia", rows)],
+    )
+
+    assert table_titles == ["Global", "Europe", "Asia"]
+
+
+@pytest.mark.parametrize(
+    ("metric_name", "expected_preference"),
+    [
+        ("rmse", ("min", None)),
+        ("accuracy", ("max", None)),
+        ("spearman", ("max", None)),
+        ("rel_mean", ("center", 1.0)),
+        ("rel_std", ("center", 1.0)),
+        ("mean_diff", ("center", 0.0)),
+        ("first_snow_day_diff", ("center", 0.0)),
+        ("kge", ("max", None)),
+    ],
+)
+def test_metric_summary_preferences_of_region_statistics(
+    metric_name, expected_preference
+):
+    """Every region statistic is scored towards its best value."""
+    assert plotter._get_metric_summary_preference(metric_name) == expected_preference
+
+
+def test_write_metric_plot_overview_pdf_uses_given_columns_without_logging(
+    tmp_path, monkeypatch
+):
+    """Given table columns replace the derived ones; log_tables=False logs nothing."""
+    styled_columns = []
+    logged_tables = []
+    monkeypatch.setattr(
+        plotter,
+        "_style_metric_summary_table",
+        lambda **kwargs: styled_columns.append(kwargs["columns"]),
+    )
+    monkeypatch.setattr(
+        plotter,
+        "_log_metric_summary_table",
+        lambda *args, **_kwargs: logged_tables.append(args),
+    )
+    summary_rows = [{"variable": "SPAEF", "statistic": "avg_spaef", "value": 0.5}]
+
+    output_file = plotter.write_metric_plot_overview_pdf(
+        output_file=tmp_path / "overview.pdf",
+        plot_files=[],
+        summary_rows=summary_rows,
+        table_columns=["variable", "statistic", "value"],
+        log_tables=False,
+    )
+
+    assert output_file.is_file()
+    assert styled_columns == [["variable", "statistic", "value"]]
+    assert logged_tables == []

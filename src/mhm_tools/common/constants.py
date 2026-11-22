@@ -96,6 +96,12 @@ FDIR_CODES = {
     "ldd": tuple(range(1, 10)),
 }
 """Valid flow direction codes per type, pits included (255 is a d8 pit too)."""
+FDIR_CODE_BY_OFFSET = {
+    "d8": ((32, 64, 128), (16, 0, 1), (8, 4, 2)),
+    "ldd": ((7, 8, 9), (4, 5, 6), (1, 2, 3)),
+}
+"""Flow direction code per downstream offset: rows north to south, columns west
+to east, the pit in the centre."""
 DEM_DERIVATIVE_EXTENSIONS = ("nc", "asc", "tif")
 """Output file extensions of create-dem-derivatives."""
 FACC_UNITS = ("cell", "km2")
@@ -121,11 +127,14 @@ LOG_LEVELS = {
     "warn": 30,
     "debug": 10,
     "error": 40,
+    # critical messages are not used, so the level falls back to error
+    "critical": 40,
     "INFO": 20,
     "WARNING": 30,
     "WARN": 30,
     "DEBUG": 10,
     "ERROR": 40,
+    "CRITICAL": 40,
 }
 
 LOG_LEVEL_STR = {

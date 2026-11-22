@@ -1,5 +1,6 @@
 """Tests for streamed gridded LAI NetCDF formatting."""
 
+import inspect
 from pathlib import Path
 
 import netCDF4
@@ -7,6 +8,7 @@ import numpy as np
 import pandas as pd
 import pytest
 import rasterio
+import rasterio.warp
 import xarray as xr
 from pyproj import Transformer
 
@@ -136,6 +138,109 @@ def test_format_lai_netcdf_warps_to_a_projected_dem(tmp_path: Path):
         assert dataset.attrs["projection"] == "epsg:32647"
         assert dataset["xc"].attrs["standard_name"] == "projection_x_coordinate"
         assert np.any(dataset["lai"].values > 0)
+
+
+def _monthly(field):
+    return np.broadcast_to(field, (12, *field.shape))
+
+
+@pytest.mark.parametrize(
+    ("crs", "mapping", "step"),
+    [
+        ("EPSG:32647", True, 5000.0),
+        ("EPSG:32647", False, 5000.0),
+        ("EPSG:4326", True, 0.1),
+    ],
+)
+def test_lai_on_x_y_axes_is_warped_from_its_own_crs(tmp_path: Path, crs, mapping, step):
+    """Projected or lon/lat x/y axes onto a lon/lat DEM, the CRS from the grid mapping or input_crs."""
+    from pyproj import CRS
+
+    dem = tmp_path / "dem.tif"
+    _write_dem(dem)
+    to_source = Transformer.from_crs("EPSG:4326", crs, always_xy=True)
+    corners_x, corners_y = to_source.transform(
+        [98.5, 102.5, 98.5, 102.5], [28.5, 28.5, 31.5, 31.5]
+    )
+    x = np.arange(min(corners_x), max(corners_x), step)
+    y = np.arange(min(corners_y), max(corners_y), step)
+    scale = 1.0 if crs == "EPSG:4326" else 1e-3
+    lai = xr.DataArray(
+        _monthly((x[None, :] + y[:, None]) * scale),
+        dims=("time", "y", "x"),
+        coords={
+            "time": pd.date_range("2001-01-01", periods=12, freq="MS"),
+            "y": y,
+            "x": x,
+        },
+        name="lai",
+        attrs={"grid_mapping": "crs"} if mapping else {},
+    ).to_dataset()
+    if mapping:
+        lai["crs"] = xr.DataArray(0, attrs={"crs_wkt": CRS(crs).to_wkt()})
+    lai.to_netcdf(tmp_path / "lai.nc")
+
+    output = format_lai_netcdf_file(
+        tmp_path / "lai.nc",
+        dem,
+        tmp_path / "out.nc",
+        input_crs=None if mapping else crs,
+    )
+
+    with xr.open_dataset(output) as result:
+        source_x, source_y = to_source.transform(
+            *np.meshgrid(result["xc"].values, result["yc"].values)
+        )
+        np.testing.assert_allclose(
+            result["lai"].values[0], (source_x + source_y) * scale, rtol=1e-3
+        )
+
+
+def _write_curvilinear_lai(path: Path) -> None:
+    """Write a rotated lat/lon grid holding lon + lat."""
+    rows, cols = np.meshgrid(np.arange(50.0), np.arange(60.0), indexing="ij")
+    lat = 28.0 + 0.1 * rows + 0.02 * cols
+    lon = 98.0 + 0.1 * cols - 0.02 * rows
+    xr.Dataset(
+        {"lai": (("time", "y", "x"), _monthly(lon + lat))},
+        coords={
+            "time": pd.date_range("2001-01-01", periods=12, freq="MS"),
+            "lat": (("y", "x"), lat, {"standard_name": "latitude"}),
+            "lon": (("y", "x"), lon, {"standard_name": "longitude"}),
+        },
+    ).to_netcdf(path)
+
+
+def test_lai_on_2d_lat_lon_is_warped_onto_the_dem(tmp_path: Path):
+    """A curvilinear (rotated) lat/lon grid goes straight onto the DEM through its geolocation."""
+    if "src_geoloc_array" not in inspect.signature(rasterio.warp.reproject).parameters:
+        pytest.skip("geolocation warps need rasterio 1.4 or newer")
+    dem = tmp_path / "dem.tif"
+    _write_dem(dem)
+    _write_curvilinear_lai(tmp_path / "lai.nc")
+
+    output = format_lai_netcdf_file(tmp_path / "lai.nc", dem, tmp_path / "out.nc")
+
+    with xr.open_dataset(output) as result:
+        centre_lon, centre_lat = np.meshgrid(result["xc"].values, result["yc"].values)
+        np.testing.assert_allclose(
+            result["lai"].values[0], centre_lon + centre_lat, atol=0.01
+        )
+
+
+def test_curvilinear_lai_on_an_old_rasterio_says_what_it_needs(
+    tmp_path: Path, monkeypatch
+):
+    """Without geolocation warps the 2D case fails clearly; nothing pins rasterio."""
+    monkeypatch.setattr(
+        rasterio.warp, "reproject", lambda _source, _destination, **_kwargs: None
+    )
+    dem = tmp_path / "dem.tif"
+    _write_dem(dem)
+    _write_curvilinear_lai(tmp_path / "lai.nc")
+
+    with pytest.raises(ValueError, match=r"rasterio 1\.4 or newer"):
+        format_lai_netcdf_file(tmp_path / "lai.nc", dem, tmp_path / "out.nc")
 
 
 @pytest.mark.parametrize("during_write", [False, True])
@@ -290,3 +395,190 @@ def test_lai_disk_guard_accounts_for_uncompressed_output(monkeypatch, tmp_path):
         format_lai.assert_lai_output_fits(
             12, 4, 6, tmp_path, compression=NetcdfCompression(complevel=0)
         )
+
+
+def _write_lai_at(path: Path, times, values=None, encoding=None) -> None:
+    """Write an LAI cube on the grid of ``_write_lai`` at the given times.
+
+    Args:
+        path (Path): Output NetCDF file.
+        times (array-like): Time stamps of the cube.
+        values (numpy.ndarray): LAI of shape (time, 3, 2); 1.0 by default.
+        encoding (dict): Encoding of the ``lai`` variable, or None.
+    """
+    values = np.ones((len(times), 3, 2)) if values is None else values
+    xr.DataArray(
+        values,
+        dims=("time", "lat", "lon"),
+        coords={"time": times, "lat": [30.0, 30.5, 31.0], "lon": [99.5, 101.5]},
+        name="lai",
+    ).to_dataset().to_netcdf(path, encoding={"lai": encoding or {}})
+
+
+def test_mid_month_stamps_fill_their_whole_month():
+    """Monthly LAI stamped on the 15th covers its month from the 1st on."""
+    times = pd.to_datetime(["2001-01-15", "2001-02-15", "2001-03-15"])
+    monthly = xr.DataArray([1.0, 2.0, 3.0], dims=("time",), coords={"time": times})
+
+    daily = prepare_lai_temporal(monthly, "daily").data
+
+    assert pd.Timestamp(daily["time"].values[0]) == pd.Timestamp("2001-01-01")
+    assert daily.sizes["time"] == 31 + 28 + 31
+    assert daily.sel(time="2001-02-10").item() == 2.0
+
+
+def test_float32_axes_count_as_regular():
+    """Float32 rounding near 180 degrees must not make a 1/12 degree axis irregular."""
+    axis = (80.0 + (np.arange(1200) + 0.5) / 12).astype("float32")
+
+    assert format_lai._axis_step(axis, "longitude") == pytest.approx(1 / 12, rel=1e-4)
+
+
+def test_lai_variable_is_preferred_over_other_cubes():
+    """A file holding Fpar and Lai uses Lai, and two unnamed cubes need a choice."""
+    cube = xr.DataArray(np.zeros((2, 2, 2)), dims=("time", "lat", "lon"))
+    dataset = xr.Dataset({"Fpar_500m": cube, "Lai_500m": cube})
+
+    assert format_lai.find_variable(dataset, None, "lat", "lon").name == "Lai_500m"
+    with pytest.raises(ValueError, match="--source-variable"):
+        format_lai.find_variable(
+            dataset.rename({"Lai_500m": "other"}), None, "lat", "lon"
+        )
+
+
+def test_a_month_without_data_raises_instead_of_lai_zero(tmp_path: Path):
+    """Daily LAI without March cannot give a monthly March."""
+    times = pd.date_range("2001-01-01", "2001-05-31", freq="D")
+    times = times[times.month != 3]
+    _write_lai_at(tmp_path / "lai.nc", times)
+    _write_dem(tmp_path / "dem.tif")
+
+    with pytest.raises(ValueError, match="no data at 1 output time step"):
+        format_lai_netcdf_file(
+            tmp_path / "lai.nc",
+            tmp_path / "dem.tif",
+            tmp_path / "out.nc",
+            output_temporal_resolution="monthly",
+        )
+
+
+def test_noleap_calendar_keeps_the_real_months():
+    """A noleap October-September year is averaged by its real months."""
+    times = xr.date_range(
+        "2000-10-01", periods=12, freq="MS", calendar="noleap", use_cftime=True
+    )
+    data = xr.DataArray(np.arange(12.0), dims=("time",), coords={"time": times})
+
+    monthly = prepare_lai_temporal(data, "long-term-mean-monthly").data
+
+    assert monthly.sel(time=10).item() == 0.0
+    assert monthly.sel(time=1).item() == 3.0
+
+
+def test_packed_codes_outside_valid_range_are_not_lai(tmp_path: Path):
+    """MODIS-like fill code 254 with valid_range 0..100 must not become LAI 25.4."""
+    values = np.full((12, 3, 2), 1.0)
+    values[:, 0, 0] = 25.4
+    _write_lai_at(
+        tmp_path / "lai.nc",
+        pd.date_range("2001-01-01", periods=12, freq="MS"),
+        values,
+        encoding={"dtype": "int16", "scale_factor": 0.1},
+    )
+    with netCDF4.Dataset(tmp_path / "lai.nc", "a") as dataset:
+        dataset["lai"].setncattr("valid_range", np.array([0, 100], dtype="int16"))
+    _write_dem(tmp_path / "dem.tif")
+
+    output = format_lai_netcdf_file(
+        tmp_path / "lai.nc", tmp_path / "dem.tif", tmp_path / "out.nc"
+    )
+
+    with xr.open_dataset(output) as result:
+        assert np.nanmax(result["lai"].values) == pytest.approx(1.0)
+
+
+def test_projected_axes_without_grid_mapping_need_an_input_crs(tmp_path: Path):
+    """x/y in metres without a grid mapping must not be read as degrees."""
+    xr.DataArray(
+        np.ones((12, 3, 4)),
+        dims=("time", "y", "x"),
+        coords={
+            "time": pd.date_range("2001-01-01", periods=12, freq="MS"),
+            "y": 3300000.0 + 5000.0 * np.arange(3),
+            "x": 500000.0 + 5000.0 * np.arange(4),
+        },
+        name="lai",
+    ).to_dataset().to_netcdf(tmp_path / "lai.nc")
+    _write_dem(tmp_path / "dem.tif")
+
+    with pytest.raises(ValueError, match="--input-crs"):
+        format_lai_netcdf_file(
+            tmp_path / "lai.nc", tmp_path / "dem.tif", tmp_path / "out.nc"
+        )
+
+
+def test_global_lai_is_cut_to_the_dem_before_aggregation(tmp_path: Path, monkeypatch):
+    """Only the source cells around a small DEM reach the time aggregation."""
+    xr.DataArray(
+        np.ones((12, 180, 360)),
+        dims=("time", "lat", "lon"),
+        coords={
+            "time": pd.date_range("2001-01-01", periods=12, freq="MS"),
+            "lat": np.arange(-89.5, 90),
+            "lon": np.arange(-179.5, 180),
+        },
+        name="lai",
+    ).to_dataset().to_netcdf(tmp_path / "lai.nc")
+    _write_dem(tmp_path / "dem.tif")
+    sizes = []
+
+    def record_sizes(data, *args, **kwargs):
+        """Record the spatial size of the cube passed to the aggregation."""
+        sizes.append((data.sizes["lat"], data.sizes["lon"]))
+        return prepare_lai_temporal(data, *args, **kwargs)
+
+    monkeypatch.setattr(format_lai, "prepare_lai_temporal", record_sizes)
+    format_lai_netcdf_file(
+        tmp_path / "lai.nc", tmp_path / "dem.tif", tmp_path / "out.nc"
+    )
+
+    # the 0.5 degree DEM spans 2 x 3 degrees, plus one DEM cell and 2 LAI cells
+    assert sizes and sizes[0][0] < 10 and sizes[0][1] < 10
+
+
+def test_lai_is_written_one_time_step_per_chunk_with_progress(tmp_path: Path):
+    """Chunks matching the staged blocks keep long monthly writes fast."""
+    source, dem = tmp_path / "source.nc", tmp_path / "dem.tif"
+    _write_lai(source)
+    _write_dem(dem)
+    progress, messages = [], []
+
+    output = format_lai_netcdf_file(
+        source,
+        dem,
+        tmp_path / "lai.nc",
+        output_temporal_resolution="monthly",
+        progress=progress.append,
+        log=messages.append,
+    )
+
+    with netCDF4.Dataset(output) as dataset:
+        assert dataset["lai"].chunking() == [1, 4, 6]
+    assert any(50 < value < 100 for value in progress)
+    assert progress[-1] == 100
+    assert any(message.startswith("Writing LAI:") for message in messages)
+
+
+def test_a_size_one_band_dimension_is_ignored(tmp_path: Path):
+    """GDAL exports carry a band dimension of length 1."""
+    source, dem = tmp_path / "source.nc", tmp_path / "dem.tif"
+    _write_lai(source)
+    with xr.open_dataset(source) as dataset:
+        banded = dataset.load().assign(lai=dataset.lai.expand_dims(band=[1], axis=1))
+    banded.to_netcdf(tmp_path / "banded.nc")
+    _write_dem(dem)
+
+    output = format_lai_netcdf_file(tmp_path / "banded.nc", dem, tmp_path / "lai.nc")
+
+    with xr.open_dataset(output) as dataset:
+        assert dataset["lai"].shape == (12, 4, 6)

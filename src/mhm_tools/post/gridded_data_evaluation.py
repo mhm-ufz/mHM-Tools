@@ -12,9 +12,11 @@ Authors
 import logging
 import random
 import re
+import warnings
 from pathlib import Path
 from typing import Iterable, Tuple
 
+import dask
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -33,12 +35,22 @@ from mhm_tools.common.logger import ErrorLogger, log_arguments, log_errors
 from mhm_tools.common.metrics.metrics_handler import (
     calculate_results_metric,
     create_results_csv,
+    normalize_results_metric,
 )
 from mhm_tools.common.netcdf import generate_bounds_for_all_coords
 from mhm_tools.common.plotter import (
+    KGE_UNDER_COLOR,
+    MAP_NO_DATA_COLOR,
+    add_map_colorbar,
+    add_no_data_legend,
+    create_axis_label,
+    create_comparison_title,
+    draw_low_reference_cells,
+    get_metric_plot_style,
     get_percent_diff_bounds,
     plot_single_map,
     round_sensibly,
+    write_metric_plot_overview_pdf,
 )
 from mhm_tools.common.resolution_handler import Resolution, get_file_res
 from mhm_tools.common.time_utils import (
@@ -47,6 +59,8 @@ from mhm_tools.common.time_utils import (
 )
 from mhm_tools.common.utils import (
     cut_to_filled_area,
+    format_region_title,
+    sanitize_name,
     select_regions,
     split_file_list,
     write_stats_table,
@@ -55,21 +69,35 @@ from mhm_tools.common.xarray_utils import (
     SPEARMAN_BYTES_PER_ELEMENT,
     calculate_region_medians,
     calculate_spearman_over_time,
+    create_reference_close_to_zero_mask,
     crop_ds,
     crop_to_region,
     get_clim_from_ds,
     get_coord_key,
     get_ds_extend,
     get_overlapping_time_slice,
+    mask_where_reference_close_to_zero,
     normalize_lat_lon,
     regrid_mask,
     regrid_to_coarser_grid,
+    select_time_steps_by_year_and_month,
 )
 
 logger = logging.getLogger(__name__)
 # Working set of one spearman block. Small on purpose: the runtime is flat
 # down to a few MiB, so a bigger block would only raise the peak.
 SPEARMAN_BLOCK_BUDGET_MIB = 32
+# Anomalies from a monthly climatology need several values per calendar month;
+# with fewer years the seasonal cycle is kept in the std and the correlation.
+MIN_YEARS_TO_REMOVE_SEASONAL_CYCLE = 5
+# the correlation of the 12 climatology values measures nothing but the cycle
+CLIMATOLOGY_SEASONALITY_LABEL = "seasonal cycle only"
+# the ratio maps hide a cell whose reference mean is below this share of its
+# median, the percent difference maps one whose reference is below the minimum
+RATIO_MIN_REFERENCE_SHARE = 0.05
+PERCENT_MIN_REFERENCE = 0.1
+RATIO_HIDDEN_LABEL = f"reference < {RATIO_MIN_REFERENCE_SHARE:.0%} of its median"
+PERCENT_HIDDEN_LABEL = f"reference < {PERCENT_MIN_REFERENCE:g}"
 
 
 class EvalDataset:
@@ -238,8 +266,15 @@ def get_file_stats(
     avaiable_years=None,
     direct_comp=False,
     compression=None,
+    remove_seasonal_cycle_from_std=False,
+    season_months=None,
 ):
-    """Get statistics for one file."""
+    """Get statistics for one file.
+
+    With `remove_seasonal_cycle_from_std` the std is that of the anomalies from
+    the monthly climatology, otherwise that of the raw values (both ddof=0).
+    Only steps in `avaiable_years` and `season_months` are used.
+    """
     # logger.debug(f"Get file stats {file}")
     lat_key = get_coord_key(ds_in, lat=True)
     lon_key = get_coord_key(ds_in, lon=True)
@@ -267,19 +302,27 @@ def get_file_stats(
         ds_croped = ds_croped.sel(
             {"lat": coordinate_slice["lat"], "lon": coordinate_slice["lon"]}
         )
-    if avaiable_years is not None:
-        ds_croped = ds_croped.sel(time=ds_croped.time.dt.year.isin(avaiable_years))
-    logger.debug(
-        f"After cropping/year selection {input_var} is all nan: "
-        f"{bool(ds_croped[input_var].isnull().all().compute().item())}; "
-        f"shape={ds_croped[input_var].shape}"
+    ds_croped = select_time_steps_by_year_and_month(
+        ds_croped, avaiable_years, season_months
     )
+    # the f-string is built even at INFO level, which is a full extra read of a
+    # lazily opened record
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(
+            f"After cropping/year selection {input_var} is all nan: "
+            f"{bool(ds_croped[input_var].isnull().all().compute().item())}; "
+            f"shape={ds_croped[input_var].shape}"
+        )
 
-    # Calculate climatology and standard deviation along the time dimension
+    # Two passes over a lazy record: the anomalies of the std need the finished
+    # climatology, and one graph for both would hold every chunk until then.
+    # Computing here also keeps later reads of the stats from re-reading it.
     clim = get_clim_from_ds(ds_croped, input_var, factor)
-    std = get_std_from_ds(ds_croped, input_var, clim, factor)
-
     mean = ds_croped[input_var].mean(dim="time", skipna=True) * factor
+    clim, mean = dask.compute(clim, mean)
+    std = get_std_from_ds(
+        ds_croped, input_var, clim if remove_seasonal_cycle_from_std else None, factor
+    ).compute()
     logger.debug(
         f"After stats calculation {input_var} is all nan: "
         f"clim={bool(clim.isnull().all().compute().item())}, "
@@ -291,7 +334,9 @@ def get_file_stats(
     # describing the statistic, copying units from the source variable when known.
     source_units = ds_croped[input_var].attrs.get("units")
     clim.attrs = {"long_name": f"Monthly climatology of {input_var}"}
-    std.attrs = {"long_name": f"Temporal standard deviation of {input_var}"}
+    std.attrs = {
+        "long_name": create_std_long_name(input_var, remove_seasonal_cycle_from_std)
+    }
     mean.attrs = {"long_name": f"Temporal mean of {input_var}"}
     if source_units is not None:
         clim.attrs["units"] = source_units
@@ -573,30 +618,27 @@ def combine_results(results):
 
     Returns
     -------
-        Tuple of combined mean, M2, count, monthly sums and counts, and the
-        merged period sums and counts.
+        Tuple of the total step count, the summed monthly sums, square sums
+        and monthly counts, and the merged period sums and counts.
     """
-    total_count = sum(count for _, _, count, _, _, _, _ in results)
-    if total_count == 0:
-        msg = "Total count of number of results is 0"
+    step_count = sum(count for count, _, _, _, _, _ in results)
+    if step_count == 0:
+        msg = (
+            "No time step was read for the one-pass statistics. Check the "
+            "selected years and season."
+        )
         with ErrorLogger(logger):
             raise ValueError(msg)
-    total_mean = (
-        sum(mean * count for mean, _, count, _, _, _, _ in results) / total_count
-    )
-    total_M2 = sum(M2 for _, M2, _, _, _, _, _ in results)
-    total_M2 += sum(
-        count * (mean - total_mean) ** 2 for mean, _, count, _, _, _, _ in results
-    )
-    monthly_sums = sum(ms for _, _, _, ms, _, _, _ in results)
-    monthly_counts = sum(mc for _, _, _, _, mc, _, _ in results)
+    monthly_sums = sum(sums for _, sums, _, _, _, _ in results)
+    square_sums = sum(squares for _, _, squares, _, _, _ in results)
+    monthly_counts = sum(counts for _, _, _, counts, _, _ in results)
     # each subset streams its own files, so a calendar month can be split
     # across subsets and its sums have to be added up per key. Both the subset
     # and its buckets are popped as they are merged, so a subset's copy of the
     # record is released here instead of outliving the merge.
     period_sums, period_counts = {}, {}
     while results:
-        _, _, _, _, _, subset_sums, subset_counts = results.pop(0)
+        _, _, _, _, subset_sums, subset_counts = results.pop(0)
         for key in list(subset_sums):
             values, counts = subset_sums.pop(key), subset_counts.pop(key)
             if key in period_sums:
@@ -606,10 +648,9 @@ def combine_results(results):
                 period_sums[key] = values
                 period_counts[key] = counts
     return (
-        total_mean,
-        total_M2,
-        total_count,
+        step_count,
         monthly_sums,
+        square_sums,
         monthly_counts,
         period_sums,
         period_counts,
@@ -617,13 +658,20 @@ def combine_results(results):
 
 
 def get_stats_one_pass_subset(
-    files, input_var, factor=1, coordinate_slice=None, with_period_series=False
+    files,
+    input_var,
+    factor=1,
+    coordinate_slice=None,
+    with_period_series=False,
+    remove_seasonal_cycle_from_std=False,
+    available_years=None,
+    season_months=None,
 ):
-    """Compute running statistics from a list of monthly files.
+    """Accumulate per-month sums, square sums and counts from a list of files.
 
-    Iterates through NetCDF files (each containing one month's data for
-    `input_var`), optionally applies a spatial slice, multiplies by `factor`,
-    and updates running aggregates.
+    Iterates through the NetCDF files one time step at a time, optionally
+    applies a spatial slice, multiplies by `factor` and adds every step to the
+    sums of its calendar month. NaN steps are skipped per cell.
 
     Parameters
     ----------
@@ -638,17 +686,22 @@ def get_stats_one_pass_subset(
     with_period_series : bool
         Also accumulate one field per calendar year and month, which gives the
         monthly means the spatial metrics need without ever holding the record.
+    remove_seasonal_cycle_from_std : bool
+        Keep the square sums per calendar month, which the std of the
+        anomalies from the monthly climatology needs. Otherwise one total.
+    available_years : list of int, optional
+        Years to read; steps of other years are skipped.
+    season_months : list of int, optional
+        Calendar months to read; steps of other months are skipped.
 
     Returns
     -------
-    mean : ndarray
-        Running mean over all time steps.
-    sum_square_diff : ndarray
-        Sum of squared deviations (for variance via Welford's algorithm).
-    count : int
-        Number of time steps processed.
+    step_count : int
+        Number of time steps read.
     monthly_sums : ndarray
         Sum per calendar month, shape (12, ...).
+    square_sums : ndarray
+        Sum of squares, float64, per calendar month (12, ...) or in total (1, ...).
     monthly_counts : ndarray
         Valid-count per calendar month, shape (12, ...).
     period_sums : dict
@@ -678,18 +731,21 @@ def get_stats_one_pass_subset(
             )[input_var]
         else:
             da = ds[input_var]
-    count = 0  # xr.DataArray(np.ones(mean.shape, dtype=int).copy(), coords=mean.coords, dims=mean.dims).expand_dims(dim='time', axis=0)
-    mean = np.zeros(da.shape[1:])
-    sum_square_diff = np.zeros(da.shape[1:])
-    monthly_sums = np.zeros((12, *da.shape[1:]))
-    monthly_counts = np.zeros((12, *da.shape[1:]), dtype=np.uint32)
+    step_count = 0
+    grid_shape = da.shape[1:]
+    monthly_sums = np.zeros((12, *grid_shape))
+    # only the std without the seasonal cycle needs the squares per month
+    square_sums = np.zeros((12 if remove_seasonal_cycle_from_std else 1, *grid_shape))
+    monthly_counts = np.zeros((12, *grid_shape), dtype=np.uint32)
     period_sums = {}
     period_counts = {}
     for f, file in enumerate(files):
         with get_xarray_ds_from_file(
             file, var_name=input_var, engine="netcdf4", force_decending_y=True
         ) as ds:
-            logger.info(f"timestep {count} in file {f+1} / {len(files)} from {file}")
+            logger.info(
+                f"timestep {step_count} in file {f + 1} / {len(files)} from {file}"
+            )
             if coordinate_slice is not None:
                 lat_key = get_coord_key(ds, lat=True)
                 lon_key = get_coord_key(ds, lon=True)
@@ -698,21 +754,22 @@ def get_stats_one_pass_subset(
                 )[input_var]
             else:
                 da = ds[input_var]
+            # selected per step, so the years also apply to directories without
+            # year folders and to files holding several years
+            da = select_time_steps_by_year_and_month(da, available_years, season_months)
+            if da.sizes["time"] == 0:
+                continue
             for _time_value, sub in da.groupby("time", squeeze=False):
                 data_slice = sub.isel(time=0)
                 try:
-                    data_values = data_slice.values * factor
-                    # logger.debug(f"{count} - {np.shape(data_values)}")
-                    count += 1
-                    delta = data_values - mean
-                    mean += delta / count
-                    delta2 = data_values - mean
-                    sum_square_diff += delta * delta2
-                    # climatology
+                    step_count += 1
                     month = int(data_slice.time.dt.month.item()) - 1
-                    filled = data_slice.fillna(0).values * factor
-                    is_valid = ~np.isnan(data_slice.values)
+                    values = data_slice.values * factor
+                    is_valid = ~np.isnan(values)
+                    filled = np.where(is_valid, values, 0)
                     monthly_sums[month] += filled
+                    square_index = month if remove_seasonal_cycle_from_std else 0
+                    square_sums[square_index] += np.square(filled, dtype=np.float64)
                     monthly_counts[month] += is_valid
                     if with_period_series:
                         # one bucket per calendar month of the record, so the
@@ -722,26 +779,19 @@ def get_stats_one_pass_subset(
                             # a bucket only ever holds one month, so float32
                             # sums and uint16 counts carry the record at a
                             # quarter of the float64 footprint
-                            period_sums[key] = np.zeros(
-                                data_values.shape, dtype=np.float32
-                            )
-                            period_counts[key] = np.zeros(
-                                data_values.shape, dtype=np.uint16
-                            )
+                            period_sums[key] = np.zeros(values.shape, dtype=np.float32)
+                            period_counts[key] = np.zeros(values.shape, dtype=np.uint16)
                         period_sums[key] += filled
                         period_counts[key] += is_valid
                 except Exception as e:
                     logger.error(data_slice)
                     with ErrorLogger(logger):
                         raise e
-    logger.debug(
-        f"{np.nanmean(mean)}, {np.nanmean(sum_square_diff)}, {count}, {np.nanmean(monthly_sums)}, {np.nanmean(monthly_counts)}"
-    )
+    logger.debug(f"Read {step_count} time steps from {len(files)} files.")
     return (
-        mean,
-        sum_square_diff,
-        count,
+        step_count,
         monthly_sums,
+        square_sums,
         monthly_counts,
         period_sums,
         period_counts,
@@ -788,6 +838,57 @@ def create_period_mean_series(period_sums, period_counts, lat, lon, var, units=N
     return series.to_dataset()
 
 
+def create_std_long_name(var, remove_seasonal_cycle_from_std):
+    """Create the long name of a temporal standard deviation.
+
+    Args:
+        var (str): Name of the source variable.
+        remove_seasonal_cycle_from_std (bool): Whether the std was taken from
+            the anomalies of the monthly climatology.
+
+    Returns
+    -------
+        The long name, stating whether the seasonal cycle is included.
+    """
+    if remove_seasonal_cycle_from_std:
+        return (
+            f"Temporal standard deviation of {var} anomalies "
+            "from the monthly climatology"
+        )
+    return f"Temporal standard deviation of {var} incl. the seasonal cycle"
+
+
+def create_seasonality_label(remove_seasonal_cycle):
+    """Create the label stating whether the seasonal cycle was removed.
+
+    It ends the std and Spearman panel titles and is stored as `seasonality`
+    attribute of `rel_std` and `spearman`. The correlation of the climatologies
+    uses `CLIMATOLOGY_SEASONALITY_LABEL` instead.
+
+    Args:
+        remove_seasonal_cycle (bool): Whether the anomalies from the monthly
+            climatology were used.
+
+    Returns
+    -------
+        "deseasonalised" or "with seasonal cycle".
+    """
+    return "deseasonalised" if remove_seasonal_cycle else "with seasonal cycle"
+
+
+def create_region_file_suffix(region_name):
+    """Create the file name suffix of a figure of one WMO region.
+
+    Args:
+        region_name (str or None): WMO region, None for the whole domain.
+
+    Returns
+    -------
+        "_region_<region>" with a file-safe region name, "" for the domain.
+    """
+    return f"_region_{sanitize_name(region_name)}" if region_name else ""
+
+
 def get_stats_one_pass(
     path,
     var,
@@ -801,13 +902,20 @@ def get_stats_one_pass(
     file_name="*.*",
     with_period_series=False,
     compression=None,
+    remove_seasonal_cycle_from_std=False,
+    season_months=None,
 ):
     """Compute streaming statistics from monthly/yearly files.
 
-    Reads one file at a time and updates running aggregates to produce mean,
-    standard deviation, and monthly climatology. Optionally slices coordinates,
-    applies a multiplicative factor, supports bootstrapping over years, and can
-    write the result to disk.
+    Reads one file at a time and accumulates per-month sums, square sums and
+    counts, from which the mean, standard deviation and monthly climatology
+    follow. NaN steps are skipped per cell, as in `get_file_stats`. Optionally
+    slices coordinates, applies a multiplicative factor, supports bootstrapping
+    over years, and can write the result to disk.
+
+    With `remove_seasonal_cycle_from_std` the std is that of the anomalies from
+    the monthly climatology (ddof=0), otherwise that of the raw values (ddof=0).
+    Only steps in `available_years` and `season_months` are used.
 
     With `with_period_series` the same pass also returns a monthly
     `time_series`, so the spatial metrics can be calculated without the record
@@ -835,29 +943,55 @@ def get_stats_one_pass(
     logger.info("creating statistics one pass...")
     subset_results = Parallel(n_jobs=ncpus, backend="loky")(
         delayed(get_stats_one_pass_subset)(
-            file_subset, var, factor, coordinate_slice, with_period_series
+            file_subset,
+            var,
+            factor,
+            coordinate_slice,
+            with_period_series,
+            remove_seasonal_cycle_from_std,
+            available_years,
+            season_months,
         )
         for file_subset in file_subsets
     )
     logger.info("combining results...")
     (
-        mean,
-        sum_square_diff,
-        count,
+        step_count,
         monthly_sums,
+        square_sums,
         monthly_counts,
         period_sums,
         period_counts,
     ) = combine_results(subset_results)
-    logger.debug(
-        f"{mean.mean()}, {sum_square_diff.mean()}, {count}, {monthly_sums.mean()}, {monthly_counts.mean()}"
+    logger.debug(f"Combined {step_count} time steps.")
+    valid_counts = monthly_counts.sum(axis=0)
+    total_sums = monthly_sums.sum(axis=0)
+    mean = np.divide(
+        total_sums,
+        valid_counts,
+        out=np.full(total_sums.shape, np.nan),
+        where=valid_counts > 0,
     )
-    variance = sum_square_diff / (count - 1)
+    climatology = np.divide(
+        monthly_sums,
+        monthly_counts,
+        out=np.full(monthly_sums.shape, np.nan),
+        where=monthly_counts > 0,
+    )
+    if remove_seasonal_cycle_from_std:
+        # squared anomalies of a month: S2 - 2*clim*S1 + n*clim^2 = S2 - S1*clim,
+        # and the anomalies add up to zero, so their mean needs no subtraction
+        squared_deviations = np.nansum(square_sums - monthly_sums * climatology, axis=0)
+    else:
+        squared_deviations = square_sums.sum(axis=0) - total_sums * mean
+    # clipped, because rounding can push a variance of zero just below it
+    variance = np.divide(
+        np.maximum(squared_deviations, 0),
+        valid_counts,
+        out=np.full(total_sums.shape, np.nan),
+        where=valid_counts > 0,
+    )
     std_dev = np.sqrt(variance)
-    monthly_sums = np.where(monthly_counts > 0, monthly_sums, np.nan)
-    monthly_counts = np.where(monthly_counts > 0, monthly_counts, np.nan)
-    climatology = monthly_sums / monthly_counts
-    climatology = np.where(monthly_counts > 0, climatology, np.nan)
     with get_dataset_from_path(
         files[0],
         var_name=var,
@@ -893,7 +1027,7 @@ def get_stats_one_pass(
     )
     mean = xr.DataArray(mean, coords={"lat": lat, "lon": lon}, dims=["lat", "lon"])
     clim.attrs = {"long_name": f"Monthly climatology of {var}"}
-    std.attrs = {"long_name": f"Temporal standard deviation of {var}"}
+    std.attrs = {"long_name": create_std_long_name(var, remove_seasonal_cycle_from_std)}
     mean.attrs = {"long_name": f"Temporal mean of {var}"}
     if source_units is not None:
         clim.attrs["units"] = source_units
@@ -979,50 +1113,68 @@ def plot_map(
     ref_name,
     output_path,
     overlapping_years=None,
+    season_months=None,
+    std_seasonality=None,
+    spearman_seasonality=None,
+    region_name=None,
+    reference_close_to_zero=None,
 ):
     """Create a 2x2 figure of relative mean, relative std, Spearman correlation, and seasonal means.
 
     Generates four subplots: (1) relative temporal mean, (2) relative temporal
-    standard deviation, (3) Spearman correlation of climatologies, and (4) monthly
-    seasonal means for both datasets.
+    standard deviation, (3) Spearman correlation, of the (by default
+    deseasonalised) time series or, without a direct comparison, of the
+    climatologies, and (4) monthly seasonal means for both datasets.
+    `season_months` names the compared season in the title, `std_seasonality`
+    and `spearman_seasonality` (see `create_seasonality_label`) state in the
+    panel titles whether the seasonal cycle was removed.
+    `region_name` names the WMO region in the title and the file names.
+    `reference_close_to_zero` marks the ratio cells hidden for a reference close
+    to zero, which are drawn white, unlike the grey cells without data.
+    Returns the path of the written figure.
     """
     rel_mean = np.where(rel_mean == np.inf, np.nan, rel_mean)
     rel_mean = np.where(rel_mean < 0, np.nan, rel_mean)
     rel_std = np.where(rel_std == np.inf, np.nan, rel_std)
     rel_std = np.where(rel_std < 0, np.nan, rel_std)
     fig, axes = plt.subplots(2, 2, figsize=(10.5, 4.68))
-    if input_name is not None and ref_name is not None:
-        title = f"Comparision {input_name} with {ref_name}"
-    if overlapping_years is not None and len(overlapping_years) > 1:
-        title += f" for years {overlapping_years[0]}-{overlapping_years[-1]}"
+    title = create_comparison_title(
+        input_name, ref_name, overlapping_years, season_months
+    ) + format_region_title(region_name)
     fig.suptitle(title, fontweight="normal", fontsize="x-large")
 
-    # Set common colormap and normalization limits for mean_et and mean_aet
-    mean_diff_1 = max(np.abs(1 - np.nanmin(rel_mean)), np.abs(1 - np.nanmax(rel_mean)))
+    # the ratios look like the alpha and beta maps of discharge-evaluation
     im0, bounds0, extend0, ticks0 = plot_single_map(
-        axes[0, 0], rel_mean, mean_diff_1, bounds_type="fixed"
+        axes[0, 0], rel_mean, bounds_type="data", **get_metric_plot_style("beta")
     )
     axes[0, 0].set_title(
         f"Relative temporal Mean (median={np.nanmedian(rel_mean):.2f})"
     )
-    std_diff_1 = max(np.abs(1 - np.nanmin(rel_std)), np.abs(1 - np.nanmax(rel_std)))
     im1, bounds1, extend1, ticks1 = plot_single_map(
-        axes[0, 1], rel_std, std_diff_1, bounds_type="quantiles"
+        axes[0, 1], rel_std, bounds_type="data", **get_metric_plot_style("alpha")
     )
+    std_label = f", {std_seasonality}" if std_seasonality else ""
     axes[0, 1].set_title(
-        f"Relative temporal Standarddeviation (median={np.nanmedian(rel_std):.2f})"
+        f"Relative temporal Standarddeviation{std_label} "
+        f"(median={np.nanmedian(rel_std):.2f})"
     )
+    if reference_close_to_zero is not None:
+        for ax in (axes[0, 0], axes[0, 1]):
+            draw_low_reference_cells(ax, reference_close_to_zero)
 
+    correlation_style = get_metric_plot_style("spearman")
+    if np.nanmin(spearman) < 0:
+        # the scale runs from 0 to 1 and every negative correlation gets the
+        # under colour, instead of the scale following them below 0
+        correlation_style.update(vmin=0.0, under_color=KGE_UNDER_COLOR)
     im2, bounds2, extend2, ticks2 = plot_single_map(
-        axes[1, 0],
-        spearman,
-        vmin=np.nanmin(spearman),
-        vmax=1,
-        cmap=plt.cm.viridis_r,
-        bounds_type="quantiles",
+        axes[1, 0], spearman, bounds_type="data", **correlation_style
     )
 
-    axes[1, 0].set_title(f"Spearman Correlation (median={np.nanmedian(spearman):.2f})")
+    spearman_label = f", {spearman_seasonality}" if spearman_seasonality else ""
+    axes[1, 0].set_title(
+        f"Spearman Correlation{spearman_label} (median={np.nanmedian(spearman):.2f})"
+    )
 
     # Plot for the seasonality
     months = np.arange(1, 13, 1)
@@ -1075,22 +1227,11 @@ def plot_map(
     ax_twy.set_ylabel("Ratio (Input / Reference)", color="#0000A7")
     ax_twy.tick_params(axis="y", labelcolor="#0000A7")
 
-    divider0 = make_axes_locatable(axes[0, 0])
-    cax = divider0.append_axes("right", size="5%", pad=0.1)
-    fig.colorbar(
-        im0, cax=cax, label="", boundaries=bounds0, extend=extend0, ticks=ticks0
-    )
-
-    divider1 = make_axes_locatable(axes[0, 1])
-    cax2 = divider1.append_axes("right", size="5%", pad=0.1)
-    fig.colorbar(
-        im1, cax=cax2, label="", boundaries=bounds1, extend=extend1, ticks=ticks1
-    )
-
-    divider2 = make_axes_locatable(axes[1, 0])
-    cax = divider2.append_axes("right", size="5%", pad=0.1)
-    fig.colorbar(
-        im2, cax=cax, label="", boundaries=bounds2, extend=extend2, ticks=ticks2
+    ratio_label = create_axis_label(f"{input_name} / {ref_name}")
+    add_map_colorbar(fig, axes[0, 0], im0, bounds0, extend0, ticks0, ratio_label)
+    add_map_colorbar(fig, axes[0, 1], im1, bounds1, extend1, ticks1, ratio_label)
+    add_map_colorbar(
+        fig, axes[1, 0], im2, bounds2, extend2, ticks2, create_axis_label("rho")
     )
 
     for ax in axes.flat:
@@ -1101,13 +1242,21 @@ def plot_map(
         ax.set_yticks([])
         ax.set_xticks([])
         ax.yaxis.labelpad = 0
+        ax.set_facecolor(MAP_NO_DATA_COLOR)
         for spine in ax.spines.values():
             spine.set_linewidth(0.25)
+    add_no_data_legend(
+        axes[1, 0],
+        RATIO_HIDDEN_LABEL if np.any(reference_close_to_zero) else None,
+    )
     plt.tight_layout()
-    file_name = f"et_map_{input_name}_{ref_name}.png".replace(" ", "_")
+    region_suffix = create_region_file_suffix(region_name)
+    file_name = f"et_map_{input_name}_{ref_name}{region_suffix}.png"
+    file_name = file_name.replace(" ", "_")
     plt.savefig(output_path / file_name, dpi=800)
     plt.close(fig)
     logger.info(f"created et_map {output_path / file_name}")
+    return output_path / file_name
 
 
 @log_errors(raise_exceptions=True)
@@ -1120,8 +1269,18 @@ def plot_map_bias_only(
     output_path,
     overlapping_years=None,
     total_rel_mean=None,
+    season_months=None,
+    region_name=None,
+    reference_close_to_zero=None,
 ):
-    """Create a 3-panel plot with relative mean, mean difference, and climatology."""
+    """Create a 3-panel plot with relative mean, mean difference, and climatology.
+
+    `season_months` names the compared season in the title.
+    `region_name` names the WMO region in the title and the file names.
+    `reference_close_to_zero` marks the ratio cells hidden for a reference close
+    to zero, which are drawn white, unlike the grey cells without data.
+    Returns the path of the written figure.
+    """
     rel_mean = np.where(rel_mean == np.inf, np.nan, rel_mean)
     ref_mean_map = np.asarray(np.nanmean(ref_clim, axis=0))
     input_mean_map = np.asarray(np.nanmean(input_clim, axis=0))
@@ -1134,21 +1293,22 @@ def plot_map_bias_only(
     ax_diff_mean = fig.add_subplot(gs[0, 2:4])
     ax_clim = fig.add_subplot(gs[1, 1:3])
 
-    if input_name is not None and ref_name is not None:
-        title = f"Comparision {input_name} with {ref_name}"
-    if overlapping_years is not None and len(overlapping_years) > 1:
-        title += f" for years {overlapping_years[0]}-{overlapping_years[-1]}"
+    title = create_comparison_title(
+        input_name, ref_name, overlapping_years, season_months
+    ) + format_region_title(region_name)
     fig.suptitle(title, fontweight="normal", fontsize="x-large")
 
-    mean_diff_1 = max(np.abs(1 - np.nanmin(rel_mean)), np.abs(1 - np.nanmax(rel_mean)))
+    # the ratio looks like the beta maps of discharge-evaluation
     im0, bounds0, extend0, ticks0 = plot_single_map(
-        ax_rel_mean, rel_mean, mean_diff_1, bounds_type="fixed"
+        ax_rel_mean, rel_mean, bounds_type="data", **get_metric_plot_style("beta")
     )
     title_rel_mean = f"a) Relative Mean (median={np.nanmedian(rel_mean):.2f}"
     if total_rel_mean is not None:
         title_rel_mean += f", mean={total_rel_mean:.2f}"
     title_rel_mean += ")"
     ax_rel_mean.set_title(title_rel_mean)
+    if reference_close_to_zero is not None:
+        draw_low_reference_cells(ax_rel_mean, reference_close_to_zero)
 
     # diff_abs_max = int(round(np.nanmax(np.abs(diff_mean)) + 0.5))
     # if not np.isfinite(diff_abs_max) or diff_abs_max == 0:
@@ -1226,10 +1386,14 @@ def plot_map_bias_only(
     ax_twy.set_ylabel("Ratio (Input / Reference)", color="#0000A7")
     ax_twy.tick_params(axis="y", labelcolor="#0000A7")
 
-    divider0 = make_axes_locatable(ax_rel_mean)
-    cax = divider0.append_axes("right", size="5%", pad=0.1)
-    fig.colorbar(
-        im0, cax=cax, label="", boundaries=bounds0, extend=extend0, ticks=ticks0
+    add_map_colorbar(
+        fig,
+        ax_rel_mean,
+        im0,
+        bounds0,
+        extend0,
+        ticks0,
+        create_axis_label(f"{input_name} / {ref_name}"),
     )
 
     divider1 = make_axes_locatable(ax_diff_mean)
@@ -1251,16 +1415,24 @@ def plot_map_bias_only(
         ax.set_yticks([])
         ax.set_xticks([])
         ax.yaxis.labelpad = 0
+        ax.set_facecolor(MAP_NO_DATA_COLOR)
     for spine in ax_rel_mean.spines.values():
         spine.set_linewidth(0.25)
     for spine in ax_diff_mean.spines.values():
         spine.set_linewidth(0.25)
+    add_no_data_legend(
+        ax_rel_mean,
+        RATIO_HIDDEN_LABEL if np.any(reference_close_to_zero) else None,
+    )
     plt.tight_layout()
 
-    file_name = f"et_map_bias_only_{input_name}_{ref_name}.png".replace(" ", "_")
+    region_suffix = create_region_file_suffix(region_name)
+    file_name = f"et_map_bias_only_{input_name}_{ref_name}{region_suffix}.png"
+    file_name = file_name.replace(" ", "_")
     plt.savefig(output_path / file_name, dpi=800)
     plt.close(fig)
     logger.info(f"created et_map {output_path / file_name}")
+    return output_path / file_name
 
 
 @log_errors(raise_exceptions=True)
@@ -1271,15 +1443,20 @@ def plot_map_global_climate(
     ref_name,
     output_path,
     overlapping_years=None,
+    season_months=None,
+    region_name=None,
 ):
-    """Create a plot showing relative mean, relative std and seasonality."""
+    """Create a plot showing relative mean, relative std and seasonality.
+
+    `season_months` names the compared season in the title.
+    `region_name` names the WMO region in the title and the file names.
+    """
     rel_mean = np.where(rel_mean == np.inf, np.nan, rel_mean)
     rel_std = np.where(rel_std == np.inf, np.nan, rel_std)
     fig, axes = plt.subplots(2, 1, figsize=(10.5, 6.2))
-    if input_name is not None and ref_name is not None:
-        title = f"Comparision {input_name} with {ref_name}"
-    if overlapping_years is not None and len(overlapping_years) > 1:
-        title += f" for years {overlapping_years[0]}-{overlapping_years[-1]}"
+    title = create_comparison_title(
+        input_name, ref_name, overlapping_years, season_months
+    ) + format_region_title(region_name)
     fig.suptitle(title, fontweight="normal", fontsize="x-large")
 
     mean_diff_1 = max(np.abs(1 - np.nanmin(rel_mean)), np.abs(1 - np.nanmax(rel_mean)))
@@ -1318,7 +1495,9 @@ def plot_map_global_climate(
         for spine in ax.spines.values():
             spine.set_linewidth(0.25)
     plt.tight_layout()
-    file_name = f"et_map_global_climate_{input_name}_{ref_name}.png".replace(" ", "_")
+    region_suffix = create_region_file_suffix(region_name)
+    file_name = f"et_map_global_climate_{input_name}_{ref_name}{region_suffix}.png"
+    file_name = file_name.replace(" ", "_")
     plt.savefig(output_path / file_name, dpi=800)
     plt.close(fig)
     logger.info(f"created et_map {output_path / file_name}")
@@ -1333,18 +1512,27 @@ def plot_map_global_climate2(
     output_path,
     overlapping_years=None,
     total_rel_mean=None,
+    season_months=None,
+    region_name=None,
+    reference_close_to_zero=None,
 ):
-    """Create a plot showing relative mean and monthly climatology difference."""
+    """Create a plot showing relative mean and monthly climatology difference.
+
+    `season_months` names the compared season in the title.
+    `region_name` names the WMO region in the title and the file names.
+    `reference_close_to_zero` marks the percent cells hidden for a reference
+    close to zero, which are drawn white, unlike the grey cells without data.
+    Returns the path of the written figure.
+    """
     rel_mean = np.where(rel_mean == np.inf, np.nan, rel_mean)
     diff_mean = np.asarray(np.where(diff_mean == np.inf, np.nan, diff_mean))
     fig = plt.figure(figsize=(10.5, 6.2))
     gs = fig.add_gridspec(2, 4, height_ratios=[1.0, 1.0])
     ax_rel_mean = fig.add_subplot(gs[1, 1:3])
     ax_diff = fig.add_subplot(gs[0, 1:3])
-    if input_name is not None and ref_name is not None:
-        title = f"Comparision {input_name} with {ref_name}"
-    if overlapping_years is not None and len(overlapping_years) > 1:
-        title += f" for years {overlapping_years[0]}-{overlapping_years[-1]}"
+    title = create_comparison_title(
+        input_name, ref_name, overlapping_years, season_months
+    ) + format_region_title(region_name)
     fig.suptitle(title, fontweight="normal", fontsize="x-large")
 
     im0, bounds0, extend0, ticks0 = plot_single_map(
@@ -1355,6 +1543,8 @@ def plot_map_global_climate2(
         title_rel_mean += f", mean={total_rel_mean:.1f}"
     title_rel_mean += ")"
     ax_rel_mean.set_title(title_rel_mean)
+    if reference_close_to_zero is not None:
+        draw_low_reference_cells(ax_rel_mean, reference_close_to_zero)
 
     vmin = np.nanquantile(diff_mean, 0.01)
     vmax = np.nanquantile(diff_mean, 0.99)
@@ -1389,20 +1579,29 @@ def plot_map_global_climate2(
     ax_rel_mean.set_yticks([])
     ax_rel_mean.set_xticks([])
     ax_rel_mean.yaxis.labelpad = 0
+    ax_rel_mean.set_facecolor(MAP_NO_DATA_COLOR)
     for spine in ax_rel_mean.spines.values():
         spine.set_linewidth(0.25)
     if diff_mean.ndim != 1:
         ax_diff.set_yticks([])
         ax_diff.set_xticks([])
         ax_diff.yaxis.labelpad = 0
+        ax_diff.set_facecolor(MAP_NO_DATA_COLOR)
         for spine in ax_diff.spines.values():
             spine.set_linewidth(0.25)
+    add_no_data_legend(
+        ax_rel_mean,
+        PERCENT_HIDDEN_LABEL if np.any(reference_close_to_zero) else None,
+    )
     plt.tight_layout()
 
-    file_name = f"et_map_global_climate2_{input_name}_{ref_name}.png".replace(" ", "_")
+    region_suffix = create_region_file_suffix(region_name)
+    file_name = f"et_map_global_climate2_{input_name}_{ref_name}{region_suffix}.png"
+    file_name = file_name.replace(" ", "_")
     plt.savefig(output_path / file_name, dpi=800)
     plt.close(fig)
     logger.info(f"created et_map {output_path / file_name}")
+    return output_path / file_name
 
 
 @log_errors(raise_exceptions=True)
@@ -1413,12 +1612,17 @@ def plot_map_local_climate(
     ref_name,
     output_path,
     overlapping_years=None,
+    season_months=None,
+    region_name=None,
 ):
     """Create monthly local-climate maps for relative and absolute differences.
 
     Produces two figures with 12 small maps (one per month):
     - Relative climatology difference in percent
     - Absolute climatology difference in native units (e.g. mm/day)
+    `season_months` names the compared season in the title.
+    `region_name` names the WMO region in the title and the file names.
+    Returns the paths of the relative and the absolute figure.
     """
     month_labels = (
         "Jan",
@@ -1453,12 +1657,18 @@ def plot_map_local_climate(
             raise ValueError(msg)
 
     # Avoid unstable percentages where reference climatology is close to zero.
-    ref_safe = np.where(np.abs(ref_clim) < 0.1, np.nan, ref_clim)
+    low_reference = np.abs(ref_clim) < PERCENT_MIN_REFERENCE
+    ref_safe = np.where(low_reference, np.nan, ref_clim)
     rel_monthly = 100.0 * (input_clim - ref_safe) / ref_safe
     abs_monthly = input_clim - ref_clim
 
     def _plot_monthly_panels(
-        values, panel_title, output_file_name, colorbar_label, bounds_type="max"
+        values,
+        panel_title,
+        output_file_name,
+        colorbar_label,
+        bounds_type="max",
+        low_reference=None,
     ):
         values = np.where(values == np.inf, np.nan, values)
         values = np.where(values == -np.inf, np.nan, values)
@@ -1487,11 +1697,12 @@ def plot_map_local_climate(
         )
         cax = fig.add_subplot(gs[:, 4])
         if input_name is not None and ref_name is not None:
-            title = f"Comparision {input_name} with {ref_name}"
+            title = create_comparison_title(
+                input_name, ref_name, overlapping_years, season_months
+            )
         else:
             title = "Local Climate Comparison"
-        if overlapping_years is not None and len(overlapping_years) > 1:
-            title += f" for years {overlapping_years[0]}-{overlapping_years[-1]}"
+        title += format_region_title(region_name)
         fig.suptitle(f"{title}\n{panel_title}", fontsize="x-large", fontweight="normal")
 
         im = None
@@ -1507,10 +1718,13 @@ def plot_map_local_climate(
                 center=0,
                 bounds_type=bounds_type,
             )
+            if low_reference is not None:
+                draw_low_reference_cells(ax, low_reference[month_idx])
             ax.set_title(month_labels[month_idx], fontsize="medium")
             ax.set_xticks([])
             ax.set_yticks([])
             ax.yaxis.labelpad = 0
+            ax.set_facecolor(MAP_NO_DATA_COLOR)
             for spine in ax.spines.values():
                 spine.set_linewidth(0.25)
 
@@ -1525,23 +1739,32 @@ def plot_map_local_climate(
         # shortest form of every tick, so 25 and 2.5 instead of 25.0 and 2.5
         cbar.set_ticks(ticks, labels=[f"{tick + 0.0:g}" for tick in ticks])
         cbar.ax.tick_params(labelsize=8)
-        fig.subplots_adjust(left=0.03, right=0.94, bottom=0.04, top=0.89)
+        add_no_data_legend(
+            fig,
+            PERCENT_HIDDEN_LABEL if np.any(low_reference) else None,
+            loc="lower center",
+            bbox_to_anchor=(0.5, 0.0),
+        )
+        fig.subplots_adjust(left=0.03, right=0.94, bottom=0.07, top=0.89)
         plt.savefig(output_path / output_file_name, dpi=400)
         plt.close(fig)
         logger.info(f"created et_map {output_path / output_file_name}")
 
-    rel_file_name = f"et_map_local_climate_rel_{input_name}_{ref_name}.png".replace(
-        " ", "_"
-    )
-    abs_file_name = f"et_map_local_climate_abs_{input_name}_{ref_name}.png".replace(
-        " ", "_"
-    )
+    rel_file_name = (
+        f"et_map_local_climate_rel_{input_name}_{ref_name}"
+        f"{create_region_file_suffix(region_name)}.png"
+    ).replace(" ", "_")
+    abs_file_name = (
+        f"et_map_local_climate_abs_{input_name}_{ref_name}"
+        f"{create_region_file_suffix(region_name)}.png"
+    ).replace(" ", "_")
     _plot_monthly_panels(
         rel_monthly,
         "Monthly Relative Climatology Difference",
         rel_file_name,
         "Relative Climatology Difference [%]",
         bounds_type="percent",
+        low_reference=low_reference,
     )
     _plot_monthly_panels(
         abs_monthly,
@@ -1549,85 +1772,344 @@ def plot_map_local_climate(
         abs_file_name,
         "Absolute Climatology Difference [mm/day]",
     )
+    return [output_path / rel_file_name, output_path / abs_file_name]
 
 
-def create_map_from_output(
-    output_path, input_name, ref_name, bias_only=False, global_climate=False
+def write_comparison_plots(
+    rel_mean,
+    input_clim,
+    ref_clim,
+    input_name,
+    ref_name,
+    output_path,
+    rel_std=None,
+    spearman=None,
+    bias_only=False,
+    global_climate=False,
+    overlapping_years=None,
+    season_months=None,
+    std_seasonality=None,
+    spearman_seasonality=None,
+    region_name=None,
 ):
-    """Read in statistics netcdf and create a map plots from it."""
-    file = get_rel_stat_file(output_path, input_name, ref_name)
-    logger.info(f"Plotting data from {file}")
-    with get_xarray_ds_from_file(file, force_decending_y=True) as ds:
-        rel_mean = ds["rel_mean"]
-        rel_mean = np.where(rel_mean == np.inf, np.nan, rel_mean)
-        rel_std = ds.get("rel_std", None)
-        rel_std = (
-            np.where(rel_std == np.inf, np.nan, rel_std)
-            if rel_std is not None
-            else None
+    """Write the figures of one comparison for the whole domain or one WMO region.
+
+    The overview map needs `rel_std` and `spearman`, `global_climate` writes the
+    climate difference map, and every other run the bias-only map. Every mode
+    also writes the monthly local climate maps. With `region_name` every field is cropped to the region
+    first, so its colour limits, medians and seasonality are the region's own.
+    The ratio maps hide the cells whose reference mean is below 5 % of its
+    median over the domain and draw them white, unlike the grey cells without
+    data, see `create_reference_close_to_zero_mask`.
+
+    Args:
+        rel_mean (xr.DataArray): Relative mean (input / reference).
+        input_clim, ref_clim (xr.DataArray): Monthly climatologies of both datasets.
+        input_name, ref_name (str): Names of the datasets.
+        output_path (Path): Directory the figures are written to.
+        rel_std, spearman (xr.DataArray, optional): Relative std and Spearman map.
+        bias_only, global_climate (bool): Mode of the comparison.
+        overlapping_years, season_months (list of int, optional): Compared years
+            and calendar months, named in the titles.
+        std_seasonality, spearman_seasonality (str, optional): Seasonality labels
+            of the std and Spearman panels, see `create_seasonality_label`.
+        region_name (str, optional): WMO region to crop to, None for the domain.
+
+    Returns
+    -------
+        List of the written figure paths, empty for a region without valid cells.
+    """
+    # ratios explode where the reference is close to zero; they are hidden
+    # before the region crop, so every figure hides the same cells
+    reference_mean = ref_clim.mean("month", skipna=True)
+    rel_mean = mask_where_reference_close_to_zero(
+        rel_mean, reference_mean, RATIO_MIN_REFERENCE_SHARE
+    )
+    if rel_std is not None:
+        rel_std = mask_where_reference_close_to_zero(
+            rel_std, reference_mean, RATIO_MIN_REFERENCE_SHARE
         )
-        spearman = ds.get("spearman", None)
-        input_clim = (
-            ds[f"{input_name}_clim"] if f"{input_name}_clim" in ds else ds["input_clim"]
-        )
-        ref_clim = (
-            ds[f"{ref_name}_clim"] if f"{ref_name}_clim" in ds else ds["ref_clim"]
-        )
+    fields = {
+        "rel_mean": rel_mean,
+        "input_clim": input_clim,
+        "ref_clim": ref_clim,
+        "rel_std": rel_std,
+        "spearman": spearman,
+        "reference_close_to_zero": create_reference_close_to_zero_mask(
+            reference_mean, RATIO_MIN_REFERENCE_SHARE
+        ),
+    }
+    if region_name is not None:
+        fields = {
+            name: None if field is None else crop_to_region(field, region_name)
+            for name, field in fields.items()
+        }
+        if not bool(np.isfinite(fields["rel_mean"]).any()):
+            logger.info(f"Skipping the figures of {region_name}: no valid cell in it.")
+            return []
+    rel_mean, input_clim, ref_clim, rel_std, spearman, reference_close_to_zero = (
+        fields.values()
+    )
+    shared_args = {
+        "input_name": input_name,
+        "ref_name": ref_name,
+        "output_path": output_path,
+        "overlapping_years": overlapping_years,
+        "season_months": season_months,
+        "region_name": region_name,
+    }
+    input_total, ref_total = np.nanmean(input_clim), np.nanmean(ref_clim)
     if (
         rel_std is not None
         and spearman is not None
         and not bias_only
         and not global_climate
     ):
-        plot_map(
+        figure_file = plot_map(
             rel_std=rel_std,
             rel_mean=rel_mean,
             spearman=spearman,
             ref_clim=ref_clim,
             input_clim=input_clim,
-            input_name=input_name,
-            ref_name=ref_name,
-            output_path=output_path,
+            std_seasonality=std_seasonality,
+            spearman_seasonality=spearman_seasonality,
+            reference_close_to_zero=reference_close_to_zero,
+            **shared_args,
         )
     elif global_climate:
-        rel_mean_diff = (
-            100
-            * (np.nanmean(input_clim, axis=0) - np.nanmean(ref_clim, axis=0))
-            / np.nanmean(ref_clim, axis=0)
-        )
-        rel_mean_diff = np.where(
-            np.nanmax(ref_clim, axis=0) < 0.1, np.nan, rel_mean_diff
-        )
-        plot_map_global_climate2(
+        input_mean_map = np.nanmean(input_clim, axis=0)
+        ref_mean_map = np.nanmean(ref_clim, axis=0)
+        rel_mean_diff = 100 * (input_mean_map - ref_mean_map) / ref_mean_map
+        low_reference = np.nanmax(ref_clim, axis=0) < PERCENT_MIN_REFERENCE
+        rel_mean_diff = np.where(low_reference, np.nan, rel_mean_diff)
+        figure_file = plot_map_global_climate2(
             rel_mean=rel_mean_diff,
-            diff_mean=np.nanmean(input_clim, axis=0) - np.nanmean(ref_clim, axis=0),
-            input_name=input_name,
-            ref_name=ref_name,
-            output_path=output_path,
-            total_rel_mean=100
-            * (np.nanmean(input_clim) - np.nanmean(ref_clim))
-            / np.nanmean(ref_clim),
-        )
-        plot_map_local_climate(
-            input_clim=input_clim,
-            ref_clim=ref_clim,
-            input_name=input_name,
-            ref_name=ref_name,
-            output_path=output_path,
+            diff_mean=input_mean_map - ref_mean_map,
+            total_rel_mean=100 * (input_total - ref_total) / ref_total,
+            reference_close_to_zero=low_reference,
+            **shared_args,
         )
     else:
-        plot_map_bias_only(
+        figure_file = plot_map_bias_only(
             rel_mean=rel_mean,
             ref_clim=ref_clim,
             input_clim=input_clim,
+            total_rel_mean=input_total / ref_total,
+            reference_close_to_zero=reference_close_to_zero,
+            **shared_args,
+        )
+    # every mode shows the monthly climatology differences next to its map
+    return [
+        figure_file,
+        *plot_map_local_climate(
+            input_clim=input_clim, ref_clim=ref_clim, **shared_args
+        ),
+    ]
+
+
+def create_overview_table_rows(tables, region_label):
+    """Create the table rows of one section of the overview PDF.
+
+    Every table contributes the columns of its row of `region_label` as one
+    block, so tables with different columns fit into one table.
+
+    Args:
+        tables (dict): Table name to DataFrame with a ``region`` column, as
+            logged, e.g. the relative statistics and one table per metric.
+        region_label (str): "Global" for the whole domain or a WMO region.
+
+    Returns
+    -------
+        List of dicts with ``variable`` (table name), ``statistic`` and
+        ``value``; tables without a row of the region are left out.
+    """
+    rows = []
+    for table_name, table in tables.items():
+        region_rows = table[table["region"] == region_label].drop(columns="region")
+        if region_rows.empty:
+            continue
+        # to_dict keeps the type of every column, so cell counts stay integers
+        rows.extend(
+            {"variable": table_name, "statistic": statistic, "value": value}
+            for statistic, value in region_rows.to_dict("records")[0].items()
+        )
+    return rows
+
+
+def write_overview_pdf(
+    output_file,
+    relative_stats_table,
+    metric_tables,
+    plot_files_by_region,
+    input_name,
+    ref_name,
+):
+    """Write the PDF with the statistics tables and the figures of a comparison.
+
+    The PDF starts with the table and the figures of the whole domain, followed
+    by the table and the figures of every WMO region that has figures.
+
+    Args:
+        output_file (Path): PDF file to write.
+        relative_stats_table (pd.DataFrame): Median relative statistics per
+            region, see `create_relative_stats_table`.
+        metric_tables (dict): Table per spatial metric, see
+            `create_region_metric_tables`.
+        plot_files_by_region (dict): Figure paths per WMO region, None for the
+            whole domain first.
+        input_name, ref_name (str): Names of the datasets.
+
+    Returns
+    -------
+        Path of the written PDF.
+    """
+    tables = {"relative statistics (median)": relative_stats_table, **metric_tables}
+    title = f"Statistics of {input_name} against {ref_name}"
+    region_tables = {}
+    for region_name, region_files in plot_files_by_region.items():
+        if region_name is None or not region_files:
+            continue
+        region_rows = create_overview_table_rows(tables, region_name)
+        if region_rows:
+            region_tables[region_files[0]] = (
+                f"{title}{format_region_title(region_name)}",
+                region_rows,
+            )
+    output_file = write_metric_plot_overview_pdf(
+        output_file=output_file,
+        plot_files=[
+            plot_file
+            for region_files in plot_files_by_region.values()
+            for plot_file in region_files
+        ],
+        summary_rows=create_overview_table_rows(tables, "Global"),
+        title=title,
+        highlight_best_values=False,
+        tables_before_plot_files=region_tables,
+        table_columns=["variable", "statistic", "value"],
+        log_tables=False,
+    )
+    logger.info(f"Wrote the overview PDF to {output_file}")
+    return output_file
+
+
+def read_metric_tables(output_path, input_name, ref_name, result_metric, region_names):
+    """Read the spatial metric tables of a comparison back from their CSVs.
+
+    The region CSV, which holds the "Global" row too, is read when regions are
+    requested and it exists, otherwise the domain CSV. A metric without CSV is
+    left out with a warning.
+
+    Args:
+        output_path (Path): Directory of the CSV files.
+        input_name, ref_name (str): Names of the datasets.
+        result_metric (str): Metrics of the run, see `normalize_results_metric`.
+        region_names (list of str): Requested WMO regions.
+
+    Returns
+    -------
+        Dict of the table per metric name, each with a ``region`` column.
+    """
+    metrics = normalize_results_metric(result_metric)
+    metrics = (metrics,) if isinstance(metrics, str) else metrics
+    output_name = f"{input_name}-{ref_name}".replace(" ", "_")
+    tables = {}
+    for metric in metrics:
+        region_file = output_path / f"{output_name}_{metric.lower()}_regions.csv"
+        domain_file = output_path / f"{output_name}_{metric.lower()}.csv"
+        if region_names and region_file.is_file():
+            tables[metric] = pd.read_csv(region_file)
+        elif domain_file.is_file():
+            table = pd.read_csv(domain_file, index_col=0)
+            table = table.drop(columns="name", errors="ignore")
+            table.insert(0, "region", "Global")
+            tables[metric] = table
+        else:
+            logger.warning(f"No {metric} table in {output_path}, left out of the PDF.")
+    return tables
+
+
+def create_map_from_output(
+    output_path,
+    input_name,
+    ref_name,
+    bias_only=False,
+    global_climate=False,
+    region_names=(),
+    result_metric="all",
+    overview_pdf_file=None,
+):
+    """Read the relative statistics file and draw its figures again.
+
+    The figures are drawn for the whole domain and once per WMO region in
+    `region_names`; the season and the seasonality labels come from the file.
+    With `overview_pdf_file` the overview PDF is written again: its relative
+    statistics are recalculated from the file and the tables of the metrics in
+    `result_metric` are read from the CSVs of the run.
+    """
+    file = get_rel_stat_file(output_path, input_name, ref_name)
+    logger.info(f"Plotting data from {file}")
+    with get_xarray_ds_from_file(file, force_decending_y=True) as ds:
+        input_clim_key = (
+            f"{input_name}_clim" if f"{input_name}_clim" in ds else "input_clim"
+        )
+        ref_clim_key = f"{ref_name}_clim" if f"{ref_name}_clim" in ds else "ref_clim"
+        fields = {
+            name: ds[key].load() if key in ds else None
+            for name, key in {
+                "rel_mean": "rel_mean",
+                "rel_std": "rel_std",
+                "spearman": "spearman",
+                "input_clim": input_clim_key,
+                "ref_clim": ref_clim_key,
+            }.items()
+        }
+        season_months = ds.attrs.get("season_months")
+    plot_files_by_region = {
+        region_name: write_comparison_plots(
             input_name=input_name,
             ref_name=ref_name,
             output_path=output_path,
-            total_rel_mean=np.nanmean(input_clim) / np.nanmean(ref_clim),
+            bias_only=bias_only,
+            global_climate=global_climate,
+            season_months=season_months,
+            std_seasonality=getattr(fields["rel_std"], "attrs", {}).get("seasonality"),
+            spearman_seasonality=getattr(fields["spearman"], "attrs", {}).get(
+                "seasonality"
+            ),
+            region_name=region_name,
+            **fields,
         )
+        for region_name in [None, *region_names]
+    }
+    if overview_pdf_file is None:
+        return
+    relative_stats_table = create_relative_stats_table(
+        fields,
+        fields["input_clim"],
+        fields["ref_clim"],
+        region_names,
+        input_name,
+        ref_name,
+    )
+    metric_tables = (
+        {}
+        if bias_only or global_climate
+        else read_metric_tables(
+            output_path, input_name, ref_name, result_metric, region_names
+        )
+    )
+    write_overview_pdf(
+        overview_pdf_file,
+        relative_stats_table,
+        metric_tables,
+        plot_files_by_region,
+        input_name,
+        ref_name,
+    )
 
 
-def get_stats(
+def get_stats(  # noqa: PLR0913
     path,
     var,
     factor,
@@ -1643,11 +2125,19 @@ def get_stats(
     file_name="*.*",
     stream_metrics=False,
     compression=None,
+    remove_seasonal_cycle_from_std=False,
+    season_months=None,
 ):
-    """Get statistics dataset from a path to a file or directory with files."""
+    """Get statistics dataset from a path to a file or directory with files.
+
+    `remove_seasonal_cycle_from_std` and `season_months` are passed on to
+    `get_stats_one_pass` or `get_file_stats`, see there.
+    """
     logger.info(f"Get stats for {path}")
     if var is not None:
-        if path.is_dir() and not direct_comp:
+        # a single file is streamed too when the monthly series is needed,
+        # since only the one-pass statistics build it outside the direct mode
+        if (path.is_dir() or stream_metrics) and not direct_comp:
             stats_ds = get_stats_one_pass(
                 path,
                 var,
@@ -1660,6 +2150,8 @@ def get_stats(
                 file_name=file_name,
                 with_period_series=stream_metrics,
                 compression=compression,
+                remove_seasonal_cycle_from_std=remove_seasonal_cycle_from_std,
+                season_months=season_months,
             )
         elif path.is_dir() or path.is_file():
             if path.is_file() and path.suffix == ".nc":
@@ -1681,16 +2173,23 @@ def get_stats(
                     avaiable_years=available_years,
                     direct_comp=direct_comp,
                     compression=compression,
+                    remove_seasonal_cycle_from_std=remove_seasonal_cycle_from_std,
+                    season_months=season_months,
                 )
             if path.is_dir():
                 file_list = get_files(
                     path, available_years=available_years, file_name=file_name
                 )
+                # open_mfdataset keeps the record lazy, while the default opens
+                # every file eagerly. The files split the record in time, so
+                # chunks in space only would need a piece of every file at once.
                 with get_dataset_from_path(
                     file_list,
                     var_name=var,
                     available_mem=available_mem,
                     file_name=file_name,
+                    use_mfdataset=True,
+                    chunk_type=ChunkType.TIME,
                 ) as ds_in:
                     stats_ds = get_file_stats(
                         ds_in,
@@ -1701,6 +2200,8 @@ def get_stats(
                         avaiable_years=available_years,
                         direct_comp=direct_comp,
                         compression=compression,
+                        remove_seasonal_cycle_from_std=remove_seasonal_cycle_from_std,
+                        season_months=season_months,
                     )
         else:
             msg = f"Path {path} is neither dir nor file."
@@ -1884,6 +2385,10 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
     compression=None,
     region_names=(),
     write_region_stats=False,
+    remove_seasonal_cycle_from_std=False,
+    remove_seasonal_cycle_from_corr=True,
+    season_months=None,
+    overview_pdf_file=None,
 ):
     """Compare the two datasets.
 
@@ -1891,6 +2396,13 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
     the whole domain and per region in `region_names`, and written to CSV when
     `write_region_stats` is set. A bootstrap run logs only the spatial metrics;
     its relative statistics are tabled once all bootstrap runs are combined.
+
+    `remove_seasonal_cycle_from_std` takes the std from the anomalies of the
+    monthly climatology; `remove_seasonal_cycle_from_corr` correlates the
+    monthly anomalies of the time series instead of the series themselves.
+    Only the months in `season_months` are compared. With `overview_pdf_file`
+    a run that plots and is no bootstrap selection also writes the tables and
+    the figures to this PDF.
     """
     output_path = Path(output_path)
     if bootstrap_index is not None:
@@ -1917,6 +2429,8 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
         file_name=input_file_name,
         stream_metrics=stream_metrics,
         compression=compression,
+        remove_seasonal_cycle_from_std=remove_seasonal_cycle_from_std,
+        season_months=season_months,
     )
     logger.debug(f"input ds: {input}")
 
@@ -1937,6 +2451,8 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
         file_name=ref_file_name,
         stream_metrics=stream_metrics,
         compression=compression,
+        remove_seasonal_cycle_from_std=remove_seasonal_cycle_from_std,
+        season_months=season_months,
     )
     logger.debug(f"ref ds: {ref}")
     logger.debug(
@@ -1976,6 +2492,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
     # compare and save statistics
     full_metrics = not bias_only and not global_climate
     with_std = not bias_only
+    metric_tables = {}
 
     if direct_comp or stream_metrics:
         input_ts, ref_ts = input["time_series"], ref["time_series"]
@@ -1988,6 +2505,13 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
 
         input_ts, ref_ts, time_slice = crop_data_to_overlapping_time(input_ts, ref_ts)
         overlapping_years = [time_slice.start.year, time_slice.stop.year]
+        # resampling to the coarser calendar fills the months between two
+        # seasons with empty steps, so the season is selected again
+        if season_months is not None:
+            input_ts = select_time_steps_by_year_and_month(
+                input_ts, months=season_months
+            )
+            ref_ts = select_time_steps_by_year_and_month(ref_ts, months=season_months)
         if input_ts.shape != ref_ts.shape:
             msg = f"Input and ref time_series shapes differ after resampling/cropping: {input_ts.shape} vs {ref_ts.shape}"
             with ErrorLogger(logger):
@@ -2034,7 +2558,6 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
             ref_ts_np[paired_valid] = np.nan
             del paired_valid
             try:
-                spearman, spearman_pval = calculate_spearman_map(input_ts_np, ref_ts_np)
                 global_results = create_results_csv(
                     map1=input_ts_np,
                     map2=ref_ts_np,
@@ -2045,7 +2568,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
                     metric=result_metric,
                     log_table=False,
                 )
-                create_region_metric_tables(
+                metric_tables = create_region_metric_tables(
                     input_ts_np,
                     ref_ts_np,
                     get_coord_values(input, lat=True),
@@ -2056,6 +2579,24 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
                     region_names,
                     output_stem=region_output_stem,
                 )
+                spearman_basis = "the time series"
+                if remove_seasonal_cycle_from_corr:
+                    # after the spatial metrics, which need the raw maps: each
+                    # series loses its own monthly means in place, one month at
+                    # a time, so the correlation follows the anomalies
+                    months = input_time.dt.month.values
+                    with warnings.catch_warnings():
+                        # cells without any paired step warn as empty slices
+                        warnings.simplefilter("ignore", category=RuntimeWarning)
+                        for month in np.unique(months):
+                            in_month = months == month
+                            for stack in (input_ts_np, ref_ts_np):
+                                stack[in_month] -= np.nanmean(stack[in_month], axis=0)
+                    spearman_basis = "the monthly anomalies of the time series"
+                spearman_seasonality = create_seasonality_label(
+                    remove_seasonal_cycle_from_corr
+                )
+                spearman, spearman_pval = calculate_spearman_map(input_ts_np, ref_ts_np)
             except ValueError as ve:
                 logger.error("Input and ref do not have the same temporal extent.")
                 logger.info(input_time)
@@ -2066,6 +2607,13 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
         logger.info("Calculating spearman correlation from seasonalities.")
         input_clim_np = np.asarray(input["clim"].values)
         ref_clim_np = np.asarray(ref["clim"].values)
+        if season_months is not None:
+            # the climatologies keep all 12 months, those outside the season empty
+            season_index = np.asarray(season_months) - 1
+            input_clim_np = input_clim_np[season_index]
+            ref_clim_np = ref_clim_np[season_index]
+        spearman_basis = "the monthly climatologies"
+        spearman_seasonality = CLIMATOLOGY_SEASONALITY_LABEL
         if not np.any(np.isfinite(input_clim_np) & np.isfinite(ref_clim_np)):
             msg = (
                 "Input and reference climatologies have no paired finite values "
@@ -2084,7 +2632,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
             metric=result_metric,
             log_table=False,
         )
-        create_region_metric_tables(
+        metric_tables = create_region_metric_tables(
             input_clim_np,
             ref_clim_np,
             get_coord_values(input, lat=True),
@@ -2203,19 +2751,28 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
         rel_std.attrs = {
             "units": "1",
             "long_name": "Relative standard deviation (input / reference)",
+            "seasonality": create_seasonality_label(remove_seasonal_cycle_from_std),
         }
         output["rel_std"] = rel_std
     if full_metrics:
         spearman.attrs = {
             "units": "1",
-            "long_name": "Spearman rank correlation (input vs reference)",
+            "long_name": (
+                f"Spearman rank correlation of {spearman_basis} (input vs reference)"
+            ),
+            "seasonality": spearman_seasonality,
         }
         spearman_pval.attrs = {
             "units": "1",
-            "long_name": "p-value of Spearman rank correlation (input vs reference)",
+            "long_name": (
+                f"p-value of Spearman rank correlation of {spearman_basis} "
+                "(input vs reference)"
+            ),
         }
         output["spearman"] = spearman
         output["spearman_pval"] = spearman_pval
+    if season_months is not None:
+        output.attrs["season_months"] = np.asarray(season_months, dtype=np.int32)
     file_name = "relative_stats"
     if input_name is not None:
         file_name += f"_{input_name}"
@@ -2242,7 +2799,7 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
     write_xarray_to_file(ds=output, file_path=file_name, compression=compression)
     logger.info(f"Written output to {file_name}")
     if bootstrap_index is None:
-        create_relative_stats_table(
+        relative_stats_table = create_relative_stats_table(
             output,
             input_clim,
             ref_clim,
@@ -2256,52 +2813,34 @@ def compare_input_with_ref(  # noqa: PLR0912, PLR0913, PLR0915
             ),
         )
     if plot:
-        if full_metrics:
-            plot_map(
+        plot_files_by_region = {
+            region_name: write_comparison_plots(
+                rel_mean=rel_mean,
+                input_clim=input_clim,
+                ref_clim=ref_clim,
+                input_name=input_name,
+                ref_name=ref_name,
+                output_path=output_path,
                 rel_std=rel_std,
-                rel_mean=rel_mean,
                 spearman=spearman,
-                ref_clim=ref_clim,
-                input_clim=input_clim,
-                input_name=input_name,
-                ref_name=ref_name,
-                output_path=output_path,
+                bias_only=bias_only,
+                global_climate=global_climate,
                 overlapping_years=overlapping_years,
+                season_months=season_months,
+                std_seasonality=rel_std.attrs["seasonality"] if with_std else None,
+                spearman_seasonality=spearman_seasonality if full_metrics else None,
+                region_name=region_name,
             )
-        elif global_climate:
-            rel_mean_diff = (
-                100
-                * (np.nanmean(input_clim, axis=0) - np.nanmean(ref_clim, axis=0))
-                / np.nanmean(ref_clim, axis=0)
-            )
-            rel_mean_diff = np.where(
-                np.nanmax(ref_clim, axis=0) < 0.1, np.nan, rel_mean_diff
-            )
-            plot_map_global_climate2(
-                rel_mean=rel_mean_diff,
-                diff_mean=np.nanmean(input_clim, axis=0) - np.nanmean(ref_clim, axis=0),
-                input_name=input_name,
-                ref_name=ref_name,
-                output_path=output_path,
-                overlapping_years=overlapping_years,
-            )
-            plot_map_local_climate(
-                input_clim=input_clim,
-                ref_clim=ref_clim,
-                input_name=input_name,
-                ref_name=ref_name,
-                output_path=output_path,
-            )
-        else:
-            plot_map_bias_only(
-                rel_mean=rel_mean,
-                ref_clim=ref_clim,
-                input_clim=input_clim,
-                input_name=input_name,
-                ref_name=ref_name,
-                output_path=output_path,
-                overlapping_years=overlapping_years,
-                total_rel_mean=np.nanmean(input_clim) / np.nanmean(ref_clim),
+            for region_name in [None, *region_names]
+        }
+        if bootstrap_index is None and overview_pdf_file is not None:
+            write_overview_pdf(
+                overview_pdf_file,
+                relative_stats_table,
+                metric_tables,
+                plot_files_by_region,
+                input_name,
+                ref_name,
             )
     return file_name
 
@@ -2549,35 +3088,46 @@ def get_available_years(
     """Determine available years from constrains and datasets.
 
     If no reference data is given it will only be the input years inside
-    the year slice.
+    the year slice. See `select_available_years`.
     """
     logger.info("Determining available years.")
-    # get all years from input data
     years_in = get_years_from_path(input_path, file_name=input_file_name)
-    years_in.sort()
-    logger.debug(f"Input years: {years_in}")
-
-    # get all years from reference data
-    years_ref = get_years_from_path(
-        ref_path, raise_exception=False, file_name=ref_file_name
+    years_ref = (
+        get_years_from_path(ref_path, raise_exception=False, file_name=ref_file_name)
+        if ref_path is not None
+        else []
     )
-    years_ref.sort()
-    logger.debug(f"Ref years: {years_ref}")
+    logger.debug(f"Input years: {sorted(years_in)}; ref years: {sorted(years_ref)}")
+    return select_available_years(years_in, years_ref, year_slice, direct_comp)
 
-    # find overlapping years
-    years = []
-    possible_years = years_in
-    if not direct_comp and years_ref:
-        possible_years.extend([y for y in years_ref if y not in possible_years])
-        possible_years.sort()
-    for year in possible_years:
-        if year_slice.start is not None and year < year_slice.start:
-            continue
-        if year_slice.stop is not None and year > year_slice.stop:
-            continue
-        if not years_ref or year in years_ref or not direct_comp:
-            years.append(year)
-    return years
+
+def select_available_years(years_in, years_ref, year_slice=None, direct_comp=True):
+    """Select the years to compare from the years of both datasets.
+
+    Args:
+        years_in (list of int): Years of the input dataset.
+        years_ref (list of int): Years of the reference dataset, empty without one.
+        year_slice (slice, optional): First and last allowed year.
+        direct_comp (bool): Keep only the years both datasets cover; otherwise
+            the years of either dataset.
+
+    Returns
+    -------
+        Sorted list of the selected years.
+    """
+    year_slice = year_slice if year_slice is not None else slice(None, None)
+    candidates = set(years_in)
+    if years_ref:
+        if direct_comp:
+            candidates &= set(years_ref)
+        else:
+            candidates |= set(years_ref)
+    return [
+        year
+        for year in sorted(candidates)
+        if (year_slice.start is None or year >= year_slice.start)
+        and (year_slice.stop is None or year <= year_slice.stop)
+    ]
 
 
 def year_structure_paths(path: Path, file_name="*.*") -> bool:
@@ -2666,16 +3216,34 @@ def gridded_data_evaluation(  # noqa: PLR0913
     n_cpus=1,
     compression=None,
     regions="all",
-    write_region_stats=False,
+    create_wmo_region_output=False,
+    remove_seasonal_cycle_from_std=False,
+    remove_seasonal_cycle_from_corr=True,
+    season_months=None,
+    overview_pdf_name=None,
 ):
     """Validate a spatial variable by comparing dataset climatologies.
 
-    `regions` ("all", "none" or a comma separated list of WMO regions) selects
-    the regions the statistics are tabled for next to the whole domain;
-    `write_region_stats` also writes those tables to CSV.
+    With `create_wmo_region_output` the statistics tables get a row per WMO
+    region in `regions` ("all", "none" or a comma separated list), are written
+    to CSV, and every figure is drawn again for each region, cropped to it.
+    Otherwise only the whole domain is evaluated.
+
+    `remove_seasonal_cycle_from_std`/`_corr` take the std and the Spearman
+    correlation from the anomalies of the monthly climatology. With fewer than
+    `MIN_YEARS_TO_REMOVE_SEASONAL_CYCLE` years covered by both datasets (per
+    bootstrap selection) the seasonal cycle is kept in both. Bootstrapping always
+    correlates with the seasonal cycle. `season_months` restricts all
+    statistics and metrics to these calendar months.
+
+    The tables and the figures are also written to the PDF `overview_pdf_name`
+    in `output_path`, by default ``overview_<input>_<ref>.pdf``.
     """
     output_path = Path(output_path)
-    region_names = select_regions(regions)
+    region_names = select_regions(regions) if create_wmo_region_output else []
+    overview_pdf_file = output_path / (
+        overview_pdf_name or f"overview_{input.name}_{ref.name}.pdf".replace(" ", "_")
+    )
     input_path = input.path
     ref_path = ref.path
     logger.debug(
@@ -2693,6 +3261,9 @@ def gridded_data_evaluation(  # noqa: PLR0913
             ref_name=ref.name,
             bias_only=bias_only,
             global_climate=global_climate,
+            region_names=region_names,
+            result_metric=result_metric,
+            overview_pdf_file=overview_pdf_file,
         )
         return
 
@@ -2729,18 +3300,44 @@ def gridded_data_evaluation(  # noqa: PLR0913
             with ErrorLogger(logger):
                 raise ValueError(msg)
 
-    available_years = get_available_years(
-        input_path,
-        ref_path,
-        year_slice,
-        direct_comp,
-        input_file_name=input.file_name,
-        ref_file_name=ref.file_name,
+    logger.info("Determining available years.")
+    years_in = get_years_from_path(input_path, file_name=input.file_name)
+    years_ref = (
+        get_years_from_path(ref_path, raise_exception=False, file_name=ref.file_name)
+        if ref_path is not None
+        else []
+    )
+    # modes comparing the datasets directly use the years both cover; bootstrapping
+    # draws the years of each dataset independently and, like the comparison of
+    # the climatologies only, keeps the union
+    compares_common_years = not bootstrap_requested and (
+        direct_comp or stream_metrics or global_climate
+    )
+    available_years = select_available_years(
+        years_in, years_ref, year_slice, compares_common_years
     )
     logger.info(f"Years {available_years} are available for comparison.")
     if not available_years:
         logger.error("Since no data is available the program is stoped.")
         return
+    # both anomalies need enough years, so only the years both datasets cover
+    # count, and a bootstrap selection holds at most n_bootstrap_years of them
+    n_common_years = len(select_available_years(years_in, years_ref, year_slice))
+    n_common_years = (
+        min(n_common_years, n_bootstrap_years)
+        if bootstrap_requested
+        else n_common_years
+    )
+    if n_common_years < MIN_YEARS_TO_REMOVE_SEASONAL_CYCLE and (
+        remove_seasonal_cycle_from_std or remove_seasonal_cycle_from_corr
+    ):
+        logger.warning(
+            f"Input and reference share only {n_common_years} years, fewer than "
+            f"{MIN_YEARS_TO_REMOVE_SEASONAL_CYCLE}, so the seasonal cycle is kept "
+            "in the standard deviation and the Spearman correlation."
+        )
+        remove_seasonal_cycle_from_std = False
+        remove_seasonal_cycle_from_corr = False
 
     if ref_path is None:
         # Only create statistics; do not compare
@@ -2762,6 +3359,8 @@ def gridded_data_evaluation(  # noqa: PLR0913
                     output_path=output_path / output_name,
                     avaiable_years=available_years,  # keep parameter name as used elsewhere
                     compression=compression,
+                    remove_seasonal_cycle_from_std=remove_seasonal_cycle_from_std,
+                    season_months=season_months,
                 )
 
         elif (
@@ -2782,6 +3381,8 @@ def gridded_data_evaluation(  # noqa: PLR0913
                     available_years=available_years,
                     file_name=input.file_name,
                     compression=compression,
+                    remove_seasonal_cycle_from_std=remove_seasonal_cycle_from_std,
+                    season_months=season_months,
                 )
                 for bootstrap_index in range(n_bootstrap_selections)
             )
@@ -2797,6 +3398,8 @@ def gridded_data_evaluation(  # noqa: PLR0913
                 available_years=available_years,
                 file_name=input.file_name,
                 compression=compression,
+                remove_seasonal_cycle_from_std=remove_seasonal_cycle_from_std,
+                season_months=season_months,
             )
         else:
             with ErrorLogger(logger):
@@ -2843,7 +3446,13 @@ def gridded_data_evaluation(  # noqa: PLR0913
                     result_metric=result_metric,
                     compression=compression,
                     region_names=region_names,
-                    write_region_stats=write_region_stats,
+                    write_region_stats=create_wmo_region_output,
+                    # the figures are drawn once from the medians of all runs
+                    plot=False,
+                    remove_seasonal_cycle_from_std=remove_seasonal_cycle_from_std,
+                    # bootstrapping correlates with the seasonal cycle on purpose
+                    remove_seasonal_cycle_from_corr=False,
+                    season_months=season_months,
                 )
                 for bootstrap_index in range(n_bootstrap_selections)
             )
@@ -2853,7 +3462,7 @@ def gridded_data_evaluation(  # noqa: PLR0913
                 stat_files, input_name=input.name, ref_name=ref.name
             )
             rel_stat_file = get_rel_stat_file(output_path, input.name, ref.name)
-            create_relative_stats_table(
+            relative_stats_table = create_relative_stats_table(
                 results,
                 results["input_clim"],
                 results["ref_clim"],
@@ -2862,88 +3471,78 @@ def gridded_data_evaluation(  # noqa: PLR0913
                 ref.name,
                 output_file=(
                     rel_stat_file.with_name(f"{rel_stat_file.stem}_regions.csv")
-                    if write_region_stats
+                    if create_wmo_region_output
                     else None
                 ),
             )
-            if (
-                "spearman" in results
-                and "rel_std" in results
-                and not bias_only
-                and not global_climate
-            ):
-                plot_map(
+            plot_files_by_region = {
+                region_name: write_comparison_plots(
+                    input_name=input.name,
+                    ref_name=ref.name,
+                    output_path=output_path,
+                    bias_only=bias_only,
+                    global_climate=global_climate,
+                    season_months=season_months,
+                    std_seasonality=create_seasonality_label(
+                        remove_seasonal_cycle_from_std
+                    ),
+                    # bootstrapping correlates the raw series or the climatologies
+                    spearman_seasonality=(
+                        create_seasonality_label(False)
+                        if stream_metrics
+                        else CLIMATOLOGY_SEASONALITY_LABEL
+                    ),
+                    region_name=region_name,
                     **results,
-                    output_path=output_path,
-                    input_name=input.name,
-                    ref_name=ref.name,
                 )
-            elif global_climate:
-                rel_mean_diff = (
-                    100
-                    * (
-                        np.nanmean(results["input_clim"], axis=0)
-                        - np.nanmean(results["ref_clim"], axis=0)
-                    )
-                    / np.nanmean(results["ref_clim"], axis=0)
-                )
-                rel_mean_diff = np.where(
-                    np.nanmax(results["ref_clim"], axis=0) < 0.1, np.nan, rel_mean_diff
-                )
-                plot_map_global_climate2(
-                    rel_mean=rel_mean_diff,
-                    diff_mean=np.nanmean(results["input_clim"], axis=0)
-                    - np.nanmean(results["ref_clim"], axis=0),
-                    output_path=output_path,
-                    input_name=input.name,
-                    ref_name=ref.name,
-                )
-                plot_map_local_climate(
-                    input_clim=results["input_clim"],
-                    ref_clim=results["ref_clim"],
-                    input_name=input.name,
-                    ref_name=ref.name,
-                    output_path=output_path,
-                )
-            else:
-                plot_map_bias_only(
-                    rel_mean=results["rel_mean"],
-                    input_clim=results["input_clim"],
-                    ref_clim=results["ref_clim"],
-                    output_path=output_path,
-                    input_name=input.name,
-                    ref_name=ref.name,
-                )
+                for region_name in [None, *region_names]
+            }
+            # the spatial metrics differ per selection and are not combined
+            write_overview_pdf(
+                overview_pdf_file,
+                relative_stats_table,
+                {},
+                plot_files_by_region,
+                input.name,
+                ref.name,
+            )
         else:
             logger.error("There are no statfiles created from the evaluation.")
     else:
         logger.info("Compare without bootstrapping.")
-        compare_input_with_ref(
-            input_path,
-            input.var,
-            output_path,
-            ref_path,
-            ref.var,
-            input.name,
-            ref.name,
-            input.factor,
-            ref.factor,
-            coordinate_slice,
-            ncpus=n_cpus,
-            available_years=available_years,
-            direct_comp=direct_comp,
-            available_mem=avaiable_mem,
-            input_file_name=input.file_name,
-            ref_file_name=ref.file_name,
-            target_freq=target_time_freq,
-            bias_only=bias_only,
-            global_climate=global_climate,
-            compare_on_coarser_grid=compare_on_coarser_grid,
-            stream_metrics=stream_metrics,
-            mask_da=mask_da,
-            mask_var=mask_var,
-            result_metric=result_metric,
-            compression=compression,
-            region_names=region_names,
-            write_region_stats=write_region_stats,
-        )
+        # every dask thread holds its own chunk, so --ncpus bounds the memory
+        # that --available-mem sizes the chunks for
+        with dask.config.set(num_workers=n_cpus):
+            compare_input_with_ref(
+                input_path,
+                input.var,
+                output_path,
+                ref_path,
+                ref.var,
+                input.name,
+                ref.name,
+                input.factor,
+                ref.factor,
+                coordinate_slice,
+                ncpus=n_cpus,
+                available_years=available_years,
+                direct_comp=direct_comp,
+                available_mem=avaiable_mem,
+                input_file_name=input.file_name,
+                ref_file_name=ref.file_name,
+                target_freq=target_time_freq,
+                bias_only=bias_only,
+                global_climate=global_climate,
+                compare_on_coarser_grid=compare_on_coarser_grid,
+                stream_metrics=stream_metrics,
+                mask_da=mask_da,
+                mask_var=mask_var,
+                result_metric=result_metric,
+                compression=compression,
+                region_names=region_names,
+                write_region_stats=create_wmo_region_output,
+                remove_seasonal_cycle_from_std=remove_seasonal_cycle_from_std,
+                remove_seasonal_cycle_from_corr=remove_seasonal_cycle_from_corr,
+                season_months=season_months,
+                overview_pdf_file=overview_pdf_file,
+            )

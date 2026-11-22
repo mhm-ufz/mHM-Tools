@@ -322,6 +322,33 @@ def test_format_soil_horizons_writes_v6_horizon_classes_and_mode1_lut(
     ]
 
 
+def test_format_soil_horizons_v6_classes_keep_their_bulk_density(tmp_path):
+    """One texture with two bulk densities gives two v6 classes, not their mean."""
+    input_path = tmp_path / "soil"
+    input_path.mkdir()
+    manifest = _write_soil_manifest(input_path)
+    texture = {"clay": 20, "sand": 30, "silt": 50}
+    for horizon, density in ((1, 1000), (2, 1800)):
+        for name, value in (*texture.items(), ("bd", density)):
+            _write_raster(
+                input_path / f"{name}{horizon}.tif",
+                np.full((2, 2), value, dtype=np.float32),
+            )
+    dem = tmp_path / "dem.tif"
+    _write_raster(dem, np.ones((2, 2), dtype=np.float32))
+
+    raster, definition = format_soil_horizons(manifest, dem, tmp_path / "v6", "nc")
+
+    with xr.open_dataset(raster, decode_cf=False) as dataset:
+        np.testing.assert_array_equal(
+            dataset["soil_class"].values, [np.full((2, 2), 1), np.full((2, 2), 2)]
+        )
+    assert definition.read_text(encoding="utf-8").splitlines()[2:] == [
+        "1\t20\t30\t1",
+        "2\t20\t30\t1.8",
+    ]
+
+
 def _write_gapped_soil_manifest(input_path: Path) -> Path:
     manifest = input_path / "format-data.txt"
     manifest.write_text(
@@ -468,3 +495,17 @@ def test_pre_exports_manifest_formatters():
     """Both manifest-based formatters are public Python APIs."""
     assert pre.format_lc_periods is format_lc_periods
     assert pre.format_soil_horizons is format_soil_horizons
+
+
+def test_format_soil_horizons_names_a_wrong_bulk_density_unit(tmp_path):
+    """A kg/m3 raster declared as g/cm3 fails early on the unit."""
+    input_path = tmp_path / "soil"
+    input_path.mkdir()
+    manifest = _write_soil_manifest(input_path)
+    manifest.write_text(manifest.read_text().replace("kg/m3", "g/cm3"))
+    _write_soil_inputs(input_path)
+    dem = tmp_path / "dem.tif"
+    _write_raster(dem, np.ones((2, 2), dtype=np.float32))
+
+    with pytest.raises(ValueError, match="Check the bulk density unit"):
+        format_soil_horizons(manifest, dem, tmp_path / "out", "nc")

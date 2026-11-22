@@ -89,6 +89,7 @@ from mhm_tools.common.plotter import (
     plot_single_map,
     style_axes,
     style_map_axes,
+    write_table_and_figures_pdf,
 )
 from mhm_tools.common.time_utils import (
     get_data_coverage,
@@ -1026,7 +1027,8 @@ def create_snow_stats_table(
 
     Args:
         accuracy_ds: Dataset from ``calculate_classification_accuracy``.
-        difference_metrics: Dataset from ``compare_snow_season_metrics``.
+        difference_metrics: Dataset from ``compare_snow_season_metrics``, or
+            None for a table of the accuracy alone.
         region_names: Keys of ``WMO_REGION_BOUNDS``.
         input_name: Label of the input dataset.
         ref_name: Label of the reference dataset.
@@ -1034,28 +1036,23 @@ def create_snow_stats_table(
 
     Returns
     -------
-        DataFrame of the medians per region.
+        DataFrame of the medians per region, with the logged title in
+        ``attrs["title"]``.
     """
     # short names keep the table narrow, the title explains them
-    stats = xr.Dataset(
-        {
-            "accuracy": accuracy_ds["classification_accuracy"],
-            "first_snow_day_diff": difference_metrics["first_snow_day_of_window"],
-            "last_snow_day_diff": difference_metrics["last_snow_day_of_window"],
-            "season_span_diff": difference_metrics["season_span_days"],
-            "snow_cover_days_diff": difference_metrics["snow_cover_days"],
-        }
-    )
+    stats = xr.Dataset({"accuracy": accuracy_ds["classification_accuracy"]})
+    if difference_metrics is not None:
+        stats["first_snow_day_diff"] = difference_metrics["first_snow_day_of_window"]
+        stats["last_snow_day_diff"] = difference_metrics["last_snow_day_of_window"]
+        stats["season_span_diff"] = difference_metrics["season_span_days"]
+        stats["snow_cover_days_diff"] = difference_metrics["snow_cover_days"]
     stats_df = calculate_region_medians(stats, list(stats.data_vars), region_names)
-    write_stats_table(
-        stats_df,
-        title=(
-            f"Median snow statistics of {input_name} against {ref_name} "
-            "(accuracy = share of matching time steps, *_diff = input - reference "
-            "in days, taken over every cell and year)"
-        ),
-        output_file=output_file,
+    stats_df.attrs["title"] = (
+        f"Median snow statistics of {input_name} against {ref_name} "
+        "(accuracy = share of matching time steps, *_diff = input - reference "
+        "in days, taken over every cell and year)"
     )
+    write_stats_table(stats_df, title=stats_df.attrs["title"], output_file=output_file)
     return stats_df
 
 
@@ -1589,15 +1586,18 @@ def create_region_outputs(
     write_gif=True,
     gif_fps=4,
     max_gif_frames=0,
+    accuracy_ds=None,
+    years=None,
 ):
     """Write the coverage plot, accuracy map and gif for every region with data.
 
     Regions whose bounds hold no cell, or no time step where both datasets
-    hold valid data, are skipped with a log message.
+    hold valid data, are skipped with a log message. Without the snow cover
+    flags, as in a redraw that has none, only the accuracy maps are written.
 
     Args:
-        input_flag: Binary snow cover DataArray of the input dataset.
-        ref_flag: Binary snow cover DataArray of the reference dataset.
+        input_flag: Binary snow cover DataArray of the input dataset, or None.
+        ref_flag: Binary snow cover DataArray of the reference dataset, or None.
         output_dir: Directory the region outputs are written to.
         region_names: Region names to process.
         input_name: Label of the input dataset.
@@ -1607,6 +1607,10 @@ def create_region_outputs(
         write_gif: Render the animated comparison per region.
         gif_fps: Playback speed of the gifs.
         max_gif_frames: Maximum number of gif frames, 0 for all time steps.
+        accuracy_ds: Dataset from ``calculate_classification_accuracy`` for the
+            whole domain, None to calculate it per region from the flags.
+        years: First and last compared year for the titles, None to take them
+            from the flags.
 
     Returns
     -------
@@ -1614,14 +1618,21 @@ def create_region_outputs(
     """
     written_files = {}
     for region_name in region_names:
-        region_input = crop_to_region(input_flag, region_name)
-        region_ref = crop_to_region(ref_flag, region_name)
-        if region_input.sizes["lat"] == 0 or region_input.sizes["lon"] == 0:
+        region_input = (
+            None if input_flag is None else crop_to_region(input_flag, region_name)
+        )
+        region_ref = None if ref_flag is None else crop_to_region(ref_flag, region_name)
+        # the accuracy is calculated per cell, so a region's is the domain's cropped
+        region_accuracy = (
+            crop_to_region(accuracy_ds, region_name)
+            if accuracy_ds is not None
+            else calculate_classification_accuracy(region_input, region_ref)
+        )
+        if region_accuracy.sizes["lat"] == 0 or region_accuracy.sizes["lon"] == 0:
             logger.info(f"Skipping region {region_name}: no cells inside its bounds.")
             continue
         # the accuracy map needs time steps where both datasets hold data
-        both_valid = get_valid_snow_mask(region_input) & get_valid_snow_mask(region_ref)
-        valid_cells = int(both_valid.any("time").sum())
+        valid_cells = int(region_accuracy["compared_time_steps"].notnull().sum())
         if valid_cells == 0:
             logger.info(
                 f"Skipping region {region_name}: no time step with valid data in "
@@ -1629,36 +1640,39 @@ def create_region_outputs(
             )
             continue
         logger.info(
-            f"Region {region_name}: {region_input.sizes['lat']} x "
-            f"{region_input.sizes['lon']} cells, {valid_cells} of them with data "
+            f"Region {region_name}: {region_accuracy.sizes['lat']} x "
+            f"{region_accuracy.sizes['lon']} cells, {valid_cells} of them with data "
             "in both datasets."
         )
         safe_name = sanitize_name(region_name)
         suffix = f"{input_name}_vs_{ref_name}_region_{safe_name}"
-        region_time = pd.DatetimeIndex(region_input.time.values)
-        written_files[f"{region_name} cover_percentage_plot"] = (
-            create_snow_cover_percentage_plot(
-                region_input,
-                region_ref,
-                output_dir / f"snow_cover_percentage_{suffix}.png",
-                input_name=input_name,
-                ref_name=ref_name,
-                region_name=region_name,
+        region_years = years
+        if region_input is not None:
+            region_time = pd.DatetimeIndex(region_input.time.values)
+            region_years = years or (region_time[0].year, region_time[-1].year)
+            written_files[f"{region_name} cover_percentage_plot"] = (
+                create_snow_cover_percentage_plot(
+                    region_input,
+                    region_ref,
+                    output_dir / f"snow_cover_percentage_{suffix}.png",
+                    input_name=input_name,
+                    ref_name=ref_name,
+                    region_name=region_name,
+                )
             )
-        )
         written_files[f"{region_name} accuracy_map"] = (
             create_classification_accuracy_map(
-                calculate_classification_accuracy(region_input, region_ref),
+                region_accuracy,
                 output_dir / f"classification_accuracy_{suffix}.png",
                 input_name=input_name,
                 ref_name=ref_name,
                 target_freq=target_freq,
                 accuracy_vmin=accuracy_vmin,
                 region_name=region_name,
-                years=(region_time[0].year, region_time[-1].year),
+                years=region_years,
             )
         )
-        if write_gif:
+        if write_gif and region_input is not None:
             written_files[f"{region_name} gif"] = create_snow_cover_gif(
                 region_input,
                 region_ref,
@@ -1669,6 +1683,175 @@ def create_region_outputs(
                 max_frames=max_gif_frames,
                 region_name=region_name,
             )
+    return written_files
+
+
+def read_snow_outputs(output_dir, input_name, ref_name):
+    """Read the accuracy, season differences and snow cover of an earlier run.
+
+    Args:
+        output_dir (Path): Output directory of the earlier run.
+        input_name, ref_name (str): Dataset labels of the earlier run.
+
+    Returns
+    -------
+        Tuple of the accuracy Dataset, the season difference Dataset (None when
+        it was not written), the input and the reference snow cover flag (both
+        None unless both were written) and the first and last compared year
+        (None when unknown).
+
+    Raises
+    ------
+        FileNotFoundError: The accuracy file, the least a redraw needs, is
+            missing.
+    """
+    accuracy_file = (
+        output_dir / f"classification_accuracy_{input_name}_vs_{ref_name}.nc"
+    )
+    if not accuracy_file.is_file():
+        msg = (
+            f"--only-plot needs {accuracy_file}, which a run without --only-plot "
+            "writes; check --output-dir, --input-name and --ref-name."
+        )
+        with ErrorLogger(logger):
+            raise FileNotFoundError(msg)
+    with xr.open_dataset(accuracy_file) as ds:
+        accuracy = ds.load()
+    difference_file = (
+        output_dir / f"snow_season_metrics_difference_{input_name}_minus_{ref_name}.nc"
+    )
+    difference_metrics = None
+    if difference_file.is_file():
+        with xr.open_dataset(difference_file) as ds:
+            difference_metrics = ds.load()
+    else:
+        logger.warning(
+            f"{difference_file} is missing, so the table holds only the accuracy."
+        )
+    flag_files = [
+        output_dir / f"snow_cover_{name}.nc" for name in (input_name, ref_name)
+    ]
+    flags = [None, None]
+    if all(file.is_file() for file in flag_files):
+        for index, file in enumerate(flag_files):
+            with xr.open_dataset(file) as ds:
+                flags[index] = ds["snow_cover"].load()
+    input_flag, ref_flag = flags
+    years = None
+    if "first_year" in accuracy.attrs:
+        years = (int(accuracy.attrs["first_year"]), int(accuracy.attrs["last_year"]))
+    elif input_flag is not None:
+        time_index = pd.DatetimeIndex(input_flag.time.values)
+        years = (time_index[0].year, time_index[-1].year)
+    return accuracy, difference_metrics, input_flag, ref_flag, years
+
+
+def write_snow_figures(
+    accuracy,
+    difference_metrics,
+    input_flag,
+    ref_flag,
+    output_dir,
+    region_names,
+    input_name,
+    ref_name,
+    years=None,
+    accuracy_vmin=None,
+    write_gif=True,
+    gif_fps=4,
+    max_gif_frames=0,
+    region_stats_file=None,
+    overview_pdf_name=None,
+):
+    """Write the statistics table, the figures of domain and regions and the PDF.
+
+    The evaluation calls it after writing its fields, a redraw with the fields
+    read back by `read_snow_outputs`. Without the snow cover flags the cover
+    plots and the gifs are left out.
+
+    Args:
+        accuracy: Dataset from ``calculate_classification_accuracy``, with the
+            frequency alias of its time steps in ``attrs["target_frequency"]``.
+        difference_metrics: Dataset from ``compare_snow_season_metrics``.
+        input_flag, ref_flag: Binary snow cover DataArrays, or None.
+        output_dir (Path): Directory the outputs are written to.
+        region_names (list of str): Regions to write.
+        input_name, ref_name (str): Dataset labels used in titles and file names.
+        years (tuple of int, optional): First and last compared year for the
+            titles.
+        accuracy_vmin, write_gif, gif_fps, max_gif_frames: See `snow_evaluation`.
+        region_stats_file (Path, optional): CSV file of the statistics table,
+            None to only log it.
+        overview_pdf_name (str, optional): Name of the PDF in `output_dir`.
+
+    Returns
+    -------
+        Dict of the written output file paths.
+    """
+    target_freq = accuracy.attrs["target_frequency"]
+    stats_df = create_snow_stats_table(
+        accuracy,
+        difference_metrics,
+        region_names,
+        input_name,
+        ref_name,
+        output_file=region_stats_file,
+    )
+    written_files = {}
+    if region_stats_file is not None:
+        written_files["region_stats"] = region_stats_file
+    written_files["accuracy_map"] = create_classification_accuracy_map(
+        accuracy,
+        output_dir / f"classification_accuracy_{input_name}_vs_{ref_name}.png",
+        input_name=input_name,
+        ref_name=ref_name,
+        target_freq=target_freq,
+        accuracy_vmin=accuracy_vmin,
+        years=years,
+    )
+    if input_flag is not None:
+        written_files["cover_percentage_plot"] = create_snow_cover_percentage_plot(
+            input_flag,
+            ref_flag,
+            output_dir / f"snow_cover_percentage_{input_name}_vs_{ref_name}.png",
+            input_name=input_name,
+            ref_name=ref_name,
+        )
+    written_files.update(
+        create_region_outputs(
+            input_flag,
+            ref_flag,
+            output_dir,
+            region_names,
+            input_name=input_name,
+            ref_name=ref_name,
+            target_freq=target_freq,
+            accuracy_vmin=accuracy_vmin,
+            write_gif=write_gif,
+            gif_fps=gif_fps,
+            max_gif_frames=max_gif_frames,
+            accuracy_ds=accuracy,
+            years=years,
+        )
+    )
+    if write_gif and input_flag is not None:
+        written_files["gif"] = create_snow_cover_gif(
+            input_flag,
+            ref_flag,
+            output_dir / f"snow_cover_comparison_{input_name}_vs_{ref_name}.gif",
+            input_name=input_name,
+            ref_name=ref_name,
+            frames_per_second=gif_fps,
+            max_frames=max_gif_frames,
+        )
+    # the gifs cannot be embedded, so the PDF holds the table and the PNG figures
+    written_files["overview_pdf"] = write_table_and_figures_pdf(
+        output_dir
+        / (overview_pdf_name or f"snow_overview_{input_name}_vs_{ref_name}.pdf"),
+        stats_df,
+        written_files.values(),
+        stats_df.attrs["title"],
+    )
     return written_files
 
 
@@ -1702,13 +1885,16 @@ def snow_evaluation(  # noqa: PLR0913
     ncpus=1,
     compression=None,
     write_region_stats=False,
+    overview_pdf_name=None,
+    only_plot=False,
 ):
     """Evaluate the snow cover of an input dataset against a reference dataset.
 
     Both datasets are normalized to a common calendar and grid, reduced to a
     binary snow cover flag and summarized into yearly first snow day, last snow
     day and season duration maps. Results are written as NetCDF files and as an
-    animated comparison.
+    animated comparison. A PDF holds the statistics table of the domain and the
+    regions and every figure, the domain first and then each region.
 
     Args:
         input_path: File or directory holding the input data.
@@ -1735,6 +1921,12 @@ def snow_evaluation(  # noqa: PLR0913
         compression: NetCDF compression settings, or None.
         write_region_stats: Also write the statistics table of the domain and
             the regions to CSV; it is always logged.
+        overview_pdf_name: Name of the PDF in `output_dir`, None for
+            ``snow_overview_<input>_vs_<ref>.pdf``.
+        only_plot: Redraw the table, the figures and the PDF from the files an
+            earlier run wrote to `output_dir`, without reading the data; it
+            needs the accuracy file, the table's day differences the season
+            difference file, and the cover plots and gifs the snow cover files.
 
     Returns
     -------
@@ -1743,6 +1935,39 @@ def snow_evaluation(  # noqa: PLR0913
     output_dir = Path(output_dir)
     # resolve the regions first, so a typo fails before the data is read
     region_names = select_regions(regions)
+    figure_options = {
+        "accuracy_vmin": accuracy_vmin,
+        "write_gif": write_gif,
+        "gif_fps": gif_fps,
+        "max_gif_frames": max_gif_frames,
+        "region_stats_file": (
+            output_dir / f"snow_region_stats_{input_name}_vs_{ref_name}.csv"
+            if write_region_stats
+            else None
+        ),
+        "overview_pdf_name": overview_pdf_name,
+    }
+    if only_plot:
+        accuracy, difference_metrics, input_flag, ref_flag, years = read_snow_outputs(
+            output_dir, input_name, ref_name
+        )
+        if input_flag is None:
+            logger.warning(
+                "The cover plots and gifs need both snow cover files, which "
+                "--no-write-snow-cover leaves out."
+            )
+        return write_snow_figures(
+            accuracy,
+            difference_metrics,
+            input_flag,
+            ref_flag,
+            output_dir,
+            region_names,
+            input_name,
+            ref_name,
+            years=years,
+            **figure_options,
+        )
     input_da = probe_snow_record(
         input_path, input_file_name, input_var, "input", ncpus, max_memory_gib
     )
@@ -1825,11 +2050,16 @@ def snow_evaluation(  # noqa: PLR0913
     difference_metrics = compare_snow_season_metrics(input_metrics, ref_metrics)
     accuracy = calculate_classification_accuracy(input_flag, ref_flag)
 
+    input_time = pd.DatetimeIndex(input_flag.time.values)
+    years = (input_time[0].year, input_time[-1].year)
     common_attrs = {
         "target_frequency": target_freq,
         "year_mode": year_mode,
         "snow_year_start_month": snow_year_start_month,
         "time_step_days": step_days,
+        # a redraw names the compared period in its titles from these
+        "first_year": years[0],
+        "last_year": years[1],
     }
     input_metrics.attrs.update(
         {**common_attrs, "dataset": input_name, "snow_threshold": input_snow_threshold}
@@ -1841,21 +2071,7 @@ def snow_evaluation(  # noqa: PLR0913
         {**common_attrs, "dataset": f"{input_name} minus {ref_name}"}
     )
     accuracy.attrs.update({**common_attrs, "dataset": f"{input_name} vs {ref_name}"})
-    region_stats_file = (
-        output_dir / f"snow_region_stats_{input_name}_vs_{ref_name}.csv"
-        if write_region_stats
-        else None
-    )
-    create_snow_stats_table(
-        accuracy,
-        difference_metrics,
-        region_names,
-        input_name,
-        ref_name,
-        output_file=region_stats_file,
-    )
 
-    input_time = pd.DatetimeIndex(input_flag.time.values)
     written_files = {
         "input_metrics": write_snow_dataset(
             input_metrics,
@@ -1878,25 +2094,7 @@ def snow_evaluation(  # noqa: PLR0913
             output_dir / f"classification_accuracy_{input_name}_vs_{ref_name}.nc",
             compression=compression,
         ),
-        "accuracy_map": create_classification_accuracy_map(
-            accuracy,
-            output_dir / f"classification_accuracy_{input_name}_vs_{ref_name}.png",
-            input_name=input_name,
-            ref_name=ref_name,
-            target_freq=target_freq,
-            accuracy_vmin=accuracy_vmin,
-            years=(input_time[0].year, input_time[-1].year),
-        ),
-        "cover_percentage_plot": create_snow_cover_percentage_plot(
-            input_flag,
-            ref_flag,
-            output_dir / f"snow_cover_percentage_{input_name}_vs_{ref_name}.png",
-            input_name=input_name,
-            ref_name=ref_name,
-        ),
     }
-    if region_stats_file is not None:
-        written_files["region_stats"] = region_stats_file
     if write_snow_cover:
         written_files["input_snow_cover"] = write_snow_dataset(
             input_flag.to_dataset(name="snow_cover"),
@@ -1909,28 +2107,17 @@ def snow_evaluation(  # noqa: PLR0913
             compression=compression,
         )
     written_files.update(
-        create_region_outputs(
+        write_snow_figures(
+            accuracy,
+            difference_metrics,
             input_flag,
             ref_flag,
             output_dir,
             region_names,
-            input_name=input_name,
-            ref_name=ref_name,
-            target_freq=target_freq,
-            accuracy_vmin=accuracy_vmin,
-            write_gif=write_gif,
-            gif_fps=gif_fps,
-            max_gif_frames=max_gif_frames,
+            input_name,
+            ref_name,
+            years=years,
+            **figure_options,
         )
     )
-    if write_gif:
-        written_files["gif"] = create_snow_cover_gif(
-            input_flag,
-            ref_flag,
-            output_dir / f"snow_cover_comparison_{input_name}_vs_{ref_name}.gif",
-            input_name=input_name,
-            ref_name=ref_name,
-            frames_per_second=gif_fps,
-            max_frames=max_gif_frames,
-        )
     return written_files

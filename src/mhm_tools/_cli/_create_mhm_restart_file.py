@@ -192,7 +192,7 @@ def add_args(parser):
         "--ncpus",
         default=1,
         type=int,
-        help=("Number of CPUs to use"),
+        help=("Number of CPUs to use. 0 or -1 uses all cores."),
     )
     optional.add_argument(
         "--mpr-packages",
@@ -218,6 +218,7 @@ def run(args):
 
     from mhm_tools.common.cli_utils import get_coords, parse_lonlatbox
     from mhm_tools.common.logger import ErrorLogger
+    from mhm_tools.common.parallel import resolve_ncpus
     from mhm_tools.pre.create_mhm_restart_file import Grid, LatLon, MPRRunner
 
     from ..pre import MHMRestartFile
@@ -302,7 +303,7 @@ def run(args):
         run_on_whole_domain=args.run_on_whole_domain,
         use_split_grids=args.use_split_grids,
         clean_temp_files=args.clean_up,
-        ncpus=args.ncpus,
+        ncpus=resolve_ncpus(args.ncpus),
         merge=not args.no_merge,
         merge_only=args.merge_only,
     )

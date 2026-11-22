@@ -3,11 +3,17 @@
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import rasterio
 import xarray as xr
 
 from mhm_tools import pre
-from mhm_tools.pre.format_lai import format_lai_data, write_lai_classdefinition
+from mhm_tools.pre.format_lai import (
+    _MONTHS,
+    _classdefinition_text,
+    format_lai_data,
+    write_lai_classdefinition,
+)
 
 
 def _write_raster(path: Path, values, *, dtype: str) -> None:
@@ -84,7 +90,7 @@ def test_format_lai_data_reads_text_lookup_and_writes_outputs(tmp_path: Path):
         fill_nodata=False,
     )
 
-    assert output == tmp_path / "output" / "lai_class.nc"
+    assert output == tmp_path / "output" / "LAI_class.nc"
     definition = tmp_path / "output" / "LAI_classdefinition.txt"
     assert definition.read_text(encoding="utf-8") == _expected_definition()
     with xr.open_dataset(output, decode_cf=False) as dataset:
@@ -108,3 +114,15 @@ def test_lai_writer_and_public_exports(tmp_path: Path):
     assert output_file.read_text(encoding="utf-8") == _expected_definition()
     assert pre.format_lai_data is format_lai_data
     assert pre.write_lai_classdefinition is write_lai_classdefinition
+
+
+def test_lai_classdefinition_separates_long_values_and_joins_names():
+    """mHM reads the rows list-directed: values need a space, names none."""
+    table = pd.DataFrame(
+        {"ID": [1], "LAND-USE": ["Crop/Natural Mixed"]}
+        | {month: [0.333333] for month in _MONTHS}
+    )
+
+    row = _classdefinition_text(table, "ID").splitlines()[2]
+
+    assert row.split() == ["1", "Crop_Natural_Mixed", *["0.333333"] * 12]
