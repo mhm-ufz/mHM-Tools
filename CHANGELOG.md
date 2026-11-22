@@ -3,6 +3,7 @@
 ## [Unreleased v0.3.2]
 
 ### Added
+
 - The docs are also built on Read the Docs (https://mhm-tools.readthedocs.io) from the GitHub mirror and show the package version. GitLab Pages stays available during the migration.
 - The extras `mhm` and `mhm5` install the mHM Python bindings that `create-mhm-restart-from-setup` runs, e.g. `pip install "mhm-tools[mhm]"`. `mhm` takes the newest mHM from 5.13 on, so it installs mHM 6 once that is released, and `mhm5` stays on mHM 5. `scripts/install_mhm_tools.sh --extras mhm` (or `mhm5`) takes mHM from conda-forge. The docs describe the pip, conda and module options.
 - `scripts/install_mhm_tools.sh --extras lint` installs ruff, black and isort in the versions the GitLab CI checks with: it installs the `check` extra the CI jobs install, so the versions are set in one place in `pyproject.toml`.
@@ -10,6 +11,7 @@
 - The summary table in the `discharge-evaluation` PDF lists every metric for all stations and again for each WMO region.
 - `discharge-evaluation --max-mean-factor` (default 30) leaves stations whose beta is above the factor or below its inverse out of the region table and the PDF summary table; the plots keep them. The log and the PDF state, one line per reason, how many stations were left out: beta too high, beta too low, or no finite value of a metric.
 - `discharge-eval-comparison` writes one summary table per WMO region, like its per-region CDF plots. The PDF shows each region's table right before that region's plots, and each table is also written to `metric_summary_region_<region>.csv`.
+- `discharge-evaluation` and `discharge-eval-comparison` take `--results-file-name` and `--overview-pdf-name` to name their results CSV and overview PDF (see Changed for the new defaults).
 - `gridded-data-evaluation --season first,last` compares only these months, e.g. `4,9` for April to September or `10,3` for October to March. The statistics, the time series, SPAEF and the other metrics use no other month, the relative statistics carry the months as `season_months` attribute, and the plot titles name the season, e.g. "(Apr-Sep)", also when `--only-plot` draws them again.
 - `gridded-data-evaluation --preserve-seasonality` chooses where the seasonal cycle stays: `std` (temporal standard deviation, the default), `corr` (Spearman correlation), `corr,std` or `none` (see Changed).
 - `gridded-data-evaluation --create-wmo-region-output` also evaluates every WMO region of `--regions`: the statistics tables get a row per region and are written to CSV, and every figure is drawn again for each region, cropped to it with its own colour scale and named e.g. `et_map_<input>_<ref>_region_<region>.png`. Regions without a valid cell get no figures, and `--only-plot` draws the region figures from the written statistics. The flag replaces `--write-region-stats`, which still works as its former name.
@@ -23,14 +25,15 @@
 - `discharge-eval-comparison --common-gauges` compares every input on the same gauges: for each metric, only gauges with a finite value in every input are kept, in the plots and the tables. The log states how many gauges each input keeps per metric. A metric missing in some inputs is not restricted, with a warning. By default every input uses all of its gauges.
 
 ### Changed
+
 - `prepare-mhm-forcings` is listed under `legacy-tools`; `format-meteo` prepares forcing for mHM. `merge-files` and `mhm_tools.pre.merge` are removed: `format-meteo` merges the files it formats.
 - `format-data` is split into three commands, each taking only its own options: `format-morph-categorical` formats soil, geology, LAI and land-cover rasters and land-cover period manifests through a lookup table, with `-l`, `-m` and `-c` now required; `format-soilgrids` formats a soil horizon manifest of clay, sand, silt and bulk density layers to `nc` or `asc`; `format-lai-netcdf` formats gridded LAI NetCDF with `--output-temporal-resolution` and `nearest` or `bilinear` resampling. `format-data` is removed, and `mhm_tools.common.format_data` is renamed to `mhm_tools.common.categorical_raster`.
 - `format-soilgrids` `nc` (mHM v6) output keys its horizon classes on the clay, sand and bulk-density bins, so each class keeps its own bulk density. Before, one texture shared the mean bulk density of all its cells across every horizon.
+- `format-soilgrids` refuses a declared bulk density unit that puts the median bulk density of a horizon outside 0.1-5 g/cm3, e.g. kg/m3 data declared as g/cm3, and its errors for horizons without a valid cell say what a valid cell is.
+- `discharge-evaluation` writes `discharge_eval_results.csv` and `discharge_eval_overview.pdf` instead of `results.csv` and `metric_plots_overview.pdf`, and `discharge-eval-comparison` writes `discharge_eval_comparison_results.csv` and `discharge_eval_comparison_overview.pdf` instead of `metric_summary.csv` and `metric_plots_overview.pdf`. `discharge-eval-comparison` reads `*results.csv` by default, so it finds both the new and the former results files.
 - The aspect of `create-dem-derivatives` comes from `calculate_aspect`. On geographic grids it now converts the cell size to metres per latitude, which corrects bearings that were pulled towards north and south (a slope facing north-east gave 33° at 50°N). Missing neighbours, at nodata cells and beyond the grid edge, take the centre value, so cells next to nodata get an aspect instead of nodata. Flat cells, the interior of every filled depression included, get the new `--missing-aspect`, by default 90°, instead of nodata. mHM 5 and 6 read a missing aspect inside their mask as 1° without a warning, so their PET aspect correction treated these cells as north-facing; 90° is neutral at the default aspect threshold of 180°. `--missing-aspect -9999` keeps flat cells missing.
-
 - `difference` and `relative-difference` compute model − reference, so a positive value means the model is higher, as their plot labels already said. Before, they computed reference − model.
 - `discharge-evaluation` in bootstrap mode names the Spearman correlation of the monthly climatologies `spearman_clim` instead of `gamma`.
-- `--ncpus 0` and `--ncpus -1` use all cores in every command.
 - `create-mhm-restart-from-setup` leaves out tiles whose DEM or flow direction has no valid cell, instead of running mHM on them and reporting them as failed. It lists them in `empty_tiles.txt` and prints them at the end of the run.
 - `create_catchment()` and `Catchment.write()` default to `frame=0` like `--frame`, so Python callers only get a frame when they ask for one.
 - The `--frame` help of `create-catchment` says which cells the frame replaces and when it overwrites basin cells.
@@ -54,9 +57,7 @@
 
 ### Fixed
 
-- `merge` linked folders with a single file to a relative path, which pointed nowhere from the link's folder when `--input-dir` was relative, so the final merge failed with `Unsupported file type`. The links now point to the absolute file path.
 - `discharge-eval-comparison` stopped with `Axis limits cannot be NaN or Inf` for gauges in projected coordinates, e.g. EPSG:3035 metres, because its difference maps took them for degrees.
-- `topography-upscaling` gives flat cells the `--missing-aspect` also on float DEMs with decimals, e.g. read from `.asc`. Rounding left a residue of about 1e-15 in the north-south gradient of `calculate_aspect`, so flat cells got 0 or 180, i.e. north- or south-facing.
 - `create-dem-derivatives` reads a DEM or flow direction stored as (x, y) or (lon, lat). Before, it derived every field on the transposed grid and swapped the x and y coordinates.
 - `format-morph-categorical` keeps the orientation of a DEM stored as (x, y), refuses `bilinear`, `cubic` and `average` resampling, which invent classes, also for land-cover manifests, and raises when no class lies inside the DEM domain, e.g. after a wrong `-s`, instead of writing a raster of nodata.
 - `format-morph-categorical -t geology` and `-t soil` list raster codes that share a class unit or soil class once in the class definition and refuse duplicates that disagree. Before, mHM read one parameter set per duplicated row or miscounted the soil horizons. Soil classes must be numbered 1 to N, as mHM uses them as index, and a REAL KARSTIC column holding 1.0 and 0.0 is accepted.
@@ -67,7 +68,7 @@
 - `discharge-evaluation` in bootstrap mode wrote the mean ratio as `alpha` and the standard deviation ratio as `beta`, the reverse of the KGE components and of direct mode. Its CDF plots no longer fail on the missing `kge` and `nse` columns.
 - `ratio` wrote `difference.nc` by default and labelled its plot as a difference. It now writes `ratio.nc`.
 - `mhm-tools -vv` crashed. Repeated `-v` or `-q` now stops at DEBUG or ERROR, and `--log-level CRITICAL` falls back to ERROR.
-- `--ncpus 0` raised an error in most commands.
+- `--ncpus 0` raised an error in most commands. `--ncpus 0` and `--ncpus -1` now use all cores in every command.
 - `create-catchment --upscale` wrote the L0 and L1 gauge info to the same `gauges_info.csv_0.*` on degree grids, so the L1 file replaced the L0 file. The L0 position now goes to `gauges_info_l0.*` and the L1 position to `gauges_info.*`.
 - `create-mhm-restart-from-setup` exited with code 1 and printed its result list after a successful run. Every command now exits with 0 when it finishes.
 - `crop-mhm-setup` and `create-mhm-restart-from-setup` copied read-only class-definition files and scripts as read-only files, so a later run could not overwrite them and kept the old copies. The copies are now writable.
@@ -86,7 +87,7 @@
 ### Tests
 
 - `format-meteo`: the required grid and an existing input file, 50 hourly steps summed to the two complete days inside them with the requested compression level, and two time blocks merged into one file.
-- Format commands: (x, y) DEMs, refused class-inventing resampling and input outside the DEM; deduplicated and gap-checked geology and soil class definitions and a REAL KARSTIC column; the LAI class file name and definition spacing; for gridded LAI mid-month stamps, float32 axes, the variable choice and `--source-variable`, a missing month, a noleap calendar, `valid_range`, projected axes without CRS and the crop to the DEM.
+- Format commands: (x, y) DEMs, refused class-inventing resampling and input outside the DEM; deduplicated and gap-checked geology and soil class definitions and a REAL KARSTIC column; a soil bulk density unit that puts the median off-scale; the LAI class file name and definition spacing; for gridded LAI mid-month stamps, float32 axes, the variable choice and `--source-variable`, a missing month, a noleap calendar, `valid_range`, projected axes without CRS and the crop to the DEM.
 - `calculate_aspect`: flat cells at 0.1 and 49.58 m; `create-dem-derivatives`: a DEM stored as (lon, lat).
 - The `test` extra installs mHM 5.13 or newer, and the GitLab test job stops before pytest if mHM cannot be imported, so the restart creation tests run the real mHM import check. `scripts/install_mhm_tools.sh --extras test` takes mHM from conda-forge.
 - CLI: exit code 0 when a command returns a result, and Click's exit codes for `-h`, `--version` and an unknown option.
